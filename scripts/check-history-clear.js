@@ -5,7 +5,7 @@
 
   The groups, each check a PASS or FAIL line named by its group:
   - units: on in-memory stores holding two branches of one campaign, each with two races and the colony series, the event archive and the observation record: Everything removes the race whole and leaves the other race, its intel and the other branch as they were; older than 10 and 20 years cut the snapshots before the bound, keep the one exactly at it and the newest, and cut the three records at the same date with their own cut and thinning bookkeeping; a series shorter than the span removes nothing and writes nothing; the dialog's counts; a race with no event archive or observation record; an increment that straddles the date; observations whose captures are all older; a record whose thinning is not intact; a time that is no number;
-  - browser: the real app in Chromium over a copy of the modded save, with the history files of the race seeded in the browser's storage: the dialog opens at Everything, states the snapshots each option removes and keeps, cannot confirm an option that removes nothing, forgets a cancelled choice, and a confirmed clear leaves in storage exactly the kept snapshots and the cut records and on the Retention panel the kept count and the thinning reading it had.
+  - browser: the real app in Chromium over a copy of the fixture save, with the history files of the race seeded in the browser's storage: the dialog opens at Everything, states the snapshots each option removes and keeps, cannot confirm an option that removes nothing, forgets a cancelled choice, and a confirmed clear leaves in storage exactly the kept snapshots and the cut records and on the Retention panel the kept count and the thinning reading it had.
   Planted faults in copies of the utilities and of the page must each fail the checks they name by a value (scripts/lib/fault-credit.js `caughtBy`); one rewrite of each family must fail none. Prints `N of N checks passed`; a failed check sets exit code 1, a defect of the harness 2.
 */
 const fs = require('fs')
@@ -17,6 +17,7 @@ const { runSuite, runnerArgs } = require('./lib/suite-runner')
 const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, readFigure } = require('./lib/browser-observe')
 const { failure, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -374,8 +375,8 @@ const GROUPS = (m) => [...unitChecks(m)]
 
 // ---------- the browser ----------
 
-// The real app in Chromium (scripts/lib/page-server.js over a copy of the modded save, scripts/lib/browser-observe.js): the history files of the race are written to the browser's storage as a player's would be (the recorder has made the campaign and the branch; the snapshots, the colony series, the event archive and the observation record are then replaced by the fixture, and an extra branch file and another race stand beside them), and the Clear control of the History page is driven as a player does it. What the dialog and the Retention panel draw is read through the hooks of the page and the text it draws on screen; what the clear leaves is read from the storage.
-const BROWSER_SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire' }
+// The real app in Chromium (scripts/lib/page-server.js over a copy of the fixture save, scripts/lib/browser-observe.js): the history files of the race are written to the browser's storage as a player's would be (the recorder has made the campaign and the branch; the snapshots, the colony series, the event archive and the observation record are then replaced by the fixture, and an extra branch file and another race stand beside them), and the Clear control of the History page is driven as a player does it. What the dialog and the Retention panel draw is read through the hooks of the page and the text it draws on screen; what the clear leaves is read from the storage.
+const BROWSER_SAVE = { file: FIXTURE.file, game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 const STEP_BOUND = 15000
 const BROWSER = { server: null, chrome: null, failure: null }
@@ -652,7 +653,7 @@ const observeSource = async (modules, replacements = [], until = null) => {
     return failedObservation(BROWSER.failure || 'the page server was not started for this worker')
   }
 
-  const [{ GameTime }] = await sqlOf('select GameTime from FCT_Game where GameID = 140')
+  const [{ GameTime }] = await sqlOf(`select GameTime from FCT_Game where GameID = ${FIXTURE.gameId}`)
 
   replacements.forEach(([file, text]) => BROWSER.server.replace(file, text))
 
@@ -948,7 +949,7 @@ const MUTATIONS_HEADING = '\nMutations: each must fail by a value the checks it 
 
 const variantsOf = (options) => [
   { key: 'groups', name: 'the clear: units', head: true, heading: 'The clear of a race\'s history: what it removes, what the dialog counts and how the records kept with it are cut', deadline: DEADLINES.part, run: () => runPart('groups') },
-  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of AuroraDB.db with the history files of the race seeded, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser') },
+  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the app over a copy of the fixture save with the history files of the race seeded, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser') },
   ...(options.mutations ? MUTANTS.map((mutant) => ({ key: mutant.id, name: `${mutant.kind} ${mutant.kind.includes('benign') ? 'rewrite' : 'mutation'}: ${mutant.name}`, heading: MUTATIONS_HEADING, pool: mutant.kind.startsWith('browser') ? 'browser' : null, deadline: mutant.kind.startsWith('browser') ? DEADLINES.browser : DEADLINES.mutant, run: () => runPart(mutant.id) })) : []),
 ]
 

@@ -5,26 +5,26 @@
 // A group is the fleets with one route key and one conditional set. Every group, and each fleet in it, names the stored orders it was inferred from (`orders`), so an inference can always be traced back.
 
 import { place } from './deep-links'
-import { ITEM_LOADS, ITEM_UNLOADS } from './cargo-actions'
+import { ITEM_LOADS, ITEM_UNLOADS, QUANTITY_UNLOADS } from './cargo-actions'
 import { orderPlaceKey } from './places'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { LOADS, UNLOADS } from './transport'
 
-const ROUTE_VERSIONS = ['2.7.x']
+const GROUP_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'hauling.routeGroup',
-  versions: ROUTE_VERSIONS,
+  versions: GROUP_VERSIONS,
   units: 'fleets',
   verification: 'estimated',
   structure: ['FCT_MoveOrders', 'DIM_MoveAction.DestinationItemType, SpecifyQuanitity, MinQuantity, TransitOrder', 'FCT_FleetConditionalOrder', 'FCT_OrderTemplate', 'FCT_MoveOrderTemplate'],
-  note: 'Fleets are grouped by the stored orders alone: the least rotation of each order\'s path and service (reduced to its period), with the conditional set. No table links a fleet to a template, so a template name is a match of content and may be a copy of a template since removed; a fleet name is free text.',
+  note: 'Fleets are grouped by the stored orders alone: the least rotation of each order\'s path and service (reduced to its period), with the conditional set. No table links a fleet to a template, so a template name is a match of content and may be a copy of a template since removed; a fleet name is free text. Checked on copies of the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema, in which fleets are given the freight queues of others at another rotation, with a delay, repeated, cut short and emptied.',
   assumptions: ['routes are told apart by the stored orders, not by what the fleets were meant to do'],
 })
 
 registerRule({
   id: 'hauling.groupCapacity',
-  versions: ROUTE_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['hauling.freightMoved', 'hauling.colonistsMoved'],
@@ -187,7 +187,7 @@ const endpointKey = (order, raceId) => {
 // The system the fleet is in after an order: the far side of a transit, else where the order starts.
 const endSystemOf = (order, action) => (isTransit(order, action) ? order.NewSystemID : order.StartSystemID)
 
-// The three parts of one order: `path` (what it passes or goes to), `service` (what it does there) and `pacing` (its delay), with `stop` (the place key of an order that goes to a place, null for a jump), `action`, `itemId` (the mineral or installation type a typed load or unload names, else null), `amount` (its stored quantity), `limited` (an unload of a type that names a quantity and leaves the rest), `movable` (it goes to an object that moves).
+// The three parts of one order: `path` (what it passes or goes to), `service` (what it does there) and `pacing` (its delay), with `stop` (the place key of an order that goes to a place, null for a jump), `action`, `itemId` (the mineral, installation or ship component type a typed load or unload names, else null), `amount` (its stored quantity), `limited` (an unload of a type that names a quantity and leaves the rest), `movable` (it goes to an object that moves).
 export const orderParts = (order, actions, raceId) => {
   const action = actionOf(actions, order.MoveActionID)
   const jump = isTransit(order, action) || isLagrangeJump(order)
@@ -198,7 +198,7 @@ export const orderParts = (order, actions, raceId) => {
   const minimum = action.minimum ? `:m${halfEven(integer(order.MinQuantity))}` : ''
   const typed = ITEM_LOADS.has(order.MoveActionID) || ITEM_UNLOADS.has(order.MoveActionID)
 
-  return { path, service: `${present(order.MoveActionID)}${item}${quantity}${minimum}`, pacing: integer(order.OrderDelay), stop, action: order.MoveActionID, itemId: typed ? present(order.DestinationItemID) : null, amount: integer(order.MaxItems), limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0, movable: MOVABLE_TYPES.has(order.DestinationType) }
+  return { path, service: `${present(order.MoveActionID)}${item}${quantity}${minimum}`, pacing: integer(order.OrderDelay), stop, action: order.MoveActionID, itemId: typed ? present(order.DestinationItemID) : null, amount: integer(order.MaxItems), limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0, movable: MOVABLE_TYPES.has(order.DestinationType) }
 }
 
 // Why a queue does not close, or null when it does: each order starts in the system the one before it ends in, the first after the last.

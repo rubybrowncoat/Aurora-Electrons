@@ -9,7 +9,7 @@
   - The pure builders on constructed rows worked out by hand: the naval tree (11 commands, 8 fleets and 8 ships of the race, and the rows that must not enter it; with the shipping lines listed, 9 fleets and 10 ships), the posts and their holders, the ground formations with their commanders, the CSV and Markdown of both (the Markdown's title and file name by the empire, its list nested as a CommonMark reader and a reader that needs four spaces a level read it, and its Mermaid diagram of the organisation read back as Mermaid reads it), and the roster filters on a roster of people whose post, rank and age are stored, unknown or on the edge of a bound.
   - The SELECT statements and the loaders on an in-memory SQLite database that holds rows of another race and another game, and a save without the columns the posts need (never a save of the user).
   - The Commanders page itself, its compiled template rendered by Vue: the controls are found by driving them and seeing the roster change, the downloads by clicking the buttons and reading what they save. The shipping-line switch is driven the same way against the page's own read of the naval tree on an in-memory database, re-run as the app re-runs a read whose inputs changed, and across a reload of the saved view.
-  - Every AuroraDB*.db that can be found, one check per game and race: the models (with the shipping lines left out and listed), the posts and the roster filters compared with SQL written separately here. A save without the tables or columns is reported UNSUPPORTED and a save with nothing to compare EMPTY: neither counts as agreement.
+  - In full mode every AuroraDB*.db that can be found, in quick mode the migrated Galactic Shogunate save (scripts/lib/fixtures.js, also used by the elapsed-time page checks), one check per game and race: the models (with the shipping lines left out and listed), the posts and the roster filters compared with SQL written separately here. A save without the tables or columns is reported UNSUPPORTED and a save with nothing to compare EMPTY: neither counts as agreement.
   - Planted faults in the utilities and the page, each of which must make every check it names fail.
 
   The checks read behaviour: the rows a control leaves in the roster, the cells a parsed CSV holds, the text a Markdown reader would show. None reads the source or the template text, the wording of a sentence or the position of an element.
@@ -26,7 +26,9 @@ const Vue = require('vue')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage } = require('./lib/page-loader')
+const { FIXTURE, LINE_SAVE_FILES } = require('./lib/fixtures')
 const { runSuite, runnerArgs } = require('./lib/suite-runner')
+const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const rawAssert = require('./lib/bounded-assert')
 const { HarnessError, readFigure, pairedBy } = require('./lib/browser-observe')
 const { failure, isMarked, isSubjectThrow, through, harnessOwn, harnessStore, boundary, subjectModule, kindOf, judged, caughtAll } = require('./lib/fault-credit')
@@ -72,7 +74,7 @@ const check = (name, ok, detail = '') => {
 
 // The script's own arguments (those of scripts/lib/suite-runner.js taken out by `runnerArgs`).
 const parseArguments = (argv) => {
-  const options = { mutations: true, saves: true, detail: false }
+  const options = { mutations: mayMutate(), saves: true, detail: false }
 
   for (const argument of argv) {
     if (argument === '--no-mutations') {
@@ -1050,9 +1052,9 @@ const nodesOf = (tree, test, found = []) => {
 
 const textOf = (tree) => (tree === null || tree === undefined ? '' : Array.isArray(tree) ? tree.map(textOf).join('') : tree.tag ? textOf(tree.children) : tree.text || '')
 
-const CORE_KEYS = ['commanders', 'bonusTypes', 'traits', 'colonies', 'ships', 'projects', 'former', 'formerHistory', 'held', 'unsettled']
+const CORE_KEYS = ['commanders', 'bonusTypes', 'traits', 'colonies', 'ships', 'lightShips', 'projects', 'former', 'formerHistory', 'held', 'unsettled', 'noResearch']
 const OPTIONAL_KEYS = ['navalTree', 'groundTree']
-const EMPTY_READS = { commanders: [], bonusTypes: [], traits: [], colonies: [], ships: [], projects: [], former: [], formerHistory: {}, held: [], unsettled: 0, navalTree: null, groundTree: null }
+const EMPTY_READS = { commanders: [], bonusTypes: [], traits: [], colonies: [], ships: [], lightShips: [], projects: [], former: [], formerHistory: {}, held: [], unsettled: 0, navalTree: null, groundTree: null, noResearch: { read: false, value: null } }
 
 const STORE = {
   getters: { config: { get: (_name, fallback) => fallback }, database: null, GameID: GAME, RaceID: RACE, StartYear: 2000, 'capabilities/report': () => null, 'capabilities/blockedBonuses': new Set() },
@@ -1493,16 +1495,40 @@ const pageSuite = async (variant, mods, into) => {
     const vm = withPeople({ groundTree: ground })
     const { get } = Component.options.asyncComputed.navalTree
     const reader = new Vue({ computed: { pending: () => get.call(vm) } })
-    let latest = Promise.resolve()
+    let generation = 0
+    let latest = { generation, done: Promise.resolve() }
     let index = -1
 
-    reader.$watch('pending', (promise) => { latest = promise.then((value) => { vm.navalTree = value }) }, { immediate: true })
+    reader.$watch('pending', (promise) => {
+      const mine = ++generation
+
+      latest = { generation: mine, done: promise.then((value) => { if (mine === generation) { vm.navalTree = value } }) }
+    }, { immediate: true })
     readers.push(reader)
 
     const settled = async () => {
-      await Vue.nextTick()
-      await latest
-      await Vue.nextTick()
+      let timer
+      const expired = new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`the shipping-line read of generation ${latest.generation} did not finish within 30000 ms`)), 30000) })
+      const completed = async () => {
+        while (true) {
+          await Vue.nextTick()
+
+          const mine = latest
+
+          await mine.done
+          await Vue.nextTick()
+
+          if (mine.generation === latest.generation) {
+            return
+          }
+        }
+      }
+
+      try {
+        await Promise.race([completed(), expired])
+      } finally {
+        clearTimeout(timer)
+      }
     }
 
     scenes.push(settled)
@@ -1652,12 +1678,132 @@ const sourceOf = (file) => {
 
 const modulesOf = async (variant) => loadUtilities(UTILITIES, { stubs: STUBS, sources: Object.fromEntries(Object.entries(variant.sources).filter(([file]) => file.startsWith('utilities/')).map(([file, text]) => [file.slice('utilities/'.length), text])) })
 
-const suites = async (variant) => {
+const SUITE_CHECKS = {
+  pure: [
+    'naval-frozen',
+    'naval-counts',
+    'naval-civilian',
+    'naval-civilian-flag-unknown',
+    'naval-parent-states',
+    'naval-roots',
+    'naval-order',
+    'naval-partition',
+    'naval-orphans',
+    'naval-cycles',
+    'naval-posts',
+    'naval-holders',
+    'naval-post-type',
+    'naval-fleet-not-post',
+    'naval-strays',
+    'naval-unread',
+    'ground-posts',
+    'ground-unread',
+    'csv-columns',
+    'csv-rows',
+    'csv-scope',
+    'csv-roundtrip',
+    'csv-formula',
+    'csv-numbers',
+    'csv-paths',
+    'csv-unresolved',
+    'csv-notes',
+    'csv-vacancy',
+    'csv-holders',
+    'ground-csv',
+    'md-outline',
+    'md-names',
+    'md-markup',
+    'md-posts',
+    'md-notes',
+    'md-ground',
+    'md-empire',
+    'export-file-length',
+    'md-diagram',
+    'md-diagram-ground',
+    'md-diagram-limit',
+    'md-branch',
+    'branch-list',
+    'md-branch-limit',
+    'shipping-lines-listed',
+    'shipping-lines-marked',
+    'shipping-lines-unknown-kept',
+    'csv-shipping-line',
+    'md-shipping-line',
+    'export-file',
+    'export-notice',
+    'cell-quoting',
+    'cell-guard',
+    'filter-off',
+    'filter-post',
+    'filter-rank',
+    'filter-age',
+    'filter-age-edge',
+    'filter-combine',
+    'filter-inputs',
+    'age-bound',
+    'choices',
+  ],
+  loader: [
+    'loader-naval',
+    'loader-shipping-lines',
+    'loader-holders',
+    'loader-select-only',
+    'loader-scope',
+    'loader-integers',
+    'loader-unsupported',
+    'loader-holders-optional',
+    'loader-ground',
+    'loader-ground-unread',
+    'loader-ground-default',
+  ],
+  page: [
+    'page-controls',
+    'page-post-filter',
+    'page-rank-filter',
+    'page-age-range',
+    'page-age-input',
+    'page-age-stored-number',
+    'page-filters-persisted',
+    'page-filters-combine',
+    'page-not-rated',
+    'page-type-reset',
+    'page-rank-gate',
+    'page-focus-bypass',
+    'page-structure-naval',
+    'page-structure-ground',
+    'page-download',
+    'page-download-ground',
+    'page-download-branch',
+    'page-structure-unsupported',
+    'page-structure-unread',
+    'page-structure-failed-read',
+    'page-structure-loading',
+    'page-optional-read-failure',
+    'page-summaries',
+    'page-shipping-lines',
+    'page-shipping-lines-download',
+    'page-shipping-lines-stored',
+    'page-shipping-lines-reload',
+    'page-renders',
+  ],
+}
+const CHECK_FAMILY = new Map(Object.entries(SUITE_CHECKS).flatMap(([family, ids]) => ids.map((id) => [id, family])))
+const familiesFor = (ids) => {
+  if (!Array.isArray(ids) || !ids.length || ids.some((id) => !CHECK_FAMILY.has(id))) {
+    throw new HarnessError(`a mutant must name a nonempty set of known check ids: ${JSON.stringify(ids)}`)
+  }
+
+  return new Set(ids.map((id) => CHECK_FAMILY.get(id)))
+}
+
+const suites = async (variant, families = null) => {
   const mods = Object.fromEntries(Object.entries(await modulesOf(variant)).map(([name, mod]) => [name, subjectModule(mod)]))
   const results = []
 
   // A suite that throws (a fault can make a model unbuildable) adds one failing result to what it had made, so the checks of the suites say what they saw. A HarnessError goes on; any other exception that does not carry the mark is the harness's (`kind` is 'error').
-  for (const run of [(into) => pureSuite(mods, into), (into) => loaderSuite(mods, into), (into) => pageSuite(variant, mods, into)]) {
+  const runs = [['pure', (into) => pureSuite(mods, into)], ['loader', (into) => loaderSuite(mods, into)], ['page', (into) => pageSuite(variant, mods, into)]]
+
+  for (const [family, run] of runs.filter(([family]) => families === null || families.has(family))) {
     const into = []
 
     try {
@@ -1670,6 +1816,10 @@ const suites = async (variant) => {
       into.push({ id: 'crash', name: `a suite stopped: ${error.message}`, ok: false, kind: kindOf(error), threw: isSubjectThrow(error), detail: error.message })
     }
 
+    if (variant === UNMODIFIED && !same(into.map((result) => result.id), SUITE_CHECKS[family])) {
+      throw new HarnessError(`the head check catalog for ${family} changed: ${into.map((result) => `${result.id}${result.id === 'crash' ? ` (${result.detail})` : ''}`).join(', ')}`)
+    }
+
     results.push(...into)
   }
 
@@ -1677,9 +1827,10 @@ const suites = async (variant) => {
 }
 
 // The checks that failed over a variant, each by an assertion of its own: a check that ended in an exception that is no marked failure of a call says nothing about what the variant changed, so `judged` stops the run, and nothing is credited with it.
-const failedOf = async (variant) => judged(await suites(variant), 'a fault')
+const failedOf = async (variant, ids = null) => judged(await suites(variant, ids === null ? null : familiesFor(ids)), 'a fault')
 
 const mutated = (file, from, to) => {
+  refusePlanting(`hierarchy fault in ${file}`)
   const source = sourceOf(file)
   const occurrences = source.split(from).length - 1
 
@@ -1818,7 +1969,7 @@ const MUTANTS = [
   ['the shipping lines are never added', U('naval-hierarchy'), 'const shippingLines = options.shippingLines === true', 'const shippingLines = false', ['shipping-lines-listed', 'csv-shipping-line', 'loader-shipping-lines', 'page-shipping-lines', 'page-shipping-lines-download', 'page-shipping-lines-reload']],
   ['the shipping lines are listed whatever the setting', U('naval-hierarchy'), 'const shippingLines = options.shippingLines === true', 'const shippingLines = true', ['naval-civilian', 'naval-counts', 'loader-naval', 'page-shipping-lines', 'page-shipping-lines-download', 'page-shipping-lines-reload']],
   ['the page reads the naval tree without the setting', PAGE, 'RaceID: this.RaceID, shippingLines: this.shippingLines }', 'RaceID: this.RaceID, shippingLines: false }', ['page-shipping-lines', 'page-shipping-lines-download', 'page-shipping-lines-reload']],
-  ['the model does not mark a shipping line\'s ship', U('naval-hierarchy'), 'unknownFlag(row.ShippingLineID, \'ship\'), isCivilianShip(row))', 'unknownFlag(row.ShippingLineID, \'ship\'), false)', ['shipping-lines-marked', 'loader-shipping-lines']],
+  ['the model does not mark a shipping line\'s ship', U('naval-hierarchy'), 'unknownFlag(row.ShippingLineID, \'ship\'), isCivilianShip(row), seniorFlag(row.ShipSeniorCO))', 'unknownFlag(row.ShippingLineID, \'ship\'), false, seniorFlag(row.ShipSeniorCO))', ['shipping-lines-marked', 'loader-shipping-lines']],
   ['the CSV does not mark a shipping line', U('hierarchy-export'), '\'Shipping line\': entry.shippingLine ? \'yes\' : \'\',', '\'Shipping line\': \'\',', ['csv-shipping-line', 'page-shipping-lines', 'page-shipping-lines-download']],
   ['the outline does not mark a shipping line', U('hierarchy-export'), 'const line = row[\'Shipping line\'] === \'\' ? \'\' : \', shipping line\'', 'const line = \'\'', ['md-shipping-line']],
   ['a flag that is not stored is silent when the shipping lines are listed', U('naval-hierarchy'), 'civilianFlag(value) === null ? [{ kind: \'shipping-line-unknown\'', 'civilianFlag(value) === null && !shippingLines ? [{ kind: \'shipping-line-unknown\'', ['shipping-lines-unknown-kept']],
@@ -1831,13 +1982,7 @@ const MUTANTS = [
 
 // ---------- the saves ----------
 
-const breadthFiles = () => {
-  const listing = (directory) => (fs.existsSync(directory) ? fs.readdirSync(directory).filter((name) => /^AuroraDB.*\.db$/i.test(name)).sort().map((name) => path.join(directory, name)) : [])
-  const artifacts = path.join(root, 'artifacts')
-  const folders = fs.existsSync(artifacts) ? fs.readdirSync(artifacts, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(artifacts, entry.name)).sort() : []
-
-  return [root, path.join(root, 'saves'), ...folders].flatMap(listing)
-}
+const breadthFiles = () => LINE_SAVE_FILES.map((name) => path.join(root, 'saves', name)).filter((file) => fs.existsSync(file))
 
 const stateOfLink = (raw, own, foreign) => (raw === 0 ? 'none' : !Number.isInteger(raw) ? 'unknown' : own.has(raw) ? 'resolved' : foreign.has(raw) ? 'foreign' : 'orphan')
 
@@ -2038,7 +2183,7 @@ const groundSave = async (mods, database, GameID, RaceID) => {
 // The roster of the game and race through the page's own read, filtered the way the page filters it, against the people worked out from SQL written here: each distinct post, rank and age bound, alone and together. Commanders whose age sits on a rounding tie are left out of the comparison and counted.
 const rosterSave = async (database, GameID, RaceID) => {
   const options = await loadPage(PAGE, { stubs: STUBS })
-  const vm = instantiate(options, { boundary, $store: harnessStore({ getters: { 'capabilities/report': () => null, 'capabilities/blockedBonuses': new Set() }, state: { freshness: { inputs: {} } }, dispatch: async () => {} }, STORE_SHAPE), database, GameID, RaceID })
+  const vm = instantiate(options, { boundary, nested: true, $store: harnessStore({ getters: { 'capabilities/report': () => null, 'capabilities/blockedBonuses': new Set() }, state: { freshness: { inputs: {} } }, dispatch: async () => {} }, STORE_SHAPE), database, GameID, RaceID })
 
   await vm.runAsync('commanders')
 
@@ -2108,6 +2253,24 @@ const savePairs = async (database, tables) => {
 }
 
 const saveFiles = () => breadthFiles()
+
+// Keep the full matrix's indices: a focused save:N always means the same file, including with --no-mutations. The quick head uses the fixture save exercised by the elapsed-time page suite; malformed structures, cross-race rows and missing columns remain covered by the constructed rows and loaders. An explicit save selection can still audit any member of the full matrix.
+const selectedSaves = (options) => {
+  const files = saveFiles().map((file, index) => ({ file, index }))
+
+  if (options.mutations || [...(runnerArgs().variants || []), ...(runnerArgs().worker || [])].some((key) => key.startsWith('save:'))) {
+    return files
+  }
+
+  const representative = path.join(root, FIXTURE.file)
+  const chosen = files.filter(({ file }) => file === representative)
+
+  if (chosen.length !== 1) {
+    throw new HarnessError(`the quick representative save is missing: ${representative}`)
+  }
+
+  return chosen
+}
 
 const saveSection = async (index) => {
   const file = saveFiles()[index]
@@ -2197,7 +2360,8 @@ const saveSection = async (index) => {
 
 // A mutant ([name, file, from, to, ids, { throws }]) is caught when every check named for it failed by an assertion (scripts/lib/fault-credit.js `caughtAll` over one result for each named check, the one that read a value where a check failed more than once). A named check that failed only because a call of the code under test threw credits nothing: it stops the run, unless the mutant declares `throws`. The line names each credit and its kind; `detail` prints what each named check said.
 const runMutant = async ([name, file, from, to, ids, { throws = false } = {}], { detail = false } = {}) => {
-  const failed = await failedOf(mutated(file, from, to))
+  refusePlanting(name)
+  const failed = await failedOf(mutated(file, from, to), ids)
   const named = ids.map((id) => {
     const own = failed.filter((result) => result.id === id)
 
@@ -2233,6 +2397,9 @@ const creditControls = async () => {
 
     return null
   }
+  check('control: an empty mutant check list is a harness error', (await stopped(() => familiesFor([]))) instanceof HarnessError)
+  check('control: an unknown mutant check id is a harness error, including beside a known id', (await stopped(() => familiesFor(['naval-posts', 'unknown-check']))) instanceof HarnessError)
+
   const stranger = () => new rawAssert.AssertionError({ message: 'thrown where no adapter names it' })
   const lookup = () => {
     const nothing = null
@@ -2347,19 +2514,47 @@ const runPart = async (part, options) => {
 // The deadlines, in seconds: five times the slowest time measured (the suites 1.8 s, a save 24 s, the control 0.6 s, a mutant 1.5 s), at least two minutes, for a busy machine. The suites build the constructed rows, the loaders and the page; a save is read and compared with SQL whole; the control runs the suites again and the controls of the credit; a mutant runs the suites over its copy.
 const DEADLINES = { suites: 120, save: 120, control: 120, mutant: 120 }
 
-// The parts, in the order they print, each in a process of its own as they ran before the runner.
+// Saves, suites and controls keep independent workers. Mutants share bounded queues, with fresh per-load module trees for every variant.
+let mutantPoolTainted = false
+const refuseMutantPoolResidue = () => {
+  const handlerLeft = [Vue.config.errorHandler, Vue.config.warnHandler].some((handler) => handler !== undefined && handler !== null)
+
+  if (mutantPoolTainted || STORE.getters.database !== null || handlerLeft) {
+    throw new HarnessError('the hierarchy mutant worker is tainted or retains fixture/STORE/Vue state; later work must run in a fresh worker')
+  }
+}
+const runPooledMutant = async (index, options) => {
+  refusePlanting(MUTANTS[index][0])
+
+  try {
+    refuseMutantPoolResidue()
+    await runPart('mutant:' + index, options)
+  } catch (error) {
+    mutantPoolTainted = true
+    throw error
+  }
+}
+
+// Original keys, order, deadlines, counts and resume records are unchanged; each pool contains at most 16 original mutant indices.
 const variantsOf = (options) => [
   { key: 'suites', name: 'the suites: constructed rows, loaders and the page', head: true, deadline: DEADLINES.suites, run: () => runPart('suites', options) },
-  ...(options.saves ? saveFiles().map((file, index) => ({ key: `save:${index}`, name: `the save ${path.relative(root, file).replace(/\\/g, '/')}`, head: true, heading: '\nEvery save found', deadline: DEADLINES.save, run: () => runPart(`save:${index}`, options) })) : []),
-  ...(options.mutations ? [{ key: 'control', name: 'control: the unmodified code and the credit of a fault', heading: '\nMutations', deadline: DEADLINES.control, run: () => runPart('control', options) }, ...MUTANTS.map(([name], index) => ({ key: `mutant:${index}`, name: `mutant: ${name}`, heading: '\nMutations', deadline: DEADLINES.mutant, run: () => runPart(`mutant:${index}`, options) }))] : []),
+  ...(options.saves ? selectedSaves(options).map(({ file, index }) => ({ key: `save:${index}`, name: `the save ${path.relative(root, file).replace(/\\/g, '/')}`, head: true, heading: options.mutations ? '\nEvery save found' : '\nSelected saves (full-matrix indices)', deadline: DEADLINES.save, run: () => runPart(`save:${index}`, options) })) : []),
+  ...(options.mutations ? [{ key: 'control', name: 'control: the unmodified code and the credit of a fault', heading: '\nMutations', deadline: DEADLINES.control, run: () => runPart('control', options) }, ...MUTANTS.map(([name], index) => ({ key: `mutant:${index}`, name: `mutant: ${name}`, heading: '\nMutations', pool: `hierarchy-mutants:${Math.floor(index / 16)}`, deadline: DEADLINES.mutant, run: () => runPooledMutant(index, options) }))] : []),
 ]
 
 const main = async () => {
   const options = parseArguments(runnerArgs().rest)
   const totals = await runSuite({
     script: __filename,
-    inputs: options.saves ? saveFiles() : [],
+    // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
+    workers: 4,
+    inputs: options.saves ? selectedSaves(options).map(({ file }) => file) : [],
     variants: variantsOf(options),
+    afterEach: (variant) => {
+      if (variant.key.startsWith('mutant:')) {
+        refuseMutantPoolResidue()
+      }
+    },
     counts: () => ({ checks, failures, extra: { unsupportedSaves, emptySaves, skippedSaves } }),
   })
   const { unsupportedSaves: unsupported = 0, emptySaves: empty = 0, skippedSaves: skipped = 0 } = totals.extra

@@ -4,7 +4,9 @@ import { CATEGORIES, UNMODELLED } from './legacy-consumption'
 import { CRITICAL_RUNWAY_YEARS, WARNING_RUNWAY_YEARS, depositForecast, orbitalChainGap, orbitalMinerRate, stockProjection, surfaceRate } from './minerals'
 import { STATUS, combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
+// The two rates a played save of the line reproduces against the game's own mineral ledger (scripts/check-orbital-mining.js on the played saves).
+const LEDGER_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'mineral.stock',
@@ -17,7 +19,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.surfaceRate',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 't/yr',
   verification: 'confirmed',
   structure: ['DIM_PlanetaryInstallation.MiningProductionValue, Workers, CivilianInstallation', 'FCT_PopulationInstallations.Amount', 'FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PopPoliticalStatus.ProductionMod', 'FCT_Commander, FCT_CommanderBonuses'],
@@ -26,7 +28,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.orbitalRate',
-  versions: VERSIONS,
+  versions: LEDGER_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_ShipClass.MiningModules, Crew', 'FCT_Ship.CurrentCrew', 'FCT_Race.MineProduction, MaximumOrbitalMiningDiameter', 'FCT_MineralDeposit.Accessibility', 'FCT_SystemBody.Radius', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_NavalAdminCommand'],
@@ -35,7 +37,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.miningRate',
-  versions: VERSIONS,
+  versions: ['x'],
   units: 't/yr',
   verification: 'confirmed',
   structure: ['the colonies\' and orbital miners\' rows of one deposit or mineral'],
@@ -54,7 +56,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.net',
-  versions: VERSIONS,
+  versions: ['x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['production and use of the same mineral'],
@@ -63,7 +65,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.runway',
-  versions: VERSIONS,
+  versions: ['x'],
   units: 'years',
   verification: 'estimated',
   structure: ['the mineral\'s stock and cargo in transit', 'its yearly net'],
@@ -72,7 +74,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.runwayStatus',
-  versions: VERSIONS,
+  versions: ['x'],
   units: '',
   verification: 'assumed',
   structure: ['the mineral\'s runway, production and use'],
@@ -82,7 +84,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.depositForecast',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_MineralDeposit.Amount, Accessibility, HalfOriginalAmount, OriginalAcc', 'the deposit\'s mining rate'],
@@ -92,7 +94,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.stockProjection',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 't',
   verification: 'estimated',
   structure: ['the mineral\'s stock and cargo in transit', 'its deposits\' forecasts', 'its other production and its use'],
@@ -102,7 +104,7 @@ registerRule({
 
 registerRule({
   id: 'mineral.queueDemand',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 't',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.Amount, ProdPerUnit, Percentage, Queue, <mineral>', 'each colony\'s production capacity (production.populationCapacity)'],

@@ -5,7 +5,7 @@
 
   The utility is run on colonies worked by hand, whose workers follow the Outlook's own worker split (a colony of 62.5 M people at colony cost 0 has 28.125 M workers: services take half of the people and agriculture 5%). What a batch leaves: the remaining population and its workers, the workers short (never negative, never a figure when the batch is blank, not a number or larger than the colony). What limits a removal: the staffing floor, found by removing people gradually, and a floor the player enters; the smaller binds, and either can bind first. The current view needs no queue: it is the same with the committed workforce absent, unavailable or present, and the committed view changes only its own figures. The emigrant pool limits only shipping-line pickups from a source colony; a pickup yet to happen is never a figure. A blank floor or batch is not known, a stored field that is null is unknown, and an invalid entry is refused. The loader runs on a small in-memory database, with a column or a table the save lacks. The panel is mounted on the same rows and its template compiled and rendered: each figure cell and each table of the detail row carries a mark bound to its own result, and the fields it keeps are those the persisted view is given. The page's tracked reads are found by running them, not by reading its text.
 
-  The saves (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) give the real loader, compared with raw counts and values of the population table.
+  The save (the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only; a save that is not there is skipped) gives the real loader, compared with raw counts and values of the population table.
 
   The colonist sources read feeds only the panel, so a failed read holds nothing back: the page, loaded with its real load-state mixin, stays ready, and the panel (its template compiled and rendered) shows the failure or the progress in place of its figures, and its figures once the read is in.
 
@@ -15,10 +15,11 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const assert = require('./lib/bounded-assert')
-const { loadUtilities } = require('./lib/utilities')
-const { loadPage, instantiate } = require('./lib/page-loader')
+const { loadPage, loadModules, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { renderTree: rendered, treeOf } = require('./lib/vue-render')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -30,23 +31,20 @@ const U = 'utility'
 const V = 'component'
 const P = 'page'
 const NAMES = ['colonist-floor', 'colonies', 'workforce-demand', 'provenance']
-const SAVES = [
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-]
+const SAVES = [fixtureSave()]
 
 const STUBS = {
+  // The page's history helpers need session storage; aurora.js imports dayjs, its UTC plugin and romanum.
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
-  'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "", inkMuted: "", primary: "" }); export const withAlpha = (color) => color; export const patternImage = () => null; export const seriesIdentity = () => null'
 // The persisted view stood in by a module that records the fields a component declares, the table's among them, for a check of how the panel keeps its view.
 const RECORDER = 'export const oneOf = (values) => (value) => values.includes(value); export const tableView = (key, defaults) => ({ key, default: defaults, table: true }); export default (fields) => { globalThis.__persistedFields = fields; return { data: () => Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, field.default])) } }'
 const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
-const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set() }, state: { RaceNPR: false }, dispatch: async () => {} }
+const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} }
 
 let failures = 0
 let checks = 0
@@ -159,9 +157,9 @@ const RACE = 5
 // The colonies worked by hand. Colony cost 0: agriculture takes 5% of the people; services take (population / 1000 M)^0.25, which is half of 62.5 M people. 62.5 M people have 28.125 M workers.
 const world = (m) => {
   const { cf, col, provenance } = m
-  const colony = (over = {}) => ({ PopulationID: 1, PopName: 'Alpha', Population: 62.5, InstallationWorkers: 20, YardWorkers: 0, ReqInf: 0, PopulationDensityModifier: 1, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, ...over })
+  const colony = (over = {}) => ({ PopulationID: 1, PopName: 'Alpha', Population: 62.5, OrbitalPopulation: 0, CurrentColonyCost: 0, MaximumColonyCost: 0, InstallationWorkers: 20, YardWorkers: 0, ReqInf: 0, PopulationDensityModifier: 1, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, ...over })
   // A colony of colony cost `cost`: ReqInf = cost x population x 100 / density.
-  const costed = (cost, over = {}) => { const base = colony(over); return { ...base, ReqInf: (cost * base.Population * 100) / base.PopulationDensityModifier } }
+  const costed = (cost, over = {}) => { const base = colony(over); return { ...base, CurrentColonyCost: cost, MaximumColonyCost: cost, ReqInf: (cost * base.Population * 100) / base.PopulationDensityModifier } }
   const results = (c) => { const cost = col.colonyCostResult(c); return { cost, workers: col.workerSplitResult(c, cost) } }
   const split = (population, required, cost = 0) => col.workerSplit({}, population, cost, required)
   const source = (over = {}) => ({ PopulationID: 1, ColonistDestination: 1, PoliticalStatus: 1, MilitaryRestrictedColony: 0, AvailableColonists: 4, ColonizationPressure: 2, ...over })
@@ -947,47 +945,8 @@ const page = (ctx) => {
 
 // ---------- the read that holds nothing back ----------
 
-// The elements a render produced, flattened: arrays are walked, and each record's children after it.
-const treeOf = (node) => {
-  const found = []
-  const visit = (entry) => {
-    if (Array.isArray(entry)) {
-      entry.forEach(visit)
-    } else if (entry && typeof entry === 'object') {
-      found.push(entry)
-      visit(entry.children)
-    }
-  }
-
-  visit(node)
-
-  return found
-}
-
 // The results the provenance marks of a render are bound to.
 const marksIn = (nodes) => treeOf(nodes).filter((node) => node.tag === 'provenance-mark').map((node) => node.data.attrs && node.data.attrs.result).filter((result) => result !== undefined)
-
-// What a compiled template renders for a mounted instance: the render function of the component's own template runs with the instance as its scope. Each element it creates is a record { tag, data, children } and each interpolated text is recorded; the scoped slots are functions of the record of the table, to be called with a row.
-const rendered = (componentText, vm) => {
-  const compiler = require('vue/compiler-sfc')
-  const parsed = compiler.parse({ source: componentText })
-  const descriptor = parsed.descriptor || parsed
-  const { code } = compiler.compileTemplate({ source: descriptor.template.content, filename: 'component.vue', id: 'component' })
-  const render = require('vm').runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\nrender`, {})
-  const tags = []
-  const texts = []
-  const make = (tag, data, children) => {
-    const hasData = !Array.isArray(data)
-
-    tags.push(tag)
-
-    return { tag, data: (hasData ? data : null) || {}, children: (hasData ? children : data) || [] }
-  }
-  const helpers = { _self: { _c: make }, _l: (list, each) => (list || []).map(each), _v: (text) => text, _s: (value) => { texts.push(String(value)); return String(value) }, _e: () => null, _u: (slots) => Object.fromEntries(slots.map((slot) => [slot.key, slot.fn])), _m: () => null }
-  const tree = render.call(new Proxy(vm, { get: (target, key) => (key in helpers ? helpers[key] : target[key]) }))
-
-  return { tags, texts, tree }
-}
 
 const optional = (ctx) => {
   const w = world(ctx.m)
@@ -1066,7 +1025,7 @@ const optional = (ctx) => {
 }
 
 // What the Outlook's rows need beyond the worked colony: the body and the system the page names a colony by.
-const pageColony = () => ({ SystemName: 'Sol', Component: 1, SystemBodyID: 1, PlanetNumber: 3, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, Radius: 6000, HydroExt: 0, TidalLock: 0, RadiationLevel: 0, Gravity: 1, Efficiency: 1, Capital: 0, SpeciesID: 1, SpeciesName: 'Human', PopulationGrowthModifier: 1, PopulationDensityModifier: 1, Infrastructure: 0, LGInfrastructure: 0 })
+const pageColony = () => ({ SystemName: 'Sol', ComponentNumber: 1, SystemBodyID: 1, PlanetNumber: 3, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, Radius: 6000, HydroExt: 0, TidalLock: 0, RadiationLevel: 0, Gravity: 1, Efficiency: 1, Capital: 0, SpeciesID: 1, SpeciesName: 'Human', PopulationGrowthModifier: 1, PopulationDensityModifier: 1, Infrastructure: 0, LGInfrastructure: 0 })
 
 // ---------- the in-memory population table ----------
 
@@ -1182,7 +1141,7 @@ const MUTATIONS = [
   { name: 'the panel showing its figures while the read is out', file: V, find: 'return this.loading || !!this.failed', replace: 'return false', fails: ['optional'] },
   { name: 'the page passing no failure to the panel', file: P, at: /(<colonist-floor\b[^>]*?)\s:failed\s*=\s*(?:"[^"]*"|'[^']*')/, to: (m) => m[1], fails: ['page'] },
   { name: 'the page mounting the panel without the queue flag', file: P, at: /(<colonist-floor\b[^>]*?)\s:committed-view\s*=\s*(?:"[^"]*"|'[^']*')/, to: (m) => m[1], fails: ['page'] },
-  { name: 'the staffing search without the services-cap stretch', file: U, find: '...(SERVICE_CAP_POPULATION < population ? [SERVICE_CAP_POPULATION] : [])', replace: '...[]', fails: ['search'] },
+  { name: 'the staffing search without the services-cap stretch', file: U, find: '...(SERVICE_CAP_POPULATION - orbitalPopulation > 0 && SERVICE_CAP_POPULATION - orbitalPopulation < population ? [SERVICE_CAP_POPULATION - orbitalPopulation] : [])', replace: '...[]', fails: ['search'] },
   { name: 'the shipping-line pickup not bounded by the colony\'s people', file: U, find: 'const problem = batchProblem(\'colonistFloor.civilian\', { workers, batch })', replace: 'const problem = batch.state === \'ok\' ? null : batchProblem(\'colonistFloor.civilian\', { workers, batch })', fails: ['pool'] },
   { name: 'the present support counting the deliveries on their way', file: U, find: 'infrastructureCapResult(infrastructureOf(colony, null), rate)', replace: 'colony.r.cap', fails: ['panel'] },
   { name: 'a batch leaving more people than the built infrastructure supports not flagged', file: V, find: 'unsupportedAfter: outcome !== null && supportNow !== null && outcome.remaining > supportNow + 1e-9,', replace: 'unsupportedAfter: false,', fails: ['panel'] },
@@ -1262,13 +1221,14 @@ const stackedSources = () => BENIGN.reduce((sources, edit) => applied(sources, e
 
 const contextOf = async (sources) => {
   const changed = (name) => sources[name] !== TEXTS[name]()
-  const sourcesFor = changed(U) ? { 'colonist-floor': sources[U] } : {}
   const utilitySources = changed(U) ? { 'utilities/colonist-floor': sources[U] } : {}
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: sourcesFor })
   const options = await loadPage('components/colonies/ColonistFloor', { stubs: STUBS, modules: { 'mixins/persisted-view': RECORDER }, sources: { 'components/colonies/ColonistFloor': sources[V], ...utilitySources } })
   const persisted = globalThis.__persistedFields
   const pageSources = { 'pages/colony-outlook': sources[P], ...utilitySources }
-  const pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: pageSources })
+  // Keep the page and the utilities it imports in one graph: the NO_* defaults are objects, not cross-session singletons.
+  const pageModules = await loadModules([...NAMES.map((name) => `utilities/${name}`), 'pages/colony-outlook'], { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB }, sources: pageSources })
+  const loaded = Object.fromEntries(NAMES.map((name) => [name, pageModules[`utilities/${name}`]]))
+  const pageOptions = pageModules['pages/colony-outlook'].default
   const livePageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/load-state': null }, sources: pageSources })
 
   return { m: { cf: loaded['colonist-floor'], col: loaded.colonies, provenance: loaded.provenance }, options, persisted, pageOptions, livePageOptions, componentText: sources[V], pageText: sources[P] }

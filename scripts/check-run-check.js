@@ -2,7 +2,8 @@
   Checks scripts/run-check.js, the way a full run is started so that it outlives the starter's turn, in a layout of its own (a copy of run-check and check-pool, a check script that passes after TINY_MS and the check script of `tree`), through these scenarios:
   - `normal`: a run started and waited for ends `done`, with the status and the summary line of its script, its supervisor the one `start` named, and `wait` ends with that status;
   - `stale`: the starter runs with each of its reads of the status held, once read, until the state on disk has moved on from the state it read (scripts/stale-starter.js of the layout), as a loaded machine can hold a process between a read and what it does with it, so that the supervisor ends while the starter holds a status it read before: the run still reads `done`, with its script's status, and `wait` ends with it, never as a run whose supervisor is gone;
-  - `expired`: with a startup time of 3 s, the starter holds its initial status read for 4 s after observing a live supervisor and child on disk; the acknowledged run must still complete rather than be killed by a startup decision made from the held snapshot;
+  - `expired`: with a startup time of 3 s, publication waits for the starter to capture its initial snapshot; the starter holds it until a live child is published and the startup deadline has passed, and the child stays live until the starter reconciles that snapshot; the acknowledged run must complete rather than be killed;
+  - `waiting`: publication falls between the waiter's reads of startup and liveness; one snapshot must govern both predicates and the terminal result;
   - `early`: a supervisor planted to end before its first write leaves the run `failed`, with why, and `start` and `wait` end with status 2, `wait` at once;
   - `hung`: a supervisor planted to wait 20 s before its first write, with a startup time of 3 s, is ended, and the run is `failed`, with why;
   - `pending`: a run whose starter wrote the status and whose supervisor has not (planted) is starting: `start` refuses a second run of its name, `status` does not call it lost and `wait` waits for it; one planted two minutes ago is lost, and `wait` ends at once with status 2.
@@ -18,7 +19,8 @@ const os = require('os')
 const path = require('path')
 const assert = require('./lib/bounded-assert')
 const { inParallel, killTree, runChild } = require('./lib/check-pool')
-const { patched } = require('./lib/mutant-source')
+const { patched, plantedPatch } = require('./lib/mutant-source')
+const { mutating } = require('./lib/no-mutations')
 
 const RUN_CHECK = 'scripts/run-check.js'
 const LIMIT = 30000
@@ -42,59 +44,172 @@ const STALE_STARTER = [
   "require('./run-check.js')",
   '',
 ].join('\n')
-// Holds the initial pre-publication snapshot across startup expiry, but only after the supervisor has published its child, so a timeout decision on that snapshot would kill legitimate work.
+// The supervisor waits for this wrapper to capture the initial snapshot. The child stays alive until the starter reads again after confronting that snapshot across the real startup deadline, so scheduler delays cannot skip the race or let the child finish before a faulty kill.
 const EXPIRED_STARTER = [
   "const fs = require('fs')",
+  "const path = require('path')",
   'const read = fs.readFileSync',
   'const held = new Int32Array(new SharedArrayBuffer(4))',
+  "const marker = (name) => path.join(__dirname, '..', name)",
   'let first = true',
   'fs.readFileSync = (file, ...rest) => {',
   '  const text = read(file, ...rest)',
-  "  if (first && String(file).endsWith('status.json') && !JSON.parse(text).supervisor) {",
-  '    first = false',
-  '    const until = Date.now() + 10000',
-  "    while (Date.now() < until && !JSON.parse(read(file, 'utf8')).child) {",
-  '      Atomics.wait(held, 0, 0, 25)',
+  "  if (String(file).endsWith('status.json')) {",
+  '    if (first && !JSON.parse(text).supervisor) {',
+  '      first = false',
+  "      fs.writeFileSync(marker('expired.snapshot'), '')",
+  '      const until = Date.now() + 10000',
+  "      while (Date.now() < until && !JSON.parse(read(file, 'utf8')).child) {",
+  '        Atomics.wait(held, 0, 0, 25)',
+  '      }',
+  "      const live = JSON.parse(read(file, 'utf8'))",
+  "      console.log('held after publication: ' + Boolean(live.supervisor && live.child))",
+  '      while (Date.now() - Date.parse(JSON.parse(text).started) <= 3000) {',
+  '        Atomics.wait(held, 0, 0, 25)',
+  '      }',
+  "      console.log('held across startup deadline: true')",
+  '    } else if (!first) {',
+  "      fs.writeFileSync(marker('expired.release'), '')",
   '    }',
-  "    const live = JSON.parse(read(file, 'utf8'))",
-  "    console.log('held after publication: ' + Boolean(live.supervisor && live.child))",
-  '    Atomics.wait(held, 0, 0, 4000)',
   '  }',
   '  return text',
   '}',
   "require('./run-check.js')",
   '',
 ].join('\n')
+const EXPIRED_CHECK = [
+  "const fs = require('fs')",
+  "const path = require('path')",
+  "const released = () => fs.existsSync(path.join(__dirname, '..', 'expired.release'))",
+  'const until = Date.now() + 20000',
+  'const timer = setInterval(() => {',
+  '  if (released() || Date.now() >= until) {',
+  '    clearInterval(timer)',
+  "    console.log(released() ? '1 of 1 checks passed' : 'the starter never reconciled its held snapshot')",
+  '    process.exitCode = released() ? 0 : 2',
+  '  }',
+  '}, 25)',
+  '',
+].join('\n')
+// The waiter holds its first decision snapshot until the supervisor publishes a live child. Releasing that child in the next event-loop turn keeps it live through all synchronous reads of the decision: a split read can return status 2 before the release, whereas one snapshot correctly waits.
+const PUBLISHED_WAITER = [
+  "const fs = require('fs')",
+  "const path = require('path')",
+  'const read = fs.readFileSync',
+  'const held = new Int32Array(new SharedArrayBuffer(4))',
+  "const marker = (name) => path.join(__dirname, '..', name)",
+  "const file = path.join(__dirname, '..', '.check-runs', 'w', 'status.json')",
+  'const until = Date.now() + 10000',
+  'let reads = 0',
+  'while (!fs.existsSync(file) && Date.now() < until) {',
+  '  Atomics.wait(held, 0, 0, 25)',
+  '}',
+  'fs.readFileSync = (file, ...rest) => {',
+  '  const text = read(file, ...rest)',
+  "  if (String(file).endsWith('status.json') && ++reads === 2) {",
+  "    fs.writeFileSync(marker('waiting.snapshot'), '')",
+  "    while (Date.now() < until && !JSON.parse(read(file, 'utf8')).child) {",
+  '      Atomics.wait(held, 0, 0, 25)',
+  '    }',
+  "    const live = JSON.parse(read(file, 'utf8'))",
+  "    console.log('wait snapshot crossed publication: ' + Boolean(!JSON.parse(text).supervisor && live.supervisor && live.child))",
+  "    setImmediate(() => fs.writeFileSync(marker('waiting.release'), ''))",
+  '  }',
+  '  return text',
+  '}',
+  "require('./run-check.js')",
+  '',
+].join('\n')
+// The waiter captures a running snapshot, releases the live child and holds that snapshot until the supervisor has published done and exited. The terminal result must be re-read after apparent death, rather than returning the stale running record.
+const COMPLETED_WAITER = [
+  "const fs = require('fs')",
+  "const path = require('path')",
+  'const read = fs.readFileSync',
+  'const held = new Int32Array(new SharedArrayBuffer(4))',
+  'let reads = 0',
+  'const alive = (pid) => {',
+  '  try { process.kill(pid, 0); return true } catch (_) { return false }',
+  '}',
+  'fs.readFileSync = (file, ...rest) => {',
+  '  const text = read(file, ...rest)',
+  "  if (String(file).endsWith('status.json') && ++reads === 2) {",
+  '    const snapshot = JSON.parse(text)',
+  "    fs.writeFileSync(path.join(__dirname, '..', 'completed.release'), '')",
+  '    const until = Date.now() + 10000',
+  "    while (Date.now() < until && (JSON.parse(read(file, 'utf8')).state !== 'done' || alive(snapshot.supervisor))) {",
+  '      Atomics.wait(held, 0, 0, 25)',
+  '    }',
+  "    const final = JSON.parse(read(file, 'utf8'))",
+  "    console.log('running snapshot crossed completed exit: ' + Boolean(snapshot.state === 'running' && final.state === 'done' && !alive(snapshot.supervisor)))",
+  '  }',
+  '  return text',
+  '}',
+  "require('./run-check.js')",
+  '',
+].join('\n')
+// A native-lock scenario owns a live child and its descendant while the reader holds status. An unrecoverable publication must end both, as well as the reader that the sampler started.
+const LOCK_CHECK = [
+  "const fs = require('fs')",
+  "const path = require('path')",
+  "const { startChild } = require('./lib/check-pool')",
+  "const marker = (name) => path.join(__dirname, '..', name)",
+  "const descendant = startChild(path.join(__dirname, 'held-lite.js'), [], { limit: 25000 })",
+  "fs.writeFileSync(marker('fixture-child.pid'), String(process.pid))",
+  "fs.writeFileSync(marker('fixture-descendant.pid'), String(descendant.pid))",
+  'const main = async () => {',
+  '  const until = Date.now() + 20000',
+  "  while (!fs.existsSync(marker('reader.released')) && Date.now() < until) {",
+  '    await new Promise((resolve) => setTimeout(resolve, 25))',
+  '  }',
+  '  descendant.kill()',
+  '  await descendant.done',
+  "  const released = fs.existsSync(marker('reader.released'))",
+  "  console.log(released ? '1 of 1 checks passed' : 'the native reader never released')",
+  '  process.exitCode = released ? 0 : 2',
+  '}',
+  'main()',
+  '',
+].join('\n')
 // The child the check script of `tree` holds: HELD_BYTES, written, until it is ended.
 const HELD_BYTES = 200 * 1048576
-const HELD = `const held = Buffer.alloc(${HELD_BYTES}, 1)\nconsole.log('held')\nsetInterval(() => held.length, 1000)\n`
-// How long the check script of `tree` waits for the status to count the held child.
+const HELD = `console.log('born ' + Date.now())\nconst held = Buffer.alloc(${HELD_BYTES}, 1)\nconsole.log('held')\nsetInterval(() => held.length, 1000)\n`
+// The native sample must finish while the held child's allocation is live. TREE_MS is only its watchdog: correctness is judged afterwards, never used as the completion condition.
 const TREE_MS = 40000
-// The check script of `tree`: it starts held.js, prints its PID, waits until the status of the run its argument names counts one process of HELD_BYTES or TREE_MS have passed, then ends it and passes.
 const TREE = [
   "const fs = require('fs')",
   "const path = require('path')",
   "const { startChild } = require('./lib/check-pool')",
-  "const status = path.join(__dirname, '..', '.check-runs', process.argv[2], 'status.json')",
-  'const counted = () => {',
-  '  try {',
-  `    return JSON.parse(fs.readFileSync(status, 'utf8')).peak.process >= ${HELD_BYTES}`,
-  '  } catch (error) {',
-  '    return false',
-  '  }',
-  '}',
+  "const marker = (name) => path.join(__dirname, '..', name)",
   'const main = async () => {',
   '  const began = Date.now()',
-  '  let ready = false',
-  `  const held = startChild(path.join(__dirname, 'held.js'), [], { limit: ${TREE_MS + 10000}, onLine: (line) => { ready = ready || line === 'held' } })`,
-  "  console.log('held ' + held.pid)",
-  `  while (!(ready && counted()) && Date.now() - began < ${TREE_MS}) {`,
-  '    await new Promise((resolve) => setTimeout(resolve, 100))',
+  "  const firstFile = marker('sample-first.json')",
+  `  while (!fs.existsSync(firstFile) && Date.now() - began < ${TREE_MS}) {`,
+  '    await new Promise((resolve) => setTimeout(resolve, 25))',
   '  }',
-  "  console.log(counted() ? 'counted' : 'not counted')",
+  "  const first = JSON.parse(fs.readFileSync(firstFile, 'utf8'))",
+  '  const spawning = Date.now()',
+  '  let born = null',
+  '  let ready = null',
+  `  const held = startChild(path.join(__dirname, 'held.js'), [], { limit: ${TREE_MS + 10000}, onLine: (line) => {`,
+  "    if (line.startsWith('born ')) { born = Number(line.slice(5)) }",
+  "    if (line === 'held') {",
+  '      ready = Date.now()',
+  "      fs.writeFileSync(marker('held.ready'), String(held.pid))",
+  '    }',
+  '  } })',
+  "  console.log('held ' + held.pid)",
+  "  const sample = () => fs.existsSync(marker('sample-second.json')) ? JSON.parse(fs.readFileSync(marker('sample-second.json'), 'utf8')) : null",
+  '  const sampled = () => sample()?.pid === held.pid',
+  `  while (!(ready && sampled()) && Date.now() - began < ${TREE_MS}) {`,
+  '    await new Promise((resolve) => setTimeout(resolve, 25))',
+  '  }',
+  '  const completed = Boolean(ready && sampled())',
+  "  fs.writeFileSync(marker('tree.events.json'), JSON.stringify({ first, spawning, born, ready, second: sample() }))",
+  "  console.log(completed ? 'sampled' : 'no native sample completed')",
   '  held.kill()',
   '  await held.done',
-  "  console.log('1 of 1 checks passed')",
+  "  console.log(completed ? '1 of 1 checks passed' : 'native sampling fixture failed')",
+  '  process.exitCode = completed ? 0 : 2',
   '}',
   'main()',
   '',
@@ -124,16 +239,35 @@ const LISTED = [
     `[pscustomobject]@{ ProcessId = 999991; ParentProcessId = 999995; CreationDate = ${createdAt(FALL_BACK + 300000)}; WorkingSetSize = ${CLOCK_BYTES}; PeakWorkingSetSize = 0; Name = 'after.exe' }`,
   ] : []),
 ].join(', ')
-const LISTING = `$r = @($all | Where-Object { $_.ProcessId -eq $root })[0]; $m = @($all | Where-Object { $r -and $_.ParentProcessId -eq $root -and $_.Name -eq $r.Name })[0]; if ($m -and $m.CreationDate) { $all = @($all) + @(${LISTED}); Set-Content -Path outsider.offered -Value $m.ProcessId }; `
+// The first real listing and SAMPLE callback precede creation of the held child. The second listing matches the PID it publishes only after allocating HELD_BYTES, independently of CreationDate and the membership/memory values under test.
+const LISTING = `$listedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); $phase = 'first'; $m = $null; if (Test-Path held.ready) { $phase = 'second'; $r = @($all | Where-Object { $_.ProcessId -eq $root })[0]; $m = @($all | Where-Object { $r -and $_.ProcessId -eq ([int](Get-Content held.ready)) -and $_.ParentProcessId -eq $root -and $_.Name -eq $r.Name })[0] }; if ($m -and $m.CreationDate) { $all = @($all) + @(${LISTED}); Set-Content -Path outsider.offered -Value $m.ProcessId }; `
+const TREE_PLANTS = [
+  ['$byParent = @{};', `${LISTING}$byParent = @{};`],
+  // Only the first continuation is causal rather than periodic: no child exists until the first SAMPLE was processed, and the next actual CIM listing waits for its allocation.
+  // eslint-disable-next-line no-template-curly-in-string
+  ['Start-Sleep -Seconds ${SAMPLE_SECONDS}', 'Write-Output "FIXTURE_SAMPLE $phase $([int]$m.ProcessId) $listedAt"; if ($phase -eq \'first\') { while (-not (Test-Path held.ready)) { Start-Sleep -Milliseconds 25 } } else { Start-Sleep -Seconds ${SAMPLE_SECONDS} }'],
+  // The acknowledgement follows the ordinary SAMPLE callbacks in the ordered stream. Final status therefore owns the sample before the child is released.
+  ['heard({ tree: Number(tree), process: Number(one), name }))', 'heard({ tree: Number(tree), process: Number(one), name }))\n      lines.map((line) => /^FIXTURE_SAMPLE (first|second) (\\d+) (\\d+)$/.exec(line)).filter(Boolean).forEach(([, phase, pid, listed]) => fs.writeFileSync(path.join(ROOT, \'sample-\' + phase + \'.json\'), JSON.stringify({ pid: Number(pid), listed: Number(listed), heard: Date.now() })))'],
+]
+
+// A real Windows reader denies delete sharing while the supervisor writes. In `locked` it releases only after the first native rename failure; `lock-expired` holds beyond the retry budget. Samples keep the ordinary publication callback active while the handle is held.
+const LOCK_READER = "$file = Join-Path (Get-Location) '.check-runs/l/status.json'; $reader = [IO.File]::Open($file, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite); [IO.File]::WriteAllText((Join-Path (Get-Location) 'reader.pid'), [string]$PID); [IO.File]::WriteAllText((Join-Path (Get-Location) 'reader.acquired'), [IO.File]::ReadAllText($file)); $until = [DateTime]::UtcNow.AddSeconds(10); while (-not (Test-Path 'rename.failed') -and [DateTime]::UtcNow -lt $until) { Write-Output 'SAMPLE 0 0 reader.exe'; Start-Sleep -Milliseconds 25 }; if (Test-Path 'hold-reader') { $until = [DateTime]::UtcNow.AddSeconds(3); while ([DateTime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 25 } }; $reader.Dispose(); Set-Content -Path reader.released -Value released; exit; "
+const LOCK_RENAME = "  const rename = fs.renameSync\n\n  fs.renameSync = (from, to) => {\n    try {\n      return rename(from, to)\n    } catch (error) {\n      fs.writeFileSync(path.join(ROOT, 'rename.failed'), error.code)\n      fs.appendFileSync(path.join(ROOT, 'rename.attempts'), error.code + '\\n')\n      throw error\n    }\n  }\n"
+// eslint-disable-next-line no-template-curly-in-string
+const LOCK_PLANTS = [['const SAMPLE_SECONDS = 5', 'const SAMPLE_SECONDS = 0.05'], ['const script = `$root = ${pid}; while ($true) {', `const script = \`${LOCK_READER}$root = \${pid}; while ($true) {`]]
 // The rewrites of run-check that plant a supervisor's fault in the layout of a scenario.
 const SUPERVISE = 'const supervise = async (name, script, args) => {\n'
 const PLANTS = {
   early: [[SUPERVISE, `${SUPERVISE}  throw new Error('a supervisor planted to end before its first write')\n`]],
   hung: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], [SUPERVISE, `${SUPERVISE}  await new Promise((resolve) => setTimeout(resolve, 20000))\n`]],
-  expired: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3']],
+  expired: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], [SUPERVISE, `${SUPERVISE}  const until = Date.now() + 10000\n\n  while (!fs.existsSync(path.join(ROOT, 'expired.snapshot')) && Date.now() < until) {\n    await pause(25)\n  }\n`]],
+  locked: [...LOCK_PLANTS, [SUPERVISE, `${SUPERVISE}${LOCK_RENAME}`]],
+  'lock-other': [...LOCK_PLANTS, [SUPERVISE, `${SUPERVISE}${LOCK_RENAME.replace('      throw error', "      error.code = 'EIO'\n      throw error")}  fs.writeFileSync(path.join(ROOT, 'hold-reader'), '')\n`]],
+  'lock-expired': [...LOCK_PLANTS, [SUPERVISE, `${SUPERVISE}${LOCK_RENAME}  fs.writeFileSync(path.join(ROOT, 'hold-reader'), '')\n`]],
+  waiting: [[SUPERVISE, `${SUPERVISE}  const until = Date.now() + 10000\n\n  while (!fs.existsSync(path.join(ROOT, 'waiting.snapshot')) && Date.now() < until) {\n    await pause(25)\n  }\n`]],
   publishing: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], ['  writeStatus(name, status)\n', '  await pause(20000)\n  writeStatus(name, status)\n']],
   cancelled: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], ['  writeStatus(name, status)\n', '  writeStatus(name, status)\n  await pause(4500)\n'], ['        killTree(supervisor.pid)\n', '        void supervisor.pid\n']],
-  tree: [['$byParent = @{};', `${LISTING}$byParent = @{};`]],
+  tree: TREE_PLANTS,
 }
 
 // A layout of its own: run-check as given in `source`, with the plants of the scenario `need`, check-pool, the check script, the starters of `stale` and `expired`, and the check script of `tree` with the child it holds.
@@ -144,11 +278,14 @@ const layoutOf = (source, need) => {
   fs.mkdirSync(path.join(scripts, 'lib'), { recursive: true })
   fs.writeFileSync(path.join(scripts, 'run-check.js'), (PLANTS[need] || []).reduce((text, [from, to]) => patched(RUN_CHECK, text, from, to), source))
   fs.copyFileSync(path.join(__dirname, 'lib', 'check-pool.js'), path.join(scripts, 'lib', 'check-pool.js'))
-  fs.writeFileSync(path.join(scripts, 'check-tiny.js'), TINY)
+  fs.writeFileSync(path.join(scripts, 'check-tiny.js'), need === 'expired' ? EXPIRED_CHECK : need === 'waiting' ? EXPIRED_CHECK.replaceAll('expired.release', 'waiting.release') : need === 'completed' ? EXPIRED_CHECK.replaceAll('expired.release', 'completed.release') : ['locked', 'lock-other', 'lock-expired'].includes(need) ? LOCK_CHECK : TINY)
   fs.writeFileSync(path.join(scripts, 'stale-starter.js'), STALE_STARTER)
   fs.writeFileSync(path.join(scripts, 'expired-starter.js'), EXPIRED_STARTER)
+  fs.writeFileSync(path.join(scripts, 'published-waiter.js'), PUBLISHED_WAITER)
+  fs.writeFileSync(path.join(scripts, 'completed-waiter.js'), COMPLETED_WAITER)
   fs.writeFileSync(path.join(scripts, 'check-tree.js'), TREE)
   fs.writeFileSync(path.join(scripts, 'held.js'), HELD)
+  fs.writeFileSync(path.join(scripts, 'held-lite.js'), 'setInterval(() => {}, 1000)\n')
 
   return layout
 }
@@ -189,10 +326,28 @@ const SCENARIOS = {
     return { started, waited, status: statusOf(layout, 's') }
   },
   expired: async (layout) => {
-    const started = await command(layout, ['start', '--label=x', 'tiny'], { entry: 'expired-starter.js', env: { TINY_MS: '8000' } })
+    const started = await command(layout, ['start', '--label=x', 'tiny'], { entry: 'expired-starter.js' })
     const waited = await command(layout, ['wait', 'x'])
 
     return { started, waited, status: statusOf(layout, 'x'), log: fs.readFileSync(path.join(layout, '.check-runs', 'x', 'log.txt'), 'utf8') }
+  },
+  waiting: async (layout) => {
+    const starting = command(layout, ['start', '--label=w', 'tiny'])
+    const waited = await command(layout, ['wait', 'w'], { entry: 'published-waiter.js' })
+    const started = await starting
+
+    // A broken waiter can exit without yielding to its release. Complete the fixture afterwards so cleanup never relies on killing a good child.
+    fs.writeFileSync(path.join(layout, 'waiting.release'), '')
+
+    const completed = await command(layout, ['wait', 'w'])
+
+    return { started, waited, completed, status: statusOf(layout, 'w') }
+  },
+  completed: async (layout) => {
+    const started = await command(layout, ['start', '--label=d', 'tiny'])
+    const waited = await command(layout, ['wait', 'd'], { entry: 'completed-waiter.js' })
+
+    return { started, waited, status: statusOf(layout, 'd') }
   },
   claimed: async (layout) => {
     plant(layout, 'c', 0)
@@ -237,13 +392,32 @@ const SCENARIOS = {
     return { refused, described, waitedFresh, waitedOld }
   },
   ...(process.platform === 'win32' ? {
+    ...Object.fromEntries(['locked', 'lock-other', 'lock-expired'].map((need) => [need, async (layout) => {
+      const started = await command(layout, ['start', '--label=l', 'tiny'])
+      const waited = await command(layout, ['wait', 'l'])
+      const began = Date.now()
+      const marker = (name) => path.join(layout, name)
+      const pid = (name) => fs.existsSync(marker(name)) ? Number(fs.readFileSync(marker(name), 'utf8')) : null
+      const child = pid('fixture-child.pid')
+      const descendant = pid('fixture-descendant.pid')
+      const sampler = pid('reader.pid')
+
+      while ((need === 'locked' ? !fs.existsSync(marker('reader.released')) : [child, descendant, sampler].some((one) => one && alive(one))) && Date.now() - began < 10000) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+
+      const diagnostic = path.join(layout, '.check-runs', 'l', 'supervisor-errors.log')
+
+      return { started, waited, status: statusOf(layout, 'l'), old: JSON.parse(fs.readFileSync(marker('reader.acquired'), 'utf8')), native: fs.readFileSync(marker('rename.failed'), 'utf8'), attempts: fs.readFileSync(marker('rename.attempts'), 'utf8').trim().split('\n').length, released: fs.existsSync(marker('reader.released')), pending: fs.existsSync(`${statusFileOf(layout, 'l')}.next`), diagnostic: fs.existsSync(diagnostic) ? fs.readFileSync(diagnostic, 'utf8') : '', child, descendant, sampler, childAlive: Boolean(child && alive(child)), descendantAlive: Boolean(descendant && alive(descendant)), samplerAlive: Boolean(sampler && alive(sampler)) }
+    }])),
     tree: async (layout) => {
       const started = await command(layout, ['start', '--label=t', 'tree', 't'])
       const waited = await command(layout, ['wait', 't'], { limit: TREE_MS + 20000 })
       const log = path.join(layout, '.check-runs', 't', 'log.txt')
       const offered = path.join(layout, 'outsider.offered')
+      const events = path.join(layout, 'tree.events.json')
 
-      return { started, waited, status: statusOf(layout, 't'), held: fs.existsSync(log) ? Number((/^held (\d+)$/m.exec(fs.readFileSync(log, 'utf8')) || [])[1]) || null : null, offered: fs.existsSync(offered) ? Number(fs.readFileSync(offered, 'utf8').trim()) : null }
+      return { started, waited, status: statusOf(layout, 't'), held: fs.existsSync(log) ? Number((/^held (\d+)$/m.exec(fs.readFileSync(log, 'utf8')) || [])[1]) || null : null, offered: fs.existsSync(offered) ? Number(fs.readFileSync(offered, 'utf8').trim()) : null, events: fs.existsSync(events) ? JSON.parse(fs.readFileSync(events, 'utf8')) : null }
     },
   } : {}),
 }
@@ -299,6 +473,12 @@ const treeRan = (tree) => {
   assert.equal(tree.status.state, 'done')
   assert.equal(tree.status.code, 0)
   assert.ok(tree.held, 'the check script printed no held child')
+  assert.ok(tree.events && tree.events.first && tree.events.second, 'the fixture recorded no native sampling phases')
+  const { first, spawning, born, ready, second } = tree.events
+
+  assert.equal(first.pid, 0, 'the first native listing already contained the held child')
+  assert.equal(second.pid, tree.held, 'the second native sample did not acknowledge the allocated held child')
+  assert.ok(first.listed <= first.heard && first.heard <= spawning && spawning <= born && born <= ready && ready <= second.listed && second.listed <= second.heard, `native sample/creation order: ${JSON.stringify(tree.events)}`)
   assert.ok(tree.status.peak, 'the run has no peak memory')
 }
 
@@ -333,11 +513,37 @@ const CHECKS = [
     ran(expired.started, 'the held start')
     ran(expired.waited, 'wait')
     assert.ok(expired.started.stdout.includes('held after publication: true'), expired.started.stdout)
+    assert.ok(expired.started.stdout.includes('held across startup deadline: true'), expired.started.stdout)
     assert.equal(expired.started.code, 0, lastLine(expired.started.stderr))
     assert.equal(expired.status.state, 'done', `the run reads ${expired.status.state}`)
     assert.equal(expired.status.code, 0)
     assert.equal(expired.waited.code, 0, lastLine(expired.waited.stdout))
     assert.ok(expired.log.includes('1 of 1 checks passed'), expired.log)
+  }],
+  ['waiting', ['waiting'], 'wait judges one snapshot when publication falls between reads, and returns the completed child status instead of losing a live run', ({ waiting }) => {
+    whole(waiting)
+    ran(waiting.started, 'start')
+    ran(waiting.waited, 'the held wait')
+    ran(waiting.completed, 'the cleanup wait')
+    assert.ok(waiting.waited.stdout.includes('wait snapshot crossed publication: true'), waiting.waited.stdout)
+    assert.equal(waiting.started.code, 0, lastLine(waiting.started.stderr))
+    assert.equal(waiting.waited.code, 0, `the held wait returned status ${waiting.waited.code}: ${lastLine(waiting.waited.stdout)}`)
+    assert.equal(waiting.completed.code, 0, lastLine(waiting.completed.stdout))
+    assert.equal(waiting.status.state, 'done')
+    assert.equal(waiting.status.code, 0)
+    assert.equal(waiting.status.supervisor, pidOf(waiting.started))
+    assert.equal(waiting.status.summary, '1 of 1 checks passed')
+  }],
+  ['completed', ['completed'], 'wait reconciles a running snapshot held until done is published and the same supervisor exits', ({ completed }) => {
+    whole(completed)
+    ran(completed.started, 'start')
+    ran(completed.waited, 'the completed wait')
+    assert.ok(completed.waited.stdout.includes('running snapshot crossed completed exit: true'), completed.waited.stdout)
+    assert.equal(completed.waited.code, 0, `the completed wait returned ${completed.waited.code}`)
+    assert.equal(completed.status.state, 'done')
+    assert.equal(completed.status.code, 0)
+    assert.equal(completed.status.supervisor, pidOf(completed.started))
+    assert.equal(completed.status.summary, '1 of 1 checks passed')
   }],
   ['early', ['early'], 'a supervisor that ends before its first write leaves the run failed, with why, and `start` and `wait` end with status 2, `wait` at once', ({ early }) => {
     whole(early)
@@ -398,13 +604,63 @@ const CHECKS = [
     assert.equal(cancelled.status.summary, 'the supervisor did not publish startup in 3 s and was ended')
     assert.equal(cancelled.logged, false, 'a cancelled supervisor started work')
   }],
+  ['locked', ['locked'], 'a real Windows reader releases after native EPERM and atomic status publication completes without losing the child', ({ locked }) => {
+    whole(locked)
+    ran(locked.started, 'start')
+    ran(locked.waited, 'wait')
+    assert.equal(locked.native, 'EPERM')
+    assert.equal(locked.old.state, 'running')
+    assert.equal(locked.released, true)
+    assert.equal(locked.started.code, 0)
+    assert.equal(locked.waited.code, 0, `wait returned ${locked.waited.code}`)
+    assert.equal(locked.status.state, 'done')
+    assert.equal(locked.status.code, 0)
+    assert.equal(locked.status.summary, '1 of 1 checks passed')
+    assert.equal(locked.pending, false)
+    assert.equal(locked.diagnostic, '')
+  }],
+  ['lock-other', ['lock-other'], 'a status publication error other than EPERM propagates and records its original kind without retrying it into a successful run', (seen) => {
+    const locked = seen['lock-other']
+
+    whole(locked)
+    ran(locked.started, 'start')
+    ran(locked.waited, 'wait')
+    assert.equal(locked.native, 'EPERM')
+    assert.ok(locked.child && locked.descendant && locked.sampler, 'the owned process identities were not recorded')
+    assert.equal(locked.child, locked.status.child)
+    assert.equal(locked.childAlive, false, `child ${locked.child} survived`)
+    assert.equal(locked.descendantAlive, false, `descendant ${locked.descendant} survived`)
+    assert.equal(locked.samplerAlive, false, `sampler ${locked.sampler} survived`)
+    assert.equal(locked.waited.code, 2)
+    assert.equal(locked.status.state, 'running')
+    assert.equal(locked.attempts, 1, `the unrelated error was retried ${locked.attempts - 1} times`)
+    assert.ok(locked.diagnostic.includes('EIO'), locked.diagnostic)
+  }],
+  ['lock-expired', ['lock-expired'], 'a persistent native sharing failure stays bounded, retains the old complete status, records EPERM and is never reported as a successful run', (seen) => {
+    const locked = seen['lock-expired']
+
+    whole(locked)
+    ran(locked.started, 'start')
+    ran(locked.waited, 'wait')
+    assert.equal(locked.native, 'EPERM')
+    assert.ok(locked.child && locked.descendant && locked.sampler, 'the owned process identities were not recorded')
+    assert.equal(locked.child, locked.status.child)
+    assert.equal(locked.childAlive, false, `child ${locked.child} survived`)
+    assert.equal(locked.descendantAlive, false, `descendant ${locked.descendant} survived`)
+    assert.equal(locked.samplerAlive, false, `sampler ${locked.sampler} survived`)
+    assert.equal(locked.waited.code, 2)
+    assert.equal(locked.status.state, 'running')
+    assert.equal(locked.status.supervisor, locked.old.supervisor)
+    assert.equal(locked.pending, true)
+    assert.ok(locked.diagnostic.includes('EPERM') && locked.diagnostic.includes('rename'), locked.diagnostic)
+  }],
   ['tree-outsider', ['tree'], 'a process created before the member whose PID it names as its parent is left out of the peak memory, though the listing offers it as that member\'s child', ({ tree }) => {
     treeRan(tree)
     assert.equal(tree.offered, tree.held, `the listing offered the outsider as a child of ${tree.offered}, not of the held child ${tree.held}`)
     assert.ok(tree.status.peak.tree < OUTSIDER_BYTES, `the tree peaked at ${tree.status.peak.tree} bytes, the outsider's ${OUTSIDER_BYTES} with them`)
     assert.ok(tree.status.peak.process < OUTSIDER_BYTES && tree.status.peak.name !== 'outsider.exe', `the largest process was ${tree.status.peak.name}, at ${tree.status.peak.process} bytes`)
   }],
-  ['tree-genuine', ['tree'], 'a child created after its parent counts in the peak memory: the held child is the largest process', ({ tree }) => {
+  ['tree-genuine', ['tree'], 'a child created after the first native sample counts in the peak memory: the held child is the largest process', ({ tree }) => {
     treeRan(tree)
     assert.ok(tree.status.peak.process >= HELD_BYTES && tree.status.peak.process < OUTSIDER_BYTES, `the largest process was ${tree.status.peak.name}, at ${tree.status.peak.process} bytes; the held child holds ${HELD_BYTES}`)
   }],
@@ -422,7 +678,9 @@ const MUTANTS = [
   ['the starter waits for publication from a supervisor that has ended', 'while (!published() && !ended) {', 'while (!published()) {', ['early'], ['early']],
   ['a supervisor that does not make its first write is never ended', '        killTree(supervisor.pid)\n', '', ['hung'], ['hung']],
   ['start launches a second run of a name that is starting', 'if (going(before) || starting(before)) {', 'if (going(before)) {', ['pending'], ['pending']],
-  ['wait gives up on a run that is starting', 'while (going(readStatus(name)) || starting(readStatus(name))) {', 'while (going(readStatus(name))) {', ['pending'], ['pending']],
+  ['wait gives up on a run that is starting', 'if (going(seen) || starting(seen)) {', 'if (going(seen)) {', ['pending'], ['pending']],
+  ['wait judges startup and liveness from different snapshots', '  let seen = readStatus(name)\n  let ended = null\n\n  while (!ended) {\n    if (going(seen) || starting(seen)) {\n      await pause(2000)\n      seen = readStatus(name)\n      continue\n    }\n\n    const current = readStatus(name)\n\n    if (current.started === seen.started && current.supervisor === seen.supervisor) {\n      ended = current\n    } else {\n      seen = current\n    }\n  }', '  while (going(readStatus(name)) || starting(readStatus(name))) {\n    await pause(2000)\n  }\n\n  const ended = readStatus(name)', ['waiting'], ['waiting']],
+  ['wait returns its stale running snapshot after supervisor exit', '      ended = current\n', '      ended = seen\n', ['completed'], ['completed']],
   ['a run is starting for ever', ' && Date.now() - Date.parse(status.started) < STARTUP_SECONDS * 1000', '', ['pending'], ['pending']],
   ['a run that is starting is called lost', ' && !alive(status.supervisor) && !starting(status)', ' && !alive(status.supervisor)', ['pending'], ['pending']],
   ['startup expiry kills without winning publication ownership', 'if (takeStartup(name)) {', 'if (true) {', ['expired'], ['expired']],
@@ -431,8 +689,11 @@ const MUTANTS = [
   ['supervisor work starts after losing commitment to timeout', 'if (!takeStartup(name)) {', 'if (false) {', ['cancelled'], ['cancelled']],
   ['a written pid bypasses startup arbitration', '!late && seen.supervisor === supervisor.pid && !fs.existsSync(startupFile(name))', 'seen.supervisor === supervisor.pid', ['cancelled'], ['cancelled']],
   ['a token is consumed before the first status write', '  writeStatus(name, status)\n\n  if (!takeStartup(name)) {\n    throw new Error(\'startup was cancelled before supervisor commitment\')\n  }', '  if (!takeStartup(name)) {\n    throw new Error(\'startup was cancelled before supervisor commitment\')\n  }\n\n  writeStatus(name, status)', ['publishing'], ['publishing']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ...(process.platform === 'win32' ? [['a Windows sharing failure is not retried', '    replaceStatus(file)', '    fs.renameSync(`${file}.next`, file)', ['locked'], ['locked']], ['status publication retries an error other than the measured Windows sharing failure', "process.platform !== 'win32' || error.code !== 'EPERM'", "process.platform !== 'win32'", ['lock-other'], ['lock-other']], ['an exhausted sharing failure is swallowed', '  throw failure\n', '  return failure\n', ['lock-expired'], ['lock-expired']]] : []),
   ['CreationDate ignored: a child counts whenever it was created', '$byParent[[int]$p.ProcessId] | Where-Object { $_.CreationDate.ToUniversalTime() -ge $p.CreationDate.ToUniversalTime() }', '$byParent[[int]$p.ProcessId]', ['tree'], ['tree-outsider']],
   ['a child is compared with the creation of the root, not of the member it names', '-ge $p.CreationDate.ToUniversalTime() }', '-ge @($all | Where-Object { $_.ProcessId -eq $root })[0].CreationDate.ToUniversalTime() }', ['tree'], ['tree-outsider']],
+  ['the sampler retains the first parent-membership map and never discovers a later child', '$queue = @($all | Where-Object { $_.ProcessId -eq $root });', '$byParent = $(if ($null -ne $cachedParents) { $cachedParents } else { $cachedParents = $byParent; $byParent }); $queue = @($all | Where-Object { $_.ProcessId -eq $root });', ['tree'], ['tree-genuine']],
   ['the sampler does not read when a process was created', 'ParentProcessId,CreationDate,WorkingSetSize', 'ParentProcessId,WorkingSetSize', ['tree'], ['tree-genuine']],
   ...(FALL_BACK ? [['creation times are compared in local time', 'Where-Object { $_.CreationDate.ToUniversalTime() -ge $p.CreationDate.ToUniversalTime() }', 'Where-Object { $_.CreationDate -ge $p.CreationDate }', ['tree'], ['tree-clock']]] : []),
 ]
@@ -445,21 +706,28 @@ const BENIGN = [
   ['the creation test written as not earlier than', 'Where-Object { $_.CreationDate.ToUniversalTime() -ge $p.CreationDate.ToUniversalTime() }', 'Where-Object { -not ($_.CreationDate.ToUniversalTime() -lt $p.CreationDate.ToUniversalTime()) }', ['tree']],
 ]
 
-const judge = (seen, needs) => CHECKS.filter(([, wanted]) => wanted.every((need) => needs.includes(need))).map(([id, , name, run]) => {
-  try {
-    run(seen)
-
-    return { id, name, ok: true, detail: '' }
-  } catch (error) {
-    return { id, name, ok: false, detail: String(error.message).split('\n')[0].slice(0, 600) }
+const judge = (seen, needs) => {
+  // A missing native sample or failed fixture cannot credit any of the memory faults.
+  if (needs.includes('tree')) {
+    treeRan(seen.tree)
   }
-})
+
+  return CHECKS.filter(([, wanted]) => wanted.every((need) => needs.includes(need))).map(([id, , name, run]) => {
+    try {
+      run(seen)
+
+      return { id, name, ok: true, detail: '' }
+    } catch (error) {
+      return { id, name, ok: false, detail: String(error.message).split('\n')[0].slice(0, 600) }
+    }
+  })
+}
 
 // The ids of the checks that fail over `source` rewritten from `from` to `to`, for each rewrite, several at a time.
-const failingOf = (source, rewrites) => inParallel(rewrites, async ([, from, to, needs]) => judge(await observe(patched(RUN_CHECK, source, from, to), needs), needs).filter((result) => !result.ok))
+const failingOf = (source, rewrites) => inParallel(rewrites, async ([, from, to, needs, caught]) => judge(await observe((caught ? plantedPatch : patched)(RUN_CHECK, source, from, to), needs), needs).filter((result) => !result.ok))
 
 const main = async () => {
-  const mutations = !process.argv.includes('--no-mutations')
+  const mutations = mutating()
   let checks = 0
   let failures = 0
   const check = (name, ok, detail = '') => {

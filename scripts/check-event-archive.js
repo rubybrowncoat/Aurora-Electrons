@@ -1,35 +1,31 @@
 /*
   Checks the event archive and the pins: the opt-in record of a race's game log, kept per branch, and the durable pins on events (src/renderer/utilities/event-archive.js, event-pins.js and their use in utilities/history.js).
 
-  node scripts/check-event-archive.js [--no-mutations]
+  bun scripts/check-event-archive.js [--no-mutations] [--head-check=<key>[,<key>...]]
 
   Groups, each check numbered and keyed (a mutation names the keys it must break):
-  - rows: how an event is normalised and identified (null against 0, text, the exact fingerprint, the multiset of identical rows), what a capture takes of a read;
+  - rows: how an event is normalised and identified (null against 0, text, the exact fingerprint, the multiset of identical rows), what a capture takes of a read, and the span and count a list of stored rows or a record covers (`logDepth`, `recordDepth`, read from the rows and never an assumed window);
   - merge: the reconciliation of captures (the same capture again, the open oldest and newest increments, a closed increment that contradicts, a ledger that does not match, the spans and their gaps, the cap), the archive as rows, a file that cannot be read;
   - branch: the archive of a fork (up to the fork, through a parent with none, never merged, a seed that stays empty);
   - pins: a pin once per group, the limit, the pins a fork inherits, what a save says of a pin;
-  - falryx: the saves of artifacts/falryx-sequential-and-rollback (game 141, race 791, a rollback and forks), read only: the figures of the reconciliation against SQL written here, a fork merged into one archive, the bytes an event costs, pins across saves whose rowids changed;
-  - passive: the 150 snapshots of artifacts/passive-campaign-20261013 (game 139, its player race found by SQL), read only: every snapshot merged in order against the multiset union computed here.
-  A save that is not there skips its group and says so; nothing is read from it but SELECTs (the files are opened read only).
+  - chain: the real recorder over the played saves (A, B and the two branches from B, C1 and C2 of scripts/lib/fixtures.js, game 161, race 909), read only and skipped where they are not there: the archive each branch settles to against SQL, a repeat that writes nothing, the fork given its archive in the pass that makes it and frozen then, the captures of the two branches merged (a conflict for each increment the rollback replaced), a fork made while no archive was chosen, a failure of the parent's log before the cut, the statements a pass issues, and what each save says of a pin and the pins a fork inherits. The retention cap, an increment that straddles the cut and a pin still running at the fork are not on the chain, so the groups above alone witness them;
+  A mutation cannot be credited unless every named check fails by an observed value; no check outside the chain group reads a save.
 
-  Everything else runs on in-memory stores. Each mutation of the utilities is planted in an isolated copy (scripts/lib/mutant-source.js) and must break the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
+  Everything runs on in-memory stores (the chain group reads the saves read only). Each mutation of the utilities is planted in an isolated copy (scripts/lib/mutant-source.js) and must break the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
 const path = require('path')
-const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
+const { assert, subjectModule, judged, caughtAll, kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { HarnessError } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
-const { plantedCopy } = require('./lib/mutant-source')
+const { plantedPatch } = require('./lib/mutant-source')
+const { mutating: mayMutate, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { GAME, RACE, fileOf, rowsOf, ledgerOf, partingOf, databaseOf, recordSave } = require('./lib/played-chain')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
-const FALRYX = path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
-const FALRYX_GAME = 141
-const FALRYX_RACE = 791
-const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013', 'snapshots')
-const PASSIVE_GAME = 139
 const NAMES = ['event-archive', 'event-pins', 'history', 'campaign', 'recording-owner']
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -53,174 +49,10 @@ const STUBS = {
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
-const loadModules = async (directory) => {
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory })
+const loadModules = async (directory, sources = {}) => {
+  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory, sources })
 
-  return { a: loaded['event-archive'], p: loaded['event-pins'], history: loaded.history, directory, reload: () => loadModules(directory) }
-}
-
-// ---------- the saves, read only ----------
-
-const handles = new Map()
-
-const handleOf = (file) => {
-  if (!handles.has(file)) {
-    handles.set(file, new Promise((resolve, reject) => {
-      const handle = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
-    }))
-  }
-
-  return handles.get(file)
-}
-
-const rowsOf = async (file, sql, params = []) => {
-  const handle = await handleOf(file)
-
-  return new Promise((resolve, reject) => handle.all(sql, params, (error, rows) => (error ? reject(error) : resolve(rows))))
-}
-
-// What the utilities read, kept by save and statement: the saves do not change, so a planted copy of a utility reads the rows the real one did and only the utility's own work is repeated. Each statement is logged when a log is given.
-const readRows = new Map()
-
-const RACE_LOG_STATEMENT = /^select FCT_GameLog\.IncrementID, .* from FCT_GameLog where FCT_GameLog\.GameID = \d+ and FCT_GameLog\.RaceID = \d+$/
-
-const WINDOW_STATEMENT = /min\(FCT_GameLog\.IncrementID\)/
-
-// The database the recorder reads: one transaction that is the connection, each statement logged, the event statements made to fail on request.
-const databaseOf = (file, { log = null, fail = false, failEvents = false } = {}) => ({
-  transaction: (work) => work({ id: 'transaction' }),
-  query: async (sql) => {
-    if (log) {
-      log.push(sql)
-    }
-
-    if (fail || (failEvents && (RACE_LOG_STATEMENT.test(sql) || WINDOW_STATEMENT.test(sql)))) {
-      throw new Error('the log could not be read')
-    }
-
-    const key = `${file}|${sql}`
-
-    if (!readRows.has(key)) {
-      readRows.set(key, rowsOf(file, sql))
-    }
-
-    return [await readRows.get(key)]
-  },
-})
-
-// ---------- what is computed here, apart from the utilities ----------
-
-const FIELD_SQL = 'Time, EventType, MessageText, SystemID, PopulationID, Xcor, Ycor, IDType, SMOnly'
-
-const independents = new Map()
-
-const once = (key, work) => {
-  if (!independents.has(key)) {
-    independents.set(key, work())
-  }
-
-  return independents.get(key)
-}
-
-// A race's log of one save grouped by SQL: { byInc: Map(IncrementID -> Map(group key -> count)), rows } with the group key the JSON of the nine stored values.
-const groupsOf = (file, GameID, RaceID) => once(`groups|${file}|${GameID}|${RaceID}`, async () => {
-  const grouped = await rowsOf(file, `select IncrementID, ${FIELD_SQL}, count(*) as n from FCT_GameLog where GameID = ${GameID} and RaceID = ${RaceID} group by IncrementID, ${FIELD_SQL}`)
-  const byInc = new Map()
-  let rows = 0
-
-  grouped.forEach((row) => {
-    const groups = byInc.get(row.IncrementID) || new Map()
-
-    groups.set(JSON.stringify([row.Time, row.EventType, row.MessageText, row.SystemID, row.PopulationID, row.Xcor, row.Ycor, row.IDType, row.SMOnly]), row.n)
-    byInc.set(row.IncrementID, groups)
-    rows += row.n
-  })
-
-  return { byInc, rows }
-})
-
-// The ledger of a save from the log's oldest increment on, by SQL: { first, last, ledger: Map(IncrementID -> [IncrementID, GameTime, Length]) }.
-const ledgerOfSave = (file, GameID) => once(`ledger|${file}|${GameID}`, async () => {
-  const [{ first }] = await rowsOf(file, `select min(IncrementID) as first from FCT_GameLog where GameID = ${GameID}`)
-  const rows = await rowsOf(file, `select IncrementID, GameTime, Length from FCT_Increments where GameID = ${GameID} and IncrementID >= ${first} order by IncrementID`)
-
-  return { first, last: rows[rows.length - 1].IncrementID, ledger: new Map(rows.map((row) => [row.IncrementID, [row.IncrementID, row.GameTime, row.Length]])) }
-})
-
-const gameTimeOf = async (file, GameID) => (await rowsOf(file, `select GameTime from FCT_Game where GameID = ${GameID}`))[0].GameTime
-
-const sameIdentity = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
-
-// The reconciliation rule written again from the design (docs/plans/backlog/evidence/AE-161-01.md 8.3), over the SQL figures of a series of saves in order: a group of a stored increment the read holds fewer of (or none) is a conflict, except in the read's oldest increment and the archive's newest, which are open and take the larger count; an increment whose identity the ledger changed is a ledger conflict, kept as it was. Returns { state: Map(IncrementID -> { identity, groups }), conflicts: Set of `id|reason|group` }.
-const modelOf = (series) => {
-  const state = new Map()
-  const conflicts = new Set()
-
-  series.forEach((save) => {
-    const newest = state.size ? Math.max(...state.keys()) : null
-    const open = (id) => id === save.first || id === newest
-
-    state.forEach((own, id) => {
-      const identity = save.ledger.get(id)
-
-      if (!identity) {
-        return
-      }
-
-      if (!sameIdentity(identity, own.identity)) {
-        conflicts.add(`${id}|ledger|`)
-        return
-      }
-
-      const read = save.byInc.get(id) || new Map()
-
-      own.groups.forEach((count, key) => {
-        const readCount = read.get(key) || 0
-
-        if (readCount > count) {
-          if (!open(id)) {
-            conflicts.add(`${id}|more|${key}`)
-          }
-
-          own.groups.set(key, readCount)
-        } else if (readCount < count && !open(id)) {
-          conflicts.add(`${id}|${readCount ? 'fewer' : 'missing'}|${key}`)
-        }
-      })
-
-      read.forEach((count, key) => {
-        if (!own.groups.has(key)) {
-          if (!open(id)) {
-            conflicts.add(`${id}|more|${key}`)
-          }
-
-          own.groups.set(key, count)
-        }
-      })
-    })
-
-    save.byInc.forEach((groups, id) => {
-      if (state.has(id)) {
-        if (!sameIdentity(state.get(id).identity, save.ledger.get(id))) {
-          conflicts.add(`${id}|ledger|`)
-        }
-      } else if (save.ledger.has(id)) {
-        state.set(id, { identity: save.ledger.get(id), groups: new Map(groups) })
-      }
-    })
-  })
-
-  return { state, conflicts }
-}
-
-const eventsOfModel = (state) => [...state.values()].reduce((sum, own) => sum + [...own.groups.values()].reduce((a, b) => a + b, 0), 0)
-
-// What a save says as the model reads it: the SQL figures of its log and its ledger.
-const saveOf = async (file, GameID, RaceID) => {
-  const { byInc } = await groupsOf(file, GameID, RaceID)
-  const { first, last, ledger } = await ledgerOfSave(file, GameID)
-
-  return { byInc, first, last, ledger }
+  return { a: subjectModule(loaded['event-archive'], 'event archive'), p: { ...subjectModule(loaded['event-pins'], 'event pins'), PinLimit: loaded['event-pins'].PinLimit }, history: subjectModule(loaded.history, 'history recorder'), raw: loaded, directory, reload: () => loadModules(directory, sources) }
 }
 
 // ---------- an installation: each store a JSON value read and written whole ----------
@@ -406,7 +238,10 @@ check('capture', 'a capture is the race\'s rows by increment as counted groups w
 
 check('readfail', 'a failed read is kept as { failed } and never thrown, and a window already read is not read again', 'unit', async ({ m }) => {
   const log = []
-  const failing = await m.a.readRaceEvents({ query: async (sql) => { log.push(sql); throw new Error('disk I/O error') } }, { GameID: 1, RaceID: 7, t: 5 })
+  const readError = new Error('disk I/O error')
+  const failing = await m.a.readRaceEvents({ query: async (sql) => { log.push(sql); throw readError } }, { GameID: 1, RaceID: 7, t: 5 })
+
+  assert.equal(failing.failed?.message ?? null, 'disk I/O error', 'the archive reports the read failure as a returned value')
 
   assert.ok(failing.failed instanceof Error)
   assert.equal(failing.capture, undefined)
@@ -641,6 +476,25 @@ check('rows', 'the archive as rows is one row for each event, newest first: a gr
   assert.equal(m.a.recordEvents({ increments: [] }), 0)
 })
 
+check('depth', 'a log\'s depth is the earliest and latest stored time and the rows it holds, never an assumed window or load limit: a row with no time still counts, a numeric string is a time, and an empty log has none', 'unit', ({ m }) => {
+  assert.equal(m.a.logDepth([]), null)
+  assert.equal(m.a.logDepth(null), null)
+  assert.deepEqual(m.a.logDepth([ev(1, 'a'), ev(3, 'b'), ev(2, 'c')]), { from: 101, to: 301, count: 3 })
+  assert.deepEqual(m.a.logDepth([ev(2, 'a', { Time: '50' }), ev(2, 'b', { Time: null })]), { from: 50, to: 50, count: 2 })
+  assert.deepEqual(m.a.logDepth([ev(2, 'a', { Time: null })]), { from: null, to: null, count: 1 })
+  assert.deepEqual(m.a.logDepth([{ Time: 0, EventType: 1 }, { Time: -5, EventType: 2 }]), { from: -5, to: 0, count: 2 })
+})
+
+check('recorddepth', 'a record\'s depth is the earliest and latest of its stored groups\' times and the events it counts, identical rows one by one, and no record has none', 'unit', ({ m }) => {
+  const { record } = merged(m, null, capture(m, 1, 3, [...many(1, 'a', 3), ev(2, 'b'), ev(3, 'c')]))
+
+  assert.deepEqual(m.a.recordDepth(record), { from: 101, to: 301, count: 5 })
+  assert.equal(m.a.recordDepth(record).count, m.a.recordEvents(record))
+  assert.deepEqual(m.a.recordDepth({ ...record, increments: record.increments.map((increment) => [increment[0], increment[1], increment[2], increment[3].map((group) => [null, ...group.slice(1)])]) }).from, null)
+  assert.equal(m.a.recordDepth(null), null)
+  assert.equal(m.a.recordDepth({ increments: [] }), null)
+})
+
 check('cap', 'a record over the cap loses whole increments, the oldest first, and says from when it holds everything: the spans are clipped to the cut and the conflicts of the dropped increments go', 'unit', ({ m }) => {
   const first = merged(m, null, capture(m, 1, 4, [...many(1, 'a', 3), ...many(2, 'b', 3), ...many(3, 'c', 3), ...many(4, 'd', 3)]))
   const record = { ...first.record, conflicts: [{ at: 1, t: 1, increment: ID(1), reason: 'missing' }, { at: 1, t: 1, increment: ID(2), reason: 'fewer' }, { at: 1, t: 1, increment: ID(3), reason: 'more' }] }
@@ -742,8 +596,13 @@ check('lineage', 'a branch with no archive starts from its parent up to the fork
   const campaign = { id: 'c', branches: { b1: { id: 'b1', parent: null, fork: null }, b2: { id: 'b2', parent: 'b1', fork: { t: 300 } }, b3: { id: 'b3', parent: 'b2', fork: { t: 500 } }, b4: { id: 'b4', parent: 'b1', fork: { t: null } }, b7: { id: 'b7', parent: 'b1', fork: { t: 100 } } } }
 
   assert.equal(m.a.eventFileName('c', 'b2'), 'campaign-c-b2-events')
-  assert.deepEqual(idsOf(m.a.eventBase(io, campaign, 'b2').races[7]), [1, 2])
-  assert.deepEqual(idsOf(m.a.eventBase(io, campaign, 'b3').races[7]), [1, 2], 'through a parent with no archive the earlier fork bounds it')
+  const directSeed = m.a.eventBase(io, campaign, 'b2')
+  const indirectSeed = m.a.eventBase(io, campaign, 'b3')
+
+  assert.ok(directSeed && directSeed.races && directSeed.races[7], 'a branch with no archive receives its parent race through the fork')
+  assert.deepEqual(idsOf(directSeed.races[7]), [1, 2])
+  assert.ok(indirectSeed && indirectSeed.races && indirectSeed.races[7], 'a branch receives its ancestor race through a parent with no archive')
+  assert.deepEqual(idsOf(indirectSeed.races[7]), [1, 2], 'through a parent with no archive the earlier fork bounds it')
   assert.deepEqual(m.a.eventBase(io, campaign, 'b4'), {})
   assert.deepEqual(m.a.eventBase(io, campaign, 'b7'), {}, 'forked before any increment ended')
   assert.equal(m.a.eventBase(io, campaign, 'b1'), file)
@@ -755,7 +614,9 @@ check('lineage', 'a branch with no archive starts from its parent up to the fork
   assert.deepEqual(m.a.eventSeed(io, marked, 'b5', 300), {})
   assert.deepEqual(m.a.eventBase(io, marked, 'b6'), {}, 'nothing passes through a branch seeded empty')
   assert.equal(m.a.eventForkFile(io, marked, 'b5'), null)
-  assert.deepEqual(idsOf(m.a.eventForkFile(io, marked, 'b2').races[7]), [1, 2], 'a branch that predates the mark is seeded')
+  const forkFile = m.a.eventForkFile(io, marked, 'b2')
+  assert.ok(forkFile && forkFile.races && forkFile.races[7], 'a branch that predates the mark receives the parent race in its fork archive')
+  assert.deepEqual(idsOf(forkFile.races[7]), [1, 2], 'a branch that predates the mark is seeded')
   assert.equal(m.a.eventForkFile(io, campaign, 'b1'), null, 'a branch with its own archive is not given another')
   assert.equal(m.a.eventForkFile(io, campaign, 'b4'), null)
   assert.equal(m.a.eventForkFile(io, campaign, 'b7'), null, 'a parent that holds nothing up to the fork gives nothing')
@@ -972,9 +833,14 @@ check('tipupto', 'an archive up to a game time drops a tip that ends after it an
 check('failonly', 'a record that holds nothing but noted failures is kept in the archive up to a game time while one of them is not later than it, and a branch forked then is given it', 'unit', ({ m }) => {
   const record = m.a.withFailure(m.a.withFailure(null, { at: 1, t: 200, reason: 'early' }), { at: 2, t: 900, reason: 'late' })
   const file = { version: 1, races: { 7: record } }
+  const raceOf = (file, label) => {
+    assert.ok(file && file.races && file.races[7], label)
 
-  assert.deepEqual(m.a.eventsUpTo(file, 200).races[7].failures.map((failure) => failure.reason), ['early'], 'a failure at the time is kept')
-  assert.deepEqual(m.a.eventsUpTo(file, 1000).races[7].failures.map((failure) => failure.reason), ['early', 'late'])
+    return file.races[7]
+  }
+
+  assert.deepEqual(raceOf(m.a.eventsUpTo(file, 200), 'the archive keeps the race with an eligible noted failure').failures.map((failure) => failure.reason), ['early'], 'a failure at the time is kept')
+  assert.deepEqual(raceOf(m.a.eventsUpTo(file, 1000), 'the archive keeps the race with both noted failures').failures.map((failure) => failure.reason), ['early', 'late'])
   assert.deepEqual(m.a.eventsUpTo(file, 199), {}, 'with no failure by the time and nothing else, the race is dropped')
   assert.deepEqual(m.a.eventsUpTo({ version: 1, races: { 7: m.a.withFailure(null, { at: 1, t: 900, reason: 'late' }) } }, 500), {})
   assert.equal(m.a.eventFileProblem(m.a.eventsUpTo(file, 500)), null)
@@ -984,13 +850,13 @@ check('failonly', 'a record that holds nothing but noted failures is kept in the
   const given = m.a.eventForkFile(io, campaign, 'b2')
 
   assert.ok(given, 'a fork given a parent that noted a failed read by the fork')
-  assert.deepEqual(given.races[7].failures.map((failure) => failure.reason), ['early'])
+  assert.deepEqual(raceOf(given, 'the fork keeps its parent race record').failures.map((failure) => failure.reason), ['early'])
   assert.deepEqual(given.races[7].increments, [])
   assert.equal(m.a.eventForkFile(io, campaign, 'b3'), null, 'a fork before the failure is given nothing')
   assert.deepEqual(m.a.eventBase(io, campaign, 'b2'), given)
 
   const capped = { ...m.a.withFailure(merged(m, null, capture(m, 1, 5, [...many(2, 'a', 2), ev(3, 'b')])).record, { at: 3, t: 200, reason: 'early' }), cut: 700 }
-  const seed = m.a.eventsUpTo({ version: 1, races: { 7: capped } }, 500).races[7]
+  const seed = raceOf(m.a.eventsUpTo({ version: 1, races: { 7: capped } }, 500), 'the capped archive keeps the race with an eligible noted failure')
 
   assert.equal(m.a.eventFileProblem({ version: 1, races: { 7: capped } }), null)
   assert.deepEqual(seed.failures.map((failure) => failure.reason), ['early'], 'a cut past the time drops the events, not the failure noted before it')
@@ -1213,9 +1079,12 @@ check('limit', 'at most 500 events are pinned on a branch: the next throws PinLi
   }
 
   assert.equal(store.pins.length, 500)
-  assert.throws(() => m.p.withPin(store, 'b1', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'over' }), (error) => error instanceof m.p.PinLimit && error.name === 'PinLimit' && error.limit === 500 && error instanceof Error)
-  assert.equal(m.p.withPin(store, 'b1', ev(1, 'e'), { increment: ID(1), count: 1, names: {}, at: 1, id: 'again' }), store, 'a group already pinned is no new pin')
-  assert.equal(m.p.withPin(store, 'b2', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'other' }).pins.length, 501)
+  assert.throws(() => m.raw['event-pins'].withPin(store, 'b1', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'over' }), (error) => error instanceof m.p.PinLimit && error.name === 'PinLimit' && error.limit === 500 && error instanceof Error)
+  const duplicate = m.p.withPin(store, 'b1', ev(1, 'e'), { increment: ID(1), count: 1, names: {}, at: 1, id: 'again' })
+
+  assert.equal(duplicate.pins.length, 500, 'a duplicate at the cap leaves exactly 500 pins')
+  assert.equal(duplicate, store, 'a group already pinned is no new pin')
+  assert.equal(m.p.withPin(store, 'b2', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'other' }).pins.length, 501, 'a full first branch leaves the other branch free to add its first pin')
   assert.equal(m.p.withPin(m.p.withoutPin(store, 'b1', 'p0'), 'b1', ev(900, 'e'), { increment: ID(900), count: 1, names: {}, at: 1, id: 'fits' }).pins.length, 500)
 })
 
@@ -1300,973 +1169,6 @@ check('pinstate', 'what a save says of a pin: held, a different count, another t
   assert.equal(state([], { first: null, ledger: new Map() }), 'older', 'a log with no row holds nothing, and says nothing of when')
 })
 
-// ---------- falryx ----------
-
-const falryxSaves = () => {
-  if (!fs.existsSync(FALRYX)) {
-    return null
-  }
-
-  const all = {}
-
-  fs.readdirSync(FALRYX).filter((name) => /^AuroraDB-\d+\.db$/.test(name)).forEach((name) => { all[name.match(/\d+/)[0].slice(0, 4)] = path.join(FALRYX, name) })
-
-  return ['2713', '2740', '2794', '2810', '2904'].every((key) => all[key]) ? all : null
-}
-
-// What the utilities make of one save of the falryx set: the window, the rows the page reads, the capture.
-const readOf = async (m, file) => {
-  const t = await gameTimeOf(file, FALRYX_GAME)
-  const database = databaseOf(file)
-  const window = await m.a.readLogWindow(database, FALRYX_GAME)
-  const read = await m.a.readRaceEvents(database, { GameID: FALRYX_GAME, RaceID: FALRYX_RACE, t, window })
-
-  assert.equal(read.failed, undefined)
-
-  return { t, window, capture: read.capture, rows: (await database.query(m.a.raceLogSql(FALRYX_GAME, FALRYX_RACE)))[0] }
-}
-
-const mergeSaves = (m, reads, { cap = 1e9 } = {}) => {
-  let file = {}
-  const now = counter()
-  const results = reads.map((read) => {
-    const result = m.a.mergeEvents(file, { races: [{ RaceID: FALRYX_RACE, capture: read.capture }] }, { cap, now })
-
-    file = result.file
-
-    return result
-  })
-
-  return { file, record: file.races[FALRYX_RACE], results }
-}
-
-const falryx = async (m) => {
-  const saves = falryxSaves()
-
-  if (!saves) {
-    return null
-  }
-
-  const memo = new Map()
-  const read = (key) => {
-    if (!memo.has(key)) {
-      memo.set(key, readOf(m, saves[key]))
-    }
-
-    return memo.get(key)
-  }
-
-  return { saves, read, series: (...keys) => Promise.all(keys.map((key) => saveOf(saves[key], FALRYX_GAME, FALRYX_RACE))) }
-}
-
-check('window', 'the window of a save the utility reads (the log\'s oldest increment, the ledger from there to the newest) is the one SQL gives', 'falryx', async ({ f, m }) => {
-  for (const key of ['2713', '2794', '2904']) {
-    const { window } = await f.read(key)
-    const own = await ledgerOfSave(f.saves[key], FALRYX_GAME)
-
-    assert.equal(window.first, own.first, key)
-    assert.equal(window.ledger.size, own.ledger.size, key)
-    assert.deepEqual([...window.ledger.values()], [...own.ledger.values()], key)
-  }
-
-  const empty = await m.a.readLogWindow(databaseOf(f.saves['2713']), 999999)
-
-  assert.equal(empty.first, null)
-  assert.equal(empty.ledger.size, 0)
-})
-
-const reconcile = async (m, f, keys) => {
-  const reads = await Promise.all(keys.map((key) => f.read(key)))
-  const own = mergeSaves(m, reads)
-  const model = modelOf(await f.series(...keys))
-
-  return { reads, ...own, model }
-}
-
-const sameAsModel = (record, model) => {
-  assert.deepEqual(idsOf(record), [...model.state.keys()].sort((a, b) => a - b), 'the same increments')
-
-  record.increments.forEach((increment) => {
-    const own = model.state.get(increment[0])
-
-    assert.deepEqual(increment.slice(0, 3), own.identity)
-    assert.equal(increment[3].length, own.groups.size, `groups of ${increment[0]}`)
-    assert.equal(increment[3].reduce((sum, group) => sum + group[9], 0), [...own.groups.values()].reduce((a, b) => a + b, 0), `events of ${increment[0]}`)
-  })
-}
-
-check('recon1', '2713 then 2740 of the first branch reconcile with no conflict, the boundary increments take the larger count, and the events are the multiset union SQL gives', 'falryx', async ({ f, m }) => {
-  const r = await reconcile(m, f, ['2713', '2740'])
-
-  assert.equal(r.record.conflicts.length, 0)
-  assert.equal(r.model.conflicts.size, 0, 'SQL written here finds no group of a closed increment that changed')
-  sameAsModel(r.record, r.model)
-  assert.equal(m.a.recordEvents(r.record), eventsOfModel(r.model.state))
-  assert.ok(m.a.recordEvents(r.record) >= r.reads[0].capture.rows)
-  assert.ok(r.record.spans.length === 1, 'the two windows overlap: one span')
-  assert.equal(r.record.revision, 2, 'each save added rows')
-
-  const events = (await groupsOf(f.saves['2713'], FALRYX_GAME, FALRYX_RACE)).rows
-
-  assert.equal(r.reads[0].capture.rows, events)
-})
-
-check('recon2', '2794 then 2810 continue exactly: no conflict, and the archive holds the race\'s rows of 2810 and no other', 'falryx', async ({ f, m }) => {
-  const r = await reconcile(m, f, ['2794', '2810'])
-  const rows = (await groupsOf(f.saves['2810'], FALRYX_GAME, FALRYX_RACE)).rows
-
-  assert.equal(r.record.conflicts.length, 0)
-  assert.equal(r.model.conflicts.size, 0)
-  assert.equal(m.a.recordEvents(r.record), rows)
-  assert.equal(rows, r.reads[1].rows.length, 'the rows the utility read are the rows SQL counts')
-  assert.equal(m.a.archiveRows(r.record).length, rows, 'one row for each event, identical ones included')
-  sameAsModel(r.record, r.model)
-  assert.deepEqual(m.a.rowCounts(r.reads[1].rows), new Map(m.a.archiveRows(r.record).reduce((all, row) => all.set(row.key, row.copies), new Map())), 'every event of 2810 is in the archive with its count')
-
-  const repeat = m.a.mergeEvents(r.file, { races: [{ RaceID: FALRYX_RACE, capture: r.reads[1].capture }] }, { cap: 1e9, now: counter() })
-
-  assert.equal(repeat.changed, false, 'the same save again writes nothing')
-  assert.deepEqual(r.record.spans.length, 1)
-})
-
-check('forkpair', '2810 then 2904 merged into one archive gives ledger conflicts for the increments the rollback replaced, which is why a fork gets its own archive', 'falryx', async ({ f, m }) => {
-  const r = await reconcile(m, f, ['2810', '2904'])
-  const [before, after] = await f.series('2810', '2904')
-  const windowStart = after.ledger.get(after.first)[1]
-  const windowEnd = after.ledger.get(after.last)[1] + after.ledger.get(after.last)[2]
-  const replaced = [...before.byInc.keys()].filter((id) => {
-    const identity = before.ledger.get(id)
-    const now = after.ledger.get(id)
-
-    return now && identity[1] >= windowStart && identity[1] + identity[2] <= windowEnd && !sameIdentity(identity, now)
-  })
-
-  assert.ok(replaced.length > 0, 'the data holds increments of 2810 that 2904 names differently')
-
-  const ledger = r.record.conflicts.filter((conflict) => conflict.reason === 'ledger')
-
-  assert.equal(ledger.length, replaced.length)
-  assert.deepEqual(ledger.map((conflict) => conflict.increment[0]).sort((a, b) => a - b), replaced.sort((a, b) => a - b))
-  assert.ok(ledger.every((conflict) => !sameIdentity(conflict.increment, after.ledger.get(conflict.increment[0]))))
-  assert.equal(r.model.conflicts.size >= replaced.length, true)
-  assert.deepEqual(new Set([...r.model.conflicts].filter((entry) => entry.includes('|ledger|')).map((entry) => Number(entry.split('|')[0]))), new Set(replaced))
-  assert.equal(r.record.conflicts.filter((conflict) => conflict.reason !== 'ledger').length, r.model.conflicts.size - replaced.length)
-
-  ledger.forEach((conflict) => {
-    const group = (record, id) => record.increments.find((increment) => increment[0] === id)
-
-    assert.ok(group(r.record, conflict.increment[0]), 'the rows of the replaced increment are kept')
-  })
-  sameAsModel(r.record, r.model)
-})
-
-check('bytes', 'an event costs 148 to 209 bytes of compact JSON in each save, 190.8 in the largest, and the events are the rows SQL counts', 'falryx', async ({ f, m }) => {
-  let largest = null
-
-  for (const [key, file] of Object.entries(f.saves)) {
-    const { capture } = await f.read(key)
-    const { record } = merged(m, null, capture)
-    const rows = (await groupsOf(file, FALRYX_GAME, FALRYX_RACE)).rows
-    const bytes = JSON.stringify(record.increments).length / rows
-
-    assert.equal(m.a.recordEvents(record), rows, key)
-    assert.ok(bytes >= 148 && bytes <= 209, `${key}: ${bytes.toFixed(1)} B an event`)
-    assert.ok(Math.abs(bytes * rows - m.a.eventEstimate(rows)) < m.a.eventEstimate(rows) * 0.26, `${key}: the estimate is within a quarter`)
-
-    if (!largest || rows > largest.rows) {
-      largest = { rows, bytes }
-    }
-  }
-
-  assert.equal(largest.rows, 119523)
-  assert.ok(Math.abs(largest.bytes - 190.8) < 0.5, `${largest.bytes.toFixed(2)} B an event in the largest`)
-})
-
-const matchingRows = (rows) => {
-  const byKey = new Map()
-
-  rows.forEach((row) => {
-    const key = JSON.stringify([row.IncrementID, row.Time, row.EventType, row.MessageText, row.SystemID, row.PopulationID, row.Xcor, row.Ycor, row.IDType, row.SMOnly])
-
-    byKey.set(key, [...(byKey.get(key) || []), row])
-  })
-
-  return byKey
-}
-
-const ROWID_SQL = (low, high) => `select rowid as rid, IncrementID, ${FIELD_SQL} from FCT_GameLog where GameID = ${FALRYX_GAME} and RaceID = ${FALRYX_RACE} and IncrementID between ${low} and ${high}`
-
-// A pin made on a row of one save and found in another: the state the SQL of the other save gives, written apart from the utility.
-const expectedState = async (file, pin) => {
-  const [id] = pin.increment
-  const { first, ledger } = await ledgerOfSave(file, FALRYX_GAME)
-
-  if (id < first) {
-    return 'older'
-  }
-
-  const identity = ledger.get(id)
-
-  if (!identity) {
-    return 'newer'
-  }
-
-  if (identity[1] !== pin.increment[1] || identity[2] !== pin.increment[2]) {
-    return 'ledger'
-  }
-
-  const where = ['Time', 'EventType', 'MessageText', 'SystemID', 'PopulationID', 'Xcor', 'Ycor', 'IDType', 'SMOnly'].map((field) => `${field} is ?`).join(' and ')
-  const [{ n }] = await rowsOf(file, `select count(*) as n from FCT_GameLog where GameID = ${FALRYX_GAME} and RaceID = ${FALRYX_RACE} and IncrementID = ? and ${where}`, [id, ...pin.fields])
-
-  return n === pin.count ? 'held' : n === 0 ? (id === first ? 'older' : 'gone') : 'count'
-}
-
-const pinFrom = (m, row, ledger, id = 'pin') => m.p.withPin(m.p.emptyPins(), 'b1', row, { increment: ledger.get(row.IncrementID), count: 1, names: {}, at: 1, id }).pins[0]
-
-const stateIn = async (m, f, key, pin) => {
-  const { rows, window } = await f.read(key)
-
-  return m.p.pinState(pin, m.a.rowCounts(rows), window)
-}
-
-check('pinsave', 'a pin made on a row of one save is held in the next though its rowid changed, and in the save after a fork it is held before the fork, unresolved (another timeline) after it, and older than the log before it', 'falryx', async ({ f, m }) => {
-  // The rowid of a row changes between saves 2713 and 2740: proved by SQL, then a pin made on such a row.
-  const early = await rowsOf(f.saves['2713'], ROWID_SQL(358070, 358120))
-  const next = matchingRows(await rowsOf(f.saves['2740'], ROWID_SQL(358070, 358120)))
-  const moved = early.find((row) => {
-    const same = next.get(JSON.stringify([row.IncrementID, row.Time, row.EventType, row.MessageText, row.SystemID, row.PopulationID, row.Xcor, row.Ycor, row.IDType, row.SMOnly]))
-
-    return same && same.length === 1 && same[0].rid !== row.rid && matchingRows(early).get(JSON.stringify([row.IncrementID, row.Time, row.EventType, row.MessageText, row.SystemID, row.PopulationID, row.Xcor, row.Ycor, row.IDType, row.SMOnly])).length === 1
-  })
-
-  assert.ok(moved, 'a row of 2713 that 2740 holds under another rowid')
-
-  const first = await ledgerOfSave(f.saves['2713'], FALRYX_GAME)
-  const pinned = pinFrom(m, moved, first.ledger)
-
-  assert.equal(await stateIn(m, f, '2713', pinned), 'held')
-  assert.equal(await stateIn(m, f, '2740', pinned), 'held', 'resolved by what the event is, not where it is stored')
-  assert.equal(await expectedState(f.saves['2740'], pinned), 'held')
-
-  // 2794 and 2810 keep their rowids; 2904 (after the fork) does not.
-  const before = await rowsOf(f.saves['2794'], ROWID_SQL(359300, 359447))
-  const afterFork = matchingRows(await rowsOf(f.saves['2904'], ROWID_SQL(359300, 359447)))
-  const keyOf = (row) => JSON.stringify([row.IncrementID, row.Time, row.EventType, row.MessageText, row.SystemID, row.PopulationID, row.Xcor, row.Ycor, row.IDType, row.SMOnly])
-  const own = matchingRows(before)
-  const settled = before.find((row) => {
-    const there = afterFork.get(keyOf(row))
-
-    return there && there.length === 1 && own.get(keyOf(row)).length === 1 && there[0].rid !== row.rid
-  })
-
-  assert.ok(settled, 'a row of 2794 before the fork that 2904 holds under another rowid')
-
-  const middle = (await ledgerOfSave(f.saves['2794'], FALRYX_GAME)).ledger
-  const pin = pinFrom(m, settled, middle)
-
-  assert.equal(await stateIn(m, f, '2794', pin), 'held')
-  assert.equal(await stateIn(m, f, '2810', pin), 'held')
-  assert.equal(await stateIn(m, f, '2904', pin), await expectedState(f.saves['2904'], pin))
-  assert.equal(await stateIn(m, f, '2904', pin), 'held', 'before the fork the two timelines are one')
-
-  // A row of 2810 after the fork: the same increment number is another increment in 2904.
-  const after = await rowsOf(f.saves['2810'], `${ROWID_SQL(359450, 359460)} limit 1`)
-  const old = (await ledgerOfSave(f.saves['2810'], FALRYX_GAME)).ledger
-  const replaced = pinFrom(m, after[0], old)
-
-  assert.equal(await stateIn(m, f, '2810', replaced), 'held')
-  assert.equal(await expectedState(f.saves['2904'], replaced), 'ledger')
-  assert.equal(await stateIn(m, f, '2904', replaced), 'ledger', 'after the fork the pin is unresolved, never shown as the other timeline\'s event')
-
-  // A row of 2794 older than what 2904 retains.
-  const [oldest] = await rowsOf(f.saves['2794'], `${ROWID_SQL(358100, 358200)} limit 1`)
-  const history = pinFrom(m, oldest, middle)
-
-  assert.equal(await expectedState(f.saves['2904'], history), 'older')
-  assert.equal(await stateIn(m, f, '2904', history), 'older')
-})
-
-// ---------- passive ----------
-
-const passiveFiles = () => (fs.existsSync(PASSIVE) ? fs.readdirSync(PASSIVE).filter((name) => /^AuroraDB_\d+_day_\d+\.db$/.test(name)).sort().map((name) => path.join(PASSIVE, name)) : null)
-
-const passive = async (m) => {
-  const files = passiveFiles()
-
-  if (!files || files.length < 2) {
-    return null
-  }
-
-  const players = await rowsOf(files[0], `select RaceID from FCT_Race where GameID = ${PASSIVE_GAME} and NPR = 0`)
-
-  assert.equal(players.length, 1, 'one player race')
-
-  const RaceID = players[0].RaceID
-  const reads = []
-  const saves = []
-
-  for (const file of files) {
-    const t = await gameTimeOf(file, PASSIVE_GAME)
-    const database = databaseOf(file)
-    const window = await m.a.readLogWindow(database, PASSIVE_GAME)
-    const read = await m.a.readRaceEvents(database, { GameID: PASSIVE_GAME, RaceID, t, window })
-
-    assert.equal(read.failed, undefined)
-    reads.push(read.capture)
-    saves.push(await saveOf(file, PASSIVE_GAME, RaceID))
-  }
-
-  const now = counter()
-  let file = {}
-  const results = reads.map((taken) => {
-    const result = m.a.mergeEvents(file, { races: [{ RaceID, capture: taken }] }, { now })
-
-    file = result.file
-
-    return result
-  })
-
-  return { files, RaceID, reads, saves, file, results, record: file.races[RaceID], model: modelOf(saves) }
-}
-
-check('passive', 'the 150 snapshots of the passive campaign merged in order give no conflict, keep the rows the log later dropped, and hold exactly the multiset union SQL gives', 'passive', ({ s, m }) => {
-  assert.equal(s.files.length, 150)
-  assert.equal(s.record.conflicts.length, 0)
-  assert.equal(s.model.conflicts.size, 0, 'SQL written here finds no closed increment that changed in any snapshot')
-  sameAsModel(s.record, s.model)
-  assert.equal(m.a.recordEvents(s.record), eventsOfModel(s.model.state))
-
-  const lastFirst = s.saves[s.saves.length - 1].first
-
-  assert.ok(Math.min(...idsOf(s.record)) < lastFirst, 'the archive holds increments the last save no longer has')
-  assert.ok(m.a.recordEvents(s.record) > s.reads[s.reads.length - 1].rows, 'and so more events than any one save')
-  assert.equal(s.record.spans.length, 1, 'the snapshots overlap: no gap')
-  assert.equal(m.a.eventFileProblem(s.file), null)
-
-  const repeat = m.a.mergeEvents(s.file, { races: [{ RaceID: s.RaceID, capture: s.reads[s.reads.length - 1] }] }, { now: counter() })
-
-  assert.equal(repeat.changed, false, 'the last snapshot again writes nothing')
-})
-
-// ---------- the recorder ----------
-
-const NPR_RACE = 785
-
-// The eight saves in the order of their game time, the order check-colony-series.js drives them in: saves 0, 1 and 3 on the first branch, 4 and 5 on the branch that forks off it, 6 and 7 on two later forks.
-const falryxOrder = () => {
-  if (!fs.existsSync(FALRYX)) {
-    return null
-  }
-
-  const files = fs.readdirSync(FALRYX).filter((name) => /^AuroraDB-\d+\.db$/.test(name)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0])).map((name) => path.join(FALRYX, name))
-
-  return files.length === 8 ? files : null
-}
-
-const recordOf = (m, inst, file, { log, failEvents, isCurrent } = {}) => m.history.recordHistory(databaseOf(file, { log, failEvents }), { storage: inst.io, path: 'C:/saves/' + path.basename(file), now: inst.now, newId: inst.newId, isCurrent })
-
-const turnOn = (m, inst, campaignId, RaceID) => m.a.saveArchiveChoice(inst.io.settings, campaignId, RaceID, true)
-
-const eventStatements = (log) => ({ window: log.filter((sql) => WINDOW_STATEMENT.test(sql)).length, ledger: log.filter((sql) => /^select FCT_Increments\.IncrementID, FCT_Increments\.GameTime, FCT_Increments\.Length from FCT_Increments where .* FCT_Increments\.IncrementID >= /.test(sql)).length, race: log.filter((sql) => RACE_LOG_STATEMENT.test(sql)).length })
-
-// A record against the SQL of a save written apart from the utilities: from increment \`from\` on, the same increments with the ledger's identity and the same groups with the same counts.
-const assertSameAsSave = (record, save, from, label) => {
-  const mine = record.increments.filter((increment) => increment[0] >= from)
-  const theirs = [...save.byInc.keys()].filter((id) => id >= from).sort((a, b) => a - b)
-
-  assert.deepEqual(mine.map((increment) => increment[0]), theirs, label + ': the same increments')
-  mine.forEach((increment) => {
-    assert.deepEqual(increment.slice(0, 3), save.ledger.get(increment[0]), label + ': the identity of increment ' + increment[0])
-    assert.deepEqual([...new Map(increment[3].map((group) => [JSON.stringify(group.slice(0, 9)), group[9]]))].sort(), [...save.byInc.get(increment[0])].sort(), label + ': the groups of increment ' + increment[0])
-  })
-}
-
-// A record the cap may have cut, against a save: it holds the newest increments of the save from `from` on, exactly, whole increments only; what the cap dropped is the oldest, the cut is the end of the newest dropped increment, and keeping one more would have gone over the cap.
-const assertCapped = (m, record, save, cap, label) => {
-  const from = record.increments[0][0]
-  const ids = [...save.byInc.keys()].sort((a, b) => a - b)
-  const dropped = ids.filter((id) => id < from)
-  const events = (id) => [...save.byInc.get(id).values()].reduce((a, b) => a + b, 0)
-
-  assertSameAsSave(record, save, from, label)
-  assert.ok(m.a.recordEvents(record) <= cap, label + ': ' + m.a.recordEvents(record) + ' events over the cap ' + cap)
-
-  if (!dropped.length) {
-    assert.equal(record.cut, undefined, label + ': nothing was cut')
-
-    return
-  }
-
-  const last = save.ledger.get(dropped[dropped.length - 1])
-
-  assert.equal(record.cut, last[1] + last[2], label + ': the cut is the end of the newest increment dropped')
-  assert.ok(m.a.recordEvents(record) + events(dropped[dropped.length - 1]) > cap, label + ': one more increment would not have fitted')
-}
-
-// What a fork is given, written from the rule apart from the utility: the parent's increments that ended by the fork, its spans clipped to it, and nothing at all when the cap had cut the parent after it.
-const expectedSeed = (record, t) => {
-  if (!record || (typeof record.cut === 'number' && record.cut > t)) {
-    return null
-  }
-
-  const increments = record.increments.filter((increment) => increment[1] + increment[2] <= t)
-  const spans = record.spans.filter(([start]) => start < t).map(([start, end]) => [start, Math.min(end, t)])
-
-  return increments.length || spans.length ? { increments, spans } : null
-}
-
-const snapshotCount = (branch) => branch.races[FALRYX_RACE].snapshots.length
-const RECORDER_SCHEDULES = ['rthrow', 'rsuperseded']
-const recorderSchedules = (only, schedules = RECORDER_SCHEDULES) => schedules.filter((key) => only === null || only.includes(key))
-
-const recorder = async (m, only = null) => {
-  const files = falryxOrder()
-
-  if (!files) {
-    return null
-  }
-
-  const schedules = recorderSchedules(only)
-
-  const result = { files, sql: await Promise.all(files.map((file) => saveOf(file, FALRYX_GAME, FALRYX_RACE))) }
-  const inst = installation()
-
-  await recordOf(m, inst, files[0])
-
-  const campaignId = inst.campaignId(FALRYX_GAME)
-  const events = (branchId) => inst.events(campaignId, branchId)
-  const named = (branchId) => 'file:' + m.a.eventFileName(campaignId, branchId)
-
-  result.campaignId = campaignId
-  inst.start = inst.copy()
-
-  // Nothing chosen: the baseline of the statements, the files and the empire file.
-  const off = inst.copy()
-  const offLog = []
-
-  await recordOf(m, off, files[1], { log: offLog })
-  result.off = { log: offLog, names: [...off.files.keys()].filter((name) => name.includes('events')), branch: off.branch(campaignId), writes: off.eventWrites() }
-
-  // The archive turned on: the same save read again, then the next.
-  turnOn(m, inst, campaignId, FALRYX_RACE)
-
-  const firstLog = []
-  const first = await recordOf(m, inst, files[0], { log: firstLog })
-
-  result.first = { run: first, log: firstLog, events: events('b1'), writes: inst.eventWrites(), order: inst.writes.map(({ name }) => name).filter((name) => name.includes(campaignId + '-b1')) }
-
-  const onLog = []
-  const second = await recordOf(m, inst, files[1], { log: onLog })
-
-  result.second = { run: second, log: onLog, events: events('b1'), branch: inst.branch(campaignId), writes: inst.eventWrites() }
-
-  await recordOf(m, inst, files[1])
-  await recordOf(m, inst, files[1])
-  result.repeat = { writes: inst.eventWrites(), events: events('b1') }
-
-  const restarted = await m.reload()
-
-  await recordOf(restarted, inst, files[1])
-  result.restart = { writes: inst.eventWrites(), events: events('b1') }
-
-  await recordOf(m, inst, files[3])
-  result.beforeFork = { events: events('b1'), writes: inst.eventWrites() }
-  inst.afterB1 = inst.copy()
-
-  // The fork: save 4 is another timeline from the game time its registry entry says.
-  const forkWrites = inst.writes.length
-
-  await recordOf(m, inst, files[4])
-
-  const registry = inst.registry().campaigns[campaignId]
-
-  if (process.env.EVENT_DEBUG) {
-    const summary = (file) => (file && file.races && file.races[FALRYX_RACE] ? { ids: [file.races[FALRYX_RACE].increments[0] && file.races[FALRYX_RACE].increments[0][0], file.races[FALRYX_RACE].increments.length], spans: file.races[FALRYX_RACE].spans, cut: file.races[FALRYX_RACE].cut, conflicts: file.races[FALRYX_RACE].conflicts.length } : file)
-
-    console.log('DEBUG', JSON.stringify({ fork: Object.fromEntries(Object.entries(registry.branches).map(([k, b]) => [k, [b.parent, b.fork]])), b1: summary(events('b1')), b2: summary(events('b2')), names: [...inst.files.keys()].filter((name) => name.includes('events')) }))
-  }
-
-  result.fork = { registry, writes: inst.eventValues(named('b2'), forkWrites), b1: events('b1'), b2: events('b2'), names: [...inst.files.keys()].filter((name) => name.includes('events')) }
-  inst.afterFork = inst.copy()
-
-  await recordOf(m, inst, files[5])
-  result.continued = { b1: events('b1'), b2: events('b2'), writes: inst.eventWrites() }
-
-  const writes = inst.eventWrites()
-
-  await recordOf(m, inst, files[5])
-  result.reconnect = { writes: inst.eventWrites() - writes, b2: events('b2') }
-
-  const chainWrites = inst.writes.length
-
-  await recordOf(m, inst, files[6])
-  await recordOf(m, inst, files[7])
-  result.chain = { writes: { b3: inst.eventValues(named('b3'), chainWrites), b4: inst.eventValues(named('b4'), chainWrites) }, registry: inst.registry().campaigns[campaignId], b1: events('b1'), b2: events('b2'), b3: events('b3'), b4: events('b4') }
-
-  // The parent's archive cleared after the fork: the fork's own stays.
-  const frozen = inst.afterFork.copy()
-  const before = frozen.events(campaignId, 'b2')
-
-  frozen.put(named('b1'), { version: 1, races: {} })
-  await recordOf(m, frozen, files[4])
-  result.frozen = { before, after: frozen.events(campaignId, 'b2') }
-
-  // A fork made while no archive was on: no file, but the branch is marked, and an archive turned on later takes the fork's own rows and not the parent's.
-  const late = inst.start.copy()
-
-  await recordOf(m, late, files[1])
-  await recordOf(m, late, files[3])
-  await recordOf(m, late, files[4])
-
-  const lateRegistry = late.registry().campaigns[campaignId]
-
-  result.late = { registry: lateRegistry, names: [...late.files.keys()].filter((name) => name.includes('events')) }
-  turnOn(m, late, campaignId, FALRYX_RACE)
-  await recordOf(m, late, files[3])
-  await recordOf(m, late, files[4])
-  result.late.afterOn = { b1: late.events(campaignId, 'b1'), b2: late.events(campaignId, 'b2'), registry: late.registry().campaigns[campaignId] }
-
-  // A race that is not a player's: chosen, and still not read.
-  const npr = inst.start.copy()
-  const nprLog = []
-
-  turnOn(m, npr, campaignId, NPR_RACE)
-  await recordOf(m, npr, files[1], { log: nprLog })
-  result.npr = { statements: eventStatements(nprLog), names: [...npr.files.keys()].filter((name) => name.includes('events')) }
-
-  // A failed read of the log: the empire's file as without an archive, nothing in the archive, nothing failed.
-  const failing = inst.start.copy()
-
-  turnOn(m, failing, campaignId, FALRYX_RACE)
-
-  const failedRun = await recordOf(m, failing, files[1], { failEvents: true })
-
-  result.failed = { run: failedRun, names: [...failing.files.keys()].filter((name) => name.includes('events')), branch: failing.branch(campaignId), events: failing.events(campaignId, 'b1'), t: await gameTimeOf(files[1], FALRYX_GAME) }
-  await recordOf(m, failing, files[1])
-  result.filled = failing.events(campaignId, 'b1')
-  await recordOf(m, failing, files[1], { failEvents: true })
-  result.erased = failing.events(campaignId, 'b1')
-
-  // An archive this version cannot read: the branch's own file, and the parent's file a fork would be seeded from. Nothing is merged, written or seeded over it, the pass reports stage 'events', and the empire's snapshot is recorded all the same.
-  const unreadable = { version: 2, races: { [FALRYX_RACE]: { later: true } } }
-  const damaged = inst.afterB1.copy()
-  const own = 'file:' + m.a.eventFileName(campaignId, 'b1')
-
-  damaged.put(own, unreadable)
-
-  const damagedRun = await recordOf(m, damaged, files[3])
-
-  result.damaged = { run: damagedRun, file: damaged.files.get(own), writes: damaged.eventWrites(), branch: damaged.branch(campaignId) }
-
-  const orphan = inst.afterB1.copy()
-
-  orphan.put(own, unreadable)
-
-  const orphanWrites = orphan.writes.length
-  const orphanRun = await recordOf(m, orphan, files[4])
-  const orphanRegistry = orphan.registry().campaigns[campaignId]
-
-  result.orphan = { run: orphanRun, parent: orphan.files.get(own), child: orphan.events(campaignId, 'b2'), eventWrites: orphan.eventWrites(), registry: orphanRegistry, branch: orphan.branch(campaignId, 'b2'), writes: orphan.writes.slice(orphanWrites).map(({ name }) => name) }
-
-  // A store that throws when read (damaged JSON, an I/O error): the same refusal as an archive this version cannot read, and never the pass's outer catch, which would skip the empire's snapshot.
-  if (schedules.includes('rthrow')) {
-    const record1 = async (inst2, file2, options) => {
-      const run = await recordOf(m, inst2, file2, options)
-
-      return { run, branch: inst2.branch(campaignId), eventWrites: inst2.eventWrites() }
-    }
-
-    const throwBase = inst.start.copy()
-
-    turnOn(m, throwBase, campaignId, FALRYX_RACE)
-    await recordOf(m, throwBase, files[0])
-
-    const throwWhole = throwBase.copy()
-
-    await recordOf(m, throwWhole, files[1])
-
-    const throwOwn = throwBase.copy()
-
-    throwOwn.breakStore(own)
-
-    const ownBefore = throwOwn.eventWrites()
-    const ownRun = await record1(throwOwn, files[1])
-
-    result.throwOwn = { run: ownRun.run, snapshots: snapshotCount(ownRun.branch), expected: snapshotCount(throwWhole.branch(campaignId)), events: throwOwn.files.get(own), eventsBefore: throwBase.files.get(own), writes: ownRun.eventWrites - ownBefore }
-
-    const throwTwice = throwBase.copy()
-
-    throwTwice.breakStore(own, 1)
-
-    const twiceRun = await recordOf(m, throwTwice, files[1])
-
-    result.throwTwice = { run: twiceRun, writes: throwTwice.eventWrites(), events: throwTwice.files.get(own), eventsBefore: throwBase.files.get(own) }
-
-    const throwFork = inst.afterB1.copy()
-
-    throwFork.breakStore(own)
-
-    const forkWritesBefore = throwFork.eventWrites()
-    const forkRun = await recordOf(m, throwFork, files[4])
-    const forkRegistry = throwFork.registry().campaigns[campaignId]
-
-    result.throwFork = { run: forkRun, child: throwFork.events(campaignId, 'b2'), registry: forkRegistry, branch: throwFork.branch(campaignId, 'b2'), writes: throwFork.eventWrites() - forkWritesBefore, colonies: [...throwFork.files.keys()].filter((name) => name.includes('colonies') && name.includes('-b2')) }
-    throwFork.mendStore(own)
-    await recordOf(m, throwFork, files[4])
-    result.throwFork.mended = throwFork.events(campaignId, 'b2')
-
-    const throwOff = inst.start.copy()
-
-    await recordOf(m, throwOff, files[1])
-    await recordOf(m, throwOff, files[3])
-    throwOff.breakStore(own)
-
-    const offFork = await recordOf(m, throwOff, files[4])
-
-    result.throwOff = { run: offFork, registry: throwOff.registry().campaigns[campaignId], branch: throwOff.branch(campaignId, 'b2'), names: [...throwOff.files.keys()].filter((name) => name.includes('events')) }
-
-    const throwQuiet = inst.start.copy()
-
-    throwQuiet.breakStore(own)
-    throwQuiet.breakStore('file:' + m.a.eventFileName(campaignId, 'b2'))
-    result.throwQuiet = { run: await recordOf(m, throwQuiet, files[1]), branch: throwQuiet.branch(campaignId) }
-  }
-
-  // A failed read on the parent, then a fork: the parent's record holds a noted failure and no rows, and the fork is given it.
-  const noted = inst.start.copy()
-
-  turnOn(m, noted, campaignId, FALRYX_RACE)
-  await recordOf(m, noted, files[1], { failEvents: true })
-  await recordOf(m, noted, files[3], { failEvents: true })
-
-  const notedParent = noted.events(campaignId, 'b1')
-
-  await recordOf(m, noted, files[4])
-
-  const notedRegistry = noted.registry().campaigns[campaignId]
-
-  result.noted = { parent: notedParent, fork: notedRegistry.branches.b2 && notedRegistry.branches.b2.fork, child: noted.events(campaignId, 'b2'), t: await gameTimeOf(files[1], FALRYX_GAME) }
-
-  // A pass replaced at each of its checks. A fault runs this schedule only when it names the supersession check; the unchanged head still runs every schedule.
-  if (schedules.includes('rsuperseded')) {
-    const base = inst.start.copy()
-
-    turnOn(m, base, campaignId, FALRYX_RACE)
-    await recordOf(m, base, files[0])
-
-    const baseEvents = base.events(campaignId, 'b1')
-    let guards = 0
-
-    await recordOf(m, base.copy(), files[1], { isCurrent: () => { guards++; return true } })
-
-    let unchangedGuards = 0
-    const unchanged = base.copy()
-
-    await recordOf(m, unchanged, files[1])
-    await recordOf(m, unchanged, files[1], { isCurrent: () => { unchangedGuards++; return true } })
-
-    const complete = base.copy()
-
-    await recordOf(m, complete, files[1])
-
-    const whole = complete.events(campaignId, 'b1')
-
-    result.superseded = { guards, unchangedGuards, baseEvents, whole, runs: [] }
-
-    for (let allowed = 0; allowed <= guards; allowed++) {
-      const run = base.copy()
-      let calls = 0
-
-      run.setCut(() => calls > allowed)
-
-      const outcome = await recordOf(m, run, files[1], { isCurrent: () => ++calls <= allowed })
-
-      result.superseded.runs.push({ allowed, superseded: outcome.superseded, afterCut: run.writes.filter(({ cut }) => cut).length, events: run.events(campaignId, 'b1') })
-    }
-  }
-
-  // The cap in force: 25,000 events held of the two saves of the first branch (20,051 and 17,571 events).
-  const capped = inst.start.copy()
-
-  capped.put('settings', { historyEventCap: 25000 })
-  turnOn(m, capped, campaignId, FALRYX_RACE)
-  await recordOf(m, capped, files[0])
-  await recordOf(m, capped, files[1])
-
-  const cappedWrites = capped.eventWrites()
-  const cappedEvents = capped.events(campaignId, 'b1')
-
-  await recordOf(m, capped, files[1])
-  await recordOf(m, capped, files[0])
-  result.capped = { events: cappedEvents, writes: capped.eventWrites() - cappedWrites, after: capped.events(campaignId, 'b1') }
-
-  return result
-}
-
-check('rnochoice', 'with no archive on a pass issues no event statement and writes no event file, and the empire file is the one a pass with the archive on writes', 'recorder', ({ r }) => {
-  assert.deepEqual(eventStatements(r.off.log), { window: 0, ledger: 0, race: 0 })
-  assert.equal(r.off.log.filter((sql) => /FCT_GameLog/.test(sql) && /RaceID = \d+$/.test(sql)).length, 0)
-  assert.deepEqual(r.off.names, [])
-  assert.equal(r.off.writes, 0)
-  assert.equal(JSON.stringify(r.second.branch), JSON.stringify(r.off.branch), 'the archive changes nothing in the empire file')
-})
-
-check('rstatements', 'turning a race on adds three statements to a pass (the log\'s first increment, the ledger from there, the race\'s rows), all SELECTs in the one read transaction, and the pass reports no failure', 'recorder', ({ r }) => {
-  assert.deepEqual(eventStatements(r.second.log), { window: 1, ledger: 1, race: 1 })
-  assert.equal(r.second.log.length - r.off.log.length, 3)
-  assert.ok(r.second.log.every((sql) => /^select /i.test(sql)), 'only SELECTs are issued to the save')
-  assert.equal(r.second.run.failed.length, 0, String(r.second.run.failed.map((entry) => entry.stage + ': ' + entry.error)))
-  assert.equal(r.second.run.superseded, false)
-  assert.equal(r.first.run.failed.length, 0)
-})
-
-check('rfile', 'the archive is the file of the branch the save settled to, holds the player race and no other, and has what SQL says the save holds: each increment with its identity and counted groups', 'recorder', ({ r, m }) => {
-  const record = r.second.events.races[FALRYX_RACE]
-
-  assert.equal(r.first.events.version, 1)
-  assert.deepEqual(Object.keys(r.second.events.races), [String(FALRYX_RACE)])
-  assert.equal(m.a.eventFileProblem(r.second.events), null)
-  assert.equal(m.a.recordEvents(r.first.events.races[FALRYX_RACE]), [...r.sql[0].byInc.values()].reduce((sum, groups) => sum + [...groups.values()].reduce((a, b) => a + b, 0), 0))
-  assertSameAsSave(r.first.events.races[FALRYX_RACE], r.sql[0], 0, 'save 0')
-  assert.equal(record.conflicts.length, 0)
-  assert.deepEqual(record.tip, r.sql[1].ledger.get(r.sql[1].last), 'the tip is the identity of the newest increment of the save')
-  assert.equal(record.spans.length, 2, 'the two saves share no increment: two spans')
-  assert.deepEqual(m.a.gapsOf(record).length, 2)
-  assertSameAsSave({ increments: record.increments.filter((increment) => increment[0] >= r.sql[1].first) }, r.sql[1], r.sql[1].first, 'save 1')
-  assert.deepEqual(r.first.order.slice(-2).map((name) => name.replace('file:campaign-' + r.campaignId + '-b1', '')), ['', '-events'], 'the empire file is written first and the archive after it')
-})
-
-check('rrepeat', 'reading the same save again, in the same run or after a restart, writes nothing and adds no revision', 'recorder', ({ r }) => {
-  assert.equal(r.second.writes, 2)
-  assert.equal(r.repeat.writes, 2)
-  assert.equal(r.restart.writes, 2)
-  assert.deepEqual(r.repeat.events, r.second.events)
-  assert.deepEqual(r.restart.events, r.second.events)
-})
-
-check('rfork', 'a fork is given its archive in the pass that creates it: the parent\'s increments that ended by the fork and none later, written before the fork\'s own capture, the parent\'s file untouched, the branch marked, and the two never merged', 'recorder', ({ r, m }) => {
-  const branch = r.fork.registry.branches.b2
-  const child = r.fork.b2.races[FALRYX_RACE]
-  const expected = expectedSeed(r.beforeFork.events.races[FALRYX_RACE], branch.fork.t)
-  const [seed, merged] = r.fork.writes
-
-  assert.equal(branch.parent, 'b1')
-  assert.equal(branch.eventsSeeded, true)
-  assert.equal(branch.coloniesSeeded, true)
-  assert.equal(r.fork.writes.length, 2, 'the seed, then the first capture')
-  assert.deepEqual(r.fork.b1, r.beforeFork.events, 'the parent is as the pass before the fork left it')
-  assert.ok(expected && expected.increments.length > 0)
-  assert.ok(r.beforeFork.events.races[FALRYX_RACE].increments.some((increment) => increment[1] + increment[2] > branch.fork.t), 'the parent holds increments after the fork')
-  assert.deepEqual(seed.races[FALRYX_RACE].increments, expected.increments)
-  assert.deepEqual(seed.races[FALRYX_RACE].spans, expected.spans)
-  assert.ok(!seed.races[FALRYX_RACE].tip || seed.races[FALRYX_RACE].tip[1] + seed.races[FALRYX_RACE].tip[2] <= branch.fork.t, 'a tip past the fork is the parent\'s')
-  assert.equal(Math.max(...seed.races[FALRYX_RACE].increments.map((increment) => increment[1] + increment[2])) <= branch.fork.t, true)
-  assert.ok(seed.races[FALRYX_RACE].increments.some((increment) => increment[0] < r.sql[4].first), 'the seed holds what the fork\'s own save no longer has')
-  assert.deepEqual(merged, r.fork.b2, 'the last write is the file')
-  assertCapped(m, child, r.sql[4], 50000, 'the fork')
-  assert.equal(child.conflicts.length, 0)
-  assert.ok(r.fork.names.includes('file:campaign-' + r.campaignId + '-b2-events'))
-})
-
-check('rcontinue', 'the fork goes on in its own archive: the next save adds to it and matches SQL under the cap, and the first branch keeps what it recorded', 'recorder', ({ r, m }) => {
-  const child = r.continued.b2.races[FALRYX_RACE]
-
-  assert.deepEqual(r.continued.b1, r.beforeFork.events)
-  assertCapped(m, child, r.sql[5], 50000, 'save 5')
-  assert.equal(child.conflicts.length, 0)
-  assert.ok(child.cut >= r.fork.b2.races[FALRYX_RACE].cut, 'the cut only moves forward')
-  assert.equal(r.reconnect.writes, 0, 'a disconnect and reconnect on an unchanged save writes nothing')
-  assert.deepEqual(r.reconnect.b2, r.continued.b2)
-})
-
-check('rchain', 'each later fork is given its parent\'s archive up to its own fork (nothing where the parent\'s cap had cut past it), its own capture follows, a branch\'s archive never reaches another\'s, and no archive holds a ledger conflict for the rollback', 'recorder', ({ r, m }) => {
-  const { registry } = r.chain
-  const record = (name) => (r.chain[name] && r.chain[name].races[FALRYX_RACE]) || { increments: [], conflicts: [] }
-
-  assert.equal(registry.branches.b3.parent, 'b2')
-  assert.equal(registry.branches.b4.parent, 'b3')
-  assert.deepEqual(r.chain.b1, r.beforeFork.events)
-  assert.deepEqual(r.chain.b2, r.continued.b2)
-  ;['b3', 'b4'].forEach((branch) => assert.equal(registry.branches[branch].eventsSeeded, true))
-  assertCapped(m, record('b3'), r.sql[6], 50000, 'save 6')
-  assertCapped(m, record('b4'), r.sql[7], 50000, 'save 7')
-
-  const seed3 = expectedSeed(r.continued.b2.races[FALRYX_RACE], registry.branches.b3.fork.t)
-  const seed4 = expectedSeed(r.chain.writes.b3[r.chain.writes.b3.length - 1].races[FALRYX_RACE], registry.branches.b4.fork.t)
-
-  assert.equal(r.chain.writes.b3.length, seed3 ? 2 : 1, 'a seed is written only when the parent holds something up to the fork')
-  assert.equal(r.chain.writes.b4.length, seed4 ? 2 : 1)
-
-  if (seed3) {
-    assert.deepEqual(r.chain.writes.b3[0].races[FALRYX_RACE].increments, seed3.increments)
-  }
-
-  if (seed4) {
-    assert.deepEqual(r.chain.writes.b4[0].races[FALRYX_RACE].increments, seed4.increments)
-  }
-
-  ;['b1', 'b2', 'b3', 'b4'].forEach((branch) => assert.equal(record(branch).conflicts.length, 0, branch))
-})
-
-check('rfrozen', 'a fork\'s archive is frozen when the fork is made: clearing the parent\'s archive afterwards and reading the fork again changes nothing in it', 'recorder', ({ r }) => {
-  assert.ok(r.frozen.before.races[FALRYX_RACE].increments.length > 0)
-  assert.deepEqual(r.frozen.after, r.frozen.before)
-})
-
-check('rlate', 'a fork made while no archive was on gets no archive file but is marked, and an archive turned on afterwards holds only the fork\'s own rows, never the parent\'s past', 'recorder', ({ r, m }) => {
-  assert.equal(r.late.registry.branches.b2.parent, 'b1')
-  assert.equal(r.late.registry.branches.b2.eventsSeeded, true)
-  assert.deepEqual(r.late.names, [])
-
-  const own = r.late.afterOn.b2.races[FALRYX_RACE]
-
-  assert.ok(r.late.afterOn.b1.races[FALRYX_RACE].increments.length > 0, 'the parent holds its own rows by now')
-  assert.equal(Math.min(...own.increments.map((increment) => increment[0])) >= r.sql[4].first, true, 'nothing of the parent\'s past in the fork')
-  assertCapped(m, own, r.sql[4], 50000, 'the fork alone')
-  assert.equal(m.a.eventFileProblem(r.late.afterOn.b2), null)
-})
-
-check('rnpr', 'a race that is not a player\'s is not read even when it is chosen, and no file is written for it', 'recorder', ({ r }) => {
-  assert.deepEqual(r.npr.statements, { window: 0, ledger: 0, race: 0 })
-  assert.deepEqual(r.npr.names, [])
-})
-
-check('rfailed', 'a failed read of the log is not a failed pass: the empire\'s file is as without an archive, the race\'s record holds one failure entry (the save\'s game time and the reason) and no row, span or tip, a good read of the same save fills the rows in and keeps the entry, and a later failed read adds an entry and erases nothing', 'recorder', ({ r, m }) => {
-  const rows = (record) => ({ increments: record.increments, spans: record.spans, tip: record.tip, revision: record.revision, captures: record.captures, conflicts: record.conflicts, cut: record.cut })
-  const failed = r.failed.events.races[FALRYX_RACE]
-  const filled = r.filled.races[FALRYX_RACE]
-  const erased = r.erased.races[FALRYX_RACE]
-
-  assert.equal(r.failed.run.failed.length, 0)
-  assert.ok(r.failed.run.recorded > 0)
-  assert.equal(JSON.stringify(r.failed.branch), JSON.stringify(r.off.branch))
-  assert.deepEqual(r.failed.names, ['file:campaign-' + r.campaignId + '-b1-events'])
-  assert.deepEqual(Object.keys(r.failed.events.races), [String(FALRYX_RACE)])
-  assert.equal(failed.failures.length, 1, 'one failure entry')
-  assert.equal(failed.failures[0].t, r.failed.t)
-  assert.equal(failed.failures[0].reason, 'the log could not be read')
-  assert.ok(Number.isFinite(failed.failures[0].at))
-  assert.deepEqual(failed.increments, [])
-  assert.deepEqual(failed.spans, [])
-  assert.equal(failed.tip, undefined)
-  assert.equal(failed.revision, 0)
-  assert.deepEqual(failed.captures, [])
-  assert.equal(m.a.eventFileProblem(r.failed.events), null)
-  assertSameAsSave(filled, r.sql[1], 0, 'a good read after a failed one')
-  assert.deepEqual(filled.failures, failed.failures, 'the failure stays in the record')
-  assert.equal(erased.failures.length, 2)
-  assert.deepEqual(erased.failures[0], failed.failures[0])
-  assert.equal(erased.failures[1].t, r.failed.t)
-  assert.deepEqual(rows(erased), rows(filled), 'a failed read changes no row, span or tip')
-  assert.equal(m.a.eventFileProblem(r.erased), null)
-})
-
-check('runreadable', 'an archive file this version cannot read is left as it is and reported as a failed pass of stage events: nothing is merged into it, a fork is not seeded from it or marked seeded, and the empire\'s snapshot is recorded', 'recorder', ({ r }) => {
-  const stages = (run) => run.failed.map((entry) => entry.stage)
-  const unreadable = { version: 2, races: { [FALRYX_RACE]: { later: true } } }
-
-  assert.deepEqual(stages(r.damaged.run), ['events'])
-  assert.equal(r.damaged.run.failed[0].GameID, FALRYX_GAME)
-  assert.ok(r.damaged.run.failed[0].error instanceof Error)
-  assert.ok(r.damaged.run.recorded > 0, 'the empire snapshot is recorded')
-  assert.deepEqual(r.damaged.file, unreadable, 'the file is as it was')
-  assert.equal(r.damaged.writes, 0)
-  assert.equal(r.damaged.branch.races[FALRYX_RACE].snapshots.length, r.second.branch.races[FALRYX_RACE].snapshots.length + 1, 'the empire file holds the new snapshot')
-
-  assert.ok(stages(r.orphan.run).length > 0 && stages(r.orphan.run).every((stage) => stage === 'events'), 'reported as events, at the seed and again at the capture')
-  assert.ok(r.orphan.run.recorded > 0)
-  assert.deepEqual(r.orphan.parent, unreadable)
-  assert.equal(r.orphan.child, undefined, 'no seed and no capture is written for the fork')
-  assert.equal(r.orphan.eventWrites, 0)
-  assert.equal(r.orphan.registry.branches.b2.parent, 'b1')
-  assert.notEqual(r.orphan.registry.branches.b2.eventsSeeded, true, 'the fork is not marked seeded, so it is seeded when the parent is readable')
-  assert.equal(r.orphan.registry.branches.b2.coloniesSeeded, true, 'the colonies are seeded all the same')
-  assert.ok(r.orphan.branch.races[FALRYX_RACE].snapshots.length > 0, 'the fork\'s empire file is written')
-})
-
-check('rthrow', 'an event store that throws when read is an archive this version cannot read: the empire\'s snapshot is still recorded, the pass reports stage events and never write, nothing is written or marked seeded over it, a fork is seeded when the store can be read again, and a pass with the archive off reads no event store unless it forks', 'recorder', ({ r }) => {
-  const stages = (run) => run.failed.map((entry) => entry.stage)
-  const allEvents = (run) => run.failed.length > 0 && run.failed.every((entry) => entry.stage === 'events')
-
-  assert.deepEqual(stages(r.throwOwn.run), ['events'], 'its own store throws')
-  assert.ok(r.throwOwn.run.failed[0].error instanceof Error)
-  assert.ok(r.throwOwn.run.recorded > 0, 'the snapshot of the empire is recorded')
-  assert.equal(r.throwOwn.snapshots, r.throwOwn.expected, 'and is in the empire file')
-  assert.equal(r.throwOwn.writes, 0)
-  assert.deepEqual(r.throwOwn.events, r.throwOwn.eventsBefore, 'the archive is as it was')
-
-  assert.ok(allEvents(r.throwTwice.run), 'a store that reads once and then throws is the same refusal, never a failed write: ' + stages(r.throwTwice.run))
-  assert.ok(r.throwTwice.run.recorded > 0, 'the snapshot of the empire is recorded')
-  assert.equal(r.throwTwice.writes, 0)
-  assert.deepEqual(r.throwTwice.events, r.throwTwice.eventsBefore)
-
-  assert.ok(allEvents(r.throwFork.run), 'the parent\'s store throws at a fork: ' + stages(r.throwFork.run))
-  assert.ok(r.throwFork.run.recorded > 0, 'the fork\'s empire snapshot is recorded')
-  assert.ok(snapshotCount(r.throwFork.branch) > 0, 'in the fork\'s own file')
-  assert.equal(r.throwFork.writes, 0, 'no events file is written, seed or capture')
-  assert.equal(r.throwFork.child, undefined)
-  assert.equal(r.throwFork.registry.branches.b2.coloniesSeeded, true, 'the colonies are seeded all the same')
-  assert.notEqual(r.throwFork.registry.branches.b2.eventsSeeded, true, 'the fork is not marked as seeded')
-
-  assert.ok(r.throwFork.mended, 'the next pass with the store readable seeds the fork at its first capture')
-  assert.deepEqual(r.throwFork.mended.races[FALRYX_RACE].increments, r.fork.b2.races[FALRYX_RACE].increments, 'with what the fork would have had at once')
-  assert.deepEqual(r.throwFork.mended.races[FALRYX_RACE].spans, r.fork.b2.races[FALRYX_RACE].spans)
-
-  assert.ok(allEvents(r.throwOff.run), 'the fork seed is read with the archive off, so the failure is reported there: ' + stages(r.throwOff.run))
-  assert.ok(r.throwOff.run.recorded > 0)
-  assert.ok(snapshotCount(r.throwOff.branch) > 0)
-  assert.notEqual(r.throwOff.registry.branches.b2.eventsSeeded, true)
-  assert.equal(r.throwOff.registry.branches.b2.coloniesSeeded, true)
-  assert.deepEqual(r.throwOff.names, [])
-
-  assert.deepEqual(r.throwQuiet.run.failed, [], 'a pass with the archive off and no fork never reads an event store')
-  assert.ok(r.throwQuiet.run.recorded > 0)
-})
-
-check('rnoted', 'a branch forked after a failed read of its parent is given the noted failure: the parent\'s record held no rows, only the failure, and the fork keeps what the parent knew up to the fork', 'recorder', ({ r }) => {
-  const parent = r.noted.parent.races[FALRYX_RACE]
-
-  assert.deepEqual(parent.increments, [], 'the parent holds no rows')
-  assert.ok(parent.failures.length >= 1)
-  assert.ok(r.noted.fork && Number.isFinite(r.noted.fork.t))
-
-  const child = r.noted.child.races[FALRYX_RACE]
-  const kept = parent.failures.filter((failure) => failure.t <= r.noted.fork.t)
-
-  assert.ok(kept.length >= 1 && kept.some((failure) => failure.t === r.noted.t), 'the failure at the first save is one the fork inherits')
-  assert.deepEqual(child.failures.filter((failure) => failure.t <= r.noted.fork.t), kept, 'the fork holds the parent\'s failures up to the fork')
-})
-
-check('rsuperseded', 'a pass replaced at any of its checks writes nothing after that and never half writes the archive: the file is whole as it was or whole as the full pass leaves it, and the archive is written behind one more check than a pass that writes none', 'recorder', ({ r, m }) => {
-  const { guards, unchangedGuards, runs, whole, baseEvents } = r.superseded
-
-  assert.ok(guards >= 3, guards + ' checks')
-  assert.equal(guards, unchangedGuards + 1, 'the event write is asked about once more than a pass that writes none')
-  assert.notDeepEqual(whole, baseEvents)
-
-  runs.forEach((run) => {
-    assert.equal(run.afterCut, 0, 'a write after the pass was replaced (allowed ' + run.allowed + ')')
-    assert.ok(JSON.stringify(run.events) === JSON.stringify(baseEvents) || JSON.stringify(run.events) === JSON.stringify(whole), 'a whole file (allowed ' + run.allowed + ')')
-    assert.equal(m.a.eventFileProblem(run.events), null)
-  })
-
-  assert.equal(runs[runs.length - 1].superseded, false)
-  assert.ok(runs.slice(0, -1).every((run) => run.superseded === true))
-  assert.deepEqual(runs[runs.length - 1].events, whole)
-})
-
-check('rcap', 'the cap in the settings cuts the archive of the pass, whole increments from the oldest with the cut recorded, and a save that still holds what was cut, in any order, writes nothing', 'recorder', ({ r, m }) => {
-  const record = r.capped.events.races[FALRYX_RACE]
-
-  assert.ok(m.a.recordEvents(record) <= 25000, m.a.recordEvents(record) + ' events')
-  assert.ok(m.a.recordEvents(record) > 17000, 'the newest save\'s rows are kept')
-  assert.ok(record.cut > 0)
-  assert.equal(Math.max(...record.increments.map((increment) => increment[0])), Math.max(...r.sql[1].byInc.keys()))
-  assert.equal(m.a.eventFileProblem(r.capped.events), null)
-  assert.equal(r.capped.writes, 0)
-  assert.deepEqual(r.capped.after, r.capped.events)
-})
-
 // ---------- the clear ----------
 
 check('rclear', 'clearing a race\'s history on a branch clears its event archive there, and no other race\'s or branch\'s', 'unit', async ({ m }) => {
@@ -2283,35 +1185,452 @@ check('rclear', 'clearing a race\'s history on a branch clears its event archive
   assert.equal(m.a.eventFileProblem(m.history.eventStore(campaignId, 'b1').store), null)
 })
 
-check('recorder-schedules', 'the full head keeps both replay schedules and every named recorder check keeps the schedules its assertions read', 'unit', ({ scheduleKeys }) => {
-  assert.deepEqual(recorderSchedules(null, scheduleKeys).sort(), ['rsuperseded', 'rthrow'])
-  assert.deepEqual(recorderSchedules([], scheduleKeys), [])
+// ---------- the played campaign ----------
 
-  for (const { key } of checks.filter((entry) => entry.needs === 'recorder')) {
-    const expected = key === 'rthrow' || key === 'rsuperseded' ? [key] : []
+// The recorder over A, B and the two branches from B, C1 and C2 (scripts/lib/played-chain.js): the archive a branch keeps against what SQL says of each save, the archive a fork is given when C2, which parts from C1 at B, is opened after it (a rollback to B and a play on), and what a pin says on each of the four saves. The figures are worked here from the saves' own tables, never from the utilities.
+const LETTERS = ['A', 'B', 'C1', 'C2']
+const CHAIN_THERE = LETTERS.every((letter) => fs.existsSync(fileOf(letter)))
+const PLAYED_NEEDS = ['chain', 'late', 'noted', 'statements', 'played']
 
-    assert.deepEqual(recorderSchedules([key], scheduleKeys), expected, key)
-    assert.deepEqual(recorderSchedules([key], scheduleKeys.slice().reverse()), expected, `${key}, declarations reversed`)
+// The columns an event is told by, in the order a group keeps them.
+const COLUMNS = ['Time', 'EventType', 'MessageText', 'SystemID', 'PopulationID', 'Xcor', 'Ycor', 'IDType', 'SMOnly']
+
+const textOfRow = (row) => JSON.stringify(COLUMNS.map((column) => (row[column] === null || row[column] === undefined ? null : column === 'MessageText' ? String(row[column]) : Number(row[column]))))
+
+// What SQL says of one save of the chain: the window of its log (the oldest increment any race has a row in, and the ledger from there), the race's rows as counted groups by increment, the span the window observes and its newest increment.
+const readingOf = (letter) => {
+  const file = fileOf(letter)
+  const [{ first }] = rowsOf(file, `select min(IncrementID) as first from FCT_GameLog where GameID = ${GAME}`)
+  const ledger = new Map(ledgerOf(letter).filter((row) => row.IncrementID >= first).map((row) => [row.IncrementID, [row.IncrementID, row.GameTime, row.Length]]))
+  const byInc = new Map()
+
+  rowsOf(file, `select IncrementID, ${COLUMNS.join(', ')}, count(*) as n from FCT_GameLog where GameID = ${GAME} and RaceID = ${RACE} group by IncrementID, ${COLUMNS.join(', ')}`).filter((row) => ledger.has(row.IncrementID)).forEach((row) => {
+    const groups = byInc.get(row.IncrementID) || new Map()
+
+    groups.set(textOfRow(row), row.n)
+    byInc.set(row.IncrementID, groups)
+  })
+
+  const ids = [...ledger.keys()]
+  const newest = ledger.get(ids[ids.length - 1])
+
+  return { letter, first, ledger, byInc, span: [ledger.get(ids[0])[1], newest[1] + newest[2]], newest }
+}
+
+const sameLedger = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
+
+// The archive the saves leave when read in this order after `base`: each increment with its ledger identity and, of each group, the larger count (the open increments of a read take the larger count, and a closed one is the same in two saves of one timeline). The rows of an increment the archive already holds under another identity are left out.
+const modelOf = (readings, base = new Map()) => {
+  const model = new Map([...base].map(([id, own]) => [id, { identity: own.identity, groups: new Map(own.groups) }]))
+
+  readings.forEach((reading) => {
+    reading.byInc.forEach((groups, id) => {
+      const own = model.get(id) || { identity: reading.ledger.get(id), groups: new Map() }
+
+      if (!sameLedger(own.identity, reading.ledger.get(id))) {
+        return
+      }
+
+      groups.forEach((count, key) => own.groups.set(key, Math.max(own.groups.get(key) || 0, count)))
+      model.set(id, own)
+    })
+  })
+
+  return model
+}
+
+const upTo = (model, t) => new Map([...model].filter(([, { identity }]) => identity[1] + identity[2] <= t))
+
+const totalOf = (model) => [...model.values()].reduce((sum, { groups }) => sum + [...groups.values()].reduce((a, b) => a + b, 0), 0)
+
+// Spans merged where they touch or overlap.
+const unionOf = (spans) => spans.map((span) => [...span]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).reduce((merged, span) => {
+  const last = merged[merged.length - 1]
+
+  if (last && span[0] <= last[1]) {
+    last[1] = Math.max(last[1], span[1])
+  } else {
+    merged.push(span)
   }
 
-  assert.deepEqual(recorderSchedules(['rthrow', 'rsuperseded'], scheduleKeys).sort(), ['rsuperseded', 'rthrow'])
+  return merged
+}, [])
+
+// What a fork keeps of spans: those that start before the cut, ending no later than it.
+const clippedTo = (spans, t) => spans.filter(([start]) => start < t).map(([start, end]) => [start, Math.min(end, t)])
+
+const shapeOf = (record) => record.increments.map(([id, time, length, groups]) => [id, time, length, groups.map((group) => [JSON.stringify(group.slice(0, COLUMNS.length)), group[COLUMNS.length]]).sort()])
+
+const shapeOfModel = (model) => [...model].sort((a, b) => a[0] - b[0]).map(([, { identity, groups }]) => [...identity, [...groups].sort()])
+
+const memo = (work) => {
+  let held = null
+
+  return () => {
+    held = held || work()
+
+    return held
+  }
+}
+
+const gameTimeOf = (letter) => rowsOf(fileOf(letter), `select GameTime from FCT_Game where GameID = ${GAME}`)[0].GameTime
+
+// One pass of the recorder over a save, giving what the save settled to.
+const settled = async (m, target, letter, options = {}) => {
+  let last = null
+
+  await recordSave(m.history, target, letter, { onResolved: (id, resolution) => { last = id === GAME ? resolution : last }, ...options })
+
+  return last
+}
+
+const chosen = (m, target, campaignId) => m.a.saveArchiveChoice(target.io.settings, campaignId, RACE, true)
+
+const eventNames = (target) => [...target.files.keys()].filter((name) => name.endsWith('-events'))
+
+// The capture the utilities take of a save of the chain.
+const readOf = async (m, letter) => {
+  const database = databaseOf(letter)
+  const window = await m.a.readLogWindow(database, GAME)
+  const read = await m.a.readRaceEvents(database, { GameID: GAME, RaceID: RACE, t: gameTimeOf(letter), window })
+
+  assert.equal(read.failed, undefined)
+
+  return read
+}
+
+// The campaign begun by A with no archive chosen.
+const begin = async (m) => {
+  const inst = installation()
+
+  await settled(m, inst, 'A')
+
+  return { inst, campaignId: inst.campaignId(GAME) }
+}
+
+// A is read with the archive on, then B and C1 (the first branch), C1 once more, then C2, which parts from C1 at B: a fork. The archive of each pass is kept, and the saves are opened again as a rollback and a play on would open them.
+const chain = async (m, begun) => {
+  const { campaignId } = begun
+  const inst = begun.inst.copy()
+  const file = (branchId) => `file:${m.a.eventFileName(campaignId, branchId)}`
+  const result = { campaignId, relations: {} }
+
+  chosen(m, inst, campaignId)
+
+  for (const letter of ['A', 'B', 'C1']) {
+    result.relations[letter] = (await settled(m, inst, letter)).relation
+    result[`after${letter}`] = inst.events(campaignId, 'b1')
+  }
+
+  const again = inst.eventWrites()
+
+  await settled(m, inst, 'C1')
+  result.repeat = { writes: inst.eventWrites() - again, b1: inst.events(campaignId, 'b1') }
+
+  const forkAt = inst.writes.length
+  const fork = await settled(m, inst, 'C2')
+
+  result.relations.C2 = fork.relation
+  result.fork = { branchId: fork.branchId, registry: inst.registry().campaigns[campaignId], writes: inst.eventValues(file(fork.branchId), forkAt), parentWrites: inst.eventValues(file('b1'), forkAt).length, b1: inst.events(campaignId, 'b1'), b2: inst.events(campaignId, 'b2'), names: eventNames(inst) }
+
+  const frozen = inst.copy()
+
+  frozen.put(file('b1'), { version: 1, races: {} })
+  await settled(m, frozen, 'C2')
+  result.frozen = { before: inst.events(campaignId, 'b2'), after: frozen.events(campaignId, 'b2') }
+
+  const writes = inst.eventWrites()
+  const reopened = await settled(m, inst, 'C1')
+  const second = await settled(m, inst, 'C2')
+
+  result.reopen = { branchId: reopened.branchId, second: second.branchId, writes: inst.eventWrites() - writes, b1: inst.events(campaignId, 'b1'), b2: inst.events(campaignId, 'b2') }
+
+  return result
+}
+
+// The fork made while no archive was chosen, and the archive chosen afterwards.
+const late = async (m, begun) => {
+  const { campaignId } = begun
+  const inst = begun.inst.copy()
+  const result = { campaignId }
+
+  await settled(m, inst, 'C1')
+  await settled(m, inst, 'C2')
+  result.off = { registry: inst.registry().campaigns[campaignId], names: eventNames(inst) }
+  chosen(m, inst, campaignId)
+  await settled(m, inst, 'C1')
+  await settled(m, inst, 'C2')
+  result.on = { registry: inst.registry().campaigns[campaignId], b1: inst.events(campaignId, 'b1'), b2: inst.events(campaignId, 'b2') }
+
+  return result
+}
+
+// The log of A and of the first branch cannot be read, and C2 can: the archive holds the failures and no row, and C2 parts from the first branch.
+const noted = async (m, begun) => {
+  const { campaignId } = begun
+  const inst = begun.inst.copy()
+  const fails = (sql) => /min\(FCT_GameLog\.IncrementID\)/.test(sql)
+
+  chosen(m, inst, campaignId)
+  await settled(m, inst, 'A', { fails })
+  await settled(m, inst, 'C1', { fails })
+
+  const parent = inst.events(campaignId, 'b1')
+  const fork = await settled(m, inst, 'C2')
+
+  return { campaignId, parent, fork: { branchId: fork.branchId, registry: inst.registry().campaigns[campaignId], b1: inst.events(campaignId, 'b1'), b2: inst.events(campaignId, 'b2') } }
+}
+
+// B opened with no archive chosen and with it chosen: the statements each pass issues.
+const statements = async (m, begun) => {
+  const { campaignId } = begun
+  const off = begun.inst.copy()
+  const on = begun.inst.copy()
+  const offLog = []
+  const onLog = []
+
+  chosen(m, on, campaignId)
+  await settled(m, off, 'B', { log: offLog })
+  await settled(m, on, 'B', { log: onLog })
+
+  return { campaignId, off: { log: offLog, names: eventNames(off) }, on: { log: onLog, names: eventNames(on) } }
+}
+
+// The record of the race in an archive file, once the file holds one.
+const raceOf = (file, what) => {
+  assert.ok(file && file.races && file.races[RACE], `${what} holds a record of the race`)
+
+  return file.races[RACE]
+}
+
+check('chainfile', 'the archive of the branch the saves settle to holds the player race and no other, and after A, B and the first branch holds what SQL says of the saves read so far: each increment with its ledger identity and counted groups, the span observed and the newest increment, and no conflict', 'chain', ({ m, k }) => {
+  const stages = [['A', k.afterA], ['B', k.afterB], ['C1', k.afterC1]]
+
+  assert.deepEqual(k.relations, { A: 'same', B: 'continues', C1: 'continues', C2: 'fork' })
+
+  stages.forEach(([letter, file], index) => {
+    const readings = LETTERS.slice(0, index + 1).map(readingOf)
+    const model = modelOf(readings)
+    const record = raceOf(file, `the archive after ${letter}`)
+
+    assert.equal(file.version, 1)
+    assert.deepEqual(Object.keys(file.races), [String(RACE)], `after ${letter}: the player race only`)
+    assert.equal(m.a.eventFileProblem(file), null)
+    assert.deepEqual(shapeOf(record), shapeOfModel(model), `after ${letter}`)
+    assert.equal(m.a.recordEvents(record), totalOf(model))
+    assert.deepEqual(record.spans, unionOf(readings.map((reading) => reading.span)), `after ${letter}: the spans`)
+    assert.deepEqual(record.tip, readings[index].newest, `after ${letter}: the newest increment observed`)
+    assert.deepEqual(record.conflicts, [])
+    assert.equal(record.cut, undefined, 'nothing was cut')
+    assert.equal(totalOf(modelOf([readingOf(letter)])), rowsOf(fileOf(letter), `select count(*) as n from FCT_GameLog where GameID = ${GAME} and RaceID = ${RACE}`)[0].n, `${letter}: the rows SQL counts`)
+  })
+
+  assert.ok(k.afterA.races[RACE].increments.length < k.afterB.races[RACE].increments.length && k.afterB.races[RACE].increments.length < k.afterC1.races[RACE].increments.length, 'each save adds increments')
+})
+
+check('chainrepeat', 'reading the same save again writes nothing, and the saves opened again after the fork (the first branch, then the second) settle to their own branches and write nothing and add no conflict', 'chain', ({ k }) => {
+  assert.equal(k.repeat.writes, 0)
+  assert.deepEqual(k.repeat.b1, k.afterC1)
+  assert.equal(k.reopen.branchId, 'b1')
+  assert.equal(k.reopen.second, 'b2')
+  assert.equal(k.reopen.writes, 0)
+  assert.deepEqual(k.reopen.b1, k.fork.b1)
+  assert.deepEqual(k.reopen.b2, k.fork.b2)
+  assert.deepEqual(raceOf(k.reopen.b1, 'the first branch\'s archive').conflicts, [])
+  assert.deepEqual(raceOf(k.reopen.b2, 'the fork\'s archive').conflicts, [])
+})
+
+check('chainfork', 'a fork is given its archive in the pass that creates it: the first branch\'s increments that had ended by the cut (B\'s among them, the later ones and the tip not), written before the fork\'s own capture, the first branch\'s file untouched, the branch marked, and the two never merged', 'chain', ({ m, k }) => {
+  const parting = partingOf(ledgerOf('C1'), ledgerOf('C2'))
+  const branch = k.fork.registry.branches.b2
+  const readings = ['A', 'B', 'C1'].map(readingOf)
+  const expected = upTo(modelOf(readings), parting.t)
+  const spans = clippedTo(unionOf(readings.map((reading) => reading.span)), parting.t)
+  const own = readingOf('C2')
+
+  assert.equal(k.fork.branchId, 'b2')
+  assert.equal(branch.parent, 'b1')
+  assert.equal(branch.fork.t, parting.t)
+  assert.equal(branch.eventsSeeded, true)
+  assert.equal(k.fork.writes.length, 2, 'the seed, then the first capture')
+  assert.equal(k.fork.parentWrites, 0, 'the first branch\'s file is not written by the pass that makes the fork')
+  assert.deepEqual(k.fork.b1, k.afterC1, 'the first branch is as the pass before the fork left it')
+  assert.ok(k.afterC1.races[RACE].increments.some((increment) => m.a.endOf(increment) > parting.t), 'the first branch holds increments after the cut')
+  assert.ok(expected.size > 0 && [...expected.keys()].some((id) => id > readingOf('A').newest[0]), 'the seed holds what B read after A')
+  assert.ok([...expected.keys()].some((id) => id < own.first), 'the seed holds what the fork\'s own save no longer has')
+
+  const [seed, merged] = k.fork.writes
+  const seeded = raceOf(seed, 'the seed')
+  const record = raceOf(merged, 'the fork\'s own capture')
+
+  assert.deepEqual(shapeOf(seeded), shapeOfModel(expected))
+  assert.deepEqual(seeded.spans, spans)
+  assert.equal(seeded.tip, undefined, 'the tip lies after the cut: the first branch\'s')
+  assert.deepEqual(seeded.captures.map((capture) => capture.t), [gameTimeOf('A')], 'the captures of the saves before the cut: A\'s, not B\'s or the first branch\'s')
+  assert.deepEqual(shapeOf(record), shapeOfModel(modelOf([own], expected)))
+  assert.deepEqual(record.spans, unionOf([...spans, own.span]))
+  assert.deepEqual(record.tip, own.newest)
+  assert.deepEqual(record.conflicts, [], 'the rollback leaves no conflict in the fork\'s archive')
+  assert.deepEqual(merged, k.fork.b2, 'the last write is the file')
+  assert.ok(k.fork.names.includes(`file:${m.a.eventFileName(k.campaignId, 'b2')}`))
+})
+
+check('chainpair', 'the captures of the first and second branch merged into one archive give a conflict for each increment the rollback replaced (a ledger that differs, the parting increment by its length alone) and keep the first branch\'s rows, which is why a fork gets its own archive', 'played', async ({ m }) => {
+  const readings = ['C1', 'C2'].map(readingOf)
+  const first = await readOf(m, 'C1')
+  const second = await readOf(m, 'C2')
+  const taken = (capture, file = {}) => m.a.mergeEvents(file, { races: [{ RaceID: RACE, capture }] }, { cap: 1e9, now: counter() })
+  const record = raceOf(taken(second.capture, taken(first.capture).file).file, 'the one archive')
+  const other = readings[1].ledger
+  const replaced = [...readings[0].byInc.keys()].filter((id) => other.has(id) && !sameLedger(other.get(id), readings[0].ledger.get(id))).sort((a, b) => a - b)
+  const parting = partingOf(ledgerOf('C1'), ledgerOf('C2'))
+  const partingId = ledgerOf('C1')[parting.common - 1].IncrementID
+
+  assert.ok(replaced.length > 1 && replaced.includes(partingId), `${replaced.length} increments of the first branch the second names otherwise`)
+  assert.ok(readings[0].ledger.get(partingId)[1] === readings[1].ledger.get(partingId)[1] && readings[0].ledger.get(partingId)[2] !== readings[1].ledger.get(partingId)[2], 'the parting increment is the same by ID and game time, another by length')
+  assert.deepEqual(record.conflicts.map((conflict) => conflict.reason), record.conflicts.map(() => 'ledger'))
+  assert.deepEqual(record.conflicts.map((conflict) => conflict.increment[0]).sort((a, b) => a - b), replaced)
+  assert.deepEqual(shapeOf(record), shapeOfModel(modelOf([readings[1]], modelOf([readings[0]]))), 'the first branch\'s rows stay, the second\'s of the same IDs are left out')
+})
+
+check('chainfrozen', 'a fork\'s archive is frozen when the fork is made: clearing the first branch\'s archive afterwards and reading the fork again changes nothing in it', 'chain', ({ k }) => {
+  const own = readingOf('C2')
+
+  assert.ok(raceOf(k.frozen.before, 'the fork\'s archive').increments.some((increment) => increment[0] < own.first), 'the fork holds the first branch\'s past')
+  assert.deepEqual(k.frozen.after, k.frozen.before)
+})
+
+check('chainlate', 'a fork made while no archive was chosen has no archive file but is marked, and an archive chosen afterwards holds only the fork\'s own rows, never the first branch\'s past', 'late', ({ m, k }) => {
+  const own = readingOf('C2')
+
+  assert.equal(k.off.registry.branches.b2.parent, 'b1')
+  assert.equal(k.off.registry.branches.b2.eventsSeeded, true)
+  assert.deepEqual(k.off.names, [])
+  assert.ok(raceOf(k.on.b1, 'the first branch\'s archive').increments.length > 0, 'the first branch holds its own rows by now')
+
+  const record = raceOf(k.on.b2, 'the fork\'s archive')
+
+  assert.deepEqual(shapeOf(record), shapeOfModel(modelOf([own])))
+  assert.deepEqual(record.spans, [own.span])
+  assert.equal(m.a.eventFileProblem(k.on.b2), null)
+})
+
+check('chainnoted', 'a fork made after a read of the first branch\'s log failed is given the failure noted by the cut and none later: the failure of A is the fork\'s past, the one of the first branch\'s own save is not, and the fork then holds its own rows', 'noted', ({ k }) => {
+  const times = { A: gameTimeOf('A'), C1: gameTimeOf('C1') }
+  const parting = partingOf(ledgerOf('C1'), ledgerOf('C2'))
+  const own = readingOf('C2')
+  const parent = raceOf(k.parent, 'the first branch\'s archive')
+
+  assert.ok(times.A <= parting.t && times.C1 > parting.t, 'A is before the cut, the first branch\'s save after it')
+  assert.deepEqual((parent.failures || []).map((failure) => failure.t), [times.A, times.C1])
+  assert.deepEqual(parent.increments, [])
+  assert.equal(k.fork.registry.branches.b2.parent, 'b1')
+  assert.equal(k.fork.registry.branches.b2.eventsSeeded, true)
+  assert.deepEqual(k.fork.b1, k.parent, 'the first branch keeps its failures')
+
+  const record = raceOf(k.fork.b2, 'the fork\'s archive')
+
+  assert.deepEqual((record.failures || []).map((failure) => failure.t), [times.A])
+  assert.deepEqual(shapeOf(record), shapeOfModel(modelOf([own])))
+})
+
+check('chainstatements', 'a pass over a real save with the archive off issues no statement of the log and writes no archive; with it chosen the pass adds the log\'s first increment, the ledger from there and the race\'s rows, all SELECTs, and the window is read once', 'statements', ({ m, k }) => {
+  const logged = (log) => log.filter((sql) => /FCT_GameLog/.test(sql))
+  const extra = k.on.log.filter((sql) => !k.off.log.includes(sql))
+
+  assert.deepEqual(logged(k.off.log), [])
+  assert.deepEqual(k.off.names, [])
+  assert.deepEqual(k.on.names, [`file:${m.a.eventFileName(k.campaignId, 'b1')}`])
+  assert.equal(logged(extra).filter((sql) => /min\(/.test(sql)).length, 1, 'the window of the log is read once')
+  assert.equal(logged(extra).filter((sql) => !/min\(/.test(sql)).length, 1)
+  assert.equal(extra.length, 3)
+  assert.ok(extra.every((sql) => /^select /i.test(sql)), 'every statement is a SELECT')
+  assert.equal(k.on.log.length - k.off.log.length, 3)
+})
+
+// A pin on the largest group of an increment of a save, as the page makes it: the group's fields, its count and the increment's ledger identity.
+const pinOnRow = (m, reading, id) => {
+  const [text, count] = [...reading.byInc.get(id)].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]
+  const fields = JSON.parse(text)
+  const row = { IncrementID: id, ...Object.fromEntries(COLUMNS.map((column, index) => [column, fields[index]])) }
+
+  return m.p.withPin(m.p.emptyPins(), 'b1', row, { increment: reading.ledger.get(id), count, names: {}, at: 1, id: `${reading.letter}-${id}` }).pins[0]
+}
+
+check('chainpin', 'what each save of the chain says of a pin made on an event of the first or the second branch: held on the timeline it was made on, another timeline\'s on the other branch from the parting increment on (that increment by its length alone), and older or newer than the log elsewhere', 'played', async ({ m }) => {
+  const readings = Object.fromEntries(LETTERS.map((letter) => [letter, readingOf(letter)]))
+  const view = {}
+
+  for (const letter of LETTERS) {
+    const database = databaseOf(letter)
+    const window = await m.a.readLogWindow(database, GAME)
+
+    assert.deepEqual([...window.ledger], [...readings[letter].ledger], `${letter}: the window SQL gives`)
+    assert.equal(window.first, readings[letter].first)
+    view[letter] = { window, counts: m.a.rowCounts((await database.query(m.a.raceLogSql(GAME, RACE)))[0]) }
+  }
+
+  const parting = partingOf(ledgerOf('C1'), ledgerOf('C2'))
+  const partingId = ledgerOf('C1')[parting.common - 1].IncrementID
+  const before = [...readings.C1.byInc].filter(([id]) => id < partingId && readings.B.byInc.has(id) && readings.C2.byInc.has(id)).sort((a, b) => b[0] - a[0])[0]
+  const pinOn = (letter, id) => pinOnRow(m, readings[letter], id)
+  const states = (pin) => Object.fromEntries(LETTERS.map((letter) => [letter, m.p.pinState(pin, view[letter].counts, view[letter].window)]))
+  const own = (letter, from) => [...readings[letter].byInc.keys()].filter((id) => id >= from).sort((a, b) => a - b)[0]
+
+  assert.ok(before && readings.C2.byInc.get(before[0]), 'an increment before the parting both branches hold')
+  assert.deepEqual(states(pinOn('C1', before[0])), { A: 'newer', B: 'held', C1: 'held', C2: 'held' }, 'before the parting the two branches are one timeline')
+  assert.ok(readings.C1.byInc.has(partingId) && readings.C2.byInc.has(partingId), 'the parting increment carries events on both branches')
+  assert.deepEqual(states(pinOn('C1', partingId)), { A: 'newer', B: 'newer', C1: 'held', C2: 'ledger' }, 'the parting increment is another increment by its length')
+  assert.deepEqual(states(pinOn('C2', partingId)), { A: 'newer', B: 'newer', C1: 'ledger', C2: 'held' })
+  assert.deepEqual(states(pinOn('C1', own('C1', partingId + 1))), { A: 'newer', B: 'newer', C1: 'held', C2: 'ledger' }, 'after the parting the same ID is another increment')
+  assert.deepEqual(states(pinOn('C2', own('C2', partingId + 1))), { A: 'newer', B: 'newer', C1: 'ledger', C2: 'held' })
+  assert.deepEqual(states(pinOn('A', own('A', 0))), { A: 'held', B: 'older', C1: 'older', C2: 'older' }, 'what A holds of the oldest log is older than the later saves keep')
+
+  const doubled = [...readings.C2.byInc].find(([, groups]) => [...groups.values()].some((count) => count > 1))
+
+  assert.ok(doubled, 'the second branch holds a group of identical rows')
+  assert.deepEqual(states(pinOn('C2', doubled[0])), { A: 'newer', B: 'newer', C1: 'ledger', C2: 'held' }, 'a group of two identical rows is held at two')
+})
+
+check('chainpinseed', 'a fork inherits the first branch\'s pins on events that had ended by the cut and none on later ones, the cut and the parent read from the registry the recorder wrote', 'chain', ({ m, k }) => {
+  const { branches } = k.fork.registry
+  const lineage = Object.fromEntries(Object.entries(branches).map(([id, branch]) => [id, { parent: branch.parent || null, t: branch.fork ? branch.fork.t : null }]))
+  const own = readingOf('C1')
+  const cut = branches.b2.fork.t
+  const ids = [...own.byInc.keys()].sort((a, b) => a - b)
+  const ended = ids.filter((id) => own.ledger.get(id)[1] + own.ledger.get(id)[2] <= cut).pop()
+  const later = ids.find((id) => own.ledger.get(id)[1] > cut)
+
+  assert.ok(ended && later && later > ended, 'the first branch holds events before the cut and after it')
+
+  const store = { ...m.p.emptyPins(), pins: [pinOnRow(m, own, ended), pinOnRow(m, own, later)] }
+  const seeded = m.p.seededPins(store, 'b2', lineage)
+
+  assert.deepEqual(seeded.pins.filter((pin) => pin.branch === 'b1').map((pin) => pin.increment[0]), [ended, later], 'the first branch keeps its own')
+  assert.deepEqual(seeded.pins.filter((pin) => pin.branch === 'b2').map((pin) => pin.increment[0]), [ended], 'the fork inherits the one that had ended by the cut')
+  assert.deepEqual(seeded.seeded, { b1: true, b2: true })
 })
 
 // ---------- the mutations ----------
+
+// Retired fault classes: a replacement does not prove the original operator.
+// [6] Old name: "a failed read is thrown"; current name: "a failed read is returned with a null failure".
+// Original class: readRaceEvents lets a database-read failure escape as a thrown exception instead of returning { failed }.
+// Reason/coverage: the original plant rejects before returning a value, so the no-subject-throw credit rule excludes it; readfail still enforces the return contract, while fault 6 now covers a returned null failure report.
+// Original class loses its last fault: yes; no remaining credited fault in this suite covers an exception escaping readRaceEvents.
 
 const MUTATIONS = [
   { name: 'a missing value is kept as 0', file: 'event-archive.js', find: 'const numberOrNull = (value) => (isKnownNumber(value) ? Number(value) : null)', replace: 'const numberOrNull = (value) => (isKnownNumber(value) ? Number(value) : 0)', fails: ['fields', 'counts', 'capture'] },
   { name: 'the fingerprint leaves the increment out', file: 'event-archive.js', find: 'JSON.stringify([Number(IncrementID), ...fields])', replace: 'JSON.stringify([...fields])', fails: ['fields', 'counts', 'pin', 'pinstate'] },
   { name: 'the fingerprint joins the fields as text', file: 'event-archive.js', find: 'JSON.stringify([Number(IncrementID), ...fields])', replace: '[Number(IncrementID), ...fields].join(\'|\')', fails: ['fields'] },
-  { name: 'identical rows are counted once', file: 'event-archive.js', find: 'counts.set(key, (counts.get(key) || 0) + 1)', replace: 'counts.set(key, 1)', fails: ['counts', 'recon2', 'pinstate'] },
-  { name: 'a capture counts identical rows once', file: 'event-archive.js', find: 'groups.set(key, groups.has(key) ? [groups.get(key)[0], groups.get(key)[1] + 1] : [fields, 1])', replace: 'groups.set(key, [fields, 1])', fails: ['capture', 'rows', 'recon1'] },
-  { name: 'a row of an increment the ledger lacks is thrown, not left out', file: 'event-archive.js', find: '      orphans++\n      return', replace: '      orphans++', fails: ['capture'] },
-  { name: 'a failed read is thrown', file: 'event-archive.js', find: 'return { failed: error }', replace: 'throw error', fails: ['readfail'] },
+  { name: 'identical rows are counted once', file: 'event-archive.js', find: 'counts.set(key, (counts.get(key) || 0) + 1)', replace: 'counts.set(key, 1)', fails: ['counts', 'pinstate', 'chainpin'] },
+  { name: 'a capture counts identical rows once', file: 'event-archive.js', find: 'groups.set(key, groups.has(key) ? [groups.get(key)[0], groups.get(key)[1] + 1] : [fields, 1])', replace: 'groups.set(key, [fields, 1])', fails: ['capture', 'rows', 'chainfork'] },
+  { name: 'an orphan row is assigned to the first known increment instead of left out', file: 'event-archive.js', find: '      orphans++\n      return', replace: '      orphans++\n      const orphan = eventFields(row)\n      const groups = byIncrement.get(ids[0]) || new Map()\n      groups.set(JSON.stringify(orphan), [orphan, 1])\n      byIncrement.set(ids[0], groups)\n      return', fails: ['capture'] },
+  { name: 'a failed read is returned with a null failure', file: 'event-archive.js', find: 'return { failed: error }', replace: 'return { failed: null }', fails: ['readfail'] },
   { name: 'the window is read again for each race', file: 'event-archive.js', find: 'const seen = window || (await readLogWindow(database, GameID, options))', replace: 'const seen = await readLogWindow(database, GameID, options)', fails: ['readfail'] },
-  { name: 'the window starts after the log\'s oldest increment', file: 'event-archive.js', find: 'FCT_Increments.IncrementID >= $' + '{Number(first)}', replace: 'FCT_Increments.IncrementID > $' + '{Number(first)}', fails: ['window'] },
   { name: 'touching spans are not merged', file: 'event-archive.js', find: 'if (last && start <= last[1]) {', replace: 'if (last && start < last[1]) {', fails: ['span', 'append'] },
   { name: 'a span inside another widens it', file: 'event-archive.js', find: 'last[1] = Math.max(last[1], end)', replace: 'last[1] = end', fails: ['span'] },
-  { name: 'a merge always reports a change', file: 'event-archive.js', find: 'changed: Boolean(added || amended || found.length || spansChanged || tipChanged || !stored)', replace: 'changed: true', fails: ['same', 'closed', 'recon2', 'passive', 'rrepeat'] },
+  { name: 'a merge always reports a change', file: 'event-archive.js', find: 'changed: Boolean(added || amended || found.length || spansChanged || tipChanged || !stored)', replace: 'changed: true', fails: ['same', 'closed', 'chainrepeat'] },
   { name: 'the read\'s oldest increment is not open', file: 'event-archive.js', find: 'const openIds = new Set([capture.from[0], newestStored])', replace: 'const openIds = new Set([newestStored])', fails: ['open'] },
   { name: 'the archive\'s newest increment is not open', file: 'event-archive.js', find: 'const openIds = new Set([capture.from[0], newestStored])', replace: 'const openIds = new Set([capture.from[0]])', fails: ['open'] },
   { name: 'every increment is open', file: 'event-archive.js', find: 'const open = openIds.has(id)', replace: 'const open = true', fails: ['open', 'closed'] },
@@ -2319,19 +1638,19 @@ const MUTATIONS = [
   { name: 'a group the read holds fewer of is not a conflict', file: 'event-archive.js', find: 'if (readCount < storedCount && !open) {', replace: 'if (false) {', fails: ['closed', 'open'] },
   { name: 'a group the read holds fewer of is lowered to the read', file: 'event-archive.js', find: '      return group\n    })\n\n    // Groups only the read holds', replace: '      return [...group.slice(0, EVENT_FIELDS.length), readCount || storedCount]\n    })\n\n    // Groups only the read holds', fails: ['closed'] },
   { name: 'a row only the read holds in a closed increment is no conflict', file: 'event-archive.js', find: "conflict(increment, 'more', group, 0, group[EVENT_FIELDS.length])", replace: 'void group', fails: ['closed'] },
-  { name: 'a changed ledger identity is not a conflict', file: 'event-archive.js', find: 'if (!sameIdentity(capture.ledger.get(id), increment)) {', replace: 'if (false) {', fails: ['ledger', 'forkpair'] },
+  { name: 'a changed ledger identity is not a conflict', file: 'event-archive.js', find: 'if (!sameIdentity(capture.ledger.get(id), increment)) {', replace: 'if (false) {', fails: ['ledger', 'chainpair'] },
   { name: 'the rows of another timeline\'s increment are not told', file: 'event-archive.js', find: "if (!sameIdentity(own, increment)) {\n        conflict(own, 'ledger')\n      }", replace: 'void own', fails: ['ledger'] },
   { name: 'a contradiction is recorded at every pass', file: 'event-archive.js', find: 'if (!keys.has(conflictKey(entry))) {', replace: 'if (true) {', fails: ['closed', 'ledger'] },
-  { name: 'the spans are the last window only', file: 'event-archive.js', find: 'const spans = windowEnd > windowStart ? withSpan(record.spans, windowStart, windowEnd) : record.spans', replace: 'const spans = [[windowStart, windowEnd]]', fails: ['append', 'open', 'rfile'] },
-  { name: 'the rows the cap dropped are added again by a save that still holds them', file: 'event-archive.js', find: '} else if (cut === null || endOf(increment) > cut) {', replace: '} else {', fails: ['capmerge', 'rcap'] },
+  { name: 'the spans are the last window only', file: 'event-archive.js', find: 'const spans = windowEnd > windowStart ? withSpan(record.spans, windowStart, windowEnd) : record.spans', replace: 'const spans = [[windowStart, windowEnd]]', fails: ['append', 'open', 'chainfile'] },
+  { name: 'the rows the cap dropped are added again by a save that still holds them', file: 'event-archive.js', find: '} else if (cut === null || endOf(increment) > cut) {', replace: '} else {', fails: ['capmerge'] },
   { name: 'the window of a capture starts before the cut', file: 'event-archive.js', find: 'const windowStart = cut === null ? capture.from[1] : Math.max(capture.from[1], cut)', replace: 'const windowStart = capture.from[1]', fails: ['capmerge'] },
   { name: 'increments are not kept in order', file: 'event-archive.js', find: 'record.increments.sort((a, b) => a[0] - b[0])', replace: 'void 0', fails: ['append'] },
   { name: 'a revision is not counted', file: 'event-archive.js', find: 'record.revision += 1', replace: 'record.revision += 0', fails: ['same', 'open'] },
   { name: 'the first gap is not told', file: 'event-archive.js', find: 'const gaps = [{ from: null, to: record.spans[0][0] }]', replace: 'const gaps = []', fails: ['append'] },
   { name: 'a gap starts at the wrong end', file: 'event-archive.js', find: 'gaps.push({ from: record.spans[index][1], to: start })', replace: 'gaps.push({ from: record.spans[index][0], to: start })', fails: ['append'] },
-  { name: 'a group of n identical rows is one row', file: 'event-archive.js', find: 'for (let copy = 0; copy < copies; copy++) {', replace: 'for (let copy = 0; copy < 1; copy++) {', fails: ['rows', 'recon2'] },
+  { name: 'a group of n identical rows is one row', file: 'event-archive.js', find: 'for (let copy = 0; copy < copies; copy++) {', replace: 'for (let copy = 0; copy < 1; copy++) {', fails: ['rows'] },
   { name: 'rows are oldest first', file: 'event-archive.js', find: 'rows.sort((a, b) => b.Time - a.Time || b.IncrementID - a.IncrementID)', replace: 'rows.sort((a, b) => a.Time - b.Time || a.IncrementID - b.IncrementID)', fails: ['rows', 'append'] },
-  { name: 'events are counted by groups', file: 'event-archive.js', find: 'increment[3].reduce((count, group) => count + group[EVENT_FIELDS.length], 0), 0)', replace: 'increment[3].reduce((count) => count + 1, 0), 0)', fails: ['cap', 'rows', 'bytes', 'recon2'] },
+  { name: 'events are counted by groups', file: 'event-archive.js', find: 'increment[3].reduce((count, group) => count + group[EVENT_FIELDS.length], 0), 0)', replace: 'increment[3].reduce((count) => count + 1, 0), 0)', fails: ['cap', 'rows'] },
   { name: 'a record at the cap is cut once more', file: 'event-archive.js', find: 'while (total > cap && increments.length) {', replace: 'while (total >= cap && increments.length) {', fails: ['cap'] },
   { name: 'the cap drops the newest increments', file: 'event-archive.js', find: 'const oldest = increments.shift()', replace: 'const oldest = increments.pop()', fails: ['cap', 'capmerge'] },
   { name: 'the cut is the start of the last dropped increment', file: 'event-archive.js', find: 'cut = Math.max(isKnownNumber(cut) ? cut : -Infinity, endOf(oldest))', replace: 'cut = Math.max(isKnownNumber(cut) ? cut : -Infinity, oldest[1])', fails: ['cap', 'capmerge'] },
@@ -2340,23 +1659,23 @@ const MUTATIONS = [
   { name: 'the conflicts of dropped increments stay', file: 'event-archive.js', find: 'conflicts: record.conflicts.filter((conflict) => endOf(conflict.increment) > cut) }, dropped }', replace: 'conflicts: record.conflicts }, dropped }', fails: ['cap'] },
   { name: 'a record cut by a lower cap alone is not written', file: 'event-archive.js', find: 'if (result.changed || dropped) {', replace: 'if (result.changed) {', fails: ['capmerge'] },
   { name: 'the merged record is not cut to the cap', file: 'event-archive.js', find: 'const { record, dropped } = capRecord(result.record, cap)', replace: 'const { record, dropped } = capRecord(result.record, Infinity)', fails: ['capmerge'] },
-  { name: 'an archive up to a time takes increments that start by then', file: 'event-archive.js', find: 'const increments = record.increments.filter((increment) => endOf(increment) <= t)', replace: 'const increments = record.increments.filter((increment) => increment[1] <= t)', fails: ['upto', 'lineage', 'cleared', 'rfork'] },
-  { name: 'an archive up to a time keeps the spans whole', file: 'event-archive.js', find: 'const spans = record.spans.filter(([start]) => start < t).map(([start, end]) => [start, Math.min(end, t)])', replace: 'const spans = record.spans', fails: ['upto'] },
-  { name: 'an archive up to a time keeps every capture', file: 'event-archive.js', find: 'captures: record.captures.filter((capture) => capture.t <= t)', replace: 'captures: record.captures', fails: ['upto'] },
+  { name: 'an archive up to a time takes increments that start by then', file: 'event-archive.js', find: 'const increments = record.increments.filter((increment) => endOf(increment) <= t)', replace: 'const increments = record.increments.filter((increment) => increment[1] <= t)', fails: ['upto', 'lineage', 'cleared'] },
+  { name: 'an archive up to a time keeps the spans whole', file: 'event-archive.js', find: 'const spans = record.spans.filter(([start]) => start < t).map(([start, end]) => [start, Math.min(end, t)])', replace: 'const spans = record.spans', fails: ['upto', 'chainfork'] },
+  { name: 'an archive up to a time keeps every capture', file: 'event-archive.js', find: 'captures: record.captures.filter((capture) => capture.t <= t)', replace: 'captures: record.captures', fails: ['upto', 'chainfork'] },
   { name: 'an archive up to a time keeps every conflict', file: 'event-archive.js', find: 'conflicts: record.conflicts.filter((conflict) => endOf(conflict.increment) <= t),', replace: 'conflicts: record.conflicts,', fails: ['upto'] },
   { name: 'a record cut after the time still seeds', file: 'event-archive.js', find: 'if (isKnownNumber(record.cut) && record.cut > t) {', replace: 'if (false) {', fails: ['upto'] },
   { name: 'the open newest increment is the newest event, not the tip', file: 'event-archive.js', find: 'const newestStored = tip ? tip[0] : lastStored', replace: 'const newestStored = false ? 0 : lastStored', fails: ['tip'] },
   { name: 'a record with no tip has no open newest increment', file: 'event-archive.js', find: 'const newestStored = tip ? tip[0] : lastStored && (observedEnd === null || endOf(lastStored) >= observedEnd) ? lastStored[0] : null', replace: 'const newestStored = tip ? tip[0] : null', fails: ['tip', 'tipupto'] },
   { name: 'the tip goes back with an older capture', file: 'event-archive.js', find: 'const nextTip = !tip || capture.to[0] >= tip[0] ? [...capture.to] : tip', replace: 'const nextTip = [...capture.to]', fails: ['tip'] },
-  { name: 'the tip never advances', file: 'event-archive.js', find: 'const nextTip = !tip || capture.to[0] >= tip[0] ? [...capture.to] : tip', replace: 'const nextTip = tip || [...capture.to]', fails: ['tip', 'rfile'] },
+  { name: 'the tip never advances', file: 'event-archive.js', find: 'const nextTip = !tip || capture.to[0] >= tip[0] ? [...capture.to] : tip', replace: 'const nextTip = tip || [...capture.to]', fails: ['tip', 'chainfile'] },
   { name: 'a tip given to a record is not a change', file: 'event-archive.js', find: 'const tipChanged = !tip || !sameIdentity(nextTip, tip)', replace: 'const tipChanged = false', fails: ['tip'] },
-  { name: 'the tip is not stored', file: 'event-archive.js', find: 'record.tip = nextTip', replace: 'void nextTip', fails: ['tip', 'rfile'] },
-  { name: 'a tip past the fork is kept in a seed', file: 'event-archive.js', find: 'if (isIdentity(record.tip) && endOf(record.tip) > t) {', replace: 'if (false) {', fails: ['tipupto'] },
+  { name: 'the tip is not stored', file: 'event-archive.js', find: 'record.tip = nextTip', replace: 'void nextTip', fails: ['tip', 'chainfile'] },
+  { name: 'a tip past the fork is kept in a seed', file: 'event-archive.js', find: 'if (isIdentity(record.tip) && endOf(record.tip) > t) {', replace: 'if (false) {', fails: ['tipupto', 'chainfork'] },
   { name: 'a tip that ends at the fork is dropped from a seed', file: 'event-archive.js', find: 'endOf(record.tip) > t) {', replace: 'endOf(record.tip) >= t) {', fails: ['tipupto'] },
-  { name: 'an archive up to a time keeps every failure', file: 'event-archive.js', find: 'record.failures.filter((failure) => failure.t <= t)', replace: 'record.failures', fails: ['tipupto'] },
+  { name: 'an archive up to a time keeps every failure', file: 'event-archive.js', find: 'record.failures.filter((failure) => failure.t <= t)', replace: 'record.failures', fails: ['tipupto', 'chainnoted'] },
   { name: 'more than 50 failures are kept', file: 'event-archive.js', find: 'const FAILURES_KEPT = 50', replace: 'const FAILURES_KEPT = 51', fails: ['failure'] },
   { name: 'the oldest failures are kept, not the newest', file: 'event-archive.js', find: '.slice(-FAILURES_KEPT)', replace: '.slice(0, FAILURES_KEPT)', fails: ['failure'] },
-  { name: 'a failure replaces the failures before it', file: 'event-archive.js', find: 'failures: [...((record && record.failures) || []), {', replace: 'failures: [{', fails: ['failure', 'rfailed'] },
+  { name: 'a failure replaces the failures before it', file: 'event-archive.js', find: 'failures: [...((record && record.failures) || []), {', replace: 'failures: [{', fails: ['failure', 'chainnoted'] },
   { name: 'a capture is not a capture the file reads', file: 'event-archive.js', find: '!record.captures.every(isCapture)', replace: 'false', fails: ['shapes'] },
   { name: 'a capture without its counts is read', file: 'event-archive.js', find: '[capture.rows, capture.added, capture.amended, capture.revision].every((count) => Number.isSafeInteger(count) && count >= 0)', replace: 'true', fails: ['shapes'] },
   { name: 'a capture whose window is not an identity is read', file: 'event-archive.js', find: 'isIdentity(capture.from) && isIdentity(capture.to) &&', replace: '', fails: ['shapes'] },
@@ -2370,20 +1689,12 @@ const MUTATIONS = [
   { name: 'a record with no tip keeps its newest increment open whatever it observed', file: 'event-archive.js', find: '(observedEnd === null || endOf(lastStored) >= observedEnd)', replace: 'true', fails: ['tip', 'tipupto'] },
   { name: 'a record with no tip closes its newest increment unless it ends after what it observed', file: 'event-archive.js', find: 'endOf(lastStored) >= observedEnd)', replace: 'endOf(lastStored) > observedEnd)', fails: ['tip', 'tipupto'] },
   { name: 'a record with no tip and no span closes its newest increment', file: 'event-archive.js', find: '(observedEnd === null || endOf(lastStored) >= observedEnd)', replace: '(observedEnd !== null && endOf(lastStored) >= observedEnd)', fails: ['tip'] },
-  { name: 'a record with only noted failures is dropped from an archive up to a time', file: 'event-archive.js', find: '|| (record.failures && record.failures.length)))', replace: '))', fails: ['failonly', 'rnoted'] },
+  { name: 'a record with only noted failures is dropped from an archive up to a time', file: 'event-archive.js', find: '|| (record.failures && record.failures.length)))', replace: '))', fails: ['failonly', 'chainnoted'] },
   { name: 'a cut past the fork drops the failures noted before it', file: 'event-archive.js', find: 'return [RaceID, { revision: record.revision, increments: [], spans: [], captures: [], conflicts: [], failures: kept.failures || [] }]', replace: 'return [RaceID, null]', fails: ['failonly'] },
   { name: 'a cut past the fork is carried into the seed', file: 'event-archive.js', find: 'failures: kept.failures || [] }]', replace: 'failures: kept.failures || [], cut: record.cut }]', fails: ['failonly'] },
   { name: 'a record with more events than any cap allows is read', file: 'event-archive.js', find: 'if (recordEvents(record) > MAX_EVENTS) {', replace: 'if (false) {', fails: ['problem'] },
   { name: 'a record with exactly the largest cap is refused', file: 'event-archive.js', find: 'if (recordEvents(record) > MAX_EVENTS) {', replace: 'if (recordEvents(record) >= MAX_EVENTS) {', fails: ['problem'] },
   { name: 'the largest event count is not the largest cap', file: 'event-archive.js', find: 'export const MAX_EVENTS = Math.max(...EVENT_CAPS)', replace: 'export const MAX_EVENTS = Math.min(...EVENT_CAPS)', fails: ['problem'] },
-  { name: 'an event store that throws when read escapes the check of the archive', file: 'history.js', find: '  } catch (error) {\n    return `the $' + '{spec.noun} of branch', replace: '  } catch (error) {\n    throw error\n    return `the $' + '{spec.noun} of branch', fails: ['rthrow'] },
-  { name: 'an event store that throws when read escapes the read of the archive', file: 'history.js', find: '  } catch (error) {\n    return { problem: ', replace: '  } catch (error) {\n    throw error\n    return { problem: ', fails: ['rthrow'] },
-  { name: 'a pass with the archive off checks the event store', file: 'history.js', find: 'if (kept.length) {', replace: 'if (true) {', fails: ['rthrow'] },
-  { name: 'a fork is marked as seeded whether or not its parent\'s archive could be read', file: 'history.js', find: 'if (eventsFine) {\n              campaign.branches[resolution.branchId].eventsSeeded = true', replace: 'if (true) {\n              campaign.branches[resolution.branchId].eventsSeeded = true', fails: ['rthrow', 'runreadable'] },
-  { name: 'an archive file this version cannot read is merged into', file: 'history.js', find: 'if (base.problem) {\n              failed.push({ GameID, stage: \'events\', error: new Error(base.problem) })\n            } else if', replace: 'if (false) {\n              failed.push({ GameID, stage: \'events\', error: new Error(base.problem) })\n            } else if', fails: ['runreadable'] },
-  { name: 'a fork is seeded from an archive this version cannot read', file: 'history.js', find: 'const eventsFine = !seed.problem', replace: 'const eventsFine = true', fails: ['runreadable'] },
-  { name: 'a failed read of the log is not noted', file: 'history.js', find: 'file.races[RaceID] = withFailure(', replace: 'void withFailure(', fails: ['rfailed'] },
-  { name: 'a failure is stamped with no game time', file: 'history.js', find: '{ at: now(), t: snapshot.t, reason:', replace: '{ at: now(), t: 0, reason:', fails: ['rfailed'] },
   { name: 'a seed through a parent with no archive reaches past the earlier fork', file: 'event-archive.js', find: 'eventSeed(io, campaign, branch.parent, Math.min(t, branch.fork.t))', replace: 'eventSeed(io, campaign, branch.parent, t)', fails: ['lineage'] },
   { name: 'a seed passes through a parent that has none', file: 'event-archive.js', find: 'eventSeed(io, campaign, branch.parent, Math.min(t, branch.fork.t)) : {}', replace: '{} : {}', fails: ['lineage'] },
   { name: 'a branch with no file is not seeded', file: 'event-archive.js', find: '? eventSeed(io, campaign, branch.parent, branch.fork.t) : {}', replace: '? {} : {}', fails: ['lineage'] },
@@ -2392,7 +1703,7 @@ const MUTATIONS = [
   { name: 'a cleared archive is seeded from its parent again', file: 'event-archive.js', find: 'if (written(stored)) {\n    return stored', replace: 'if (written(stored) && Object.keys(stored.races).length) {\n    return stored', fails: ['cleared'] },
   { name: 'a seed through a cleared branch reaches the parent\'s rows', file: 'event-archive.js', find: 'if (written(file)) {\n    return eventsUpTo(file, t)', replace: 'if (written(file) && Object.keys(file.races).length) {\n    return eventsUpTo(file, t)', fails: ['cleared'] },
   { name: 'a fork is given a file even when its parent holds none', file: 'event-archive.js', find: 'return written(seed) && Object.keys(seed.races).length ? seed : null', replace: 'return seed', fails: ['lineage', 'cleared'] },
-  { name: 'a fork is not given the parent\'s archive', file: 'event-archive.js', find: 'return written(seed) && Object.keys(seed.races).length ? seed : null', replace: 'return null', fails: ['lineage', 'rfork'] },
+  { name: 'a fork is not given the parent\'s archive', file: 'event-archive.js', find: 'return written(seed) && Object.keys(seed.races).length ? seed : null', replace: 'return null', fails: ['lineage', 'chainfork', 'chainfrozen'] },
   { name: 'a cleared file is replaced by a fork seed', file: 'event-archive.js', find: 'if (written(io.file(eventFileName(campaign.id, branchId)).store)) {\n    return null\n  }', replace: 'if (false) {\n    return null\n  }', fails: ['lineage'] },
   { name: 'a group of zero rows is a stored group', file: 'event-archive.js', find: 'group[EVENT_FIELDS.length] > 0 && EVENT_FIELDS.every', replace: 'group[EVENT_FIELDS.length] >= 0 && EVENT_FIELDS.every', fails: ['problem'] },
   { name: 'an increment twice is a file this version reads', file: 'event-archive.js', find: 'index && increment[0] <= record.increments[index - 1][0])', replace: 'index && increment[0] < record.increments[index - 1][0])', fails: ['problem'] },
@@ -2405,42 +1716,41 @@ const MUTATIONS = [
   { name: 'a game of another campaign is read', file: 'event-archive.js', find: 'campaign.gameIds.includes(GameID) && campaign.races', replace: 'campaign.races', fails: ['choice'] },
   { name: 'turning it off drops the race\'s other settings', file: 'event-archive.js', find: 'delete race.logArchive', replace: 'delete races[RaceID]', fails: ['choice'] },
   { name: 'the cap is any number the settings hold', file: 'event-archive.js', find: 'return EVENT_CAPS.includes(stored) ? stored : EVENT_CAP', replace: 'return stored || EVENT_CAP', fails: ['choice'] },
-  { name: 'events are read whether or not an archive is on', file: 'history.js', find: 'const wanted = races.filter((race) => !toBoolean(race.NPR) && archiveWanted(archive, GameID, race.RaceID))', replace: 'const wanted = races.filter((race) => !toBoolean(race.NPR))', fails: ['rnochoice'] },
-  { name: 'a race that is not a player\'s is read when it is chosen', file: 'history.js', find: 'const wanted = races.filter((race) => !toBoolean(race.NPR) && archiveWanted(archive, GameID, race.RaceID))', replace: 'const wanted = races.filter((race) => archiveWanted(archive, GameID, race.RaceID))', fails: ['rnpr'] },
-  { name: 'the log window is read again for each race', file: 'history.js', find: 'readRaceEvents(database, { GameID, RaceID: race.RaceID, t, window }, options)', replace: 'readRaceEvents(database, { GameID, RaceID: race.RaceID, t, window: null }, options)', fails: ['rstatements'] },
-  { name: 'a failed read of the log window fails the pass', file: 'history.js', find: '    failure = error\n  }', replace: '    throw error\n  }', fails: ['rfailed'] },
-  { name: 'the event file is written without asking whether the pass is current', file: 'history.js', find: '                guard()\n                events.store = file', replace: '                events.store = file', fails: ['rsuperseded'] },
-  { name: 'a fork is not given its event archive when it is created', file: 'history.js', find: 'if (givenEvents) {', replace: 'if (false) {', fails: ['rfork'] },
-  { name: 'a fork is not marked once it was given its event archive', file: 'history.js', find: 'campaign.branches[resolution.branchId].eventsSeeded = true', replace: 'void campaign', fails: ['rfork', 'rlate'] },
-  { name: 'a fork is given nothing when it is created', file: 'history.js', find: 'if (resolution.forked) {\n          const registry = readRegistry(storage)', replace: 'if (false) {\n          const registry = readRegistry(storage)', fails: ['rfork', 'rlate'] },
-  { name: 'the cap of the settings is not given to the archive', file: 'history.js', find: '{ cap: eventCapOfSettings(storage.settings), now })', replace: '{ now })', fails: ['rcap'] },
-  { name: 'a pass merges into an empty archive, not the branch\'s', file: 'history.js', find: 'mergeEvents(base.value, {', replace: 'mergeEvents({}, {', fails: ['rfile', 'rrepeat'] },
   { name: 'clearing a history leaves its event archive', file: 'history.js', find: 'planned(eventStore(campaignId, branchId), eventsFrom),', replace: 'null,', fails: ['rclear'] },
-  { name: 'an event is estimated at 256 bytes', file: 'event-archive.js', find: 'export const EVENT_BYTES = 200', replace: 'export const EVENT_BYTES = 256', fails: ['estimate', 'bytes'] },
-  { name: 'a group already pinned is pinned again', file: 'event-pins.js', find: 'if (pinOfRow(store, branch, row)) {\n    return store', replace: 'if (false) {\n    return store', fails: ['pin', 'limit'] },
+  { name: 'an event is estimated at 256 bytes', file: 'event-archive.js', find: 'export const EVENT_BYTES = 200', replace: 'export const EVENT_BYTES = 256', fails: ['estimate'] },
+  { name: 'a group already pinned is pinned again', file: 'event-pins.js', find: 'if (pinOfRow(store, branch, row)) {\n    return store', replace: 'if (pinOfRow(store, branch, row)) {\n    return { ...store, pins: [...store.pins, pinOfRow(store, branch, row)] }', fails: ['pin', 'limit'] },
   { name: 'the pin limit is one more', file: 'event-pins.js', find: 'export const MAX_PINS = 500', replace: 'export const MAX_PINS = 501', fails: ['limit'] },
   { name: 'the pin limit is reached one too late', file: 'event-pins.js', find: 'if (pinsOf(store, branch).length >= MAX_PINS) {', replace: 'if (pinsOf(store, branch).length > MAX_PINS) {', fails: ['limit'] },
-  { name: 'the limit counts every branch', file: 'event-pins.js', find: 'if (pinsOf(store, branch).length >= MAX_PINS) {', replace: 'if (store.pins.length >= MAX_PINS) {', fails: ['limit'] },
+  { name: 'the limit counts every branch', file: 'event-pins.js', find: 'if (pinsOf(store, branch).length >= MAX_PINS) {', replace: 'if (store.pins.length >= MAX_PINS && pinsOf(store, branch).length < MAX_PINS) {\n    return store\n  }\n\n  if (pinsOf(store, branch).length >= MAX_PINS) {', fails: ['limit'] },
   { name: 'pins are listed oldest first', file: 'event-pins.js', find: 'b.fields[0] - a.fields[0] || b.increment[0] - a.increment[0]', replace: 'a.fields[0] - b.fields[0] || a.increment[0] - b.increment[0]', fails: ['pin'] },
   { name: 'a pin is found on every branch', file: 'event-pins.js', find: 'pin.branch === branch && pinKey(pin) === key', replace: 'pinKey(pin) === key', fails: ['pin'] },
   { name: 'a removal reaches the copy on another branch', file: 'event-pins.js', find: '!(pin.branch === branch && pin.id === id)', replace: 'pin.id !== id', fails: ['pin'] },
   { name: 'a note reaches the copy on another branch', file: 'event-pins.js', find: 'pin.branch === branch && pin.id === id ? { ...pin, note', replace: 'pin.id === id ? { ...pin, note', fails: ['pin'] },
   { name: 'stored pins that cannot be read are taken', file: 'event-pins.js', find: '!value.pins.every(validPin)', replace: 'false', fails: ['pin'] },
   { name: 'a fork inherits the pins of events still running at the fork', file: 'event-pins.js', find: 'pin.increment[1] + pin.increment[2] <= t', replace: 'pin.increment[1] <= t', fails: ['pinseed'] },
-  { name: 'a fork inherits every pin of its parent', file: 'event-pins.js', find: 'pin.branch === parent && pin.increment[1] + pin.increment[2] <= t', replace: 'pin.branch === parent', fails: ['pinseed'] },
+  { name: 'a fork inherits every pin of its parent', file: 'event-pins.js', find: 'pin.branch === parent && pin.increment[1] + pin.increment[2] <= t', replace: 'pin.branch === parent', fails: ['pinseed', 'chainpinseed'] },
   { name: 'a pin the fork has is inherited again', file: 'event-pins.js', find: ' && !own.has(pinKey(pin)))', replace: ')', fails: ['pinseed'] },
   { name: 'the parent is not seeded first', file: 'event-pins.js', find: 'next = seededPins(next, parent, lineage, walked)', replace: 'next = next', fails: ['pinseed'] },
   { name: 'a branch is seeded again', file: 'event-pins.js', find: 'if (store.seeded[branch] || !lineage', replace: 'if (!lineage', fails: ['pinseed'] },
-  { name: 'a branch the registry does not know is marked', file: 'event-pins.js', find: '|| !lineage[branch] || walked.has(branch)', replace: '|| walked.has(branch)', fails: ['pinseed'] },
-  { name: 'a pin is held without asking whether the log was read', file: 'event-pins.js', find: "if (!window) {\n    return 'unread'\n  }", replace: 'if (false) {\n    return null\n  }', fails: ['pinstate'] },
+  { name: 'a branch the registry does not know is marked', file: 'event-pins.js', find: '  if (store.seeded[branch] || !lineage || !lineage[branch] || walked.has(branch)) {\n    return store\n  }', replace: '  if (lineage && !lineage[branch]) {\n    return { ...store, seeded: { ...store.seeded, [branch]: true } }\n  }\n\n  if (store.seeded[branch] || !lineage || !lineage[branch] || walked.has(branch)) {\n    return store\n  }', fails: ['pinseed'] },
+  { name: 'a pin is held without asking whether the log was read', file: 'event-pins.js', find: "if (!window) {\n    return 'unread'\n  }", replace: "if (!window) {\n    return 'held'\n  }", fails: ['pinstate'] },
   { name: 'the oldest increment of the log is before it', file: 'event-pins.js', find: 'if (window.first === null || id < window.first) {', replace: 'if (window.first === null || id <= window.first) {', fails: ['pinstate'] },
-  { name: 'the length is not part of an increment\'s identity', file: 'event-pins.js', find: 'if (identity[1] !== pin.increment[1] || identity[2] !== pin.increment[2]) {', replace: 'if (identity[1] !== pin.increment[1]) {', fails: ['pinstate'] },
-  { name: 'a ledger that differs is not told', file: 'event-pins.js', find: 'if (identity[1] !== pin.increment[1] || identity[2] !== pin.increment[2]) {', replace: 'if (false) {', fails: ['pinstate', 'pinsave'] },
+  { name: 'the length is not part of an increment\'s identity', file: 'event-pins.js', find: 'if (identity[1] !== pin.increment[1] || identity[2] !== pin.increment[2]) {', replace: 'if (identity[1] !== pin.increment[1]) {', fails: ['pinstate', 'chainpin'] },
+  { name: 'a ledger that differs is not told', file: 'event-pins.js', find: 'if (identity[1] !== pin.increment[1] || identity[2] !== pin.increment[2]) {', replace: 'if (false) {', fails: ['pinstate', 'chainpin'] },
   { name: 'a pin is held at any count above its own', file: 'event-pins.js', find: 'if (held === pin.count) {', replace: 'if (held >= pin.count) {', fails: ['pinstate'] },
   { name: 'an event the save does not hold is gone even in the oldest increment', file: 'event-pins.js', find: "return id === window.first ? 'older' : 'gone'", replace: "return 'gone'", fails: ['pinstate'] },
   { name: 'a different count is told as held', file: 'event-pins.js', find: "  return 'count'\n}", replace: "  return 'held'\n}", fails: ['pinstate'] },
-  { name: 'the throwing-store replay is omitted from its named check', schedules: ['rsuperseded'], fails: ['recorder-schedules'] },
-  { name: 'the supersession replay is omitted from its named check', schedules: ['rthrow'], fails: ['recorder-schedules'] },
+  { name: 'a log\'s depth ends at its first row', file: 'event-archive.js', find: 'return { from, to, count: rows.length }', replace: 'return { from, to: from, count: rows.length }', fails: ['depth'] },
+  { name: 'a record\'s depth counts identical rows once', file: 'event-archive.js', find: 'count += group[EVENT_FIELDS.length]', replace: 'count += 1', fails: ['recorddepth'] },
+  { name: 'a fork is not given its event archive when it is created', file: 'history.js', find: 'if (givenEvents) {', replace: 'if (false) {', fails: ['chainfork', 'chainfrozen'] },
+  { name: 'a fork is not marked once it was given its event archive', file: 'history.js', find: 'campaign.branches[resolution.branchId].eventsSeeded = true', replace: 'void campaign', fails: ['chainfork', 'chainlate', 'chainnoted'] },
+  { name: 'a fork is given nothing when it is created', file: 'history.js', find: 'if (resolution.forked) {\n          const registry = readRegistry(storage)', replace: 'if (false) {\n          const registry = readRegistry(storage)', fails: ['chainfork', 'chainlate', 'chainnoted'] },
+  { name: 'a fork is cut at the game time of the save that made it', file: 'campaign.js', find: 'const forkTime = found.common ? opened.times[found.common / STEP - 1] : null', replace: 'const forkTime = found.common ? opened.t : null', fails: ['chainfork', 'chainpinseed'] },
+  { name: 'events are read whether or not an archive is on', file: 'history.js', find: 'const wanted = races.filter((race) => !toBoolean(race.NPR) && archiveWanted(archive, GameID, race.RaceID))', replace: 'const wanted = races.filter((race) => !toBoolean(race.NPR))', fails: ['chainstatements'] },
+  { name: 'the log window is read again for each race', file: 'history.js', find: 'readRaceEvents(database, { GameID, RaceID: race.RaceID, t, window }, options)', replace: 'readRaceEvents(database, { GameID, RaceID: race.RaceID, t, window: null }, options)', fails: ['chainstatements'] },
+  { name: 'a pass merges into an empty archive, not the branch\'s', file: 'history.js', find: 'mergeEvents(base.value, {', replace: 'mergeEvents({}, {', fails: ['chainfile', 'chainrepeat'] },
+  { name: 'a failed read of the log is not noted', file: 'history.js', find: 'file.races[RaceID] = withFailure(', replace: 'void withFailure(', fails: ['chainnoted'] },
+  { name: 'a failure is stamped with no game time', file: 'history.js', find: '{ at: now(), t: snapshot.t, reason:', replace: '{ at: now(), t: 0, reason:', fails: ['chainnoted'] },
 ]
 
 // ---------- running ----------
@@ -2461,142 +1771,151 @@ const show = (label, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? (detail ? `  [${detail}]` : '') : `\n         ${typeof result === 'string' ? result : 'false'}`}`)
 }
 
-const memo = (work) => {
-  let held = null
+// The context a check runs in for one set of modules; a scenario of the played campaign is run once, on its first use.
+const contextOf = (m) => {
+  const begun = memo(() => begin(m))
+  const scenarios = { chain: memo(async () => chain(m, await begun())), late: memo(async () => late(m, await begun())), noted: memo(async () => noted(m, await begun())), statements: memo(async () => statements(m, await begun())) }
 
-  return () => {
-    held = held || work()
-
-    return held
-  }
+  return { run: async ({ needs, run }) => run({ m, k: scenarios[needs] ? await scenarios[needs]() : null }) }
 }
 
-// The context a check runs in for one set of modules; a scenario is run once, on its first use.
-const contextOf = (m, only = null, scheduleKeys = RECORDER_SCHEDULES) => {
-  const scenarios = { falryx: memo(() => falryx(m)), passive: memo(() => passive(m)), recorder: memo(() => recorder(m, only)) }
-
-  return {
-    run: async ({ needs, run }) => {
-      const f = needs === 'falryx' ? await scenarios.falryx() : null
-      const s = needs === 'passive' ? await scenarios.passive() : null
-      const r = needs === 'recorder' ? await scenarios.recorder() : null
-
-      if ((needs === 'falryx' && !f) || (needs === 'passive' && !s) || (needs === 'recorder' && !r)) {
-        return 'skip'
-      }
-
-      return run({ m, f, s, r, scheduleKeys })
-    },
-  }
-}
+// Whether a check reads a save that is not here: it is skipped and says so.
+const unread = (entry) => PLAYED_NEEDS.includes(entry.needs) && !CHAIN_THERE
 
 const outcomeOf = async (context, entry) => {
   try {
-    const outcome = await context.run(entry)
+    await context.run(entry)
 
-    return outcome === 'skip' ? 'skip' : true
+    return { id: entry.key, ok: true, kind: null, threw: false, detail: '' }
   } catch (error) {
-    return String((error && error.stack) || error).split('\n').slice(0, 8).join('\n         ')
+    if (error instanceof HarnessError) {
+      throw error
+    }
+
+    return { id: entry.key, ok: false, kind: kindOf(error), threw: isSubjectThrow(error), detail: String((error && error.stack) || error).split('\n').slice(0, 8).join('\n         ') }
   }
 }
 
-const planted = (mutation) => plantedCopy(utilitiesDirectory, 'ae-event-archive-mutant-', mutation.file, mutation.find, mutation.replace)
+// A fault changes one module's source; imports and reloads receive that same override. The unchanged modules and their shared registry are loaded through the same content-addressed utility loader, without copying the entire utilities tree.
+const planted = (mutation) => ({ [mutation.file.replace(/\.js$/, '')]: plantedPatch(mutation.file, fs.readFileSync(path.join(utilitiesDirectory, mutation.file), 'utf8'), mutation.find, mutation.replace) })
 
 // A mutation judged in this process, as `show` prints it: the result (true, or why it fails) and the detail of a pass.
-const judge = async (mutation) => {
-  const started = Date.now()
-  let directory = null
-
-  try {
-    if (!mutation.schedules) {
-      directory = planted(mutation)
-    }
-
-    const mutant = contextOf(await loadModules(directory || utilitiesDirectory), mutation.fails, mutation.schedules)
-    const named = checks.filter((entry) => mutation.fails.includes(entry.key))
-    const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
-    const missed = []
-    const skipped = []
-
-    for (const entry of named) {
-      const outcome = await outcomeOf(mutant, entry)
-
-      if (outcome === 'skip') {
-        skipped.push(entry.key)
-      } else if (outcome === true) {
-        missed.push(entry.key)
-      }
-    }
-
-    const ran = named.length - skipped.length
-
-    return { result: absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, detail: `${mutation.fails.join(', ')}; ${((Date.now() - started) / 1000).toFixed(1)} s` }
-  } catch (error) {
-    return { result: `does not load: ${error.message}` }
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
+const judge = async (mutation, { modulesOf = loadModules, entries = checks, context = contextOf } = {}) => {
+  // Injected credit controls load no product source and plant no fault.
+  if (modulesOf === loadModules) {
+    refusePlanting(mutation.name)
   }
+
+  const started = Date.now()
+  const sources = mutation.file ? planted(mutation) : {}
+  const mutant = context(await modulesOf(utilitiesDirectory, sources))
+  const named = entries.filter((entry) => mutation.fails.includes(entry.key))
+  const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
+  const skipped = named.filter(unread)
+  const outcomes = []
+
+  for (const entry of named.filter((entry) => !unread(entry))) {
+    outcomes.push(await outcomeOf(mutant, entry))
+  }
+
+  const failed = judged(outcomes, `the event fault "${mutation.name}"`)
+  const caught = caughtAll(outcomes, { name: mutation.name })
+  const details = failed.map(({ id, threw, detail }) => `${id}: ${threw ? 'subject throw' : 'value'}: ${detail.split('\n')[0]}`).join('; ')
+
+  return { result: absent.length ? `no check is keyed ${absent.join(', ')}` : !outcomes.length ? `none of the named checks could run (${skipped.map((entry) => entry.key).join(', ')}): a save of the played campaign is not here` : !caught ? 'a named check did not fail by an allowed assertion' : true, detail: `${details}; ${((Date.now() - started) / 1000).toFixed(1)} s` }
 }
 
-// The mutations run in child processes, several side by side (CHECK_JOBS), each child judging its share one after another the way the whole run once did in one process: every mutation still gets a fresh copy of the modules and fresh scenarios, and a child holds only its own share of module copies in memory. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its verdicts.
+// Exercise this suite's actual outcome and credit path independently, without planting a source or reading a save.
+check('credit-boundaries', 'event fault credit rejects harness exceptions and subject throws, and credits every named wrong value', 'unit', async () => {
+  const fault = { name: 'credit probe', fails: ['probe'] }
+  const entries = [{ key: 'probe', run: ({ m }) => m.a.probe() }]
+  const context = (m) => ({ run: (entry) => entry.run({ m }) })
+  const probe = (run, throws = false) => judge({ ...fault, throws }, { entries, context, modulesOf: async () => ({ a: subjectModule({ probe: run }, 'credit probe') }) })
+
+  await assert.rejects(judge(fault, { entries, modulesOf: async () => ({}), context: () => ({ run: () => { throw new Error('fixture broke') } }) }), (error) => error instanceof HarnessError && error.message.includes('fixture broke'))
+  await assert.rejects(probe(() => { throw new Error('unexpected subject exception') }), (error) => error instanceof HarnessError && error.message.includes('not by a value'))
+  await assert.rejects(probe(() => { throw new assert.AssertionError({ message: 'subject assertion is not a check assertion' }) }), (error) => error instanceof HarnessError && error.message.includes('not by a value'))
+
+  const wrong = await judge(fault, { entries: [{ key: 'probe', run: () => assert.equal(2, 1, 'independent expected value') }], context, modulesOf: async () => ({}) })
+  await assert.rejects(probe(() => { throw new Error('declared propagation defect') }, true), (error) => error instanceof HarnessError && error.message.includes('not by a value'))
+
+  assert.equal(wrong.result, true)
+  assert.ok(wrong.detail.includes('probe: value:'), wrong.detail)
+})
+
+// The mutations run in child processes, several side by side (CHECK_JOBS), each child judging its share one after another the way the whole run once did in one process: every mutation gets its source override and fresh scenarios; module identity remains governed by the utility loader, and a child holds only its own share of module copies in memory. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its verdicts.
 const MUTANTS_PREFIX = 'MUTANTS_RESULT '
 const CHILD_MUTANTS = process.argv.filter((argument) => argument.startsWith('--mutants=')).map((argument) => argument.slice(10).split(',').map(Number))[0]
-
-const closeHandles = async () => {
-  for (const handle of handles.values()) {
-    ;(await handle).close()
-  }
-}
 
 const childMain = async () => {
   const verdicts = []
 
   for (const index of CHILD_MUTANTS) {
-    verdicts.push(await judge(MUTATIONS[index]))
+    console.log(`MUTANT_START ${JSON.stringify({ index, name: MUTATIONS[index].name })}`)
+
+    let verdict
+
+    try {
+      verdict = await judge(MUTATIONS[index])
+    } catch (error) {
+      throw new HarnessError(`event fault ${index} "${MUTATIONS[index].name}", declared checks [${MUTATIONS[index].fails.join(', ')}], could not be credited: ${error && error.stack ? error.stack : error}`)
+    }
+
+    verdicts.push(verdict)
+    console.log(`MUTANT_DETAIL ${JSON.stringify({ index, name: MUTATIONS[index].name, ...verdict })}`)
   }
 
-  await closeHandles()
   process.stdout.write(`${MUTANTS_PREFIX}${JSON.stringify(verdicts)}\n`, () => process.exit(0))
 }
 
+const mutantChunk = async (chunk) => {
+  const result = await runChild(__filename, [`--mutants=${chunk.join(',')}`], { onLine: (line, stream) => { if (stream === 'stderr') { console.error(line) } else if (/^MUTANT_(START|DETAIL) /.test(line)) { console.log(line) } } })
+
+  if (result.code !== 0) {
+    console.error(`CHUNK_FAILURE ${chunk.join(',')}\nComplete child stdout:\n${result.stdout}\nComplete child stderr:\n${result.stderr}`)
+  }
+
+  return lastJson(result, MUTANTS_PREFIX)
+}
+
 const main = async () => {
+  const focus = (process.argv.find((argument) => argument.startsWith('--head-check=')) || '').slice('--head-check='.length)
+
+  const requested = focus ? focus.split(',') : []
+
+  if (focus && (mayMutate() || requested.some((key) => !checks.some((entry) => entry.key === key)))) {
+    throw new HarnessError('--head-check names an existing check and requires --no-mutations')
+  }
+
   const began = Date.now()
-  const real = await loadModules(utilitiesDirectory)
-  const context = contextOf(real)
-
-  if (!falryxSaves()) {
-    console.log(`  skip   ${path.relative(root, FALRYX)} is not here, so the falryx group is not run`)
-  }
-
-  if (!passiveFiles()) {
-    console.log(`  skip   ${path.relative(root, PASSIVE)} is not here, so the passive group is not run`)
-  }
+  let real = await loadModules(utilitiesDirectory)
+  let context = contextOf(real)
 
   console.log('The event archive')
 
-  for (const entry of checks) {
+  if (!CHAIN_THERE) {
+    console.log('  skip   a save of the played campaign is not here, so the chain checks are not run')
+  }
+
+  for (const entry of checks.filter((entry) => (!focus || requested.includes(entry.key)) && !unread(entry))) {
     number++
 
     const started = Date.now()
     const outcome = await outcomeOf(context, entry)
 
-    if (outcome === 'skip') {
-      console.log(`  skip   ${number}. ${entry.key}: its saves are not here`)
-      continue
-    }
-
-    show(`${number}. ${entry.key}: ${entry.name}`, outcome, entry.needs === 'unit' ? '' : `${((Date.now() - started) / 1000).toFixed(1)} s`)
+    show(`${number}. ${entry.key}: ${entry.name}`, outcome.ok ? true : outcome.detail, entry.needs === 'unit' ? '' : `${((Date.now() - started) / 1000).toFixed(1)} s`)
   }
 
   const checksTook = Date.now() - began
 
-  if (!process.argv.includes('--no-mutations')) {
+  context = null
+  real = null
+
+  if (mayMutate()) {
     console.log('\nMutations: each must break the checks it names')
 
     const chunks = chunksOf(MUTATIONS.length)
-    const verdicts = spread(chunks, await inParallel(chunks, async (chunk) => lastJson(await runChild(__filename, [`--mutants=${chunk.join(',')}`]), MUTANTS_PREFIX)))
+    const verdicts = spread(chunks, await inParallel(chunks, mutantChunk, 4))
 
     MUTATIONS.forEach((mutation, index) => {
       const verdict = verdicts[index]
@@ -2610,8 +1929,6 @@ const main = async () => {
   }
 
   console.log(`\n${total - failures} of ${total} checks passed (${((Date.now() - began) / 1000).toFixed(1)} s, the checks themselves ${(checksTook / 1000).toFixed(1)} s)`)
-
-  await closeHandles()
 
   process.exit(failures ? 1 : 0)
 }

@@ -3,8 +3,6 @@
 
   node scripts/check-economy-notes.js [--no-mutations]
 
-  NOTES_FALRYX and NOTES_BOSCO point the saves checks at other folders of saves (or at none: a folder that is not there skips them). A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
-
   Groups:
   - links: each kind of target is linked where the save shows it is the object that was linked (a body by the discovery time of its system, a fleet by its creation time, a catalogue tech anywhere) and not checked where nothing does (a colony, a designed tech), a rename keeps the link and shows the new name, an object that is gone or an ID that another object took is never rebound, and on another branch a body is linked only if its system was found strictly before the branches parted;
   - stale: a deleted or changed target leaves the note readable, marked stale, with the name and system it last had, through a restart and an edit;
@@ -13,7 +11,7 @@
   - edits: a note is made, edited, deleted, refused when stale or invalid, and an edit keeps the link;
   - scope: a link is made only against the objects of the race, campaign and branch the note is kept for, and only for an object that is there as it was picked;
   - picker and reads: the choices of the form, and every query the notebook sends is a select, so editing a note never writes the save;
-  - saves: on the owner's saves (opened read only, skipped when they are not here) the objects load with the real queries, the bodies, colonies, fleets and designed techs whose IDs another branch gave again read as changed or not checked and never as linked, the catalogue is the same in two campaigns, and the renames of a line of saves keep the links;
+  - saves: on the two branches from B of the played campaign (C1 and C2 of scripts/lib/played-chain.js, game 161, race 909, opened read only and skipped when they are not here), with the lineage the real recorder (utilities/history.js) keeps for A, B, C1 and C2 recorded in the order they were played, C2 being a fork of the branch of C1 cut at the shared checkpoint before B (the cut the two ledgers give, never the game time of B or of C2): every body, colony, fleet and tech C1 holds read on C2 with the real queries and the identity SQL gives (the same object linked when it was found or made strictly before the cut, a colony and a designed tech not checked, an object C2 does not hold gone), a note made on one branch kept and read on the other (what only the first holds gone and stale with its name), and every query a select with the file as it was. The chain cannot tell the cut from a later one: the latest body or fleet both branches hold was found or made before the cut and the earliest one only a branch holds after it, with the game time of B between the two, so a cut that is too late and the strictness of the comparison at the cut are held by the planted trees of the links group alone, a cut that is too early only by the one fleet made just before the cut, and the cut itself by the lineage check. No object of the race is given again under an ID between the two branches, so an ID taken by another object is held by the planted saves alone;
   - backup: notes round-trip through the backup's annotation adapter;
   - page: the panels name what they are for in the page's voice, a note is kept from the form, listed, filtered, isolated by race and branch, a draft is dropped and refused when what is shown changes (the backup's registration of the notes' adapter is checked with every other kind by scripts/check-history-restore.js).
 
@@ -23,20 +21,18 @@ const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { createRequire } = require('module')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const played = require('./lib/played-chain')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'notebook.vue')
 const navigationFile = path.join(utilitiesDirectory, 'navigation.js')
-const FALRYX = process.env.NOTES_FALRYX || path.join(root, 'artifacts', 'falryx-sequential-and-rollback')
-const BOSCO = process.env.NOTES_BOSCO || path.join(root, 'artifacts', 'boscodiogigia-sequential-saves')
-const NAMES = ['economy-notes', 'history-milestones', 'scenario-records', 'history-backup']
+const NAMES = ['economy-notes', 'history-milestones', 'scenario-records', 'history-backup', 'history']
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -48,8 +44,6 @@ const STUBS = {
   romanum: 'export default { toNumeral: String }',
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
-
-const localRequire = createRequire(path.join(root, 'package.json'))
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
@@ -163,7 +157,7 @@ const fakeSave = (save, { failing = [] } = {}) => {
         const ids = wanted ? wanted[1].split(',').map((part) => Number(part.trim())) : null
         const only = sql.includes(':SystemID') ? options.replacements.SystemID : null
 
-        return [save.bodies.filter((row) => (ids ? ids.includes(row.id) : row.systemId === only)).filter((row) => found(save.systems, row.systemId)).map((row) => ({ SystemBodyID: row.id, SystemID: row.systemId, BodyClass: row.bodyClass, BodyTypeID: row.bodyType, PlanetNumber: row.planet, OrbitNumber: row.orbit, Component: 1, SystemBodyName: row.name, SystemName: named(row.systemId), DiscoveredTime: found(save.systems, row.systemId).discovered }))]
+        return [save.bodies.filter((row) => (ids ? ids.includes(row.id) : row.systemId === only)).filter((row) => found(save.systems, row.systemId)).map((row) => ({ SystemBodyID: row.id, SystemID: row.systemId, BodyClass: row.bodyClass, BodyTypeID: row.bodyType, PlanetNumber: row.planet, OrbitNumber: row.orbit, ComponentNumber: 1, SystemBodyName: row.name, SystemName: named(row.systemId), DiscoveredTime: found(save.systems, row.systemId).discovered }))]
       }
 
       if (sql.includes('from FCT_Population')) {
@@ -497,6 +491,9 @@ const suite = (m) => {
 
     const unread = notes.readNotes(w.repo, scope(), noTechs).entries
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE fleet link after another read fails:', entryFor(unread, 'fleet').link.status)
+    }
     assert.equal(entryFor(unread, 'tech').link.status, 'unknown')
     assert.equal(entryFor(unread, 'tech').stale, false)
     assert.equal(entryFor(unread, 'fleet').link.status, 'linked')
@@ -859,6 +856,12 @@ const suite = (m) => {
     assert.equal(after.title, 'Terraform it')
     assert.equal(after.status, 'done')
     assert.equal(after.next, '')
+    const linkedIds = after.links.map((link) => `${link.type}:${link.id}`)
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE note linked object IDs after editing:', JSON.stringify(linkedIds))
+    }
+    assert.deepEqual(linkedIds, ['body:101'], 'the note keeps the linked body identity')
     assert.equal(after.target.id, 101)
     assert.equal(after.link.status, 'linked')
     assert.equal(after.links.length, 1)
@@ -1084,6 +1087,12 @@ const suite = (m) => {
     await notes.saveNote(w.repo, scope(), { entry, title: 'Edited', status: 'done', next: '', context })
     await notes.deleteNote(w.repo, scope(), entriesOf(w, scope(), context)[0])
 
+    const writes = context.database.sent.filter(({ sql }) => /^(?:insert|update|delete|drop|alter|create|replace|attach|pragma)\b/i.test(sql)).length
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE write statements sent by the notebook:', writes)
+    }
+    assert.equal(writes, 0, 'the save receives no write statement from the notebook')
     assert.ok(context.database.sent.length >= 7)
     context.database.sent.forEach(({ sql }) => {
       assert.match(sql, /^select /)
@@ -1103,6 +1112,9 @@ const suite = (m) => {
     await notes.saveNote(w.repo, scope(), { entry, title: 'Edited', status: 'done', next: '', context })
     await notes.deleteNote(w.repo, scope(), entriesOf(w, scope(), context)[0])
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE save queries sent while editing notes:', context.database.sent.length - sentBefore)
+    }
     assert.equal(context.database.sent.length, sentBefore)
   })
 
@@ -1136,6 +1148,9 @@ const suite = (m) => {
     const database = fakeSave(SAVE(), { failing: ['FCT_Population'] })
     const loaded = await notes.loadNoteObjects(database, { GameID: 1, RaceID: 7 })
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE fleets and systems after a colony read fails:', JSON.stringify([loaded.objects.fleet.size, loaded.systems.length]))
+    }
     assert.match(loaded.failed.colony, /the save lacks the population data/)
     assert.equal(loaded.objects.colony, undefined)
     assert.equal(loaded.objects.fleet.size, 2)
@@ -1200,25 +1215,25 @@ const suite = (m) => {
 
   // ---- saves --------------------------------------------------------------------------------------------------------
 
-  const sqlite3 = () => localRequire('sqlite3')
+  const chainThere = ['A', 'B', 'C1', 'C2'].every((letter) => fs.existsSync(played.fileOf(letter)))
 
-  // A save opened read only, with a `database` of the shape the page's reads use, and the SQL it was sent.
-  const openSave = (file) => {
-    const db = new (sqlite3().Database)(file, sqlite3().OPEN_READONLY)
+  // A save of the played campaign (scripts/lib/played-chain.js, opened read only), with a `database` of the shape the page's reads use, and the SQL it was sent. A write is refused by the file (read only), so one sent is counted in `sent` and fails there.
+  const openSave = (letter) => {
+    const file = played.fileOf(letter)
     const sent = []
-    const run = (sql, params = {}) => new Promise((resolve, reject) => db.all(sql, Object.fromEntries(Object.entries(params).map(([key, value]) => [`:${key}`, value])), (error, rows) => (error ? reject(error) : resolve(rows))))
+    const run = async (sql, params = {}) => played.rowsOf(file, sql, params)
 
-    return { file, sent, close: () => db.close(), run, database: { query: async (sql, { replacements = {} } = {}) => { sent.push(sql); return [await run(sql, replacements)] } } }
+    return { letter, file, sent, run, database: { query: async (sql, { replacements = {} } = {}) => { sent.push(sql); return [await run(sql, replacements)] } } }
   }
 
   const KNOWN_BODIES = 'select FCT_SystemBody.SystemBodyID from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = :RaceID and FCT_RaceSysSurvey.GameID = :GameID where FCT_SystemBody.GameID = :GameID and FCT_SystemBody.BodyClass in (1, 2, 3, 5)'
 
   // The objects of a real save: everything `loadNoteObjects` gives and every body the race knows.
-  const objectsOfSave = async (save, GameID, RaceID) => {
-    const ids = (await save.run(KNOWN_BODIES, { GameID, RaceID })).map((row) => row.SystemBodyID)
-    const loaded = await notes.loadNoteObjects(save.database, { GameID, RaceID })
-    const bodies = await notes.loadBodies(save.database, { GameID, RaceID, bodyIds: ids })
-    const [{ GameTime }] = await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID })
+  const objectsOfSave = async (save) => {
+    const ids = (await save.run(KNOWN_BODIES, { GameID: played.GAME, RaceID: played.RACE })).map((row) => row.SystemBodyID)
+    const loaded = await notes.loadNoteObjects(save.database, { GameID: played.GAME, RaceID: played.RACE })
+    const bodies = await notes.loadBodies(save.database, { GameID: played.GAME, RaceID: played.RACE, bodyIds: ids })
+    const [{ GameTime }] = await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID: played.GAME })
 
     return { objects: notes.withBodies(loaded, bodies).objects, GameTime, failed: loaded.failed }
   }
@@ -1232,248 +1247,230 @@ const suite = (m) => {
     return milestones.resolveLink(stored, { name: row.name, origin }, context, notes.NOTE_TARGETS)
   }
 
-  const falryxFiles = () => (fs.existsSync(FALRYX) ? fs.readdirSync(FALRYX).filter((name) => /^AuroraDB-\d+\.db$/.test(name)).sort() : [])
+  const idsOf = async (save, sql) => new Set((await save.run(sql, { GameID: played.GAME, RaceID: played.RACE })).map((row) => Object.values(row)[0]))
 
-  check('saves', 'on the owner\'s saves of a rewound game the bodies, colonies, fleets and designed techs whose IDs another branch gave again read as changed or not checked and are never linked', async () => {
-    const files = falryxFiles()
+  const SQL_IDS = { fleet: 'select FleetID from FCT_Fleet where GameID = :GameID and RaceID = :RaceID', colony: 'select PopulationID from FCT_Population where GameID = :GameID and RaceID = :RaceID', body: KNOWN_BODIES }
 
-    if (files.length < 5) {
-      return { skipped: 'the falryx saves are not here' }
-    }
+  // The branches of the played campaign as the real recorder (utilities/history.js) keeps them: A, B, C1 and C2 recorded in the order they were played into stores in memory (scripts/lib/played-chain.js), so that C2, which leaves C1 at B, is a fork of the branch of C1. `branches` is what the page hands the links (`branchLineage` of the registry), `branchOf` the branch the recorder gave each save.
+  let chainHeld = null
 
-    const GameID = 141
-    const RaceID = 791
-    const [common, a, b] = ['AuroraDB-2713949950.db', 'AuroraDB-2740177930.db', 'AuroraDB-2794985390.db'].map((name) => openSave(path.join(FALRYX, name)))
+  const chainOf = () => {
+    chainHeld = chainHeld || (async () => {
+      const inst = played.installation()
+      const branchOf = {}
+      let resolved = null
 
-    try {
-      const [before, left, right] = [await objectsOfSave(common, GameID, RaceID), await objectsOfSave(a, GameID, RaceID), await objectsOfSave(b, GameID, RaceID)]
-      const parted = before.GameTime
-      const tree = { x: { parent: null, t: null }, y: { parent: 'x', t: parted } }
-      const context = { objects: right.objects, GameID, RaceID, campaignId: 'c1', branchId: 'y', branches: tree }
-      const origin = { campaignId: 'c1', branchId: 'x' }
-      const report = {}
+      for (const letter of ['A', 'B', 'C1', 'C2']) {
+        const run = await played.recordSave(m.history, inst, letter, { onResolved: (GameID, resolution) => { resolved = GameID === played.GAME ? resolution : resolved } })
 
-      for (const type of Object.keys(notes.NOTE_TARGETS)) {
-        const counts = { reissued: 0, linked: 0, unknown: 0, changed: 0, missing: 0, linkedButReissued: 0 }
-
-        for (const [id, row] of left.objects[type]) {
-          const now = right.objects[type].get(id) || null
-          const result = shown(type, row, now, context, origin)
-
-          counts[result.status] += 1
-
-          if (now && notes.NOTE_TARGETS[type].fingerprint(now) !== notes.NOTE_TARGETS[type].fingerprint(row)) {
-            counts.reissued += 1
-            const timeLost = type === 'fleet' && Number.isFinite(row.created) && !Number.isFinite(now.created)
-
-            assert.equal(result.status, timeLost ? 'unknown' : 'changed', `${type} ${id}`)
-          }
-
-          if (type !== 'tech' && result.status === 'linked') {
-            assert.ok(now && notes.NOTE_TARGETS[type].fingerprint(now) === notes.NOTE_TARGETS[type].fingerprint(row), `${type} ${id} is linked though it differs`)
-          }
-
-          if (type === 'colony' || type === 'design') {
-            assert.notEqual(result.status, 'linked', `${type} ${id}`)
-          }
+        if (run.failed.length) {
+          throw new Error(`recording ${letter} failed: ${run.failed.map((failure) => failure.error && failure.error.message).join('; ')}`)
         }
 
-        report[type] = counts
+        branchOf[letter] = resolved.branchId
       }
 
-      assert.ok(report.body.reissued > 100, `bodies given again: ${report.body.reissued}`)
-      assert.ok(report.colony.reissued > 0, `colonies given again: ${report.colony.reissued}`)
-      assert.ok(report.body.linked > 1000)
-      assert.equal(report.colony.linked, 0)
-      assert.equal(report.design.linked, 0)
-      assert.ok(report.tech.linked === 1186 && report.tech.changed === 0, 'the whole catalogue links on the other branch')
+      return { campaignId: resolved.campaignId, branchOf, branches: m.milestones.branchLineage(clone(inst.files.get('registry')).campaigns[resolved.campaignId]) }
+    })()
 
-      // The evidence the rule rests on: no body of a system found before the last save both branches hold differs on the two branches.
-      let early = 0
+    return chainHeld
+  }
 
-      for (const [id, row] of left.objects.body) {
-        const now = right.objects.body.get(id)
+  const gameTimeOf = async (save) => (await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID: played.GAME }))[0].GameTime
 
-        if (now && row.discovered < parted) {
-          early += 1
-          assert.equal(notes.NOTE_TARGETS.body.fingerprint(now), notes.NOTE_TARGETS.body.fingerprint(row), `body ${id}`)
+  // The times a note's link is certified by, read by SQL written here: when the system of a body was found by the race, and when a fleet was created (its first history entry, none for a fleet that has none).
+  const TIMES_SQL = {
+    body: 'select FCT_SystemBody.SystemBodyID as id, FCT_RaceSysSurvey.DiscoveredTime as t from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = :RaceID and FCT_RaceSysSurvey.GameID = :GameID where FCT_SystemBody.GameID = :GameID and FCT_SystemBody.BodyClass in (1, 2, 3, 5)',
+    fleet: "select FCT_Fleet.FleetID as id, min(FCT_FleetHistory.GameTime) as t from FCT_Fleet left join FCT_FleetHistory on FCT_FleetHistory.FleetID = FCT_Fleet.FleetID and FCT_FleetHistory.GameID = :GameID and FCT_FleetHistory.Description like 'Created on%' where FCT_Fleet.GameID = :GameID and FCT_Fleet.RaceID = :RaceID group by FCT_Fleet.FleetID",
+  }
+
+  const timesOf = async (save) => Object.fromEntries(await Promise.all(Object.entries(TIMES_SQL).map(async ([type, sql]) => [type, new Map((await save.run(sql, { GameID: played.GAME, RaceID: played.RACE })).map((row) => [row.id, row.t]))])))
+
+  // What the objects of two saves say of where a cut may lie: the latest time of a body or a fleet both hold under one ID with one time, and the earliest time of one that only one holds (or that the two time differently).
+  const windowOf = (left, right) => {
+    let latest = -Infinity
+    let earliest = Infinity
+
+    for (const type of Object.keys(TIMES_SQL)) {
+      for (const id of new Set([...left[type].keys(), ...right[type].keys()])) {
+        const times = [left[type], right[type]].map((held) => (held.has(id) ? held.get(id) : undefined))
+
+        if (times[0] !== undefined && times[0] === times[1] && Number.isFinite(times[0])) {
+          latest = Math.max(latest, times[0])
+        } else {
+          times.filter((t) => Number.isFinite(t)).forEach((t) => { earliest = Math.min(earliest, t) })
         }
       }
-
-      assert.ok(early > 1000)
-
-      const later = Math.min(...[...left.objects.body.values()].filter((row) => right.objects.body.has(row.id) && notes.NOTE_TARGETS.body.fingerprint(right.objects.body.get(row.id)) !== notes.NOTE_TARGETS.body.fingerprint(row)).map((row) => row.discovered))
-
-      assert.ok(later >= parted, 'every body that was given again is in a system found after the saves the branches share')
-
-      return `${report.body.reissued} bodies, ${report.colony.reissued} colonies, ${report.fleet.reissued} fleets, ${report.design.reissued} designed techs given again; none linked`
-    } finally {
-      ;[common, a, b].forEach((save) => save.close())
     }
+
+    return { latest, earliest }
+  }
+
+  check('saves', 'the lineage the real recorder keeps for the played campaign gives the links the cut of the fork where the ledgers of C1 and C2 part: C2 a fork of the branch C1 is on, cut at the last whole 64 increments the two ledgers share, before the save of B and never at the game time of C2, after every body and fleet both branches hold and before every one that only a branch holds', async () => {
+    if (!chainThere) {
+      return { skipped: 'the played saves are not here' }
+    }
+
+    const chain = await chainOf()
+    const parting = played.partingOf(played.ledgerOf('C1'), played.ledgerOf('C2'))
+    const [common, a, b] = ['B', 'C1', 'C2'].map(openSave)
+    const fork = chain.branches[chain.branchOf.C2]
+    const reached = await gameTimeOf(common)
+    const held = windowOf(await timesOf(a), await timesOf(b))
+
+    assert.deepEqual(chain.branchOf, { A: 'b1', B: 'b1', C1: 'b1', C2: 'b2' })
+    assert.deepEqual(chain.branches[chain.branchOf.C1], { parent: null, t: null })
+    assert.equal(fork.parent, chain.branchOf.C1)
+    assert.equal(fork.t, parting.t, 'the fork is cut at the last whole 64 increments the two ledgers share')
+    assert.ok(fork.t < reached, 'the cut falls before the save of B')
+    assert.ok(reached < (await gameTimeOf(b)), 'the save of B is before the save of C2')
+    assert.ok(held.latest < fork.t && fork.t <= held.earliest, `the cut ${fork.t} lies after the latest object both hold (${held.latest}) and by the earliest one only a branch holds (${held.earliest})`)
+
+    return `cut ${fork.t}, the save of B ${reached}: the objects both hold were found or made by ${held.latest}, the ones only a branch holds from ${held.earliest}`
   })
 
-  check('saves', 'on the owner\'s saves a note made on one branch is kept, read on the other and edited end to end, with the sample of bodies given again reading changed', async () => {
-    const files = falryxFiles()
-
-    if (files.length < 5) {
-      return { skipped: 'the falryx saves are not here' }
+  check('saves', 'on the saves of the two branches from B (C1 and C2), with the lineage the real recorder keeps for them, every body, colony, fleet, catalogue tech and designed tech C1 holds reads on C2 as SQL says: the same object linked when it was found or made strictly before the cut of the fork (a colony and a designed tech never, being not checked), one C2 does not hold gone, and none that differs under its ID linked', async () => {
+    if (!chainThere) {
+      return { skipped: 'the played saves are not here' }
     }
 
-    const GameID = 141
-    const RaceID = 791
-    const [a, b] = ['AuroraDB-2740177930.db', 'AuroraDB-2794985390.db'].map((name) => openSave(path.join(FALRYX, name)))
+    const chain = await chainOf()
+    const parting = played.partingOf(played.ledgerOf('C1'), played.ledgerOf('C2'))
+    const [a, b] = ['C1', 'C2'].map(openSave)
+    const [left, right] = [await objectsOfSave(a), await objectsOfSave(b)]
+    const times = await timesOf(a)
+    const context = { objects: right.objects, GameID: played.GAME, RaceID: played.RACE, campaignId: chain.campaignId, branchId: chain.branchOf.C2, branches: chain.branches }
+    const origin = { campaignId: chain.campaignId, branchId: chain.branchOf.C1 }
+    const report = {}
 
-    try {
-      const [left, right] = [await objectsOfSave(a, GameID, RaceID), await objectsOfSave(b, GameID, RaceID)]
-      const differs = (id) => notes.NOTE_TARGETS.body.fingerprint(right.objects.body.get(id)) !== notes.NOTE_TARGETS.body.fingerprint(left.objects.body.get(id))
-      const shared = [...left.objects.body.keys()].filter((id) => right.objects.body.has(id))
-      const reissued = shared.filter(differs).slice(0, 12)
-      const same = shared.filter((id) => !differs(id) && left.objects.body.get(id).discovered < 2713949950).slice(0, 12)
+    for (const type of Object.keys(notes.NOTE_TARGETS)) {
+      const counts = { reissued: 0, linked: 0, unknown: 0, changed: 0, missing: 0 }
+      const target = notes.NOTE_TARGETS[type]
+
+      for (const [id, row] of left.objects[type]) {
+        const now = right.objects[type].get(id) || null
+        const result = shown(type, row, now, context, origin)
+        const same = Boolean(now) && target.fingerprint(now) === target.fingerprint(row)
+        const made = times[type] ? times[type].get(id) : undefined
+        const timeLost = Boolean(now) && type === 'fleet' && Number.isFinite(row.created) && !Number.isFinite(now.created)
+        const certified = type === 'tech' || (Number.isFinite(made) && made < parting.t)
+        const wanted = !now ? 'missing' : !same ? (timeLost ? 'unknown' : 'changed') : certified ? 'linked' : 'unknown'
+
+        counts[result.status] += 1
+        counts.reissued += now && !same ? 1 : 0
+        assert.equal(result.status, wanted, `${type} ${id}`)
+      }
+
+      report[type] = counts
+    }
+
+    for (const type of Object.keys(SQL_IDS)) {
+      const [held, there] = [await idsOf(a, SQL_IDS[type]), await idsOf(b, SQL_IDS[type])]
+      const gone = [...held].filter((id) => !there.has(id)).length
+
+      assert.equal(report[type].missing, gone, `${type}: the objects C2 does not hold`)
+      assert.equal(left.objects[type].size, held.size, `${type}: the objects of C1`)
+    }
+
+    assert.equal(report.body.linked, left.objects.body.size)
+    assert.equal(report.fleet.linked + report.fleet.missing, left.objects.fleet.size)
+    assert.ok(report.body.linked > 1000 && report.fleet.linked > 20 && report.fleet.missing > 0, JSON.stringify(report))
+    assert.equal(report.colony.linked, 0)
+    assert.equal(report.design.linked, 0)
+    assert.ok(report.colony.unknown > 0 && report.design.unknown > 0)
+    assert.ok(report.tech.linked === left.objects.tech.size && report.tech.changed === 0 && report.tech.linked > 1000, 'the whole catalogue links on the other branch')
+
+    return `${report.body.linked} bodies, ${report.fleet.linked} fleets and ${report.tech.linked} techs linked, ${report.fleet.missing} fleets gone, ${report.colony.unknown} colonies and ${report.design.unknown} designed techs not checked, ${report.body.reissued + report.colony.reissued + report.fleet.reissued + report.design.reissued} given again`
+  })
+
+  check('saves', 'on the saves of the two branches from B a note made on one branch is kept and read on the other, with the lineage the real recorder keeps for them: the bodies and fleets both hold read linked, a colony not checked, and what only the first holds, made after the cut, reads gone and stale with the name and the system it had', async () => {
+    if (!chainThere) {
+      return { skipped: 'the played saves are not here' }
+    }
+
+    const chain = await chainOf()
+    const parting = played.partingOf(played.ledgerOf('C1'), played.ledgerOf('C2'))
+    const [a, b] = ['C1', 'C2'].map(openSave)
+    const sides = { C1: await objectsOfSave(a), C2: await objectsOfSave(b) }
+    const times = { C1: await timesOf(a), C2: await timesOf(b) }
+    const contextOn = (letter) => ({ objects: sides[letter].objects, GameID: played.GAME, RaceID: played.RACE, campaignId: chain.campaignId, branchId: chain.branchOf[letter], branches: chain.branches })
+    const scopeOn = (letter) => scope(chain.branchOf[letter], played.RACE, chain.campaignId)
+    const pick = (from, to, type, held) => [...sides[from].objects[type].keys()].filter((id) => sides[to].objects[type].has(id) === held).slice(0, 8)
+    const summary = {}
+
+    for (const [from, to] of [['C1', 'C2'], ['C2', 'C1']]) {
       const w = world(m)
-      const whereX = scope('x', RaceID)
-      const contextX = { objects: left.objects, GameID, RaceID, campaignId: 'c1', branchId: 'x', branches: { x: { parent: null, t: null }, y: { parent: 'x', t: 2713949950 } } }
+      const made = { held: { body: pick(from, to, 'body', true), fleet: pick(from, to, 'fleet', true), colony: pick(from, to, 'colony', true) }, gone: { body: pick(from, to, 'body', false), fleet: pick(from, to, 'fleet', false) } }
 
-      for (const id of [...reissued, ...same]) {
-        await kept(w, whereX, contextX, 'body', id, { policy: 'campaign' })
-      }
-
-      const contextY = { objects: right.objects, GameID, RaceID, campaignId: 'c1', branchId: 'y', branches: contextX.branches }
-      const entries = entriesOf(w, scope('y', RaceID), contextY)
-
-      assert.equal(entries.length, reissued.length + same.length)
-      reissued.forEach((id) => assert.equal(entries.find((entry) => entry.target.id === id).link.status, 'changed', `body ${id}`))
-      same.forEach((id) => assert.equal(entries.find((entry) => entry.target.id === id).link.status, 'linked', `body ${id}`))
-      assert.ok(reissued.length >= 5 && same.length >= 5)
-      assert.equal(entries.filter((entry) => entry.stale).length, reissued.length)
-
-      return `${reissued.length} reissued bodies changed, ${same.length} older ones linked`
-    } finally {
-      ;[a, b].forEach((save) => save.close())
-    }
-  })
-
-  check('saves', 'the game\'s own catalogue of techs is the same in two campaigns of two games, and a note on one links in the other', async () => {
-    const files = falryxFiles()
-    const boscoFiles = fs.existsSync(BOSCO) ? fs.readdirSync(BOSCO).filter((name) => name.endsWith('.db')).sort() : []
-
-    if (files.length < 1 || boscoFiles.length < 1) {
-      return { skipped: 'the owner\'s saves are not here' }
-    }
-
-    const [falryx, bosco] = [openSave(path.join(FALRYX, files[0])), openSave(path.join(BOSCO, boscoFiles[0]))]
-
-    try {
-      const [one, two] = [await objectsOfSave(falryx, 141, 791), await objectsOfSave(bosco, 140, 784)]
-      const context = { objects: two.objects, GameID: 140, RaceID: 784, campaignId: 'c2', branchId: 'z', branches: {} }
-      let linked = 0
-
-      for (const [id, row] of one.objects.tech) {
-        const result = shown('tech', row, two.objects.tech.get(id) || null, context, { campaignId: 'c1', branchId: 'x' })
-
-        assert.equal(result.status, 'linked', `tech ${id}`)
-        linked += 1
-      }
-
-      assert.equal(one.objects.tech.size, two.objects.tech.size)
-      assert.ok(linked > 1000)
-
-      return `${linked} techs link across campaigns`
-    } finally {
-      ;[falryx, bosco].forEach((save) => save.close())
-    }
-  })
-
-  check('saves', 'on the owner\'s line of saves the renames keep every link: bodies, fleets and techs stay linked and show the new name, colonies stay not checked and name their holder', async () => {
-    const files = fs.existsSync(BOSCO) ? fs.readdirSync(BOSCO).filter((name) => name.endsWith('.db')) : []
-
-    if (files.length < 2) {
-      return { skipped: 'the boscodiogigia saves are not here' }
-    }
-
-    const GameID = 140
-    const RaceID = 784
-    const saves = files.map((name) => openSave(path.join(BOSCO, name)))
-
-    try {
-      const loaded = []
-
-      for (const save of saves) {
-        const [game] = await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID })
-
-        if (game) {
-          loaded.push({ time: game.GameTime, ...(await objectsOfSave(save, GameID, RaceID)) })
-        }
-      }
-
-      loaded.sort((x, y) => x.time - y.time)
-      assert.ok(loaded.length >= 2)
-
-      const renamed = { body: 0, colony: 0, fleet: 0, tech: 0 }
-      const origin = { campaignId: 'c1', branchId: 'b1' }
-
-      for (let index = 1; index < loaded.length; index += 1) {
-        const [first, second] = [loaded[index - 1], loaded[index]]
-        const context = { objects: second.objects, GameID, RaceID, campaignId: 'c1', branchId: 'b1', branches: TREE }
-
-        for (const type of Object.keys(renamed)) {
-          for (const [id, row] of first.objects[type]) {
-            const now = second.objects[type].get(id)
-
-            if (!now || now.name === row.name || notes.NOTE_TARGETS[type].fingerprint(now) !== notes.NOTE_TARGETS[type].fingerprint(row)) {
-              continue
-            }
-
-            const result = shown(type, row, now, context, origin)
-
-            renamed[type] += 1
-
-            if (type === 'colony') {
-              assert.equal(result.status, 'unknown', `colony ${id}`)
-              assert.equal(result.nowNamed, null)
-            } else if (type === 'fleet' && !Number.isFinite(row.created)) {
-              assert.equal(result.status, 'unknown', `fleet ${id}`)
-            } else {
-              assert.equal(result.status, 'linked', `${type} ${id}`)
-              assert.equal(result.nowNamed, now.name, `${type} ${id}`)
-            }
+      for (const group of Object.values(made)) {
+        for (const [type, ids] of Object.entries(group)) {
+          for (const id of ids) {
+            await kept(w, scopeOn(from), contextOn(from), type, id, { policy: 'campaign' })
           }
         }
       }
 
-      assert.ok(renamed.body + renamed.colony + renamed.fleet + renamed.tech > 0, 'the saves hold at least one rename')
+      const entries = entriesOf(w, scopeOn(to), contextOn(to))
+      const entryOf = (type, id) => entries.find((entry) => entry.target.type === type && entry.target.id === id)
 
-      return `renames kept: ${renamed.body} bodies, ${renamed.colony} colonies, ${renamed.fleet} fleets, ${renamed.tech} techs`
-    } finally {
-      saves.forEach((save) => save.close())
+      summary[`${from}${to}`] = { held: made.held.body.length + made.held.fleet.length + made.held.colony.length, gone: made.gone.body.length + made.gone.fleet.length }
+
+      for (const [type, ids] of Object.entries(made.held)) {
+        ids.forEach((id) => {
+          const at = times[from][type] ? times[from][type].get(id) : undefined
+
+          assert.equal(entryOf(type, id).link.status, type !== 'colony' && Number.isFinite(at) && at < parting.t ? 'linked' : 'unknown', `${from} to ${to}: ${type} ${id}`)
+          assert.equal(entryOf(type, id).stale, false, `${from} to ${to}: ${type} ${id}`)
+        })
+      }
+
+      for (const [type, ids] of Object.entries(made.gone)) {
+        ids.forEach((id) => {
+          const entry = entryOf(type, id)
+          const row = sides[from].objects[type].get(id)
+          const at = times[from][type].get(id)
+
+          assert.ok(Number.isFinite(at) && at >= parting.t, `${from} to ${to}: ${type} ${id} is held by one branch only, so made after the cut (${at})`)
+          assert.equal(entry.link.status, 'missing', `${from} to ${to}: ${type} ${id}`)
+          assert.equal(entry.stale, true, `${from} to ${to}: ${type} ${id}`)
+          assert.equal(entry.target.name, row.name, `${from} to ${to}: ${type} ${id}`)
+        })
+      }
+
+      assert.equal(entries.length, Object.values(made).flatMap((group) => Object.values(group).flat()).length)
+      assert.equal(entries.filter((entry) => entry.stale).length, made.gone.body.length + made.gone.fleet.length)
     }
+
+    return JSON.stringify(summary)
   })
 
-  check('saves', 'on the owner\'s saves every query is a select, and reading the objects leaves the file as it was', async () => {
-    const files = falryxFiles()
-
-    if (files.length < 1) {
-      return { skipped: 'the falryx saves are not here' }
+  check('saves', 'on the saves of the two branches from B every query is a select, and reading the objects leaves the file as it was', async () => {
+    if (!chainThere) {
+      return { skipped: 'the played saves are not here' }
     }
 
-    const file = path.join(FALRYX, files[files.length - 1])
+    const file = played.fileOf('C2')
     const digest = () => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
     const before = digest()
-    const save = openSave(file)
+    const save = openSave('C2')
+    const [first] = await save.run('select SystemID from FCT_RaceSysSurvey where GameID = :GameID and RaceID = :RaceID limit 1', { GameID: played.GAME, RaceID: played.RACE })
+    const ids = (await save.run(KNOWN_BODIES, { GameID: played.GAME, RaceID: played.RACE })).slice(0, 2).map((row) => row.SystemBodyID)
+    const loaded = await notes.loadNoteObjects(save.database, { GameID: played.GAME, RaceID: played.RACE })
+    const bodies = await notes.loadBodies(save.database, { GameID: played.GAME, RaceID: played.RACE, bodyIds: ids, systemId: first.SystemID })
+    const writes = save.sent.filter((sql) => /^(?:insert|update|delete|drop|alter|create|replace|attach|pragma)\b/i.test(sql)).length
 
-    try {
-      const [first] = await save.run('select SystemID from FCT_RaceSysSurvey where GameID = 141 and RaceID = 791 limit 1')
-      const loaded = await notes.loadNoteObjects(save.database, { GameID: 141, RaceID: 791 })
-      const bodies = await notes.loadBodies(save.database, { GameID: 141, RaceID: 791, bodyIds: [1988470, 1988471], systemId: first.SystemID })
-
-      assert.deepEqual(loaded.failed, {})
-      assert.ok(bodies.size >= 2)
-      assert.ok(save.sent.length >= 7)
-      save.sent.forEach((sql) => assert.match(sql, /^select /))
-    } finally {
-      save.close()
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE write statements sent to the real save:', writes)
     }
 
+    assert.equal(writes, 0, 'the real save receives no write statement from the notebook')
+    assert.deepEqual(loaded.failed, {})
+    assert.ok(bodies.size >= 2)
+    assert.ok(save.sent.length >= 7, `${save.sent.length} statements`)
+    save.sent.forEach((sql) => assert.match(sql, /^select /))
     assert.equal(digest(), before)
+
+    return `${save.sent.length} statements, none a write, the file as it was`
   })
 
   return checks
@@ -1739,6 +1736,10 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     mount.vm.draft.kind = 'fleet'
     mount.vm.draft.title = 'No object'
     await mount.vm.saveDraft(false)
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE notes kept without picking an object:', mount.vm.entries.length)
+    }
+    assert.equal(mount.vm.entries.length, 0, 'an unpicked object creates no note')
     assert.match(mount.vm.message, /Pick the object/)
     assert.equal(notes.readNotes(mount.w.repo, scope()).entries.length, 0)
   })
@@ -1772,6 +1773,9 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     assert.equal(mount.vm.draft.kind, 'keep')
     mount.vm.draft.status = 'done'
     await mount.vm.saveDraft(false)
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE fleet note target after form-only editing:', mount.vm.entries[0].target.id)
+    }
     assert.equal(mount.vm.entries[0].target.id, 30)
     assert.equal(mount.vm.entries[0].statusText, 'Done')
 
@@ -1813,15 +1817,29 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
 // ---- Mutants ---------------------------------------------------------------------------------------------------------
 
+// TFIN-03 catalog audit: zero-based combined utility/page indices and mapped checks are unchanged; replacements do not prove retired operators.
+// [40] Old: "a failed read of one kind of object stops the others"; new: "a failed colony read clears the other loaded objects".
+// The original throw in the kind catch (economy-notes.js:135) rejects getContext before any returned context can be observed.
+// Replacement class: successful object maps are cleared after a failed kind. Original unhandled-kind-rejection class currently has no credited fault.
+// [41] Old/new: "a write is sent to the save". [42] Old/new: "keeping a note writes to the save".
+// Both exact original update/delete statements remain; only their rejected responses are handled so actual sent SQL counts can be asserted.
+// Defect class: unauthorized write attempts, not read-only/fake-save rejection. Original write-attempt class keeps a fault: yes, at both indices.
+// [57] Old: "the form relinks a note when it is only edited"; new: "a form-only edit relinks to the last loaded fleet".
+// The original accesses null draft.pick.row at notebook.vue:429, before try:433; no edited note is persisted.
+// Replacement class: a form-only edit persists a different existing fleet target. Original null-pick dereference class currently has no credited fault.
+// [58] Old: "a note is kept with no object picked"; new: "an unpicked note form chooses the first loaded object".
+// Removing the original no-pick guard accesses null draft.pick.row at notebook.vue:429 before any note is created.
+// Replacement class: an unpicked form silently chooses an object and saves a note. Original missing-pick guard-removal crash class currently has no credited fault.
+
 const UTILITY_MUTATIONS = [
   { name: 'a link whose object is gone is rebound to the object with the same content', file: 'economy-notes.js', find: 'return objects.get(link.id) || null', replace: 'return objects.get(link.id) || [...objects.values()].find((row) => targetOf(link.type).fingerprint(row) === link.fingerprint) || null', fails: ['links: a link is never rebound'] },
-  { name: 'an ID that another object took is trusted', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId), present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "fingerprint: () => 'body',", fails: ['links: an ID that a save gives to another object reads changed', 'saves: on the owner\'s saves of a rewound game'] },
+  { name: 'an ID that another object took is trusted', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId), present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "fingerprint: () => 'body',", fails: ['links: an ID that a save gives to another object reads changed'] },
   { name: 'a body is told by its name', file: 'economy-notes.js', find: "fingerprint: (row) => ['body', present(row.systemId),", replace: "fingerprint: (row) => ['body', row.name, present(row.systemId),", fails: ['links: no fingerprint holds a name', 'links: a renamed body, fleet and tech stays linked'] },
   { name: 'a tech is told by its name', file: 'economy-notes.js', find: "fingerprint: (row) => ['tech', present(row.typeId),", replace: "fingerprint: (row) => ['tech', row.name, present(row.typeId),", fails: ['links: no fingerprint holds a name', 'links: a renamed body, fleet and tech stays linked'] },
-  { name: 'a body is not told by its place', file: 'economy-notes.js', find: "present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "present(row.discovered)].join('|'),", fails: ['links: an ID that a save gives to another object reads changed', 'saves: on the owner\'s saves of a rewound game'] },
-  { name: 'a stale note shows no name', file: 'economy-notes.js', find: 'id: target.id, name: target.name, systemId: target.systemId, systemName: target.systemName, origin: { campaignId: target.origin.campaignId', replace: "id: target.id, name: link && (link.status === 'missing' || link.status === 'changed') ? '' : target.name, systemId: target.systemId, systemName: target.systemName, origin: { campaignId: target.origin.campaignId", fails: ['stale: a deleted target leaves the note readable', 'stale: a changed link is stale too', 'stale: a stale note is read the same after a restart'] },
+  { name: 'a body is not told by its place', file: 'economy-notes.js', find: "present(row.planetNumber), present(row.orbitNumber), present(row.bodyClass), present(row.bodyTypeId), present(row.discovered)].join('|'),", replace: "present(row.discovered)].join('|'),", fails: ['links: an ID that a save gives to another object reads changed'] },
+  { name: 'a stale note shows no name', file: 'economy-notes.js', find: 'id: target.id, name: target.name, systemId: target.systemId, systemName: target.systemName, origin: { campaignId: target.origin.campaignId', replace: "id: target.id, name: link && (link.status === 'missing' || link.status === 'changed') ? '' : target.name, systemId: target.systemId, systemName: target.systemName, origin: { campaignId: target.origin.campaignId", fails: ['stale: a deleted target leaves the note readable', 'stale: a changed link is stale too', 'stale: a stale note is read the same after a restart', 'saves: on the saves of the two branches from B a note'] },
   { name: 'a changed link is not stale', file: 'economy-notes.js', find: "const stale = Boolean(link) && (link.status === 'missing' || link.status === 'changed')", replace: "const stale = Boolean(link) && link.status === 'missing'", fails: ['stale: a changed link is stale too', 'links: an ID that a save gives to another object reads changed'] },
-  { name: 'a link that is not checked is stale', file: 'economy-notes.js', find: "const stale = Boolean(link) && (link.status === 'missing' || link.status === 'changed')", replace: "const stale = Boolean(link) && link.status !== 'linked'", fails: ['stale: a note that is not checked is not stale', 'links: a body, a fleet and a catalogue tech are linked'] },
+  { name: 'a link that is not checked is stale', file: 'economy-notes.js', find: "const stale = Boolean(link) && (link.status === 'missing' || link.status === 'changed')", replace: "const stale = Boolean(link) && link.status !== 'linked'", fails: ['stale: a note that is not checked is not stale', 'links: a body, a fleet and a catalogue tech are linked', 'saves: on the saves of the two branches from B a note'] },
   { name: 'a note is listed on another branch than its own', file: 'economy-notes.js', find: 'listed = repository.list(scope, { kind: NOTE_KIND, context: context || undefined })', replace: "listed = repository.list({ ...scope, branchId: 'b1' }, { kind: NOTE_KIND, context: context || undefined })", fails: ['isolation: a note is kept for its branch by default'] },
   { name: 'a note is listed for another race than its own', file: 'economy-notes.js', find: 'listed = repository.list(scope, { kind: NOTE_KIND, context: context || undefined })', replace: 'listed = repository.list({ ...scope, RaceID: 7 }, { kind: NOTE_KIND, context: context || undefined })', fails: ['isolation: a race lists only its own notes'] },
   { name: 'a note is listed for another campaign than its own', file: 'economy-notes.js', find: 'listed = repository.list(scope, { kind: NOTE_KIND, context: context || undefined })', replace: "listed = repository.list({ ...scope, campaignId: 'c1' }, { kind: NOTE_KIND, context: context || undefined })", fails: ['isolation: another campaign lists none of the notes of this one'] },
@@ -1832,9 +1850,11 @@ const UTILITY_MUTATIONS = [
   { name: 'a fleet is found in the system it was kept in, not the one it is in', file: 'economy-notes.js', find: 'return { systemId: row.systemId || null, systemName: row.systemName || \'\', lastKnown: false }', replace: 'return { systemId: target.systemId, systemName: target.systemName, lastKnown: false }', fails: ['filter: a fleet that moved is found in the system it is in now'] },
   { name: 'a stale note is found in no system', file: 'economy-notes.js', find: 'return { systemId: target.systemId, systemName: target.systemName, lastKnown: true }', replace: "return { systemId: null, systemName: '', lastKnown: true }", fails: ['filter: a note that is stale, or whose fleet is not known'] },
   { name: 'a fleet that is not known to be the one linked is found where it is now', file: 'economy-notes.js', find: "(link.status === 'linked' || Boolean(targetOf(target.type) && targetOf(target.type).placed))", replace: 'true', fails: ['filter: a note that is stale, or whose fleet is not known'] },
-  { name: 'a catalogue tech is not certified on another branch', file: 'history-milestones.js', find: "definition.identity === 'content' || definition.identity === 'static'", replace: "definition.identity === 'content'", fails: ['links: a catalogue tech is linked on any branch', 'saves: the game\'s own catalogue of techs'] },
-  { name: 'a designed tech is certified like a catalogue tech', file: 'economy-notes.js', find: "identity: 'unwitnessed',\n    unwitnessedNote:", replace: "identity: 'static',\n    unwitnessedNote:", fails: ['links: a body, a fleet and a catalogue tech are linked', 'saves: on the owner\'s saves of a rewound game'] },
-  { name: 'a colony is certified by the place it was made with', file: 'history-milestones.js', find: "if (definition.identity === 'unwitnessed') {\n    return definition.unwitnessedNote || UNVERIFIED_TEXT.unwitnessed\n  }", replace: "if (definition.identity === 'unwitnessed') {\n    return null\n  }", fails: ['links: a body, a fleet and a catalogue tech are linked', 'links: a colony ID given again', 'saves: on the owner\'s saves of a rewound game'] },
+  { name: 'a catalogue tech is not certified on another branch', file: 'history-milestones.js', find: "definition.identity === 'content' || definition.identity === 'static'", replace: "definition.identity === 'content'", fails: ['links: a catalogue tech is linked on any branch', 'saves: on the saves of the two branches from B (C1'] },
+  { name: 'a designed tech is certified like a catalogue tech', file: 'economy-notes.js', find: "identity: 'unwitnessed',\n    unwitnessedNote:", replace: "identity: 'static',\n    unwitnessedNote:", fails: ['links: a body, a fleet and a catalogue tech are linked', 'saves: on the saves of the two branches from B (C1'] },
+  { name: 'a fork is cut at the game time of the save that made it', file: 'campaign.js', find: 'const forkTime = found.common ? opened.times[found.common / STEP - 1] : null', replace: 'const forkTime = found.common ? opened.t : null', fails: ['saves: the lineage the real recorder keeps'] },
+  { name: 'a fork is cut a whole checkpoint before the shared one', file: 'campaign.js', find: 'const forkTime = found.common ? opened.times[found.common / STEP - 1] : null', replace: 'const forkTime = found.common ? opened.times[found.common / STEP - 2] : null', fails: ['saves: the lineage the real recorder keeps', 'saves: on the saves of the two branches from B (C1 and C2), with the lineage'] },
+  { name: 'a colony is certified by the place it was made with', file: 'history-milestones.js', find: "if (definition.identity === 'unwitnessed') {\n    return definition.unwitnessedNote || UNVERIFIED_TEXT.unwitnessed\n  }", replace: "if (definition.identity === 'unwitnessed') {\n    return null\n  }", fails: ['links: a body, a fleet and a catalogue tech are linked', 'links: a colony ID given again', 'saves: on the saves of the two branches from B (C1', 'saves: on the saves of the two branches from B a note'] },
   { name: 'a body is certified without the time its system was found', file: 'economy-notes.js', find: "identity: 'created',\n    created: 5,", replace: "identity: 'static',", fails: ['links: on another branch a body is linked only when its system was found strictly before'] },
   { name: 'a body is certified by the time of the wrong part of its fingerprint', file: 'economy-notes.js', find: 'created: 5,', replace: 'created: 4,', fails: ['links: on another branch a body is linked only when its system was found strictly before'] },
   { name: 'a kind of object the save could not give reads as gone', file: 'economy-notes.js', find: 'throw new TypeError(`the #{link.type} objects of the save were not read`)', replace: 'return null', fails: ['links: a link read with no objects is not checked'] },
@@ -1854,9 +1874,9 @@ const UTILITY_MUTATIONS = [
   { name: 'the picker offers the bodies of every system', file: 'economy-notes.js', find: "(type !== 'body' || row.systemId === systemId)", replace: 'true', fails: ['picker: the bodies offered'] },
   { name: 'the bodies are read all at once', file: 'economy-notes.js', find: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), BODIES_PER_READ)) {', replace: 'for (const batch of batchesOf(bodyIds.filter((id) => Number.isInteger(id)), 100000)) {', fails: ['reads: the bodies are read by ID in batches'] },
   { name: 'a failed read of the bodies is taken for no bodies', file: 'economy-notes.js', find: '    keep((await database.query(bodiesByIdSql(batch), { replacements }))[0])', replace: '    keep((await database.query(bodiesByIdSql(batch), { replacements }).catch(() => [[]]))[0])', fails: ['reads: a kind the save cannot give is named as failed'] },
-  { name: 'a failed read of one kind of object stops the others', file: 'economy-notes.js', find: 'failed[key] = messageOf(error)', replace: 'throw error', fails: ['reads: a kind the save cannot give is named as failed', 'links: a link read with no objects is not checked'] },
-  { name: 'a write is sent to the save', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set SystemBodyID = SystemBodyID')\n\n  return bodies\n}", fails: ['reads: every query the notebook sends is a select', 'saves: on the owner\'s saves every query is a select'] },
-  { name: 'keeping a note writes to the save', file: 'economy-notes.js', find: '    const links = target ? [{ type: target.type, id: row.id, row }] : []', replace: "    const links = target ? [{ type: target.type, id: row.id, row }] : []\n\n    if (context && context.database) {\n      await context.database.query('delete from FCT_Fleet where FleetID = 0')\n    }", fails: ['reads: keeping, editing and deleting a note sends nothing to the save', 'reads: every query the notebook sends is a select'] },
+  { name: 'a failed colony read clears the other loaded objects', file: 'economy-notes.js', find: '  return { objects, systems, failed, GameID, RaceID }', replace: '  if (Object.keys(failed).length) {\n    Object.keys(objects).forEach((type) => { objects[type] = new Map() })\n    systems = []\n  }\n\n  return { objects, systems, failed, GameID, RaceID }', fails: ['reads: a kind the save cannot give is named as failed', 'links: a link read with no objects is not checked'] },
+  { name: 'a write is sent to the save', file: 'economy-notes.js', find: '  return bodies\n}', replace: "  await database.query('update FCT_SystemBody set SystemBodyID = SystemBodyID').catch(() => [[]])\n\n  return bodies\n}", fails: ['reads: every query the notebook sends is a select', 'saves: on the saves of the two branches from B every query'] },
+  { name: 'keeping a note writes to the save', file: 'economy-notes.js', find: '    const links = target ? [{ type: target.type, id: row.id, row }] : []', replace: "    const links = target ? [{ type: target.type, id: row.id, row }] : []\n\n    if (context && context.database) {\n      await context.database.query('delete from FCT_Fleet where FleetID = 0').catch(() => [[]])\n    }", fails: ['reads: keeping, editing and deleting a note sends nothing to the save', 'reads: every query the notebook sends is a select'] },
 ]
 
 const PAGE_MUTATIONS = [
@@ -1874,8 +1894,8 @@ const PAGE_MUTATIONS = [
   { name: 'a draft is kept when what is shown changes', mutate: replacing('resetDraft() {\n      this.draft = blankDraft()', 'resetDraft() {\n      this.draft = this.draft'), fails: ['page: a draft belongs to the campaign'] },
   { name: 'an edit is made over the revision the list has now, so a stale one is written over', mutate: replacing('{ ...stored, revision: draft.revision }', 'stored'), fails: ['page: a stale edit of the form is not written over silently'] },
   { name: 'a note is kept for the campaign whatever the switch says', mutate: replacing("policy: draft.campaignWide ? 'campaign' : 'branch'", "policy: 'campaign'"), fails: ['page: another race and another branch never list a note'] },
-  { name: 'the form relinks a note when it is only edited', mutate: replacing("const target = draft.kind === 'keep' ? undefined : { type: draft.kind, row: draft.pick.row }", 'const target = { type: draft.kind, row: draft.pick.row }'), fails: ['page: an edit of the form keeps the link'] },
-  { name: 'a note is kept with no object picked', mutate: replacing("if (draft.kind !== 'keep' && !draft.pick) {", 'if (false) {'), fails: ['page: a note is not kept until an object is picked'] },
+  { name: 'a form-only edit relinks to the last loaded fleet', mutate: replacing("const target = draft.kind === 'keep' ? undefined : { type: draft.kind, row: draft.pick.row }", "const target = draft.kind === 'keep' ? { type: 'fleet', row: [...this.context.objects.fleet.values()].slice(-1)[0] } : { type: draft.kind, row: draft.pick.row }"), fails: ['page: an edit of the form keeps the link'] },
+  { name: 'an unpicked note form chooses the first loaded object', mutate: replacing("if (draft.kind !== 'keep' && !draft.pick) {", "if (draft.kind !== 'keep' && !draft.pick) {\n        draft.pick = { row: [...this.context.objects[draft.kind].values()][0] }\n      }\n\n      if (false) {"), fails: ['page: a note is not kept until an object is picked'] },
 ]
 
 const mutatedCopy = ({ file, find, replace }) => {
@@ -1901,7 +1921,7 @@ const mutatedCopy = ({ file, find, replace }) => {
 const loadModules = async (directory) => {
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory })
 
-  return { notes: loaded['economy-notes'], milestones: loaded['history-milestones'], records: loaded['scenario-records'], backup: loaded['history-backup'] }
+  return { notes: loaded['economy-notes'], milestones: loaded['history-milestones'], records: loaded['scenario-records'], backup: loaded['history-backup'], history: loaded.history }
 }
 
 let failures = 0
@@ -1944,7 +1964,7 @@ const runChecks = async (list, only = null) => {
         results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : '', false])
       }
     } catch (error) {
-      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false])
+      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false, { kind: kindOf(error), threw: isSubjectThrow(error) }])
     }
   }
 
@@ -1952,8 +1972,15 @@ const runChecks = async (list, only = null) => {
 }
 
 const caught = (mutant, results) => {
-  const expected = mutant.fails.filter((start) => !results.some(([name, , , skip]) => skip && name.startsWith(start)))
-  const survived = expected.filter((start) => !results.some(([name, result]) => name.startsWith(start) && result !== true))
+  const expected = mutant.fails
+  const skipped = results.filter(([name, , , skip]) => skip && expected.some((start) => name.startsWith(start)))
+  const invalid = results.find(([, result, , , failure]) => result !== true && (!failure || failure.kind !== 'assertion' || failure.threw))
+
+  if (skipped.length || invalid) {
+    return skipped.length ? `missing fixture for ${skipped.map(([name]) => name).join('; ')}` : `not an own value assertion: ${invalid[0]}: ${invalid[1]}`
+  }
+
+  const survived = expected.filter((start) => !results.some(([name, result, , , failure]) => name.startsWith(start) && result !== true && failure.kind === 'assertion' && !failure.threw))
   const missing = expected.filter((start) => !results.some(([name]) => name.startsWith(start)))
 
   return survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`
@@ -1993,7 +2020,7 @@ const mutantEntries = async ({ mutant, page }) => {
       results = await runChecks(suite(await loadModules(directory)), mutant.fails)
     }
 
-    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results)] }]
+    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results), process.argv.includes('--detail') ? results.filter(([, result]) => result !== true).map(([name, result]) => `${name}: ${result}`).join('; ') : ''] }]
   } catch (error) {
     return [{ show: [`mutant caught: ${mutant.name}`, error.message] }]
   } finally {

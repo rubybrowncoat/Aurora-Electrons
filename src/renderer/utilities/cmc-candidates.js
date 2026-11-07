@@ -1,11 +1,12 @@
-// The optional longevity ranking of the civilian mining complex candidates of the Mineral Breakdown. A candidate is a surveyed body in reach of its star, with no complex on it yet, that holds more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better (minerals.js `qualifiesForCmc`); the Mineral Breakdown marks it with a CMC chip. A body with a Duranium or Gallicite deposit whose amount or accessibility is not recorded, and that could still meet the rule, is listed as a possible candidate and stays unknown in every figure. Evidence: docs/plans/backlog/evidence/AE-055-01.md.
+// The optional longevity ranking of the civilian mining complex candidates of the Mineral Breakdown. A candidate is a surveyed body in reach of its star, with no complex on it yet, that has more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better (minerals.js `qualifiesForCmc`), and that no colony keeps a complex off (colonization.js `cmcBlocks`, the page's `cmcBlocked`: a colony with people, an automated mine, a civilian or ex-civilian complex, a mass driver or orbital miners at work); the Mineral Breakdown marks it with a CMC chip. A body with a Duranium or Gallicite deposit whose amount or accessibility is not recorded, and that could still meet the rule, is listed as a possible candidate and stays unknown in every figure. Evidence: docs/plans/backlog/evidence/AE-055-01.md.
 //
 // Two orders are offered. The headline order is the page's existing site order (minerals.js `betterSite`: the body's mining potential, then accessibility, then amount) and is the default. The longevity order is a preference score the player sets: the weighted mean of three terms of the qualifying deposits, each between 0 and 1: the reserve against a reference reserve, the accessibility, and the production lifetime against a horizon. The lifetime is how long assumed complexes would take to dig the deposits out (minerals.js `depositForecast`, the decline model of the Mineral Outlook). Every term, weight and assumption is a result with its provenance. Neither order is the game's own choice of where a complex is founded: the game picks by its own scoring and a dice roll, and nothing here predicts it.
 
 import { CMC_MINERAL_IDS, MINERALS, betterSite, bodyPotentialResult, depositForecast, depositReadable, qualifiesForCmc, surfaceRate } from './minerals'
 import { combine, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-const CANDIDATE_VERSIONS = ['2.7.x']
+// Aurora 3.1 renamed and changed the founding rule: the candidate rules hold for the 3.2 line (the excluded bodies are the page's `cmcBlocked`).
+const CANDIDATE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'cmcCandidate.input',
@@ -333,7 +334,7 @@ const assumptionLines = (ctx) => {
   ]
 }
 
-// The candidates, ranked. `bodies` are the page's body rows (SystemBodyID, name, place, depositList, complexes, complexGaps, cmcInReach, RadiationLevel, bare); `race` the race's { MineProduction, ComplexMining } (null before it loads); `allowed` whether the game founds complexes at all; `settings` the typed settings text; `ranking` 'headline' or 'longevity'.
+// The candidates, ranked. `bodies` are the page's body rows (SystemBodyID, name, place, depositList, complexes, complexGaps, cmcBlocked, cmcInReach, RadiationLevel, bare); `race` the race's { MineProduction, ComplexMining } (null before it loads); `allowed` whether the game founds complexes at all; `settings` the typed settings text; `ranking` 'headline' or 'longevity'. A body a colony blocks (`cmcBlocked`) is no candidate.
 // The value is { allowed, requested, shown, fellBack, rows, parsed, blocking, notes, lines }. `rows` come in the order of the shown ranking, a candidate with no rank last; each has `rank` (in the shown order), `headlineRank` and `longevityRank` (null while not known), its `terms` ({ key, label, raw, term, weight, contribution }) and its `score`. `blocking` is why no score is given at all; `notes` what leaves a column unknown (a blank or rejected assumption); a longevity request with a blocking reason is shown in the headline order (`fellBack`).
 export const candidateRanking = ({ bodies, race, allowed, settings, ranking }) => {
   const parsed = parseSettings(settings)
@@ -343,7 +344,7 @@ export const candidateRanking = ({ bodies, race, allowed, settings, ranking }) =
   const weights = Object.fromEntries(TERMS.map((term) => [term.key, parsed[term.weight].value]))
   const weightTotal = Object.values(weights).reduce((sum, weight) => sum + weight, 0)
   const ctx = { parsed, race: saved, entered: enteredResults, complexes: enteredResults.complexes, blocking, weights, weightTotal }
-  const base = allowed ? bodies.filter((body) => !body.bare && !(body.complexes > 0) && body.cmcInReach).map((body) => rowOf(body, ctx)).filter(Boolean) : []
+  const base = allowed ? bodies.filter((body) => !body.bare && !(body.complexes > 0) && !body.cmcBlocked && body.cmcInReach).map((body) => rowOf(body, ctx)).filter(Boolean) : []
 
   base.forEach((row) => {
     row.terms = TERMS.map((term) => ({ key: term.key, label: term.label, raw: rawOf(term.key, row), term: termResult(term.key, row, ctx), weight: parsed[term.weight].value }))

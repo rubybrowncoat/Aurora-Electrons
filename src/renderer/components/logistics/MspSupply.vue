@@ -52,7 +52,7 @@
                   <th class="text-end">Tonnes</th>
                   <th>Arrives</th>
                   <th class="text-end">Adds, queue idle (MSP/yr)</th>
-                  <th class="text-end">Adds, queue first (MSP/yr)</th>
+                  <th class="text-end">Adds, queue active (MSP/yr)</th>
                 </tr>
               </thead>
               <tbody>
@@ -73,7 +73,7 @@
         </template>
       </v-data-table>
       <div class="panel-foot caption text--secondary">
-        Identify the mineral that limits output and the delivery needed to increase it. Stock-only output uses the colony's current stock, as in the table above. Supplied output also counts mining, packets and hauls on their arrival days. The colony's claims follow the game's order: the build queue, mass-driver exports of stock above the reserve, then maintenance, which no reserve protects. The queue is treated as idle and supplied first because saved projects record their remaining needs but not when they draw stock. A colony supplies a haul only from what its own production leaves. Each freighter serves one planned haul, in planner order. All mining on a body depletes the same deposit, including taxed output, but the colony keeps only its own share. Deliveries with unknown timing or size are listed but excluded, not counted as 0. Packets launched by colonies during the period are excluded.
+        Identify the mineral that limits output and the delivery needed to increase it. Stock-only output uses a player colony's current stock. NPR output is unavailable without the shared capital mineral stock and its allocation across producers. Saved installation amounts are converted to decimal before weighting and summation; nominal production uses the whole units of that sum. Actual output also requires surface or orbital population. Supplied output counts mining, packets and hauls on their arrival days. Class-haul timing omits jump shock waits, which can move arrival beyond the selected period. The colony's claims follow the game's order: industrial work, mass-driver exports above the reserve, shipyard work, then maintenance, which no reserve protects. The queue-active scenario draws each phase's remaining needs as soon as stock allows; the queue-idle scenario omits them. Saved remaining needs do not fix project timing, so these scenarios are not guaranteed bounds on every schedule. A colony supplies a haul only from what its own production leaves. Unknown donor production leaves the haul and dependent supplied output unavailable, without changing the recipient's stock-only output. Each freighter serves one planned haul, in planner order. All mining on a body depletes the same deposit, including taxed output, but the colony keeps only its own share. Deliveries with unknown timing or size are listed but excluded, not counted as 0. Packets launched by colonies during the period are excluded.
       </div>
     </template>
   </v-card>
@@ -137,7 +137,7 @@ export default {
         { text: 'Production / yr', value: 'productionValue', align: 'end' },
         { text: 'Stock only / yr', value: 'stockOnlyValue', align: 'end' },
         { text: 'Supplied, queue idle / yr', value: 'highValue', align: 'end' },
-        { text: 'Supplied, queue first / yr', value: 'lowValue', align: 'end' },
+        { text: 'Supplied, queue active / yr', value: 'lowValue', align: 'end' },
         { text: 'Conditional delivery', value: 'deliveryText' },
         { text: 'Not counted', value: 'notCountedCount', align: 'end' },
       ]

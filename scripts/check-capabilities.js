@@ -6,15 +6,21 @@
   --write regenerates utilities/capability-reads.js from the renderer's sources (scripts/lib/capability-scan.js). Without it the file is compared with a fresh scan and any difference fails: a page that reads a column the file does not list would otherwise pass the preflight unchecked. Regenerate after changing a page's queries.
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
-  - the two real saves (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): every report supported, the formula version 2.7.x, every lookup row as expected, no diagnostic;
-  - copies of a 2.7 save in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
+  - the saves of the line (the shipped 3.0.0, 3.1.0 and 3.2.0 databases, the six played 3.2 saves and the migrated 3.1 fixture of scripts/lib/fixtures.js): of the 3.2 line with none of the seven columns missing, the formula version 3.2.x assumed, the shell supported, every lookup row as expected (with the 3.1 rows beside them: Fighter Combat and Fighter Pod Bay gone, Light Tactical and Ordnance Factory Module in, none of them gated) and the commanders soft groups whole. Every report is supported, and the columns the reports lack are exactly those `RENAMED_READS` lists, the columns Aurora 3.1 renamed or removed that a read of a page still names with the inputs and reports that still name each, so a half-migrated set of reads fails rather than passing as the item's whole set (it is empty since AE-308-02 and AE-308-03 deleted their entries), none of them a column of DIM_Gases or FCT_AtmosphericGas. The altered copies and the report-level checks are made from the shipped 3.1 save;
+  - the saves from before the line (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): refused as a save from before Aurora 3.0, naming the seven columns Aurora 3.0 added that the file lacks, with every report still evaluated so that the layout alone holds each page back, and no formula version (the direct loader states none for them either);
+  - copies of the shipped 3.1 save, in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
+  - the station and reserve panels of /logistics (the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves), whose reads the scan cannot tell from the page's own and so sit in its required `page` input: a copy without a column only they read (FCT_FleetHistory.Description) leaves the report degraded by the station group and in service, where a column the page's own required read names (FCT_Ship.SensorDelay) leaves it unsupported; the page's real script runs on the same copy and renders its own figures, and a copy of the code without the group must fail the degraded check;
+  - the alien-class reads, on the interim fixture that holds 32 alien classes (the shipped saves and the export hold none, so the preflight says nothing of their queries): the Intelligence page's three reads, the recovery ledger's statements (the Galaxy Map's recovery objects and the observation read of the Map, Survey Progress and History), Route Finder's small places and the known wrecks check of Warnings run through the page loader and loadUtilities and return rows; a read the 3.2 line blocks by a column another item owns (`RENAMED_READS`) is recorded with that item, not fixed;
+  - the structures the catalogue declares before a page reads them (`DECLARED`: the ordnance series tables, the Lagrange anchor columns and the option, archaeology and light-naval columns): the saves of the line hold every column of every entry and each item lists its own; the saves from before the line hold none of them and no report loses a status for it; no declared field is an input of a report, and the preflight is shown the save of the line without each of them in turn, each absent and no report's status changed (a model carries an attribute only where a page reads the column); a copy of the code whose model regains an unread attribute widens the read, and the same probe withholds that report, which the check must notice; and a copy of the code that misspells a declared column or leaves a declared table out of the preflight's schema read names a field absent that the save holds, which the save's check must notice;
+  - the life pod, wreck and waypoint queries, on the interim fixture: the recovery ledger's four statements and the small places' reads run and return the objects the save holds, beside the anchor columns the catalogue declares for them (AE-308-06);
+  - the lookup rows the line changed (AE-308-08), on every save of the line: move actions 211-214 gone and 237 present, standing order 57, wealth uses 53-55, tech types 286-288, installations 53 and 54, and event types 233, 319 and 373-381 under their 3.1 names (scripts/check-lookups.js holds the app's own ID-keyed constants to the export);
   - the consumers of the result, on the real modules (utilities/commanders.js, mixins/production-modifiers.js, store/capabilities.js, utilities/capabilities.js): a renamed bonus leaves the officer bonuses, the colony capacities and the governor review unknown, no assessment blocks every lookup ID, a failed retry keeps the result of the same copy and a result of another copy is dropped. Each of those checks is run again on a copy of the code with one gate taken out, and must fail there;
   - the Commanders page's own roster queries (taken from its source) run on copies without a rank or age column, on the parts the preflight chose, and fail on the parts of a complete save;
   - the resource reserves panel's reads, which the scan of its component does not follow (`EXTRA_READS`, an optional input of /logistics and /hauling): a copy without FCT_ShipClass.MinimumFuel and FCT_Race.MSPProduction degrades /hauling by the panel alone and names both fields on /logistics beside the page's own required read, and the copies without FuelStockpile or MaintenanceStockpile count the panel among the readers; and the Production bonus (5) its production rates rest on, which a copy with the bonus renamed leaves /hauling degraded by, naming the reserve production;
   - what a built-by-name read depends on: each marker of an input stands for its own columns (`Reserve*` for the reserves, a bare `*` for the minerals, and the share its page loads for the command types, `MARKER_USES`, which is compared with the page's own `share: '<name>'`). Copies without FCT_Population.ReserveDuranium, FuelStockpile or MaintenanceStockpile, or without the Industrial, Survey or Tactical share, leave supported every report that does not read the column by name (the readers are derived from the generated reads) and make the others unsupported, naming it; a copy of the code that stands every marker for the whole list of its table must fail those checks. On the copy without ReserveDuranium the Mineral Outlook page's own stockpile read runs and the Minerals page's colony read (which names the reserves) fails;
   - the pages' own wiring (scripts/lib/capability-pages.js): the real script of /lagrange, /commanders and /production run on the capability results of real copies (the unverified lookup rows and missing ship columns withhold the stabilisation ships, the roster's blocked bonuses are unknown and its queries wait for the check, the research read and the colony capacities leave a blocked bonus unknown). Each page is run again with one gate cut out of its script, and a page check must fail there;
   - the file's SHA-256 before and after a preflight on a copy, and that every query the preflight sent was a select;
-  - the Aurora line (`lineResult`, `LINE_SIGNATURE`: the fourteen columns Aurora 2.7 added over 2.6): the signature is the fourteen columns; the real 2.7 saves are of the line with none missing; a copy without FCT_Game is refused as no Aurora save, a copy with all fourteen dropped is refused as a save from before 2.7 (the 2.6 save, when it is present, too) naming each, and a copy with one or seven dropped is still of the line, naming exactly those it lacks; the refused copies still have every report evaluated. The store's `line` and `refused` getters follow the result of the copy now open: nothing is refused before the check answers or after it failed, a retry keeps the refusal of the same copy, and a copy that replaced a refused one is not refused. Two mutants fail a consumer check: one in which the line counts a schema with some of the fourteen columns as one with none, one in which the store refuses a copy on the result of an earlier copy. What a player sees is checked by scripts/check-unsupported-save-page.js.
+  - the Aurora line and the formula version (`lineResult`, `LINE_SIGNATURE`, `formulaResult`, `loadFormulaVersion`: the seven columns Aurora 3.0 added over the releases before it): the signature is the seven columns; the saves of the line are of it with none missing, 3.0, 3.1 and 3.2 alike, and state the formula version 3.2.x assumed; a copy without FCT_Game is refused as no Aurora save, a copy with all seven dropped is refused as a save from before 3.0 (the 2.6 save, when it is present, too) naming each, and a copy with one or three dropped is still of the line, naming exactly those it lacks; a save states the formula version only with all seven, so the refused copies and a damaged one name the absent columns and state none, and the direct loader reads all four tables of the signature, so a copy whose only surviving columns are outside FCT_Game still states it; the refused copies still have every report evaluated, and a damaged copy without FCT_Ship.ShipSeniorCO keeps /commanders in service, degraded by the ship Senior CO group alone (AE-302-11). The store's `line` and `refused` getters follow the result of the copy now open: nothing is refused before the check answers or after it failed, a retry keeps the refusal of the same copy, and a copy that replaced a refused one is not refused. Two mutants fail a consumer check: one in which the line counts a schema with some of the seven columns as one with none, one in which the store refuses a copy on the result of an earlier copy. What a player sees is checked by scripts/check-unsupported-save-page.js.
   - `--no-mutations` runs the checks of the real code alone: no copy of the code with a gate taken out, no registry rewritten and no page cut is made, and `--write` is the only other option.
 */
 const crypto = require('crypto')
@@ -25,41 +31,63 @@ const vm = require('vm')
 const sqlite3 = require('sqlite3')
 const { Sequelize } = require('sequelize')
 const { loadUtilities } = require('./lib/utilities')
+const { loadPage, instantiate } = require('./lib/page-loader')
 const { readsOfFile, scanReads } = require('./lib/capability-scan')
 const { chainChecks } = require('./lib/capability-chains')
 const { pageChecks } = require('./lib/capability-pages')
 const { routes: routeTable } = require('./lib/store-routes')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
+const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2, PLAYED_D1, PLAYED_D1_SIBLING } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const OPEN_EXISTING = 0x2
 const READS_FILE = path.join(repo, 'src', 'renderer', 'utilities', 'capability-reads.js')
 const PLANNED_ROUTES = new Set(['/settings', '/about'])
 
+// The saves the preflight is run on, each with the line it is expected to be of: the shipped 3.0.0, 3.1.0 and 3.2.0 databases, the migrated 3.1 fixture and the six played 3.2 saves are the 3.2 line (the three releases share one schema), the two saves from before Aurora 3.0 are refused.
 const REAL = [
-  { label: 'modded 2.7 save', file: 'AuroraDB.db' },
-  { label: 'stock 2.7.1 save', file: 'saves/AuroraDB_271_skoormit_saved.db' },
+  { label: 'shipped 3.0 save', file: 'saves/AuroraDB_300_shipped.db', expect: 'accepted' },
+  { label: 'shipped 3.1 save', file: 'saves/AuroraDB_310_shipped.db', expect: 'accepted' },
+  { label: 'migrated 3.1 save', file: FIXTURE.file, expect: 'accepted' },
+  { label: 'shipped 3.2 save', file: 'saves/AuroraDB_320_shipped.db', expect: 'accepted' },
+  { label: 'played 3.2 save A', file: PLAYED.file, expect: 'accepted' },
+  { label: 'played 3.2 save B', file: PLAYED_NEXT.file, expect: 'accepted' },
+  { label: 'played 3.2 save C1 (first branch from B)', file: PLAYED_C1.file, expect: 'accepted' },
+  { label: 'played 3.2 save C2 (second branch from B)', file: PLAYED_C2.file, expect: 'accepted' },
+  { label: 'played 3.2 save D1 (specimen branch from C2)', file: PLAYED_D1.file, expect: 'accepted' },
+  { label: 'played 3.2 save D1 sibling (second branch from C2)', file: PLAYED_D1_SIBLING.file, expect: 'accepted' },
+  { label: 'modded save from before 3.0', file: 'AuroraDB.db', expect: 'refused' },
+  { label: 'stock save from before 3.0', file: 'saves/AuroraDB_271_skoormit_saved.db', expect: 'refused' },
 ]
+// The save a run without mutants is made on: one of the line, so that the reports it checks are the ones the app reads.
+const QUICK = 'shipped 3.1 save'
 
-// The fourteen columns Aurora 2.7 added over 2.6, as 'Table.Column', written here from the diff of the two saves on disk: the oracle utilities/capabilities.js `LINE_SIGNATURE` is compared with, and the columns the planted copies drop.
+// The seven columns Aurora 3.0 added over the releases before it, as 'Table.Column', written here from the diff of the shipped databases on disk: the oracle utilities/capabilities.js `LINE_SIGNATURE` is compared with, and the columns the planted copies drop. Aurora 3.0, 3.1 and 3.2 are one line: the shipped 3.0.0, 3.1.0 and 3.2.0 databases are identical in schema.
 const LINE_COLUMNS = [
-  'FCT_Game.AllowCMC',
-  'FCT_Game.AncientRelics',
-  'FCT_DesignPhilosophy.MaintenanceModules',
-  'FCT_Fleet.AutoLP',
-  'FCT_Population.AcademyNameThemeID',
-  'FCT_Population.BuildReplacements',
-  'FCT_Population.ReplacementCapacity',
-  'FCT_Population.UseAcademyNameTheme',
-  'FCT_Race.RandomClassName',
-  'FCT_Race.chkCometNames',
-  'FCT_Race.chkComets',
-  'FCT_Ship.MaxActiveResolution',
-  'FCT_Ship.SLRetire',
-  'FCT_ShipClassTemplate.CrewDesignEfficiency',
+  'FCT_Game.LostColonies',
+  'FCT_Game.GenerateNonOxygenRaces',
+  'FCT_Game.NoShieldTechnology',
+  'FCT_Game.OrbitalMovementInSubPulse',
+  'FCT_Ship.ShipSeniorCO',
+  'FCT_Race.NoResearchProjects',
+  'FCT_Population.AlienArtifacts',
 ]
-// Seven of them, among them the two the formula version rests on: a copy without these is damaged, not older.
-const SEVEN_COLUMNS = ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics', 'FCT_Fleet.AutoLP', 'FCT_Population.BuildReplacements', 'FCT_Race.chkComets', 'FCT_Ship.SLRetire', 'FCT_ShipClassTemplate.CrewDesignEfficiency']
+// Three of the seven, FCT_Game's LostColonies among them and two outside it: a copy without these is a damaged 3.2 save, not one from before the line, and it states no formula version.
+const DAMAGED_COLUMNS = ['FCT_Game.LostColonies', 'FCT_Ship.ShipSeniorCO', 'FCT_Population.AlienArtifacts']
+
+// The columns Aurora 3.1 renamed or removed that a read of a page still names, with the item that rewrites the reads, the number of inputs that name the column and the reports those inputs belong to, as this commit leaves them: a save of the line lacks each of them and no other column a report reads, so the reports that are not supported on it rest on these. An item that lands deletes its entries, and the check of a save of the line fails on an entry no report names any more as on a column that is not listed. The count and the reports pin the state the migration starts from: an item that renames some of its reads changes them, and the check then fails until the item restates what it still has to do or deletes the entry, so a half-migrated read cannot pass as the whole of what the item claims (`renamedReaders`). None is left: AE-308-02 (the star's component number, held by `starColumnChecks`) and AE-308-03 (the gas columns, held by the gas checks of `registryChecks`) rewrote theirs. One removed column is named by no read the preflight sees: DIM_AssignmentTypeFilter.Fighter by nothing.
+const RENAMED_READS = {}
+
+// The star's component number: `after` is its name in the 3.2 line (AE-308-02), `before` the name it had before the line, which no save of the line holds and no input of the registry names.
+const STAR_NUMBER = { table: 'FCT_Star', before: 'Component', after: 'ComponentNumber' }
+
+// The inputs of the registry that name a column, as `[{ route, key }]`: what a renamed read still has, compared with what `RENAMED_READS` pins.
+const renamedReaders = (capabilities, field) => {
+  const [table, column] = field.split('.')
+
+  return Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => (input.reads[table] || []).includes(column)).map((input) => ({ route, key: input.key })))
+}
 
 const dropStatements = (fields) => fields.map((field) => `alter table ${field.split('.')[0]} drop column ${field.split('.')[1]}`)
 
@@ -79,6 +107,20 @@ const check = (message, condition, detail = '') => {
   }
 }
 
+// Credit only the declared checks' returned values; an exception while obtaining the values cannot enter this path.
+const caughtValues = async (results, fails, name) => {
+  const named = results.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+  const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+
+  if (absent.length) {
+    throw new Error(`${name}: no check begins ${absent.join('; ')}`)
+  }
+
+  const failed = judged(await runChecks(named.map(([id, held]) => ({ id, name: id, run: () => assert.ok(held === true, typeof held === 'string' ? held : `${id} returned ${held}`) })), {}), name)
+
+  return fails.every((start) => caughtBy(failed, named.filter(([id]) => id.startsWith(start)).map(([id]) => id), { name }))
+}
+
 const quote = (text) => `'${text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 
 // An object key as standard style writes it: bare when it is an identifier, quoted otherwise.
@@ -94,8 +136,57 @@ const generated = (scan) => {
   return `// Generated by \`node scripts/check-capabilities.js --write\` from the pages' own queries: do not edit by hand. Per report (a route of the page registry, or 'shell' for what the app reads outside a page), each input it reads (the page's tracked reads, the warnings page's checks) with its label and the tables and columns its code names, as 'Table(Column Column)'. utilities/capabilities.js adds what the scan cannot see and says which inputs a report cannot do without.\nexport const READS = {\n${lines.join('\n')}\n}\n`
 }
 
+const openConsumer = (file, create) => {
+  const consumer = copyConsumer(file)
+  let sequelize
+
+  try {
+    sequelize = create()
+  } catch (error) {
+    if (consumer) {
+      consumer.failed(error)
+    }
+
+    throw error
+  }
+
+  if (consumer) {
+    const manager = sequelize.connectionManager
+    const getConnection = manager.getConnection
+    const close = sequelize.close
+
+    manager.getConnection = function (...args) {
+      try {
+        const pending = Reflect.apply(getConnection, this, args)
+
+        pending.then(() => {}, consumer.failed)
+
+        return pending
+      } catch (error) {
+        consumer.failed(error)
+        throw error
+      }
+    }
+
+    sequelize.close = function (...args) {
+      try {
+        const pending = Reflect.apply(close, this, args)
+
+        pending.then(consumer.closed, consumer.failed)
+
+        return pending
+      } catch (error) {
+        consumer.failed(error)
+        throw error
+      }
+    }
+  }
+
+  return sequelize
+}
+
 const openSave = (file, log) => {
-  const sequelize = new Sequelize({ dialect: 'sqlite', storage: file, logging: false, dialectOptions: { mode: OPEN_EXISTING } })
+  const sequelize = openConsumer(file, () => new Sequelize({ dialect: 'sqlite', storage: file, logging: false, dialectOptions: { mode: OPEN_EXISTING } }))
   const query = sequelize.query.bind(sequelize)
 
   sequelize.query = (sql, options) => {
@@ -113,21 +204,212 @@ const run = (database, sql) => new Promise((resolve, reject) => {
   database.exec(sql, (error) => (error ? reject(error) : resolve()))
 })
 
-// A copy of `source` in the temp folder with `statements` run on it.
-const alteredCopy = async (source, name, statements) => {
-  const copy = path.join(os.tmpdir(), `ae-capabilities-${process.pid}-${name}.db`)
+// The altered databases belong to one private invocation folder. No old prefix-matching file is reclaimed; an uncertain copy or handle is retained with an error.
+let copyDirectory = null
+const ownedCopies = new Map()
+const copyFailures = []
+const rememberFailure = (error) => copyFailures.push(error)
 
-  fs.copyFileSync(source, copy)
+// Later readers own distinct handles: closing the alteration handle says nothing about these consumers.
+const copyConsumer = (file) => {
+  const owned = ownedCopies.get(file)
 
-  const database = new sqlite3.Database(copy)
-
-  for (const statement of statements) {
-    await run(database, statement)
+  if (!owned) {
+    return null
   }
 
-  await new Promise((resolve) => database.close(resolve))
+  const handle = {}
 
-  return copy
+  owned.consumers.add(handle)
+
+  return {
+    closed: () => owned.consumers.delete(handle),
+    failed: (error) => {
+      owned.uncertain = true
+      copyFailures.push(error)
+    },
+  }
+}
+
+const copyStat = (file) => {
+  try {
+    return fs.lstatSync(file, { bigint: true })
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+
+    return null
+  }
+}
+
+const plainCopyDirectory = (directory) => {
+  const absolute = path.resolve(directory)
+  let current = path.parse(absolute).root
+
+  for (const entry of absolute.slice(current.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, entry)
+
+    const stat = copyStat(current)
+
+    if (!stat || !stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error(`The capability copy directory is not an ordinary directory: ${current}`)
+    }
+  }
+
+  const canonical = fs.realpathSync(absolute)
+
+  if (process.platform === 'win32' ? canonical.toLowerCase() !== absolute.toLowerCase() : canonical !== absolute) {
+    throw new Error(`The capability copy directory resolves elsewhere: ${absolute}`)
+  }
+}
+
+const checkedCopyDirectory = () => {
+  if (!copyDirectory) {
+    const temporary = path.resolve(os.tmpdir())
+
+    plainCopyDirectory(temporary)
+
+    const directory = fs.mkdtempSync(path.join(temporary, `ae-capabilities-${process.pid}-`))
+
+    plainCopyDirectory(directory)
+    copyDirectory = { path: directory, stat: copyStat(directory) }
+  }
+
+  plainCopyDirectory(copyDirectory.path)
+
+  const stat = copyStat(copyDirectory.path)
+
+  if (stat.dev !== copyDirectory.stat.dev || stat.ino !== copyDirectory.stat.ino) {
+    throw new Error('The capability copy directory was replaced')
+  }
+
+  return copyDirectory.path
+}
+
+const removeOwnedCopy = (file) => {
+  const owned = ownedCopies.get(file)
+
+  if (!owned || path.dirname(file) !== checkedCopyDirectory()) {
+    throw new Error(`The capability copy is not owned: ${file}`)
+  }
+
+  if (!owned.closed || owned.consumers.size || owned.uncertain) {
+    throw new Error(`The capability copy has an uncertain open handle: ${file}`)
+  }
+
+  const stat = copyStat(file)
+
+  if (stat && (!owned.stat || !stat.isFile() || stat.isSymbolicLink() || stat.dev !== owned.stat.dev || stat.ino !== owned.stat.ino)) {
+    throw new Error(`The capability copy was replaced: ${file}`)
+  }
+
+  if (stat) {
+    fs.unlinkSync(file)
+  }
+
+  ownedCopies.delete(file)
+}
+
+const cleanupCopies = () => {
+  if (!copyDirectory) {
+    return
+  }
+
+  const directory = checkedCopyDirectory()
+  const errors = []
+
+  for (const file of ownedCopies.keys()) {
+    try {
+      removeOwnedCopy(file)
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  try {
+    // Nonrecursive removal refuses unexpected files, including unclaimed partial copies and sidecars.
+    fs.rmdirSync(directory)
+    copyDirectory = null
+  } catch (error) {
+    errors.push(error)
+  }
+
+  if (errors.length) {
+    throw new AggregateError(errors, 'Capability copy cleanup failed')
+  }
+}
+
+// A copy of `source`, created exclusively and registered before any SQLite work. Private temp ancestry is assumed stable against concurrent external rewriting, as in the other check fixtures.
+const alteredCopy = async (source, name, statements) => {
+  try {
+    const copy = path.join(checkedCopyDirectory(), `ae-capabilities-${process.pid}-${name}.db`)
+
+    if (path.dirname(copy) !== copyDirectory.path || [copy, `${copy}-journal`, `${copy}-wal`, `${copy}-shm`].some((file) => copyStat(file))) {
+      throw new Error(`The capability copy or a sidecar already exists: ${copy}`)
+    }
+
+    fs.copyFileSync(source, copy, fs.constants.COPYFILE_EXCL)
+
+    const owned = { stat: null, closed: true, consumers: new Set(), uncertain: false }
+
+    ownedCopies.set(copy, owned)
+
+    let database = null
+    let opened = false
+    let failure = null
+
+    try {
+      owned.stat = copyStat(copy)
+
+      if (!owned.stat || !owned.stat.isFile() || owned.stat.isSymbolicLink()) {
+        throw new Error(`The new capability copy is not an ordinary file: ${copy}`)
+      }
+
+      await new Promise((resolve, reject) => {
+        database = new sqlite3.Database(copy, OPEN_EXISTING, (error) => {
+          if (error) {
+            reject(error)
+          } else {
+            opened = true
+            owned.closed = false
+            resolve()
+          }
+        })
+      })
+
+      for (const statement of statements) {
+        await run(database, statement)
+      }
+    } catch (error) {
+      failure = error
+    } finally {
+      if (opened) {
+        try {
+          await new Promise((resolve, reject) => database.close((error) => (error ? reject(error) : resolve())))
+          owned.closed = true
+        } catch (error) {
+          failure = failure ? new AggregateError([failure, error], 'Capability copy SQL and close failed') : error
+        }
+      }
+    }
+
+    if (failure) {
+      try {
+        removeOwnedCopy(copy)
+      } catch (error) {
+        failure = new AggregateError([failure, error], 'Capability copy operation and cleanup failed')
+      }
+
+      throw failure
+    }
+
+    return copy
+  } catch (error) {
+    // A caller's finally can itself fail while removing an earlier copy; retain the operation's original cause for the terminal report too.
+    copyFailures.push(error)
+    throw error
+  }
 }
 
 // The columns of `fields` ('Table.Column') that the save file lacks, read in SQL here: the oracle for what a refused or damaged copy is missing.
@@ -158,6 +440,9 @@ const summary = (result) => {
 
 const notSupported = (result) => Object.values(result.reports).filter((report) => report.status !== 'supported')
 
+// The columns the reports of a result lack, once each as 'Table.Column' (a lookup row that differs is not one, and a table the save lacks reads as 'Table (table)'): what the required inputs, the optional inputs and the soft groups name.
+const namedFields = (result) => [...new Set(Object.values(result.reports).flatMap((report) => [...report.missing, ...report.degraded.filter((entry) => !entry.gate)].flatMap((entry) => entry.fields)))].sort()
+
 const failedGates = (result) => [...Object.entries(result.gates.bonuses).map(([id, gate]) => [`bonus ${id}`, gate]), ...Object.entries(result.gates.components).map(([id, gate]) => [`component type ${id}`, gate])].filter(([, gate]) => gate.status === 'unavailable').map(([name]) => name)
 
 const preflightOf = async (capabilities, file) => {
@@ -168,8 +453,28 @@ const preflightOf = async (capabilities, file) => {
     const result = await capabilities.preflight(database)
 
     return { result, log }
+  } catch (error) {
+    if (ownedCopies.has(file)) {
+      copyFailures.push(error)
+    }
+
+    throw error
   } finally {
     await database.close()
+  }
+}
+
+// The opened save as the preflight sees it without one column: the schema rows of `field`'s table are read from the real file and that one row is left out, so a report that reads the column is withheld exactly as on a save that lacks it. Nothing is written and no copy is made, so a primary key is probed as well as an ordinary column, and the file the save was opened from keeps every column.
+const withoutColumn = (database, field) => {
+  const [table, column] = field.split('.')
+  const dropped = (row) => String(row.tbl || '').toLowerCase() === table.toLowerCase() && String(row.name || '').toLowerCase() === column.toLowerCase()
+
+  return {
+    query: async (sql, options) => {
+      const [rows, metadata] = await database.query(sql, options)
+
+      return [/pragma_table_xinfo/i.test(sql) && Array.isArray(rows) ? rows.filter((row) => !dropped(row)) : rows, metadata]
+    },
   }
 }
 
@@ -183,9 +488,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/lagrange jumpInfrastructure', '/lagrange jumpBuilders', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/hauling routeQueues', '/information fleetShips', '/information fuelSites', '/information FuelReserveReader', '/logistics mspSupply', '/logistics fuelDonors', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/logistics ResourceReserves', '/logistics FuelReserves', '/hauling ResourceReserves', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/map recoveryObjects', '/map observationRead', '/map recoveryObservationRead', '/survey-progress formations', '/survey-progress groundCommanders', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/survey-progress observationRead', '/survey-progress recoveryObservationRead', '/history observationRead', '/history recoveryObservationRead', '/commanders navalTree', '/commanders groundTree']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/warnings page', '/notebook page', '/lagrange ships', '/lagrange jumpInfrastructure', '/lagrange jumpBuilders', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/hauling routeQueues', '/information fleetShips', '/information fuelSites', '/information FuelReserveReader', '/logistics mspSupply', '/logistics fuelDonors', '/logistics summarySources', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/logistics FleetStations', '/logistics ResourceReserves', '/logistics FuelReserves', '/hauling ResourceReserves', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/map habitability', '/map recoveryObjects', '/map observationRead', '/map recoveryObservationRead', '/survey-progress formations', '/survey-progress groundCommanders', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/survey-progress observationRead', '/survey-progress recoveryObservationRead', '/history observationRead', '/history recoveryObservationRead', '/commanders navalTree', '/commanders groundTree', '/commanders noResearch', '/technologies noResearch', '/production developments']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships, the jump point infrastructure and the gate builders of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the saved queues of /hauling, the fleet profile\'s ships, the fuel service sites and the fuel reserve reader of /information, the incoming minerals, the fuel service of the ships, the fleet stations\' reads and the fuel reserves of /logistics, the resource reserves panel of /logistics and /hauling, the position facts and orbit facts of /routes, /information and /hauling, the ground formations and the life pods and wrecks of /map, the ground survey commanders, the ruins, the ancient constructs and the troop ships of /survey-progress, the formations observed of /survey-progress and /history, the life pods and wrecks observed of /map, /survey-progress and /history, and the naval and ground command structures of /commanders, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings and the page\'s other reads there, the ships, the jump point infrastructure and the gate builders of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax reads of /finances and /information, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the saved queues of /hauling, the fleet profile\'s ships, the fuel service sites and the fuel reserve reader of /information, the incoming minerals, the fuel service of the ships, the colony summary\'s ships, modules and services, the fleet stations\' reads and the fuel reserves of /logistics, the resource reserves panel of /logistics and /hauling, the position facts and orbit facts of /routes, /information and /hauling, the colony costs, the ground formations and the life pods and wrecks of /map, the bodies the notes link to on /notebook, the ground survey commanders, the ruins, the ancient constructs and the troop ships of /survey-progress, the formations observed of /survey-progress and /history, the life pods and wrecks observed of /map, /survey-progress and /history, the naval and ground command structures of /commanders, the No Research Projects setting of /commanders and /technologies, and the development items of /production, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   const formationReaders = (route) => capabilities.INPUTS[route].filter((input) => input.reads.FCT_GroundUnitFormationElement || input.reads.FCT_GroundUnitFormation).map((input) => input.key).sort().join()
 
@@ -235,9 +540,42 @@ const registryChecks = (capabilities, scan, navigation) => {
     })
   })
 
+  // The structures the catalogue declares before a page reads them (AE-308-05, AE-308-06, AE-308-07): every entry names a table, its columns and the items that declare and will read it, once each. No declaration adds an input of its own: a declared field is no report's input, because a model carries an attribute only where a page reads the column, so the preflight reads every declared table's schema and gates nothing by it.
+  const inputFields = new Set(Object.values(capabilities.INPUTS).flatMap((inputs) => inputs.flatMap((input) => Object.entries(input.reads).flatMap(([table, columns]) => columns.map((column) => `${table}.${column}`)))))
+  const declaredFields = capabilities.DECLARED.flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`))
+  const entryShape = (entry) => /^(?:FCT|DIM)_[A-Za-z0-9]+$/.test(entry.table) && entry.columns.length > 0 && entry.columns.every((column) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) && /^AE-\d{3}-\d{2}$/.test(entry.item) && /^AE-\d{3}-\d{2}$/.test(entry.readBy) && (entry.retained === undefined || typeof entry.retained === 'boolean') && (entry.note === undefined || typeof entry.note === 'string')
+  const malformed = capabilities.DECLARED.filter((entry) => !entryShape(entry)).map((entry) => entry.table)
+  const repeated = declaredFields.filter((field, index) => declaredFields.indexOf(field) !== index)
+  const readDeclarations = declaredFields.filter((field) => inputFields.has(field))
+
+  check('registry: every declared 3.1 structure names a table, its columns and the items that declare and will read it, once each', capabilities.DECLARED.length > 0 && malformed.length === 0 && repeated.length === 0, [...malformed, ...repeated].join(', '))
+  check('registry: no declared 3.1 structure is an input of a report, so a declaration adds no input of its own and gates nothing', readDeclarations.length === 0, readDeclarations.join(', '))
+
   const gated = new Set([...Object.values(capabilities.BONUS_NAMES), ...Object.values(capabilities.COMPONENT_TYPES)].flatMap((gate) => gate.routes))
 
+  Object.entries(RENAMED_READS).forEach(([field, entry]) => {
+    const readers = renamedReaders(capabilities, field)
+    const reports = [...new Set(readers.map((reader) => reader.route))].sort()
+
+    check(`registry: ${field}, which ${entry.owner} rewrites, is still named by the ${entry.reads} inputs on the ${entry.reports.length} reports pinned for it and by no other, so a half-migrated set of reads fails here (an item that lands deletes its entry, and a read it did not rewrite then makes a save of the line lack a column the list does not name)`, readers.length === entry.reads && sameFields(reports, entry.reports), `${readers.length} inputs on ${reports.join(', ')}`)
+  })
+
+  // The gas columns are read in their 3.1 names (AE-308-03): the share of a gas is the percentage, and the danger of a gas is one pair for each of the four breathing gases, every input that reads one pair reading all four.
+  const gasInputs = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.reads.DIM_Gases || input.reads.FCT_AtmosphericGas).map((input) => ({ route, key: input.key, gases: input.reads.DIM_Gases || [], atmosphere: input.reads.FCT_AtmosphericGas || [] })))
+  const named = (input) => `${input.route} ${input.key}`
+  const dangerColumns = ['DangerousOxygen', 'DangerousPPMOxygen', 'DangerousMethane', 'DangerousPPMMethane', 'DangerousSulphur', 'DangerousPPMSulphur', 'DangerousAmmonia', 'DangerousPPMAmmonia']
+  const dangerOf = (input) => input.gases.filter((column) => /^Danger/.test(column)).sort().join()
+  const strayOf = (input) => [...input.gases.filter((column) => /^Danger/.test(column) && !dangerColumns.includes(column)), ...input.atmosphere.filter((column) => /^AtmosGas/.test(column) && !['AtmosGasID', 'AtmosGasPercentage'].includes(column))]
+  const strays = gasInputs.filter((input) => strayOf(input).length).map((input) => `${named(input)}: ${strayOf(input).join()}`)
+  const dangerReaders = gasInputs.filter((input) => dangerOf(input))
+  const shareReaders = gasInputs.filter((input) => input.atmosphere.includes('AtmosGasPercentage'))
+
+  check('registry: every danger column of a gas an input reads is one of the eight of the four breathers, and the share of a gas is read as the percentage', strays.length === 0, strays.join('; '))
+  check('registry: every input that reads the danger of a gas reads the pairs of all four breathers, and /habitability and /map both do', dangerReaders.every((input) => dangerOf(input) === [...dangerColumns].sort().join()) && ['/habitability', '/map'].every((route) => dangerReaders.some((input) => input.route === route)), dangerReaders.map((input) => `${named(input)}: ${dangerOf(input)}`).join('; '))
+  check('registry: /habitability and /map read the percentage of a gas in the atmosphere', ['/habitability', '/map'].every((route) => shareReaders.some((input) => input.route === route)), shareReaders.map(named).join(', '))
+
   check('registry: every route a lookup gate names is a report', [...gated].every((route) => capabilities.REPORT_ROUTES.includes(route)), [...gated].filter((route) => !capabilities.REPORT_ROUTES.includes(route)).join(', '))
+  check('registry: no lookup gate keys on a row the line removed at 3.1 (commander bonus 26, Fighter Combat; component type 65, Fighter Pod Bay), which no save of the line holds, so a gate on it would never read as expected', !(26 in capabilities.BONUS_NAMES) && !(65 in capabilities.COMPONENT_TYPES), `${Object.keys(capabilities.BONUS_NAMES).join()}; ${Object.keys(capabilities.COMPONENT_TYPES).join()}`)
   check('registry: Hauling rests on the Production bonus (5, the colonies\' production rates of the reserve panel) and the cargo handling bonus (24) and on no other lookup, so the Shipbuilding and Ground Construction bonuses leave it supported', Object.entries(capabilities.BONUS_NAMES).filter(([, bonus]) => bonus.routes.includes('/hauling')).map(([id]) => id).join() === '5,24')
   check('registry: every route of the scan with inputs is a report (or the shell)', Object.keys(scan).filter((route) => scan[route] && Object.keys(scan[route]).length).every((route) => route === 'shell' || capabilities.REPORT_ROUTES.includes(route) || Object.values(scan[route]).every((input) => !Object.keys(input.reads).length)))
 }
@@ -276,7 +614,21 @@ const scannerChecks = (scan) => {
   check('scanner: the milestones\' own page reads the milestone queries, for it names the link table itself', Object.values(scan['/history']).some((input) => Object.keys(input.reads).includes('FCT_GameLog')))
 }
 
-const realSaveChecks = async (capabilities, save) => {
+// Whether every report of the save was evaluated, whatever its line says: the layout decides what is shown, so the preflight must have a status for each page.
+const allReported = (capabilities, result) => Object.keys(result.reports).sort().join() === [...capabilities.REPORT_ROUTES].sort().join() && Object.values(result.reports).every((report) => ['supported', 'degraded', 'unsupported'].includes(report.status))
+
+// The formula version the module's own loader gives a save file (`loadFormulaVersion`), through an opened handle as the app reads one; its query is not the preflight's, so this is checked apart.
+const loadedFormula = async (capabilities, file) => {
+  const database = openSave(file, [])
+
+  try {
+    return await capabilities.loadFormulaVersion(database)
+  } finally {
+    await database.close()
+  }
+}
+
+const realSaveChecks = async (capabilities, save, fieldWords) => {
   const file = path.resolve(repo, save.file)
 
   if (!fs.existsSync(file)) {
@@ -288,16 +640,85 @@ const realSaveChecks = async (capabilities, save) => {
   const { result } = await preflightOf(capabilities, file)
 
   console.log(`INFO  ${save.label}: ${result.tables} tables, ${result.columns} columns; ${summary(result)}; formula ${result.formula.status} ${result.formula.value || ''}`)
-  check(`${save.label}: every report is supported`, notSupported(result).length === 0, notSupported(result).map((report) => `${report.route} ${report.status} ${JSON.stringify([...report.missing, ...report.degraded])}`).join('; '))
+
+  if (save.expect === 'refused') {
+    const absent = await absentIn(file, LINE_COLUMNS)
+
+    check(`${save.label}: the save is refused as one from before Aurora 3.0, naming the ${LINE_COLUMNS.length} columns Aurora 3.0 added that it lacks`, result.line.status === 'refused' && result.line.reason === 'pre-3.0' && result.line.line === null && result.line.missing.length === LINE_COLUMNS.length && sameFields(result.line.missing, absent), JSON.stringify(result.line))
+    check(`${save.label}: the formula version is unavailable, naming the ${LINE_COLUMNS.length} columns Aurora 3.0 added that it lacks`, result.formula.status === 'unavailable' && result.formula.value === null && sameFields(result.formula.inputs.missing, absent.map((field) => fieldWords(field))), JSON.stringify(result.formula.inputs))
+    check(`${save.label}: the direct loader states no formula version for it either`, (await loadedFormula(capabilities, file)) === null)
+    check(`${save.label}: the refused save still has every report evaluated, so the layout alone holds each page back`, allReported(capabilities, result), Object.keys(result.reports).length)
+
+    // The declared structures are no report's input: a save from before the line lacks every added one and holds the two the line kept from the header before it, and no report loses a status for a declaration.
+    const declaredOnly = capabilities.DECLARED.filter((entry) => !entry.retained).flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`))
+    const retainedFields = capabilities.DECLARED.filter((entry) => entry.retained).flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`))
+    const presentFields = result.declared.flatMap((entry) => entry.present.map((column) => `${entry.table}.${column}`))
+    const held = presentFields.filter((field) => declaredOnly.includes(field))
+    const named = namedFields(result).filter((field) => declaredOnly.includes(field))
+    const kept = retainedFields.filter((field) => presentFields.includes(field))
+
+    check(`${save.label}: the save holds none of the ${declaredOnly.length} declared 3.1 structures a page does not read`, held.length === 0, held.join(', '))
+    check(`${save.label}: no report is held back by a declared 3.1 structure a page does not read, so a save without one changes no report's status`, named.length === 0, named.join(', '))
+    check(`${save.label}: the save holds the ${retainedFields.length} columns the line kept from the header before it, which a save from before the line has too (${kept.join(', ')})`, kept.length === retainedFields.length, retainedFields.filter((field) => !kept.includes(field)).join(', '))
+
+    return
+  }
+
+  // `RENAMED_READS` lists the column names that Aurora 3.1 renamed or removed that a page still reads (none is left), so a save of the line leaves the reports that rest on them unsupported until the item that rewrites the reads lands: this checks that those columns are the only ones a report lacks, and the line, the formula, the lookups and the shell of a real save of the line. The changed-column checks below run on copies of the shipped save of the line.
+  check(`${save.label}: every report is evaluated`, allReported(capabilities, result), Object.keys(result.reports).length)
   check(`${save.label}: the shell is supported`, result.shell.status === 'supported', JSON.stringify(result.shell))
   check(`${save.label}: every lookup row reads as expected`, failedGates(result).length === 0, failedGates(result).join(', '))
-  check(`${save.label}: the formula version is the stated one, as an assumption`, result.formula.value === capabilities.STATED_FORMULA_VERSION && result.formula.status === 'assumed')
-  check(`${save.label}: the save is of the 2.7 line, with none of the fourteen columns missing`, result.line.status === 'accepted' && result.line.reason === null && result.line.line === capabilities.STATED_FORMULA_VERSION && result.line.missing.length === 0, JSON.stringify(result.line))
+  check(`${save.label}: the formula version is the stated one, as an assumption`, result.formula.value === capabilities.STATED_FORMULA_VERSION && result.formula.status === 'assumed' && result.formula.inputs.missing.length === 0)
+  check(`${save.label}: the direct loader states the stated version for it too`, (await loadedFormula(capabilities, file)) === capabilities.STATED_FORMULA_VERSION)
+  check(`${save.label}: the save is of the 3.2 line, with none of the ${LINE_COLUMNS.length} columns missing`, result.line.status === 'accepted' && result.line.reason === null && result.line.line === capabilities.STATED_FORMULA_VERSION && result.line.missing.length === 0, JSON.stringify(result.line))
   check(`${save.label}: the commanders soft groups are both whole`, result.reports['/commanders'].groups.rank === true && result.reports['/commanders'].groups.age === true)
+  check(`${save.label}: the columns its reports lack are the ${Object.keys(RENAMED_READS).length} renamed or removed ones a read still names (${[...new Set(Object.values(RENAMED_READS).map((entry) => entry.owner))].join(', ')}), and no other`, sameFields(namedFields(result), Object.keys(RENAMED_READS)), namedFields(result).join(', '))
+  check(`${save.label}: no report lacks a column of DIM_Gases or FCT_AtmosphericGas, so the gas reads of the pages are all in the 3.1 header rows`, namedFields(result).every((field) => !/^(DIM_Gases|FCT_AtmosphericGas)\./.test(field)), namedFields(result).filter((field) => /^(DIM_Gases|FCT_AtmosphericGas)\./.test(field)).join(', '))
+
+  const bonusRows = await all(file, 'select BonusID, Description, Percentage from DIM_CommanderBonusType where BonusID in (26, 39)')
+  const componentRows = await all(file, 'select ComponentTypeID, TypeDescription from DIM_ComponentType where ComponentTypeID in (65, 72)')
+
+  check(`${save.label}: the lookups hold the 3.1 rows: Fighter Combat (26) and Fighter Pod Bay (65) are gone, Light Tactical (39) is a multiplier and Ordnance Factory Module (72) a component type`, bonusRows.length === 1 && bonusRows[0].BonusID === 39 && bonusRows[0].Description === 'Light Tactical' && bonusRows[0].Percentage === 1 && componentRows.length === 1 && componentRows[0].ComponentTypeID === 72 && componentRows[0].TypeDescription === 'Ordnance Factory Module', JSON.stringify([...bonusRows, ...componentRows]))
+
+  // The structures the catalogue declares before a page reads them (AE-308-05, AE-308-06, AE-308-07): a save of the line holds every column of every entry, whether or not a report reads one, and each of the three items lists its own.
+  const declared = result.declared
+  const declaredOf = (item) => declared.filter((entry) => entry.item === item)
+  const listed = (entries) => entries.map((entry) => `${entry.table}(${entry.columns.join(' ')})`).join(', ')
+  const whole = (entries) => entries.length > 0 && entries.every((entry) => entry.absent.length === 0)
+
+  check(`${save.label}: the two ordnance series tables are declared in the catalogue and present with all their columns (${listed(declaredOf('AE-308-05'))})`, whole(declaredOf('AE-308-05')), JSON.stringify(declaredOf('AE-308-05').filter((entry) => entry.absent.length)))
+  check(`${save.label}: the Lagrange anchor columns are declared and present (${listed(declaredOf('AE-308-06'))})`, whole(declaredOf('AE-308-06')), JSON.stringify(declaredOf('AE-308-06').filter((entry) => entry.absent.length)))
+  check(`${save.label}: the option, archaeology and light-naval columns are declared and present (${listed(declaredOf('AE-308-07'))})`, whole(declaredOf('AE-308-07')), JSON.stringify(declaredOf('AE-308-07').filter((entry) => entry.absent.length)))
+
+  // The other lookup rows the line changed (AE-308-08): the removed rows are gone and the added rows hold their 3.1 names. A fixture of the line is a save of the same line as the export, so the names are the same on every save of the line.
+  const lookup = async (table, idColumn, ids, columns) => all(file, `select ${idColumn}, ${columns} from ${table} where ${idColumn} in (${ids.join(', ')}) order by ${idColumn}`)
+  const names = (rows, idColumn, column) => rows.map((row) => `${row[idColumn]} ${String(row[column]).trim()}`).join('; ')
+  const moves = await lookup('DIM_MoveAction', 'MoveActionID', [211, 212, 213, 214, 237], 'Description')
+  const standing = await lookup('DIM_StandingOrders', 'OrderID', [57], 'Description')
+  const uses = await lookup('DIM_WealthUse', 'WealthUseID', [53, 54, 55], 'Description')
+  const techs = await lookup('DIM_TechType', 'TechTypeID', [286, 287, 288], 'Description')
+  const yards = await lookup('DIM_PlanetaryInstallation', 'PlanetaryInstallationID', [53, 54], 'Name')
+  const events = await lookup('DIM_EventType', 'EventTypeID', [233, 319, 373, 374, 375, 376, 377, 378, 379, 380, 381], 'Description')
+  const eventNames = new Map(events.map((row) => [row.EventTypeID, String(row.Description).trim()]))
+  const added = ['Xenoarchaeology Research', 'Artifacts Recovered', 'Aether Gate Detected', 'All Minerals Exhausted', 'New Neutral Alien Ship', 'New Friendly Alien Ship', 'New Allied Alien Ship', 'Mining Colony Update', 'Incomplete Salvage']
+
+  check(`${save.label}: the move actions are the 3.1 rows: 211-214 are gone and 237 is Load All Ship Components (${names(moves, 'MoveActionID', 'Description')})`, moves.length === 1 && moves[0].MoveActionID === 237 && moves[0].Description === 'Load All Ship Components')
+  check(`${save.label}: standing order 57 is LD: Civilian Contract (${names(standing, 'OrderID', 'Description')})`, standing.length === 1 && standing[0].OrderID === 57 && standing[0].Description === 'LD: Civilian Contract')
+  check(`${save.label}: wealth uses 53, 54 and 55 are Engineering, Ordnance and Ground Unit Projects (${names(uses, 'WealthUseID', 'Description')})`, uses.length === 3 && uses[0].WealthUseID === 53 && uses[0].Description === 'Engineering Projects' && uses[1].WealthUseID === 54 && uses[1].Description === 'Ordnance Projects' && uses[2].WealthUseID === 55 && uses[2].Description === 'Ground Unit Projects')
+  check(`${save.label}: tech types 286-288 are the two Aether Gate tech types and the Ordnance Factory Module (${names(techs, 'TechTypeID', 'Description')})`, techs.length === 3 && techs[0].Description === 'Ordnance Factory Module' && techs[1].Description === 'Aether Gate Detection' && techs[2].Description === 'Aether Gate Prevention')
+  check(`${save.label}: installations 53 and 54 are the Light Naval Shipyard and the Aether Gate Monitoring Station (${names(yards, 'PlanetaryInstallationID', 'Name')})`, yards.length === 2 && yards[0].Name === 'Light Naval Shipyard' && yards[1].Name === 'Aether Gate Monitoring Station')
+  check(`${save.label}: the event types are the 3.1 rows: 233 is New Hostile Alien Ship, 319 is Light Naval Construction, and 373-381 are the nine added types (${names(events, 'EventTypeID', 'Description')})`, eventNames.get(233) === 'New Hostile Alien Ship' && eventNames.get(319) === 'Light Naval Construction' && [373, 374, 375, 376, 377, 378, 379, 380, 381].every((id, index) => eventNames.get(id) === added[index]))
 }
 
 const alteredChecks = async (capabilities, source) => {
   const copies = []
+  const copy = async (name, statements) => {
+    const file = await alteredCopy(source, name, statements)
+
+    copies.push(file)
+
+    return file
+  }
   const unrelated = (result, ...routes) => Object.values(result.reports).filter((report) => !routes.includes(report.route)).every((report) => report.status === 'supported')
   // The reports other than `route` that are not supported, each only degraded and by an input that names `field` (a report that reads the field for another purpose, such as the naval commands' captains' ranks).
   const alsoReading = (result, route, field) => Object.values(result.reports).filter((report) => report.route !== route && !NAVAL_ADMIN_ROUTES.includes(report.route) && report.status !== 'supported').every((report) => report.status === 'unsupported' && report.missing.every((entry) => entry.fields.includes(field)))
@@ -305,46 +726,39 @@ const alteredChecks = async (capabilities, source) => {
   const SEPARATE = ['/finances', '/routes', '/log', '/propulsion', '/map', '/lagrange', '/technologies', '/designed-tech', '/history', '/intelligence', '/minerals']
 
   try {
-    const rankless = await alteredCopy(source, 'rank', ['alter table FCT_Commander drop column RankID'])
-    const coreless = await alteredCopy(source, 'core', ['alter table FCT_Commander drop column RetireStatus'])
-    const rankTable = await alteredCopy(source, 'ranks', ['drop table FCT_Ranks'])
-    const ageless = await alteredCopy(source, 'age', ['alter table FCT_Species drop column GraduationAge'])
-    const renamed = await alteredCopy(source, 'renamed', ["update DIM_CommanderBonusType set Description = 'Mineral Extraction' where BonusID = 6"])
-    const terraformRenamed = await alteredCopy(source, 'terraforming', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 9"])
-    const productionRenamed = await alteredCopy(source, 'production', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5"])
-    const flipped = await alteredCopy(source, 'flipped', ['update DIM_CommanderBonusType set Percentage = 1 where BonusID = 27'])
-    const retyped = await alteredCopy(source, 'component', ["update DIM_ComponentType set TypeDescription = 'Jump Gate Construction' where ComponentTypeID = 29"])
-    const noBonusTable = await alteredCopy(source, 'nobonus', ['drop table DIM_CommanderBonusType'])
-    const noFormula = await alteredCopy(source, 'formula', ['alter table FCT_Game drop column AncientRelics'])
-    const noGame = await alteredCopy(source, 'game', ['drop table FCT_Game'])
-    const pre27 = await alteredCopy(source, 'pre27', dropStatements(LINE_COLUMNS))
-    const sevenDropped = await alteredCopy(source, 'seven', dropStatements(SEVEN_COLUMNS))
-    const noFinance = await alteredCopy(source, 'finance', ['drop table FCT_WealthData'])
-    const noSpecies = await alteredCopy(source, 'species', ['alter table FCT_Commander drop column SpeciesID'])
-    const noCrew = await alteredCopy(source, 'crew', ['alter table FCT_Ship drop column CurrentCrew'])
-    const noMessage = await alteredCopy(source, 'message', ['alter table FCT_GameLog drop column MessageText'])
-    const noMineral = await alteredCopy(source, 'mineral', ['alter table FCT_Population drop column Duranium'])
-    const noFormationReads = await alteredCopy(source, 'formationreads', ['alter table FCT_GroundUnitFormation drop column ReplacementTemplateID'])
-    const noTechType = await alteredCopy(source, 'techtype', ['alter table DIM_TechType drop column Description'])
-    const noObsolete = await alteredCopy(source, 'obsolete', ['alter table FCT_GroundUnitFormationTemplate drop column Obsolete'])
-    const noBuild = await alteredCopy(source, 'nobuild', ['alter table DIM_PlanetaryInstallation drop column NoBuild'])
-    const noXcor = await alteredCopy(source, 'xcor', ['alter table FCT_SystemBody drop column Xcor'])
-    const noDelay = await alteredCopy(source, 'delay', ['alter table FCT_Ship drop column SensorDelay'])
-    const noUnits = await alteredCopy(source, 'units', ['alter table FCT_GroundUnitFormationElement drop column Units'])
-    const noFormationShip = await alteredCopy(source, 'formationship', ['alter table FCT_GroundUnitFormation drop column ShipID'])
-    const noOrbit = await alteredCopy(source, 'orbit', ['alter table FCT_SystemBody drop column Bearing'])
-    const noConstructColumn = await alteredCopy(source, 'constructcolumn', ['alter table FCT_AncientConstruct drop column Active'])
-    const noConstructTable = await alteredCopy(source, 'constructtable', ['drop table FCT_AncientConstruct'])
-    const noGates = await alteredCopy(source, 'gates', ['drop table FCT_AetherGates'])
-    const noRuinTable = await alteredCopy(source, 'ruintable', ['drop table FCT_KnownRuinRace'])
-    const noTroopColumn = await alteredCopy(source, 'troopcolumn', ['alter table FCT_ShipClass drop column TroopCapacity'])
-    const noHeadquarters = await alteredCopy(source, 'headquarters', ['alter table FCT_GroundUnitClass drop column HQCapacity'])
-    const noPanelReads = await alteredCopy(source, 'panel', ['alter table FCT_ShipClass drop column MinimumFuel', 'alter table FCT_Race drop column MSPProduction'])
-    const twoRenamed = await alteredCopy(source, 'tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
-
-    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noBuild, noDelay, noXcor, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, noHeadquarters, productionRenamed, noGates)
-    copies.push(noUnits, noFormationShip)
-    copies.push(noGame, pre27, sevenDropped)
+    const rankless = await copy('rank', ['alter table FCT_Commander drop column RankID'])
+    const coreless = await copy('core', ['alter table FCT_Commander drop column RetireStatus'])
+    const rankTable = await copy('ranks', ['drop table FCT_Ranks'])
+    const ageless = await copy('age', ['alter table FCT_Species drop column GraduationAge'])
+    const renamed = await copy('renamed', ["update DIM_CommanderBonusType set Description = 'Mineral Extraction' where BonusID = 6"])
+    const terraformRenamed = await copy('terraforming', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 9"])
+    const productionRenamed = await copy('production', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5"])
+    const flipped = await copy('flipped', ['update DIM_CommanderBonusType set Percentage = 1 where BonusID = 27'])
+    const retyped = await copy('component', ["update DIM_ComponentType set TypeDescription = 'Jump Gate Construction' where ComponentTypeID = 29"])
+    const noBonusTable = await copy('nobonus', ['drop table DIM_CommanderBonusType'])
+    const noFinance = await copy('finance', ['drop table FCT_WealthData'])
+    const noSpecies = await copy('species', ['alter table FCT_Commander drop column SpeciesID'])
+    const noCrew = await copy('crew', ['alter table FCT_Ship drop column CurrentCrew'])
+    const noMessage = await copy('message', ['alter table FCT_GameLog drop column MessageText'])
+    const noMineral = await copy('mineral', ['alter table FCT_Population drop column Duranium'])
+    const noFormationReads = await copy('formationreads', ['alter table FCT_GroundUnitFormation drop column ReplacementTemplateID'])
+    const noTechType = await copy('techtype', ['alter table DIM_TechType drop column Description'])
+    const noObsolete = await copy('obsolete', ['alter table FCT_GroundUnitFormationTemplate drop column Obsolete'])
+    const noBuild = await copy('nobuild', ['alter table DIM_PlanetaryInstallation drop column NoBuild'])
+    const noXcor = await copy('xcor', ['alter table FCT_SystemBody drop column Xcor'])
+    const noDelay = await copy('delay', ['alter table FCT_Ship drop column SensorDelay'])
+    const noStation = await copy('station', ['alter table FCT_FleetHistory drop column Description'])
+    const noUnits = await copy('units', ['alter table FCT_GroundUnitFormationElement drop column Units'])
+    const noFormationShip = await copy('formationship', ['alter table FCT_GroundUnitFormation drop column ShipID'])
+    const noOrbit = await copy('orbit', ['alter table FCT_SystemBody drop column Bearing'])
+    const noConstructColumn = await copy('constructcolumn', ['alter table FCT_AncientConstruct drop column Active'])
+    const noConstructTable = await copy('constructtable', ['drop table FCT_AncientConstruct'])
+    const noGates = await copy('gates', ['drop table FCT_AetherGates'])
+    const noRuinTable = await copy('ruintable', ['drop table FCT_KnownRuinRace'])
+    const noTroopColumn = await copy('troopcolumn', ['alter table FCT_ShipClass drop column TroopCapacity'])
+    const noHeadquarters = await copy('headquarters', ['alter table FCT_GroundUnitClass drop column HQCapacity'])
+    const noPanelReads = await copy('panel', ['alter table FCT_ShipClass drop column MinimumFuel', 'alter table FCT_Race drop column MSPProduction'])
+    const twoRenamed = await copy('tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
 
     const baseline = (await preflightOf(capabilities, source)).result
     const rank = (await preflightOf(capabilities, rankless)).result
@@ -374,10 +788,6 @@ const alteredChecks = async (capabilities, source) => {
     const flip = (await preflightOf(capabilities, flipped)).result
     const retype = (await preflightOf(capabilities, retyped)).result
     const noBonus = (await preflightOf(capabilities, noBonusTable)).result
-    const formula = (await preflightOf(capabilities, noFormula)).result
-    const gameless = (await preflightOf(capabilities, noGame)).result
-    const older27 = (await preflightOf(capabilities, pre27)).result
-    const sevenLess = (await preflightOf(capabilities, sevenDropped)).result
     const finance = (await preflightOf(capabilities, noFinance)).result
     const orbit = (await preflightOf(capabilities, noOrbit)).result
 
@@ -388,14 +798,18 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_Commander.RankID dropped degrades /commanders, naming the field and the rank group', rankReport.status === 'degraded' && rankReport.missing.length === 0 && rankReport.groups.rank === false && rankReport.groups.age === true && rankReport.degraded.some((entry) => entry.group && entry.key === 'rank' && entry.fields.includes('FCT_Commander.RankID')), JSON.stringify(rankReport))
     check('altered: FCT_Commander.RankID dropped degrades the reports that read the naval admin ranks by the shared group, naming the field and what is left out, and leaves them in service', NAVAL_ADMIN_ROUTES.every((route) => rank.reports[route].status === 'degraded' && rank.reports[route].missing.length === 0 && rank.reports[route].groups.navalRank === false && rank.reports[route].degraded.some((entry) => entry.group && entry.key === 'navalRank' && entry.fields.includes('FCT_Commander.RankID') && /rates|outlook|output/.test(entry.affects))), NAVAL_ADMIN_ROUTES.map((route) => rank.reports[route].status).join())
     check('altered: FCT_Commander.RankID dropped leaves the reports that do not read it supported, and makes the others unsupported only by that read', SEPARATE.every((route) => rank.reports[route].status === 'supported') && alsoReading(rank, '/commanders', 'FCT_Commander.RankID'), notSupported(rank).map((report) => report.route).join(', '))
-    check('altered: the formula version and the lookups are unaffected by a rank column', rank.formula.status === 'assumed' && failedGates(rank).length === 0)
+    check('altered: the base save, a save of the line, states the formula version with none of the seven columns Aurora 3.0 added missing', baseline.formula.status === 'assumed' && baseline.formula.value === capabilities.STATED_FORMULA_VERSION && baseline.formula.inputs.missing.length === 0, JSON.stringify(baseline.formula.inputs))
+    check('altered: the formula version and the lookups are unaffected by a rank column', rank.formula.status === baseline.formula.status && rank.formula.inputs.missing.join() === baseline.formula.inputs.missing.join() && failedGates(rank).length === 0)
 
     const coreReport = core.reports['/commanders']
 
     check('altered: FCT_Commander.RetireStatus dropped makes /commanders unsupported, naming the field', coreReport.status === 'unsupported' && coreReport.missing.some((entry) => entry.fields.includes('FCT_Commander.RetireStatus')), JSON.stringify(coreReport.missing))
-    check('altered: FCT_Commander.RetireStatus dropped does not make an unrelated report unsupported', ['/finances', '/routes', '/log', '/propulsion', '/map', '/survey-progress', '/lagrange'].every((route) => core.reports[route].status === 'supported'), notSupported(core).map((report) => report.route).join(', '))
+    check('altered: FCT_Commander.RetireStatus dropped does not make an unrelated report unsupported', ['/finances', '/log', '/propulsion', '/lagrange'].every((route) => core.reports[route].status === 'supported'), notSupported(core).map((report) => report.route).join(', '))
+    check('altered: FCT_Commander.RetireStatus dropped degrades the Galaxy Map and Survey Progress by their recovery reads (the officers aboard a pod) and leaves them in service, and makes Route Finder unsupported by its small places read, which counts the officers aboard a life pod', ['/map', '/survey-progress'].every((route) => core.reports[route].status === 'degraded' && core.reports[route].missing.length === 0 && core.reports[route].degraded.some((entry) => entry.fields.includes('FCT_Commander.RetireStatus'))) && core.reports['/routes'].status === 'unsupported' && core.reports['/routes'].missing.some((entry) => entry.fields.includes('FCT_Commander.RetireStatus')), ['/map', '/survey-progress', '/routes'].map((route) => `${route} ${core.reports[route].status} ${JSON.stringify(core.reports[route].missing.concat(core.reports[route].degraded).map((entry) => entry.key))}`).join('; '))
 
-    check('altered: FCT_Ranks dropped degrades /commanders by the rank group, naming the table', table.reports['/commanders'].status === 'degraded' && table.reports['/commanders'].degraded.some((entry) => entry.key === 'rank' && entry.fields.includes('FCT_Ranks (table)')) && SEPARATE.every((route) => table.reports[route].status === 'supported'), JSON.stringify(table.reports['/commanders'].degraded))
+    // The ground formations read the race's ranks for a formation's echelon (AE-309-05), so the map, which lists them, leaves service with the commanders' rank group; the other separate reports stay supported.
+    check('altered: FCT_Ranks dropped degrades /commanders by the rank group, naming the table', table.reports['/commanders'].status === 'degraded' && table.reports['/commanders'].degraded.some((entry) => entry.key === 'rank' && entry.fields.includes('FCT_Ranks (table)')) && SEPARATE.filter((route) => route !== '/map').every((route) => table.reports[route].status === 'supported'), JSON.stringify([table.reports['/commanders'].degraded, notSupported(table).map((report) => report.route)]))
+    check('altered: FCT_Ranks dropped leaves /map out of service by the ground formations\' rank read, naming the table', table.reports['/map'].status !== 'supported' && [...table.reports['/map'].missing, ...table.reports['/map'].degraded].some((entry) => entry.fields.includes('FCT_Ranks (table)')), JSON.stringify([table.reports['/map'].status, table.reports['/map'].missing, table.reports['/map'].degraded]))
     check('altered: FCT_Species.GraduationAge dropped degrades /commanders by the age group only', age.reports['/commanders'].status === 'degraded' && age.reports['/commanders'].groups.age === false && age.reports['/commanders'].groups.rank === true && unrelated(age, '/commanders'), JSON.stringify(age.reports['/commanders']))
 
     check('altered: a renamed bonus (6) fails its lookup instead of mapping silently', failedGates(rename).join() === 'bonus 6' && /Mineral Extraction/.test(rename.gates.bonuses[6].inputs.missing.join()), failedGates(rename).join())
@@ -412,22 +826,10 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: a rating (27) turned into a multiplier fails its lookup', failedGates(flip).join() === 'bonus 27' && /rating/.test(flip.gates.bonuses[27].inputs.missing.join()), failedGates(flip).join())
     check('altered: a renamed component type (29) degrades /lagrange only', failedGates(retype).join() === 'component type 29' && retype.reports['/lagrange'].status === 'degraded' && unrelated(retype, '/lagrange'), notSupported(retype).map((report) => report.route).join(', '))
     check('altered: DIM_CommanderBonusType dropped fails every bonus lookup, and /commanders (which reads it) is unsupported', failedGates(noBonus).length === Object.keys(capabilities.BONUS_NAMES).length && noBonus.reports['/commanders'].status === 'unsupported')
-    check('altered: FCT_Game.AncientRelics dropped makes the formula version unavailable, without touching a report', formula.formula.status === 'unavailable' && formula.formula.inputs.missing.join() === 'the game setting for ancient relics' && notSupported(formula).length === 0, JSON.stringify(formula.formula.inputs))
 
-    const pre27Absent = await absentIn(pre27, LINE_COLUMNS)
-    const sevenAbsent = await absentIn(sevenDropped, LINE_COLUMNS)
-    const formulaAbsent = await absentIn(noFormula, LINE_COLUMNS)
-    const reported = (result) => Object.keys(result.reports).sort().join() === [...capabilities.REPORT_ROUTES].sort().join() && Object.values(result.reports).every((report) => ['supported', 'degraded', 'unsupported'].includes(report.status))
-
-    check('line: LINE_SIGNATURE is the fourteen columns Aurora 2.7 added over 2.6', sameFields(capabilities.LINE_SIGNATURE, LINE_COLUMNS) && capabilities.LINE_SIGNATURE.length === 14, JSON.stringify(capabilities.LINE_SIGNATURE))
-    check('line: the unaltered 2.7 copy is of the 2.7 line with none of the fourteen missing', baseline.line.status === 'accepted' && baseline.line.reason === null && baseline.line.line === capabilities.STATED_FORMULA_VERSION && baseline.line.missing.length === 0, JSON.stringify(baseline.line))
-    check('line: a copy with the fourteen columns dropped is refused as a save from before 2.7, naming each of the fourteen the file lacks', pre27Absent.length === 14 && older27.line.status === 'refused' && older27.line.reason === 'pre-2.7' && older27.line.line === null && sameFields(older27.line.missing, pre27Absent), JSON.stringify(older27.line))
-    check('line: a refused copy still has every report evaluated, so the layout alone decides what is shown', reported(older27) && older27.formula.status === 'unavailable', Object.keys(older27.reports).length)
-    check('line: a copy without the FCT_Game table is refused as no Aurora save, naming no column', gameless.line.status === 'refused' && gameless.line.reason === 'not-aurora' && gameless.line.line === null && gameless.line.missing.length === 0 && reported(gameless), JSON.stringify(gameless.line))
-    check('line: the copy without FCT_Game.AncientRelics is still of the 2.7 line, naming the column the file lacks, with the formula version unavailable', formulaAbsent.length === 1 && formula.line.status === 'accepted' && formula.line.line === capabilities.STATED_FORMULA_VERSION && sameFields(formula.line.missing, formulaAbsent) && formula.formula.status === 'unavailable', JSON.stringify(formula.line))
-    check('line: a copy with seven of the fourteen columns dropped is still of the 2.7 line, naming exactly the seven the file lacks, with the formula version unavailable', sevenAbsent.length === 7 && sevenLess.line.status === 'accepted' && sevenLess.line.line === capabilities.STATED_FORMULA_VERSION && sameFields(sevenLess.line.missing, sevenAbsent) && sevenLess.formula.status === 'unavailable' && reported(sevenLess), JSON.stringify(sevenLess.line))
     const species = (await preflightOf(capabilities, noSpecies)).result
     const crew = (await preflightOf(capabilities, noCrew)).result
+    const station = (await preflightOf(capabilities, noStation)).result
     const message = (await preflightOf(capabilities, noMessage)).result
     const mineral = (await preflightOf(capabilities, noMineral)).result
     const panel = (await preflightOf(capabilities, noPanelReads)).result
@@ -443,6 +845,25 @@ const alteredChecks = async (capabilities, source) => {
 
     check('altered: FCT_Commander.SpeciesID dropped degrades /commanders by the age group, naming the join key', species.reports['/commanders'].status === 'degraded' && species.reports['/commanders'].groups.age === false && species.reports['/commanders'].degraded.some((entry) => entry.key === 'age' && entry.fields.includes('FCT_Commander.SpeciesID')), JSON.stringify(species.reports['/commanders']))
     check('altered: FCT_Ship.CurrentCrew dropped leaves /lagrange degraded by its optional ships, naming the field, and not unsupported', crew.reports['/lagrange'].status === 'degraded' && crew.reports['/lagrange'].missing.length === 0 && crew.reports['/lagrange'].degraded.some((entry) => entry.key === 'ships' && entry.fields.includes('FCT_Ship.CurrentCrew')), JSON.stringify(crew.reports['/lagrange']))
+
+    // The station and reserve panels of /logistics: their reads are in the page's `page` input, which is required, so a save without one of their columns would withhold the whole report, although the page's own reads never name them. The soft group takes those fields out of what the page cannot do without: the report degrades, the panel names what it could not read, and the page's own required reads still withhold it.
+    const stationReport = station.reports['/logistics']
+
+    check('altered: FCT_FleetHistory.Description dropped (a column only the station panels read) leaves /logistics degraded by the station and reserve group, naming the field, and not unsupported', stationReport.status === 'degraded' && stationReport.missing.length === 0 && stationReport.groups.stationPanels === false && stationReport.degraded.some((entry) => entry.group && entry.key === 'stationPanels' && entry.fields.includes('FCT_FleetHistory.Description')), JSON.stringify([stationReport.status, stationReport.missing, stationReport.degraded]))
+    check('altered: FCT_Ship.SensorDelay dropped (a column the page\'s own required read names) leaves /logistics unsupported, so the group does not take a required read out of the page', undelayed.reports['/logistics'].status === 'unsupported' && undelayed.reports['/logistics'].missing.some((entry) => entry.key === 'page' && entry.fields.includes('FCT_Ship.SensorDelay')), JSON.stringify(undelayed.reports['/logistics']))
+
+    if (mutating()) {
+      const directory = mutatedCopy('utilities/capabilities.js', ', STATION_PANEL_READS]', ']')
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+        const report = (await preflightOf(mutant, noStation)).result.reports['/logistics']
+
+        check('altered: a copy of the code in which the station panels stay in the page\'s own required input leaves /logistics unsupported on a save without their column, as the check above must notice', report.status === 'unsupported' && report.missing.some((entry) => entry.key === 'page'), report.status)
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
     check('altered: FCT_GameLog.MessageText dropped (read through a table alias) makes /log unsupported, naming the field', message.reports['/log'].status === 'unsupported' && message.reports['/log'].missing.some((entry) => entry.fields.includes('FCT_GameLog.MessageText')), JSON.stringify(message.reports['/log']))
     check('altered: FCT_Population.Duranium dropped (a column built by name) makes /mineral-outlook unsupported, naming the field', mineral.reports['/mineral-outlook'].status === 'unsupported' && mineral.reports['/mineral-outlook'].missing.some((entry) => entry.fields.includes('FCT_Population.Duranium')) && mineral.reports['/finances'].status === 'supported', JSON.stringify(mineral.reports['/mineral-outlook'].missing))
     check('altered: a column only the ground formations read dropped (FCT_GroundUnitFormation.ReplacementTemplateID) degrades /map and /survey-progress by their formation inputs and leaves neither unsupported', onlyFormations(formationReads, '/map', 'groundFormations') && onlyFormations(formationReads, '/survey-progress', 'formations') && formationReads.reports['/map'].degraded[0].fields.includes('FCT_GroundUnitFormation.ReplacementTemplateID'), JSON.stringify([formationReads.reports['/map'], formationReads.reports['/survey-progress']]))
@@ -465,9 +886,10 @@ const alteredChecks = async (capabilities, source) => {
       }
     }
 
-    const xcorNamed = (result) => result.reports['/mineral-outlook'].status === 'unsupported' && result.reports['/mineral-outlook'].missing.some((entry) => entry.fields.includes('FCT_SystemBody.Xcor'))
+    // The deficit sites are named by their own input (`DeficitSites`): the production modifiers of the page read the position too since the fleet-at-colony rule tests it (AE-309-01), so the column alone does not tell the inputs apart.
+    const xcorNamed = (result) => result.reports['/mineral-outlook'].status === 'unsupported' && result.reports['/mineral-outlook'].missing.some((entry) => entry.key === 'DeficitSites' && entry.fields.includes('FCT_SystemBody.Xcor'))
 
-    check('altered: FCT_SystemBody.Xcor dropped (the position the deficit sites are placed by) makes /mineral-outlook unsupported, naming the column, as its deficit sites are a required input', xcorNamed(noPosition), `${noPosition.reports['/mineral-outlook'].status}`)
+    check('altered: FCT_SystemBody.Xcor dropped (the position the deficit sites are placed by) makes /mineral-outlook unsupported, naming the column under the deficit sites, as they are a required input', xcorNamed(noPosition), JSON.stringify([noPosition.reports['/mineral-outlook'].status, noPosition.reports['/mineral-outlook'].missing]))
 
     if (mutating()) {
       const directory = mutatedCopy('utilities/capabilities.js', "BodyDetail: 'the body detail', DeficitSites: 'the deficit sites'", "BodyDetail: 'the body detail'")
@@ -475,7 +897,7 @@ const alteredChecks = async (capabilities, source) => {
       try {
         const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
 
-        check('altered: a copy of the code in which the deficit sites input is not kept leaves /mineral-outlook ' + (await preflightOf(mutant, noXcor)).result.reports['/mineral-outlook'].status + ' on a save without the position, as the check above must notice', !xcorNamed((await preflightOf(mutant, noXcor)).result))
+        check('altered: a copy of the code in which the deficit sites input is not kept leaves /mineral-outlook ' + (await preflightOf(mutant, noXcor)).result.reports['/mineral-outlook'].status + ' on a save without the position with no deficit sites entry, as the check above must notice', !xcorNamed((await preflightOf(mutant, noXcor)).result), JSON.stringify((await preflightOf(mutant, noXcor)).result.reports['/mineral-outlook'].missing))
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }
@@ -554,21 +976,21 @@ const alteredChecks = async (capabilities, source) => {
       check('altered: a registry that requires the observation read of /survey-progress fails the check that leaves /survey-progress in service', surveyRequired.text !== registryText && !observationOnly((await preflightOf(surveyRequired.registry, noUnits)).result, 'FCT_GroundUnitFormationElement.Units'))
     }
 
-    // The optional reads of Survey Progress (the ruins, the ancient constructs, the troop ships): a save without what one reads leaves the page in service with that input degraded, and the page then marks the work it cannot tell as unknown. Each case drops what only that input reads.
+    // The optional reads of Survey Progress (the ruins, the ancient constructs, the troop ships): a save without what one reads leaves the page in service with that input degraded, and the page then marks the work it cannot tell as unknown. Each case drops what only that input reads, but the headquarters capacity, which the formations read too for the headquarters symbol (AE-309-05): that case names the inputs it degrades besides.
     const SURVEY_OPTIONAL = [
       ['FCT_AncientConstruct.Active dropped', noConstructColumn, 'constructSites', 'FCT_AncientConstruct.Active'],
       ['FCT_AncientConstruct dropped', noConstructTable, 'constructSites', 'FCT_AncientConstruct (table)'],
       ['FCT_KnownRuinRace dropped', noRuinTable, 'ruinSites', 'FCT_KnownRuinRace (table)'],
       ['FCT_ShipClass.TroopCapacity dropped', noTroopColumn, 'troopBays', 'FCT_ShipClass.TroopCapacity'],
-      ['FCT_GroundUnitClass.HQCapacity dropped', noHeadquarters, 'groundCommanders', 'FCT_GroundUnitClass.HQCapacity'],
+      ['FCT_GroundUnitClass.HQCapacity dropped', noHeadquarters, 'groundCommanders', 'FCT_GroundUnitClass.HQCapacity', ['formations']],
     ]
     const surveyReport = async (capabilitiesModule, file) => (await preflightOf(capabilitiesModule, file)).result.reports['/survey-progress']
-    const surveyKept = (report, key, field) => report.status === 'degraded' && report.missing.length === 0 && report.degraded.length === 1 && report.degraded[0].key === key && report.degraded[0].fields.includes(field)
+    const surveyKept = (report, key, field, also = []) => report.status === 'degraded' && report.missing.length === 0 && report.degraded.map((entry) => entry.key).sort().join() === [key, ...also].sort().join() && report.degraded.every((entry) => entry.fields.includes(field))
 
-    for (const [label, file, key, field] of SURVEY_OPTIONAL) {
+    for (const [label, file, key, field, also = []] of SURVEY_OPTIONAL) {
       const report = await surveyReport(capabilities, file)
 
-      check(`altered: ${label} degrades /survey-progress by its ${key} input only and leaves the page in service`, surveyKept(report, key, field), JSON.stringify([report.status, report.missing, report.degraded]))
+      check(`altered: ${label} degrades /survey-progress by its ${[key, ...also].join(' and ')} input${also.length ? 's' : ''} only and leaves the page in service`, surveyKept(report, key, field, also), JSON.stringify([report.status, report.missing, report.degraded]))
     }
 
     // The planted faults: an input of the page that is not optional makes the save without it unsupported, and the layout then withholds the whole page.
@@ -578,10 +1000,10 @@ const alteredChecks = async (capabilities, source) => {
 
         try {
           const { capabilities: broken } = await loadUtilities(['capabilities'], { directory: path.join(faulty, 'utilities') })
-          const [, file, , field] = SURVEY_OPTIONAL.find((entry) => entry[2] === key)
+          const [, file, , field, also = []] = SURVEY_OPTIONAL.find((entry) => entry[2] === key)
           const report = await surveyReport(broken, file)
 
-          check(`altered: a /survey-progress that required ${key} would be unsupported on a save without it (the planted fault the checks above must fail)`, !surveyKept(report, key, field) && report.status === 'unsupported', report.status)
+          check(`altered: a /survey-progress that required ${key} would be unsupported on a save without it (the planted fault the checks above must fail)`, !surveyKept(report, key, field, also) && report.status === 'unsupported', report.status)
         } finally {
           fs.rmSync(faulty, { recursive: true, force: true })
         }
@@ -664,20 +1086,127 @@ const alteredChecks = async (capabilities, source) => {
     check('immutable: the file hash of a copy is unchanged by a preflight', before === after, `${before} then ${after}`)
     check('immutable: every query the preflight sent is a select', log.length > 0 && log.every((sql) => /^\s*select\b/i.test(sql)), log.filter((sql) => !/^\s*select\b/i.test(sql)).join('; '))
     check('immutable: a retry reads the copy as it is now', (await preflightOf(capabilities, rankless)).result.reports['/commanders'].status === 'degraded')
+  } catch (error) {
+    copyFailures.push(error)
+    throw error
   } finally {
-    copies.forEach((copy) => fs.rmSync(copy, { force: true }))
+    copies.forEach(removeOwnedCopy)
   }
 }
 
 const STUBS = {
+  // Logistics reaches history through fleet-stations; its persistence dependency stays in memory here, as in the fleet-stations check.
+  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 
-const CONSUMER_MODULES = ['capabilities', 'commanders', '../mixins/production-modifiers', '../store/capabilities']
+// The appearance helper of the Intelligence page, which the page loader's stub of utilities/appearance does not carry (`toneColor`): the page reads no appearance in these checks, so a small one stands in.
+const INTELLIGENCE_APPEARANCE = 'export const activeAppearance = () => ({}); export const toneColor = () => undefined'
 
+// The read behind an input that names FCT_AlienClass, as the page or utility makes it: the number of rows it returns, or the error it throws. The recovery ledger's four statements stand for three inputs (the Galaxy Map's recovery objects and the observation read of the Map, Survey Progress and History); a failed statement is thrown in its own words, so an owned column names its item.
+const recoveryObjectsRead = async (context) => {
+  const { objects, failed } = await context.recovery.loadRecoveryObjects(context.database, context.ids)
+  const failures = Object.values(failed)
+
+  if (failures.length) {
+    throw new Error(failures.join('; '))
+  }
+
+  return Object.values(objects).reduce((total, rows) => total + (rows ? rows.size : 0), 0)
+}
+
+const smallPlacesRead = async (context) => (await context.places.loadSmallPlaces(context.database, context.ids, String)).length
+
+// The known wrecks check of the Warnings page, read as the page reads it (`read(ctx)`).
+const knownWrecksRead = async (context) => {
+  const wrecks = context.wrecks.checks.find((entry) => entry.key === 'known-wrecks')
+
+  if (!wrecks) {
+    throw new Error('the known wrecks check is not in utilities/warnings/space.js')
+  }
+
+  return (await wrecks.read({ database: context.database, ...context.ids, count: (value) => String(value) })).length
+}
+
+// The inputs of the registry that name FCT_AlienClass, by route and key, each with the read that serves it: the Intelligence page's three reads through its own page script, the recovery ledger's statements, Route Finder's small places and the known wrecks check of Warnings. A registry input with no reader here fails the check: those are exactly the alien-class reads the preflight would leave unrun.
+const ALIEN_READERS = {
+  '/intelligence': { races: (context) => context.page.runAsync('races').then((rows) => rows.length), ships: (context) => context.page.runAsync('ships').then((rows) => rows.length), classes: (context) => context.page.runAsync('classes').then((rows) => rows.length) },
+  '/map': { recoveryObjects: recoveryObjectsRead, recoveryObservationRead: recoveryObjectsRead },
+  '/survey-progress': { recoveryObservationRead: recoveryObjectsRead },
+  '/history': { recoveryObservationRead: recoveryObjectsRead },
+  '/routes': { smallPlaces: smallPlacesRead },
+  '/warnings': { 'check:known-wrecks': knownWrecksRead },
+}
+
+// The alien-class reads, run where a save holds alien classes: the interim fixture is the only save of the line that does (the time-zero export and the shipped databases hold none), so the preflight's column check proves nothing of their queries. These are the pages' and utilities' own reads, through the page loader and `loadUtilities`, with the game and the player's race as the app reads them from FCT_Race. A read the 3.2 line blocks by a column another named item owns (`RENAMED_READS`) is recorded with that item and not fixed (a check red for a reason a pending item owns is recorded, not fixed); any other failure fails this check.
+const alienClassChecks = async (capabilities, file) => {
+  if (!fs.existsSync(file)) {
+    console.log(`SKIP  alien: ${FIXTURE.file} is not there, so the alien-class reads are not run (not run)`)
+
+    return
+  }
+
+  const log = []
+  const database = openSave(file, log)
+
+  try {
+    const [races] = await database.query('select GameID, RaceID from FCT_Race where NPR = 0 order by GameID, RaceID limit 1')
+    const [game] = races
+
+    check('alien: the interim fixture names a game and a player race to run the alien-class reads for', Boolean(game), 'no FCT_Race row with NPR = 0')
+
+    if (!game) {
+      return
+    }
+
+    const [[{ classes }]] = await database.query(`select count(*) as classes from FCT_AlienClass where ViewRaceID = ${Number(game.RaceID)}`)
+
+    check('alien: the interim fixture holds alien classes in the view of the race they are read for', classes > 0, `${classes} classes for race ${game.RaceID}`)
+
+    const { 'recovery-ledger': recovery, 'place-data': places, 'warnings/space': wrecks } = await loadUtilities(['recovery-ledger', 'place-data', 'warnings/space'], { stubs: STUBS })
+    const intelligence = await loadPage('pages/intelligence', { stubs: STUBS, modules: { 'utilities/appearance': INTELLIGENCE_APPEARANCE } })
+    const page = instantiate(intelligence, { $store: { getters: {}, state: {}, dispatch: () => Promise.resolve() }, database, GameID: game.GameID, RaceID: game.RaceID })
+    const context = { database, ids: { GameID: game.GameID, RaceID: game.RaceID }, page, recovery, places, wrecks }
+    const inputs = Object.entries(capabilities.INPUTS).flatMap(([route, entries]) => entries.filter((entry) => Object.keys(entry.reads).includes('FCT_AlienClass')).map((entry) => [route, entry.key]))
+    const unserved = inputs.filter(([route, key]) => !(ALIEN_READERS[route] && ALIEN_READERS[route][key]))
+
+    check(`alien: every input of the registry that names FCT_AlienClass (${inputs.length}) has a read this check runs`, inputs.length > 0 && unserved.length === 0, unserved.map(([route, key]) => `${route} ${key}`).join(', '))
+
+    const results = []
+
+    for (const [route, key] of inputs.filter(([route, key]) => ALIEN_READERS[route] && ALIEN_READERS[route][key])) {
+      let rows = null
+      let failure = null
+
+      try {
+        rows = await ALIEN_READERS[route][key](context)
+      } catch (error) {
+        failure = String((error && error.message) || error).split('\n')[0]
+      }
+
+      const owned = failure ? Object.keys(RENAMED_READS).find((field) => failure.includes(field)) : null
+
+      results.push(`${route} ${key}: ${failure ? (owned ? `blocked by ${owned} (${RENAMED_READS[owned].owner})` : `FAILED: ${failure}`) : `${rows} rows`}`)
+
+      if (failure) {
+        check(`alien: ${route} ${key} is blocked by ${owned || 'a column no item owns'}; a read the 3.2 line blocks by a column another item owns is recorded with that item, not fixed`, Boolean(owned), failure)
+      } else {
+        check(`alien: ${route} ${key} runs on the interim fixture and returns rows`, rows > 0, `${rows} rows`)
+      }
+    }
+
+    console.log(`INFO  alien reads on ${path.basename(file)} for game ${game.GameID} race ${game.RaceID}: ${results.join('; ')}`)
+
+    check('alien: every query the alien-class reads sent is a select', log.length > 0 && log.every((sql) => /^\s*select\b/i.test(sql)), log.filter((sql) => !/^\s*select\b/i.test(sql)).join('; '))
+  } finally {
+    await database.close()
+  }
+}
+
+const CONSUMER_MODULES = ['capabilities', 'commanders', '../mixins/production-modifiers', '../store/capabilities']
 const rendererDirectory = path.join(repo, 'src', 'renderer')
 
 // The pages that load the naval admin commands of one share, with the file that names the share (`loadNavalAdmins(..., { share })`): the Colonization Planner's read is in utilities/colonization-data.js, the handling times' of Transport and Hauling in utilities/handling-support.js. `MARKER_USES` gives each of them the share it loads.
@@ -686,6 +1215,8 @@ const SHARE_SOURCES = {
   '/mineral-outlook': 'pages/mineral-outlook.vue',
   '/habitability': 'utilities/colonization-data.js',
   '/logistics': 'pages/logistics.vue',
+  '/colony-outlook': 'mixins/production-modifiers.js',
+  '/shipyards': 'mixins/production-modifiers.js',
   '/survey-progress': 'pages/survey-progress.vue',
   '/hauling': 'utilities/handling-support.js',
   '/information': 'utilities/handling-support.js',
@@ -750,7 +1281,7 @@ const consumerResults = async (mods, source, refusedFile) => {
   holds('a roster bonus of a blocked ID is unknown, never its stored value', bonuses[5] === null && bonuses[25] === null && bonuses[6] === 1.1)
   holds('a roster chip of a blocked bonus reads as unknown', commanders.formatBonus(25, 6, blocked) !== '6' && commanders.formatBonus(25, 6, new Set()) === '6')
 
-  const ship = { ShipID: 1, ClassName: 'Terraformer', Terraformers: 2, RankRequired: 3 }
+  const ship = { ShipID: 1, ClassName: 'Terraformer', Terraformers: 2, RankRequired: 3, ShipSeniorCO: 0, MainFunction: 2 }
 
   holds('a specialist post that rests on a blocked bonus is unavailable', !isAvailableResult(commanders.specialistPost(ship, new Set([9]))) && isAvailableResult(commanders.specialistPost(ship, new Set())))
 
@@ -784,14 +1315,14 @@ const consumerResults = async (mods, source, refusedFile) => {
     return schema
   }
   const none = capabilities.lineResult(schemaOf([]))
-  const some = capabilities.lineResult(schemaOf(SEVEN_COLUMNS))
-  const one = capabilities.lineResult(schemaOf(['FCT_Ship.SLRetire']))
+  const some = capabilities.lineResult(schemaOf(DAMAGED_COLUMNS))
+  const one = capabilities.lineResult(schemaOf(['FCT_Ship.ShipSeniorCO']))
   const whole = capabilities.lineResult(schemaOf(LINE_COLUMNS))
   const noGameLine = capabilities.lineResult(schemaOf(LINE_COLUMNS.filter((field) => !field.startsWith('FCT_Game.')), false))
 
-  holds('a schema with FCT_Game and none of the fourteen columns is refused as a save from before 2.7', none.status === 'refused' && none.reason === 'pre-2.7' && sameFields(none.missing, LINE_COLUMNS))
-  holds('a schema with any of the fourteen columns is of the 2.7 line, one column or seven, naming those it lacks', one.status === 'accepted' && sameFields(one.missing, LINE_COLUMNS.filter((field) => field !== 'FCT_Ship.SLRetire')) && some.status === 'accepted' && sameFields(some.missing, LINE_COLUMNS.filter((field) => !SEVEN_COLUMNS.includes(field))))
-  holds('a schema with every one of the fourteen columns is of the 2.7 line, with none missing', whole.status === 'accepted' && whole.missing.length === 0)
+  holds('a schema with FCT_Game and none of the seven columns is refused as a save from before 3.0', none.status === 'refused' && none.reason === 'pre-3.0' && sameFields(none.missing, LINE_COLUMNS))
+  holds('a schema with any of the seven columns is of the 3.2 line, one column or three, naming those it lacks', one.status === 'accepted' && sameFields(one.missing, LINE_COLUMNS.filter((field) => field !== 'FCT_Ship.ShipSeniorCO')) && some.status === 'accepted' && sameFields(some.missing, LINE_COLUMNS.filter((field) => !DAMAGED_COLUMNS.includes(field))))
+  holds('a schema with every one of the seven columns is of the 3.2 line, with none missing', whole.status === 'accepted' && whole.missing.length === 0)
   holds('a schema without the FCT_Game table is refused as no Aurora save, whatever else it holds', noGameLine.status === 'refused' && noGameLine.reason === 'not-aurora')
 
   const quiet = console.error
@@ -813,7 +1344,7 @@ const consumerResults = async (mods, source, refusedFile) => {
     holds('the store blocks every bonus before any check', over.getters.blockedBonuses.size === all.length)
     await over.run('preflight')
     holds('the store releases the bonuses once the check answered on this copy', over.getters.status === 'ok' && over.getters.blockedBonuses.size === 0)
-    holds('an accepted copy is of the 2.7 line, and is not refused', over.getters.line !== null && over.getters.line.status === 'accepted' && over.getters.refused === false)
+    holds('an accepted copy is of the 3.2 line, and is not refused', over.getters.line !== null && over.getters.line.status === 'accepted' && over.getters.refused === false)
 
     connections[1].state.busy = true
 
@@ -842,7 +1373,7 @@ const consumerResults = async (mods, source, refusedFile) => {
 
     holds('no line is known and nothing is refused before the check answers', refusedOver.getters.line === null && refusedOver.getters.refused === false)
     await refusedOver.run('preflight')
-    holds('a copy without the fourteen columns is refused by the store, as a save from before 2.7', refusedOver.getters.refused === true && refusedOver.getters.line.reason === 'pre-2.7')
+    holds('a copy without the seven columns is refused by the store, as a save from before 3.0', refusedOver.getters.refused === true && refusedOver.getters.line.reason === 'pre-3.0')
 
     const again = refusedOver.run('retry')
 
@@ -893,16 +1424,16 @@ const mutatedCopy = (file, from, to) => {
 }
 
 const MUTATIONS = [
-  ['a missing capacity term named by its column of the modifier row', 'mixins/production-modifiers.js', '.map((term) => TERM_WORDS[term] || term)', ''],
-  ['commanders.js reads a blocked bonus', 'utilities/commanders.js', 'blocked.has(Number(id)) || value === undefined', 'value === undefined'],
-  ['the production modifiers ignore a blocked bonus', 'mixins/production-modifiers.js', '(blocked.has(Number(id)) ? { ...gated, [column]: null } : gated)', 'gated'],
-  ['the capacity result ignores a blocked bonus', 'mixins/production-modifiers.js', 'const lookup = blocked.has(5) ?', 'const lookup = false ?'],
-  ['no assessment releases every bonus', 'utilities/capabilities.js', 'Object.entries(gates ? gates.bonuses : BONUS_NAMES)', 'Object.entries(gates ? gates.bonuses : {})'],
-  ['no assessment is read as confirmed lookup rows', 'utilities/capabilities.js', 'if (!gates) {\n    return [UNCONFIRMED]', 'if (!gates) {\n    return []'],
-  ['a retry clears the result of the same copy', 'store/capabilities.js', 'if (state.resultGeneration !== generation) {', 'if (true) {'],
-  ['the store returns a result of an earlier copy', 'store/capabilities.js', 'return state.resultGeneration === rootState.freshness.generation ? state.result : null', 'return state.result'],
-  ['the line counts a schema with some of the fourteen columns as one with none', 'utilities/capabilities.js', 'if (missing.length === LINE_SIGNATURE.length) {', 'if (missing.length > 0) {'],
-  ['the store refuses a copy on the result of an earlier copy', 'store/capabilities.js', "return getters.line !== null && getters.line.status === 'refused'", "return Boolean(_state.result && _state.result.line && _state.result.line.status === 'refused')"],
+  ['a missing capacity term named by its column of the modifier row', 'mixins/production-modifiers.js', '.map((term) => TERM_WORDS[term] || term)', '', ['a colony capacity with the Production bonus blocked or a rate not stored names']],
+  ['commanders.js reads a blocked bonus', 'utilities/commanders.js', 'blocked.has(Number(id)) || value === undefined', 'value === undefined', ['a roster bonus of a blocked ID']],
+  ['the production modifiers ignore a blocked bonus', 'mixins/production-modifiers.js', '(blocked.has(Number(id)) ? { ...gated, [column]: null } : gated)', 'gated', ['a modifier row of a blocked bonus loses']],
+  ['the capacity result ignores a blocked bonus', 'mixins/production-modifiers.js', 'const lookup = blocked.has(5) ?', 'const lookup = false ?', ['a colony capacity with the Production bonus blocked is unavailable']],
+  ['no assessment releases every bonus', 'utilities/capabilities.js', 'Object.entries(gates ? gates.bonuses : BONUS_NAMES)', 'Object.entries(gates ? gates.bonuses : {})', ['no assessment blocks every bonus ID']],
+  ['no assessment is read as confirmed lookup rows', 'utilities/capabilities.js', 'if (!gates) {\n    return [UNCONFIRMED]', 'if (!gates) {\n    return []', ['gateGaps without an assessment']],
+  ['a retry clears the result of the same copy', 'store/capabilities.js', 'if (state.resultGeneration !== generation) {', 'if (true) {', ['a retry that failed keeps']],
+  ['the store returns a result of an earlier copy', 'store/capabilities.js', 'return state.resultGeneration === rootState.freshness.generation ? state.result : null', 'return state.result', ['a result of an earlier copy']],
+  ['the line counts a schema with some of the seven columns as one with none', 'utilities/capabilities.js', 'if (missing.length === LINE_SIGNATURE.length) {', 'if (missing.length > 0) {', ['a schema with any of the seven']],
+  ['the store refuses a copy on the result of an earlier copy', 'store/capabilities.js', "return getters.line !== null && getters.line.status === 'refused'", "return Boolean(_state.result && _state.result.line && _state.result.line.status === 'refused')", ['the refusal of an earlier copy']],
 ]
 
 // The nodes of a page's script that `wanted(node)` accepts, and the script's text: { script, nodes }.
@@ -936,11 +1467,56 @@ const rosterTemplates = () => {
 }
 
 const all = (file, sql) => new Promise((resolve, reject) => {
-  const database = new sqlite3.Database(file, sqlite3.OPEN_READONLY)
+  const consumer = copyConsumer(file)
 
-  database.all(sql, (error, rows) => {
-    database.close(() => (error ? reject(error) : resolve(rows)))
-  })
+  if (!consumer) {
+    const database = new sqlite3.Database(file, sqlite3.OPEN_READONLY)
+
+    database.all(sql, (error, rows) => {
+      database.close(() => (error ? reject(error) : resolve(rows)))
+    })
+
+    return
+  }
+
+  let database
+
+  try {
+    database = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (openError) => {
+      if (openError) {
+        consumer.failed(openError)
+        reject(openError)
+
+        return
+      }
+
+      const done = (error, rows) => {
+        try {
+          database.close((closeError) => {
+            if (closeError) {
+              consumer.failed(closeError)
+              reject(error ? new AggregateError([error, closeError], 'Capability read and close failed') : closeError)
+            } else {
+              consumer.closed()
+              error ? reject(error) : resolve(rows)
+            }
+          })
+        } catch (closeError) {
+          consumer.failed(closeError)
+          reject(error ? new AggregateError([error, closeError], 'Capability read and close failed') : closeError)
+        }
+      }
+
+      try {
+        database.all(sql, done)
+      } catch (error) {
+        done(error)
+      }
+    })
+  } catch (error) {
+    consumer.failed(error)
+    reject(error)
+  }
 })
 
 // Runs the page's own roster queries on a copy: { ok, failed: [error], rows: [rows of each] }.
@@ -966,12 +1542,15 @@ const rosterRun = async (commanders, file, groups) => {
 // The consumers of the capability result, on the real modules and, with one gate taken out of a copy of them, on mutants that must fail.
 const consumerChecks = async (source) => {
   const mods = await loadUtilities(CONSUMER_MODULES, { stubs: STUBS })
-  const refusedFile = await alteredCopy(source, 'pre27store', dropStatements(LINE_COLUMNS))
+  const refusedFile = await alteredCopy(source, 'pre30store', dropStatements(LINE_COLUMNS))
 
   try {
     return await consumerRun(mods, source, refusedFile)
+  } catch (error) {
+    copyFailures.push(error)
+    throw error
   } finally {
-    fs.rmSync(refusedFile, { force: true })
+    removeOwnedCopy(refusedFile)
   }
 }
 
@@ -981,14 +1560,14 @@ const consumerRun = async (mods, source, refusedFile) => {
   results.forEach(([statement, held]) => check(`consumers: ${statement}`, held))
 
   if (mutating()) {
-    for (const [label, file, from, to] of MUTATIONS) {
+    for (const [label, file, from, to, fails] of MUTATIONS) {
       const directory = mutatedCopy(file, from, to)
 
       try {
         const mutants = await loadUtilities(CONSUMER_MODULES, { stubs: STUBS, directory: path.join(directory, 'utilities') })
-        const broken = (await consumerResults(mutants, source, refusedFile)).filter(([, held]) => !held).map(([statement]) => statement)
+        const caught = await caughtValues(await consumerResults(mutants, source, refusedFile), fails, label)
 
-        check(`consumers: a copy of the code in which ${label} fails a consumer check`, broken.length > 0)
+        check(`consumers: a copy of the code in which ${label} fails its named consumer check`, caught)
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }
@@ -1006,7 +1585,7 @@ const rosterChecks = async (capabilities, commanders, source) => {
   try {
     const baseline = await rosterRun(commanders, source, null)
 
-    check('roster: the page\'s four queries run on an unaltered save', baseline.ok && baseline.rows.length === 4, baseline.failed.join('; '))
+    check('roster: the page\'s five queries run on an unaltered save (the fifth reads the classes of the light naval candidates, AE-304-02)', baseline.ok && baseline.rows.length === 5, [baseline.rows.length, ...baseline.failed].join('; '))
     check('roster: an unaltered save returns rank names and ages', named(baseline.rows, 'RankName').some((name) => name !== null) && named(baseline.rows, 'GraduationAge').some((age) => age !== null))
 
     const cases = [
@@ -1030,8 +1609,11 @@ const rosterChecks = async (capabilities, commanders, source) => {
       check(`roster: with ${label}, the same queries fail on the parts of a complete save`, !unguarded.ok)
       check(`roster: with ${label}, /commanders is degraded and names the field`, result.reports['/commanders'].status === 'degraded' && result.reports['/commanders'].degraded.some((entry) => entry.group), JSON.stringify(result.reports['/commanders'].degraded.map((entry) => entry.fields)))
     }
+  } catch (error) {
+    copyFailures.push(error)
+    throw error
   } finally {
-    copies.forEach((copy) => fs.rmSync(copy, { force: true }))
+    copies.forEach(removeOwnedCopy)
   }
 }
 
@@ -1127,11 +1709,11 @@ const dependencyChecks = async (capabilities, source, scan) => {
   const copies = []
   // The resource reserves panel and the Transport page's refuelling sites read through mixins and helpers the scan does not follow, so their reads are in `EXTRA_READS`: the registry says which of its inputs read a column.
   const panelReaders = (table, column) => [['/logistics', 'ResourceReserves'], ['/hauling', 'ResourceReserves'], ['/information', 'fuelSites']].filter(([route, key]) => capabilities.INPUTS[route].some((input) => input.key === key && (input.reads[table] || []).includes(column)))
-  const unaffected = ['/mineral-outlook', '/logistics', '/habitability', '/production', '/colony-outlook', '/survey-progress']
+  const unaffected = ['/logistics', '/habitability', '/production', '/colony-outlook', '/survey-progress']
   const shared = (share) => shareReaders(scan, share)
   const sharing = (share) => Object.keys(SHARE_SOURCES).filter((route) => sharesOf(route).includes(share))
   const cases = [
-    { label: 'FCT_Population.ReserveDuranium dropped', table: 'FCT_Population', column: 'ReserveDuranium', readers: readersOf(scan, 'FCT_Population', 'ReserveDuranium'), supported: unaffected, unsupported: ['/minerals', '/hauling'] },
+    { label: 'FCT_Population.ReserveDuranium dropped', table: 'FCT_Population', column: 'ReserveDuranium', readers: readersOf(scan, 'FCT_Population', 'ReserveDuranium'), supported: unaffected, unsupported: ['/minerals', '/hauling', '/mineral-outlook'] },
     { label: 'FCT_Population.FuelStockpile dropped', table: 'FCT_Population', column: 'FuelStockpile', readers: [...readersOf(scan, 'FCT_Population', 'FuelStockpile'), ...riftReaders('FuelStockpile'), ...panelReaders('FCT_Population', 'FuelStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress'], unsupported: ['/logistics', '/production'] },
     { label: 'FCT_Population.MaintenanceStockpile dropped', table: 'FCT_Population', column: 'MaintenanceStockpile', readers: [...readersOf(scan, 'FCT_Population', 'MaintenanceStockpile'), ...riftReaders('MaintenanceStockpile'), ...panelReaders('FCT_Population', 'MaintenanceStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress', '/production'], unsupported: ['/logistics'] },
     { label: 'DIM_NavalAdminCommandType.Industrial dropped', table: 'DIM_NavalAdminCommandType', column: 'Industrial', readers: shared('Industrial'), supported: ['/survey-progress', '/minerals', '/hauling'], unsupported: sharing('Industrial') },
@@ -1149,7 +1731,7 @@ const dependencyChecks = async (capabilities, source, scan) => {
     const results = await dependencyResults(capabilities, cases)
 
     results.forEach(([statement, held, detail]) => check(`dependencies: ${statement}`, held, detail))
-    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/habitability', '/logistics', '/mineral-outlook', '/production'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
+    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/colony-outlook', '/habitability', '/logistics', '/mineral-outlook', '/production', '/shipyards'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
 
     if (mutating()) {
       const [label, file, from, to] = UNION
@@ -1157,27 +1739,30 @@ const dependencyChecks = async (capabilities, source, scan) => {
 
       try {
         const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
-        const broken = (await dependencyResults(mutant, cases)).filter(([, held]) => !held).map(([statement]) => statement)
+        const broken = await dependencyResults(mutant, cases)
+        const caught = await caughtValues(broken, ['FCT_Population.ReserveDuranium dropped: exactly the reports whose inputs read it by name'], label)
 
-        console.log(`INFO  a copy of the code with the ${label} fails ${broken.length} of the dependency checks`)
-        check(`dependencies: a copy of the code with the ${label} fails a dependency check`, broken.length > 0)
+        console.log(`INFO  a copy of the code with the ${label} fails ${broken.filter(([, held]) => !held).length} of the dependency checks`)
+        check(`dependencies: a copy of the code with the ${label} fails its named dependency check`, caught)
       } finally {
         fs.rmSync(directory, { recursive: true, force: true })
       }
     }
 
     await sqlChecks(source, cases[0].file)
+  } catch (error) {
+    copyFailures.push(error)
+    throw error
   } finally {
-    copies.forEach((copy) => fs.rmSync(copy, { force: true }))
+    copies.forEach(removeOwnedCopy)
   }
 }
 
 // The columns a built-by-name read stands for (`MARKER_COLUMNS`) are the lists the pages build them from: the minerals of utilities/minerals.js, the command-type shares of utilities/naval-admins.js.
 const markerChecks = async (capabilities) => {
-  const { minerals } = await loadUtilities(['minerals'], { stubs: STUBS })
+  const { minerals, 'naval-admins': navalAdmins } = await loadUtilities(['minerals', 'naval-admins'], { stubs: STUBS })
   const names = minerals.MINERALS.map((mineral) => mineral.name)
-  const shares = /const SHARES = \[([^\]]*)\]/.exec(fs.readFileSync(path.join(rendererDirectory, 'utilities', 'naval-admins.js'), 'utf8'))
-  const listed = shares ? shares[1].split(',').map((name) => name.trim().replace(/'/g, '')) : []
+  const listed = [...new Set(Object.values(navalAdmins.NAVAL_ADMIN_SHARES).flat())].sort()
 
   ;['FCT_Population', 'FCT_IndustrialProjects', 'FCT_ShipyardTask', 'FCT_MassDriverPackets', 'FCT_ShipDesignComponents'].forEach((table) => check(`registry: the built-by-name columns of ${table} are the minerals`, capabilities.MARKER_COLUMNS[table].join() === names.join()))
 
@@ -1185,7 +1770,190 @@ const markerChecks = async (capabilities) => {
 
   check('registry: a `Reserve*` marker stands for the reserve of each mineral, and the bare marker beside it for the minerals only', Boolean(reserves) && reserves['Reserve*'].join() === names.map((name) => `Reserve${name}`).join() && reserves['*'].join() === names.join(), JSON.stringify(reserves))
   check('registry: the colony stockpiles are no built-by-name column, an input that reads them names them', !capabilities.MARKER_COLUMNS.FCT_Population.includes('FuelStockpile') && !capabilities.MARKER_COLUMNS.FCT_Population.includes('MaintenanceStockpile'))
-  check('registry: the built-by-name columns of DIM_NavalAdminCommandType are the command-type shares', listed.length > 0 && capabilities.MARKER_COLUMNS.DIM_NavalAdminCommandType.join() === listed.join() && capabilities.SHARE_NAMES.join() === listed.join(), listed.join())
+  check('registry: the built-by-name columns of DIM_NavalAdminCommandType are the command-type shares', listed.length > 0 && [...capabilities.MARKER_COLUMNS.DIM_NavalAdminCommandType].sort().join() === listed.join() && [...capabilities.SHARE_NAMES].sort().join() === listed.join(), listed.join())
+}
+
+// The Aurora line and the formula version of a save of the line and of its altered copies, on a save of the line itself: a save of the one shape of 3.0, 3.1 and 3.2 is of the 3.2 line with none of the signature missing and states 3.2.x; a copy without the seven columns Aurora 3.0 added is refused as a save from before 3.0 and states no formula version, naming all seven; a copy without some of them is still of the line, naming those it lacks, and states no formula version either, naming the same; a file without FCT_Game is no Aurora save and states none; a copy whose surviving signature columns are all outside FCT_Game still states the version, so the direct loader is shown to read every table of the signature. The real saves of the line are checked by `realSaveChecks`; these are the copies, made from the shipped 3.1.0 database, which is a save of the line.
+const lineChecks = async (capabilities, source, fieldWords) => {
+  const copies = []
+
+  try {
+    const copy = async (name, statements) => {
+      const file = await alteredCopy(source, name, statements)
+
+      copies.push(file)
+
+      return file
+    }
+    const gameSignature = LINE_COLUMNS.filter((field) => field.startsWith('FCT_Game.'))
+    const outsideSignature = LINE_COLUMNS.filter((field) => !field.startsWith('FCT_Game.'))
+    const words = (fields) => fields.map((field) => fieldWords(field))
+    const baseline = (await preflightOf(capabilities, source)).result
+    const pre30 = await copy('line-pre30', dropStatements(LINE_COLUMNS))
+    const damaged = await copy('line-damaged', dropStatements(DAMAGED_COLUMNS))
+    const noGame = await copy('line-game', ['drop table FCT_Game'])
+    const outsideOnly = await copy('line-outside', dropStatements(gameSignature))
+    const outsideDropped = await copy('line-outside-dropped', dropStatements(outsideSignature))
+    const older30 = (await preflightOf(capabilities, pre30)).result
+    const damagedLess = (await preflightOf(capabilities, damaged)).result
+    const gameless = (await preflightOf(capabilities, noGame)).result
+    const outsideLess = (await preflightOf(capabilities, outsideOnly)).result
+    const outsideDroppedLess = (await preflightOf(capabilities, outsideDropped)).result
+    const pre30Absent = await absentIn(pre30, LINE_COLUMNS)
+    const damagedAbsent = await absentIn(damaged, LINE_COLUMNS)
+    const outsideAbsent = await absentIn(outsideOnly, LINE_COLUMNS)
+    const outsideDroppedAbsent = await absentIn(outsideDropped, LINE_COLUMNS)
+
+    check('line: the refusal names the Aurora 2.7.x line with its releases from the release/2.7 branch, and Aurora Electrons 0.11.0 for a save from before 2.7', /Aurora Electrons 2\.7\.x line/.test(capabilities.REFUSALS['pre-3.0'].notice) && /releases 2\.7\.N from the release\/2\.7 branch/.test(capabilities.REFUSALS['pre-3.0'].notice) && /2\.7\.11/.test(capabilities.REFUSALS['pre-3.0'].notice) && /Aurora Electrons 0\.11\.0/.test(capabilities.REFUSALS['pre-3.0'].notice), capabilities.REFUSALS['pre-3.0'].notice)
+    check('line: LINE_SIGNATURE is the seven columns Aurora 3.0 added over the releases before it', sameFields(capabilities.LINE_SIGNATURE, LINE_COLUMNS) && capabilities.LINE_SIGNATURE.length === LINE_COLUMNS.length, JSON.stringify(capabilities.LINE_SIGNATURE))
+    check('line: the unaltered 3.1 copy is of the 3.2 line with none of the seven missing, and states the formula version', baseline.line.status === 'accepted' && baseline.line.reason === null && baseline.line.line === capabilities.STATED_FORMULA_VERSION && baseline.line.missing.length === 0 && baseline.formula.status === 'assumed' && baseline.formula.value === capabilities.STATED_FORMULA_VERSION && baseline.formula.inputs.missing.length === 0 && (await loadedFormula(capabilities, source)) === capabilities.STATED_FORMULA_VERSION, JSON.stringify([baseline.line, baseline.formula.inputs]))
+    check('line: a copy with the seven columns dropped is refused as a save from before 3.0, naming each of the seven the file lacks, and states no formula version naming the same seven', pre30Absent.length === LINE_COLUMNS.length && older30.line.status === 'refused' && older30.line.reason === 'pre-3.0' && older30.line.line === null && sameFields(older30.line.missing, pre30Absent) && older30.formula.status === 'unavailable' && older30.formula.value === null && sameFields(older30.formula.inputs.missing, words(pre30Absent)) && (await loadedFormula(capabilities, pre30)) === null, JSON.stringify([older30.line, older30.formula.inputs]))
+    check('line: a refused copy still has every report evaluated, so the layout alone decides what is shown', allReported(capabilities, older30), Object.keys(older30.reports).length)
+    check('line: a copy without the FCT_Game table is refused as no Aurora save, naming no column, and states no formula version naming the four FCT_Game columns it lacks', gameless.line.status === 'refused' && gameless.line.reason === 'not-aurora' && gameless.line.line === null && gameless.line.missing.length === 0 && gameless.formula.status === 'unavailable' && sameFields(gameless.formula.inputs.missing, words(gameSignature)) && sameFields(gameless.formula.inputs.present, outsideSignature) && allReported(capabilities, gameless), JSON.stringify([gameless.line, gameless.formula.inputs]))
+    check('line: a copy with three of the seven columns dropped is still of the 3.2 line, naming exactly the three the file lacks, states no formula version naming those three, and has every report evaluated', damagedAbsent.length === DAMAGED_COLUMNS.length && damagedLess.line.status === 'accepted' && damagedLess.line.line === capabilities.STATED_FORMULA_VERSION && sameFields(damagedLess.line.missing, damagedAbsent) && damagedLess.formula.status === 'unavailable' && damagedLess.formula.value === null && sameFields(damagedLess.formula.inputs.missing, words(damagedAbsent)) && (await loadedFormula(capabilities, damaged)) === null && allReported(capabilities, damagedLess), JSON.stringify([damagedLess.line, damagedLess.formula.inputs]))
+    // The damaged copy lacks the ship's Senior CO flag, an option whose absence may lighten only what shows it (AE-302-11): the Commanders page and its command structure must stay in service, degraded by that group, and never be withheld for the column.
+    check('line: a damaged copy without FCT_Ship.ShipSeniorCO keeps /commanders in service, degraded by the ship Senior CO group alone and naming the column, where the report would be unsupported were the flag required', damagedAbsent.includes('FCT_Ship.ShipSeniorCO') && damagedLess.reports['/commanders'].status === 'degraded' && damagedLess.reports['/commanders'].missing.length === 0 && damagedLess.reports['/commanders'].groups.seniorCO === false && damagedLess.reports['/commanders'].groups.rank === true && damagedLess.reports['/commanders'].groups.age === true && damagedLess.reports['/commanders'].degraded.some((entry) => entry.group && entry.key === 'seniorCO' && entry.fields.includes('FCT_Ship.ShipSeniorCO')), JSON.stringify(damagedLess.reports['/commanders']))
+    check('line: a copy whose only surviving signature columns are outside FCT_Game is still of the 3.2 line, states no formula version naming the four FCT_Game columns, and counts the three it keeps', outsideAbsent.length === gameSignature.length && outsideLess.line.status === 'accepted' && outsideLess.line.line === capabilities.STATED_FORMULA_VERSION && sameFields(outsideLess.line.missing, outsideAbsent) && outsideLess.formula.status === 'unavailable' && sameFields(outsideLess.formula.inputs.missing, words(gameSignature)) && sameFields(outsideLess.formula.inputs.present, outsideSignature), JSON.stringify([outsideLess.line, outsideLess.formula.inputs]))
+    check('line: a copy whose FCT_Game signature columns are all kept and the three elsewhere dropped states no formula version and the direct loader reads none, where a loader that read only FCT_Game would state one', outsideDroppedAbsent.length === outsideSignature.length && outsideDroppedLess.line.status === 'accepted' && sameFields(outsideDroppedLess.line.missing, outsideDroppedAbsent) && outsideDroppedLess.formula.status === 'unavailable' && sameFields(outsideDroppedLess.formula.inputs.missing, words(outsideDroppedAbsent)) && (await loadedFormula(capabilities, outsideDropped)) === null, JSON.stringify([outsideDroppedLess.line, outsideDroppedLess.formula.inputs]))
+  } catch (error) {
+    copyFailures.push(error)
+    throw error
+  } finally {
+    copies.forEach(removeOwnedCopy)
+  }
+}
+
+// The star's component number is `ComponentNumber` in the 3.2 line and a save of it has no column under the old name (AE-308-02): no input of the registry names the old column, the reserve panel's own list of reads (`RESERVE_PANEL_READS`, which the scan of the panel's component cannot see and so is written by hand) names the new one on both reports that carry it, and a copy of the code in which that list still names the old one has an input that names it, as the check must notice.
+const starColumnChecks = async (capabilities) => {
+  const [oldField, newField] = [STAR_NUMBER.before, STAR_NUMBER.after].map((column) => `${STAR_NUMBER.table}.${column}`)
+  const oldReaders = (module) => renamedReaders(module, oldField).map((reader) => `${reader.route} ${reader.key}`)
+  const reserves = renamedReaders(capabilities, newField).filter((reader) => reader.key === 'ResourceReserves').map((reader) => reader.route).sort()
+
+  check(`registry: no input names the old ${STAR_NUMBER.before} column of ${STAR_NUMBER.table}, which Aurora 3.1 renamed to ${STAR_NUMBER.after} and no save of the line has`, oldReaders(capabilities).length === 0, oldReaders(capabilities).join(', '))
+  check(`registry: the resource reserves input of /hauling and /logistics reads ${newField}, in the list the reserve panel is written out in by hand`, reserves.join() === '/hauling,/logistics', reserves.join())
+
+  if (mutating()) {
+    const directory = mutatedCopy('utilities/capabilities.js', `'${STAR_NUMBER.table}(${STAR_NUMBER.after} StarID)'`, `'${STAR_NUMBER.table}(${STAR_NUMBER.before} StarID)'`)
+
+    try {
+      const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+
+      check(`registry: a copy of the code whose reserve panel reads still name the star's ${STAR_NUMBER.before} column has the two resource reserves inputs name it, as the check above must notice`, oldReaders(mutant).sort().join() === '/hauling ResourceReserves,/logistics ResourceReserves', oldReaders(mutant).join())
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
+// The structures the catalogue declares before a page reads them (AE-308-05, AE-308-06, AE-308-07): a save of the line holds every column of every entry, and no report's status rests on one. The preflight is shown the save without each declared column in turn: a model carries an attribute only where a page reads the column, so no report may lose its status. A model that regained an unread attribute makes its page select it, and the same probe then withholds that report, which a copy of the code re-adding one must show. A copy of the code that misspells a declared column, or leaves a declared table out of the preflight's schema read, has the preflight name a column or a table absent that the save holds, which the check of a save of the line must notice.
+const declarationChecks = async (capabilities, file, routes) => {
+  const absent = (result) => result.declared.filter((entry) => entry.absent.length)
+  const baseline = (await preflightOf(capabilities, file)).result
+
+  check('declared: a save of the line holds every structure the catalogue declares, so each is reported present', absent(baseline).length === 0, absent(baseline).map((entry) => `${entry.table}(${entry.absent.join(' ')})`).join(', '))
+
+  const statuses = (result) => Object.fromEntries(Object.entries(result.reports).map(([route, report]) => [route, report.status]))
+  const changed = (before, after) => Object.keys(before).filter((route) => before[route] !== after[route]).map((route) => `${route} ${before[route]} -> ${after[route]}`)
+  const fields = [...new Set(capabilities.DECLARED.flatMap((entry) => entry.columns.map((column) => `${entry.table}.${column}`)))]
+  const before = statuses(baseline)
+  const database = openSave(file, [])
+  const drift = []
+  const unread = []
+
+  try {
+    for (const field of fields) {
+      const [table, column] = field.split('.')
+      const result = await capabilities.preflight(withoutColumn(database, field))
+
+      if (!result.declared.some((entry) => entry.table === table && entry.absent.includes(column))) {
+        unread.push(field)
+      }
+
+      const moved = changed(before, statuses(result))
+
+      if (moved.length) {
+        drift.push(`${field}: ${moved.join(', ')}`)
+      }
+    }
+  } finally {
+    await database.close()
+  }
+
+  check(`declared: the preflight reads the save without each of the ${fields.length} declared columns in turn, and names each absent`, unread.length === 0, unread.join(', '))
+  check(`declared: a save of the line without any one of its ${fields.length} declared columns keeps every report's status, as no model carries a column no page reads`, drift.length === 0, drift.join('; '))
+
+  if (!mutating()) {
+    return
+  }
+
+  // A copy of the code whose SystemBody model regains an unread attribute: the reads the scan writes for it select the column on /map, and the probe above must find the report withheld. The attribute is added to the model of a copy of the utilities folder, and the reads of that copy are the ones `--write` would write from it.
+  const widened = mutatedCopy('utilities/database.js', "    FixedBody: Sequelize.BOOLEAN, //\n  }, {\n    sequelize,\n    modelName: 'SystemBody'", "    FixedBody: Sequelize.BOOLEAN, //\n    ArtifactReserve: Sequelize.INTEGER, //\n  }, {\n    sequelize,\n    modelName: 'SystemBody'")
+  const mutants = [
+    { name: 'a declared column is misspelled', directory: mutatedCopy('utilities/capabilities.js', "columns: Object.freeze(['FixedBodyLagrangePointID'])", "columns: Object.freeze(['FixedBodyLagrangePointIDs'])"), names: (result) => result.declared.some((entry) => entry.table === 'FCT_SystemBody' && entry.absent.includes('FixedBodyLagrangePointIDs')) },
+    { name: 'a declared table is left out of the preflight\'s schema read', directory: mutatedCopy('utilities/capabilities.js', '  DECLARED.forEach((entry) => tables.add(entry.table))\n', ''), names: (result) => result.declared.filter((entry) => entry.item === 'AE-308-05').every((entry) => entry.present.length === 0 && entry.absent.length === entry.columns.length) },
+  ]
+
+  try {
+    for (const mutant of mutants) {
+      const module = (await loadUtilities(['capabilities'], { directory: path.join(mutant.directory, 'utilities') })).capabilities
+      const result = (await preflightOf(module, file)).result
+
+      check(`declared: a copy of the code in which ${mutant.name} has the preflight name a field absent that the save holds, as the check above must notice`, mutant.names(result), JSON.stringify(absent(result)))
+    }
+
+    const reads = generated(scanReads(routes, { database: path.join(widened, 'utilities', 'database.js') }))
+    const module = (await loadUtilities(['capabilities'], { sources: { 'capability-reads': reads } })).capabilities
+    const open = openSave(file, [])
+    let moved = []
+
+    try {
+      moved = changed(before, statuses(await module.preflight(withoutColumn(open, 'FCT_SystemBody.ArtifactReserve'))))
+    } finally {
+      await open.close()
+    }
+
+    check(`declared: a copy of the code in which the SystemBody model regains an unread attribute widens the /map read, so the save without that column withholds the report, as the check above must notice (${moved.join(', ') || 'no report moved'})`, moved.some((entry) => entry.startsWith('/map ')), moved.join(', '))
+  } finally {
+    [...mutants.map((mutant) => mutant.directory), widened].forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
+  }
+}
+
+// The life pod, wreck and waypoint queries of the app on a save of the line: the recovery ledger's four statements and the small places' waypoint, wreck and life pod reads run and return the objects the save holds, so the anchor columns the catalogue declares for them (AE-308-06) sit beside queries that run.
+const anchorReadChecks = async (file) => {
+  if (!fs.existsSync(file)) {
+    console.log(`SKIP  anchor: ${path.basename(file)} is not there, so the life pod, wreck and waypoint queries are not run (not run)`)
+
+    return
+  }
+
+  const log = []
+  const database = openSave(file, log)
+
+  try {
+    const [[game]] = await database.query('select GameID, RaceID from FCT_Race where NPR = 0 order by GameID, RaceID limit 1')
+
+    if (!game) {
+      check('anchor: the interim fixture names a game and a player race to run the life pod, wreck and waypoint queries for', false, 'no FCT_Race row with NPR = 0')
+
+      return
+    }
+
+    const { 'recovery-ledger': recovery, 'place-data': places } = await loadUtilities(['recovery-ledger', 'place-data'], { stubs: STUBS })
+    const ids = { GameID: game.GameID, RaceID: game.RaceID }
+    const { objects, failed } = await recovery.loadRecoveryObjects(database, ids)
+    const kinds = Object.keys(recovery.RECOVERY_TARGETS)
+    const unread = kinds.filter((kind) => !objects[kind])
+    const small = await places.loadSmallPlaces(database, ids, String)
+    const rows = kinds.map((kind) => `${kind} ${objects[kind].size}`).join(', ')
+
+    check(`anchor: the recovery ledger's life pod and wreck queries run on the interim fixture and read each kind (${rows})`, unread.length === 0, JSON.stringify(failed))
+    check(`anchor: the small places' waypoint, wreck and life pod queries run on the interim fixture and return the objects it holds (${small.length} rows)`, Array.isArray(small) && small.length > 0)
+    check('anchor: every query the anchor reads sent is a select', log.length > 0 && log.every((sql) => /^\s*select\b/i.test(sql)), log.filter((sql) => !/^\s*select\b/i.test(sql)).join('; '))
+
+    console.log(`INFO  anchor reads on ${path.basename(file)} for game ${game.GameID} race ${game.RaceID}: recovery ${rows}; waypoints, wrecks, life pods, contacts and gates ${small.length} rows`)
+  } finally {
+    await database.close()
+  }
 }
 
 const main = async () => {
@@ -1195,6 +1963,12 @@ const main = async () => {
   if (unknown.length) {
     console.error(`Unknown argument ${unknown[0]}`)
     process.exit(2)
+  }
+
+  const quick = REAL.find(({ label }) => label === QUICK)
+
+  if (!mutating() && !fs.existsSync(path.resolve(repo, quick.file))) {
+    throw new Error(`quick mode requires its representative save: ${quick.file}`)
   }
 
   const { navigation } = await loadUtilities(['navigation']).then((modules) => ({ navigation: modules.navigation }))
@@ -1208,49 +1982,80 @@ const main = async () => {
     check('reads: utilities/capability-reads.js matches what the pages read now (node scripts/check-capabilities.js --write regenerates it)', fs.existsSync(READS_FILE) && fs.readFileSync(READS_FILE, 'utf8') === expected)
   }
 
-  const { capabilities } = await loadUtilities(['capabilities'])
+  const { capabilities, provenance } = await loadUtilities(['capabilities', 'provenance'])
+
+  const warningsLabel = (scan['/warnings']['check:free-fighter-capacity'] || {}).label
+  const reportedLabel = ((capabilities.INPUTS['/warnings'] || []).find((input) => input.key === 'check:free-fighter-capacity') || {}).label
+
+  check('reads: the check of free light naval capacity keeps its stored key and carries the light naval words, in the scan and in the report that names it when the check cannot be read', warningsLabel === 'the free light naval production capacity' && reportedLabel === warningsLabel, JSON.stringify([warningsLabel, reportedLabel]))
 
   registryChecks(capabilities, scan, navigation)
   scannerChecks(scan)
   await markerChecks(capabilities)
+  await starColumnChecks(capabilities)
 
-  for (const save of REAL) {
-    await realSaveChecks(capabilities, save)
+  const realSaves = mutating() ? REAL : REAL.filter(({ label }) => label === QUICK)
+
+  for (const save of realSaves) {
+    await realSaveChecks(capabilities, save, provenance.fieldWords)
   }
 
-  const real260 = path.resolve(repo, 'AuroraDB_260_base.db')
+  // The alien-class reads the preflight cannot run: the interim fixture holds the alien classes (the shipped saves and the export hold none), so the pages' own reads run there.
+  await alienClassChecks(capabilities, path.resolve(repo, FIXTURE.file))
+  // The life pod, wreck and waypoint queries the anchor columns are declared for (AE-308-06), run where the save holds the objects.
+  await anchorReadChecks(path.resolve(repo, FIXTURE.file))
 
-  if (fs.existsSync(real260)) {
-    const { result } = await preflightOf(capabilities, real260)
+  // A save of the line, the shipped 3.1 save: the checks of the line itself, the store's accepted-copy test, and the base the altered copies and the report-level checks are made from (each copy is this save with one thing altered; it holds every column the pages read, so every report is supported on it and the line gate accepts it).
+  const lineSource = path.resolve(repo, 'saves/AuroraDB_310_shipped.db')
 
-    check('line: a real 2.6 save is refused as a save from before 2.7, naming each of the fourteen columns the file lacks', result.line.status === 'refused' && result.line.reason === 'pre-2.7' && sameFields(result.line.missing, await absentIn(real260, LINE_COLUMNS)) && result.line.missing.length === 14, JSON.stringify(result.line))
+  if (fs.existsSync(lineSource)) {
+    await lineChecks(capabilities, lineSource, provenance.fieldWords)
+    await declarationChecks(capabilities, lineSource, navigation.PAGES.map((page) => page.route))
   } else {
-    console.log('SKIP  line: a real 2.6 save (AuroraDB_260_base.db) is not there, so none is shown to be refused (not run)')
+    console.log('SKIP  line: saves/AuroraDB_310_shipped.db is not there, so the line is not checked on a copy (not run)')
   }
 
-  const source = path.resolve(repo, 'AuroraDB_270_base.db')
-
-  if (fs.existsSync(source)) {
+  if (fs.existsSync(lineSource)) {
+    const source = await alteredCopy(lineSource, 'base', [])
     await alteredChecks(capabilities, source)
     await dependencyChecks(capabilities, source, scan)
-    const mods = await consumerChecks(source)
+    const mods = await consumerChecks(lineSource)
 
     await rosterChecks(capabilities, mods.commanders, source)
 
     // The pages' own wiring of the result (scripts/lib/capability-pages.js): the real script of /lagrange, /commanders and /production on the result of real copies, and on copies of those pages with one gate cut out, which must fail.
-    await pageChecks({ mods, stubs: STUBS, source, check, alteredCopy, preflightOf })
+    await pageChecks({ mods, stubs: STUBS, source, check, alteredCopy, preflightOf, caughtValues, removeOwnedCopy, rememberFailure })
 
     // What the missing naval admin ranks and a blocked Mining bonus leave unknown (scripts/lib/capability-chains.js).
-    await chainChecks({ check, stubs: STUBS, source, alteredCopy, mutatedCopy, preflightOf, capabilities })
+    await chainChecks({ check, stubs: STUBS, source, alteredCopy, mutatedCopy, preflightOf, capabilities, caughtValues, openConsumer, removeOwnedCopy, rememberFailure })
   } else {
-    console.log('SKIP  altered copies: AuroraDB_270_base.db is not there (not run)')
+    console.log('SKIP  altered copies: saves/AuroraDB_310_shipped.db is needed (not run)')
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
-  process.exit(failures ? 1 : 0)
+  return failures ? 1 : 0
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(1)
-})
+const finish = (code, failure = null) => {
+  const errors = [...copyFailures]
+
+  if (failure) {
+    errors.push(failure)
+  }
+
+  try {
+    cleanupCopies()
+  } catch (error) {
+    errors.push(error)
+  }
+
+  const unique = [...new Set(errors)]
+
+  if (unique.length) {
+    console.error(unique.length === 1 ? unique[0] : new AggregateError(unique, 'Capability check and copy cleanup failed'))
+  }
+
+  process.exit(unique.length ? 1 : code)
+}
+
+main().then((code) => finish(code), (error) => finish(1, error))

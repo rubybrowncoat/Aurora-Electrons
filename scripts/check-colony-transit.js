@@ -6,7 +6,7 @@
 
   Fixtures: a graph of systems with two chains of three jumps whose legs inside each system differ (the same jump count, a distinct distance and a distinct time), a link charted but not explored, a link whose far side is not charted, stabilised points on the departure side only, a route that is shortest in kilometres with more jumps than the fewest-jump one, a point flagged to be ignored for distance, Lagrange points that shorten a leg, that do not, and a single one. Statements: an unknown route is unknown and never 0 (state, figures, results, sort values, the table's order whichever way it runs), a blank or non-positive speed leaves the time unknown while the distance stays, a changed speed rescales the time and nothing else, a changed drive changes what can be crossed, and no speed, drive or Lagrange setting reaches a system or a jump point the race does not know (compared with a walk over the graph written another way).
 
-  Saves: the loaders against queries written another way; every basis against an independent walk over the raw charted and explored jump points; the same jump count with different system legs in the save's own graph; the speed that only rescales; Lagrange routing that never lengthens a route; the km route equal to the app's Distance column basis; the ship classes' drives. A save that is not there is reported as skipped and never counted as passed.
+  Saves: the loaders against queries written another way; every basis against an independent walk over the raw charted and explored jump points; the same jump count with different system legs in the save's own graph; the speed that only rescales; Lagrange routing that never lengthens a route; the km route equal to the app's Distance column basis; the ship classes' drives. With no --save the default fixture is read (scripts/lib/fixtures.js: game 141, race 784 of the interim 3.1 fixture). A save that is not there is reported as skipped and never counted as passed.
 
   Mutations: each planted fault must fail the checks it names, and every one names a fixture check so that it is caught with no save there. Exit code 1 when a check fails.
 */
@@ -17,14 +17,12 @@ const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilities = path.join(root, 'src', 'renderer', 'utilities')
 const NAMES = ['colony-transit', 'jump-graph', 'provenance', 'transport', 'colonization-data']
-const DEFAULT_SAVES = [
-  { label: 'modded', file: 'AuroraDB.db', game: 140, race: 784 },
-  { label: 'stock', file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [{ label: 'fixture', ...fixtureSave() }]
 // The parts run as children of the one that was started, so the saves given on its command line reach them through the environment.
 const SAVES = process.env.COLONY_TRANSIT_SAVES ? JSON.parse(process.env.COLONY_TRANSIT_SAVES) : DEFAULT_SAVES
 const STUBS = {

@@ -8,9 +8,9 @@
           <th>Stop</th>
           <th>Ship</th>
           <th class="text-right">Own</th>
-          <th v-for="officer in officers" :key="officer.key" class="text-right">{{ officer.label }}</th>
           <th class="text-right">Technology</th>
           <th class="text-right">Added by the colony</th>
+          <th v-for="officer in officers" :key="officer.key" class="text-right">{{ officer.label }}</th>
           <th class="text-right">Crew</th>
           <th class="text-right">Strength</th>
           <th class="text-right">Time</th>
@@ -21,9 +21,9 @@
           <td class="caption">{{ row.stop }}</td>
           <td class="caption">{{ row.ship }}</td>
           <td class="caption text-right text-no-wrap" data-own>{{ figure(row.own) }}<provenance-mark :result="row.results.own" /></td>
-          <td v-for="factor in row.factors" :key="factor.key" class="caption text-right text-no-wrap" :class="{ 'warning--text': factor.state === 'unknown' }" :data-officer="factor.key" :data-state="factor.state" :title="factor.text">{{ factor.cell }}<provenance-mark :result="factor.result" /></td>
           <td class="caption text-right text-no-wrap" data-technology>{{ figure(row.technology) }}<provenance-mark :result="row.results.technology" /></td>
           <td class="caption text-right text-no-wrap" data-additive>{{ row.additive ? `+${figure(row.additive)}` : figure(row.additive) }}<provenance-mark :result="row.results.additive" /></td>
+          <td v-for="factor in row.factors" :key="factor.key" class="caption text-right text-no-wrap" :class="{ 'warning--text': factor.state === 'unknown' }" :data-officer="factor.key" :data-state="factor.state" :title="factor.text">{{ factor.cell }}<provenance-mark :result="factor.result" /></td>
           <td class="caption text-right text-no-wrap" data-crew>{{ `×${figure(row.crew)}` }}<provenance-mark :result="row.results.crew" /></td>
           <td class="caption text-right text-no-wrap font-weight-medium" data-strength>{{ figure(row.strength) }}<provenance-mark :result="row.result" /></td>
           <td class="caption text-right text-no-wrap" data-time>{{ hours(row.seconds) }}<provenance-mark :result="row.results.seconds" /></td>
@@ -39,7 +39,7 @@ import { OFFICERS } from '../../utilities/handling-bonuses'
 import { roundToDecimal } from '../../utilities/math'
 import ProvenanceMark from './ProvenanceMark.vue'
 
-// The loading strength of the slowest ship at each stop of a run or a cycle, broken into its terms: the ship's own strength, each officer's Logistics factor, the race's technology and what a colony's spaceport or cargo shuttle station adds (which no officer multiplies), then the crew share the time is divided by. `rows` as `handlingRows` (utilities/transport.js) gives them.
+// The loading strength of the slowest ship at each stop of a run or a cycle, broken into its terms in the order the game applies them: the ship's own strength times the race's technology, what a colony's spaceport or cargo shuttle station adds, each officer's Logistics factor (which multiplies the colony's addition too), then the crew share the time is divided by. `rows` as `handlingRows` (utilities/transport.js) gives them.
 export default {
   name: 'HandlingBreakdown',
   components: { ProvenanceMark },

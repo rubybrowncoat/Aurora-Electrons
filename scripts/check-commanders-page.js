@@ -18,24 +18,47 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
-const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey } = require('./lib/browser-observe')
+const { observe, validate, failedObservation, failureLine, describe, HarnessError, settled, installScreen, pairedBy, labelKey } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { strictRecords } = require('./lib/csv-records')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating: mutationsEnabled, refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
+const { FIXTURE, fixtureRows } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const PAGE_FILE = 'src/renderer/pages/commanders.vue'
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const IDS = { GameID: 138, RaceID: 785 }
-const NAMES = { game: 'EggSample', race: 'EggSample' }
+const SAVE = FIXTURE.file
+const IDS = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 const YEAR = 31536000
 const ROSTER_ROWS = 25
 const STORED = { commandersAgeMin: 30, commandersAgeMax: 90, commandersRank: 2 }
-// Two serving naval officers of the save whose post, age and rank put both on every roster the checks compare (the roster as it opens, the post chosen, the age bound): every copy of the save served gives the second the name of the first.
-const NAMESAKES = [624163, 624519]
-const NAMESAKE_RENAME = `update FCT_Commander set Name = (select Name from FCT_Commander where CommanderID = ${NAMESAKES[0]}) where CommanderID = ${NAMESAKES[1]}`
+// Two serving naval officers made the namesakes of the control. The fixture holds no two serving officers of one name, so the first two serving naval officers (by CommanderID, the order the roster opens in) that hold another post are planted in the post the checks choose (the post held by the most serving officers, from two to 23, so that two more stay within the roster's 25 rows), made the oldest of the race (so that the age bound leaves both), and the second takes the name of the first. Every copy of the save served is planted so.
+const plantedNamesakes = () => {
+  const serving = fixtureRows('select CommanderID as id, CommandType as post from FCT_Commander where GameID = ? and RaceID = ? and CommanderType = 0 and RetireStatus = 0 and Prisoner = 0 order by CommanderID', IDS.GameID, IDS.RaceID)
+  const counts = new Map()
+
+  serving.forEach((row) => counts.set(row.post, (counts.get(row.post) || 0) + 1))
+
+  const [post] = [...counts.entries()].filter(([, count]) => count >= 2 && count <= ROSTER_ROWS - 2).sort((a, b) => b[1] - a[1])[0] || []
+  const pair = serving.filter((row) => row.post !== post).slice(0, 2).map((row) => row.id)
+
+  if (post === undefined || pair.length !== 2) {
+    throw new Error(`the save has no post held by two to ${ROSTER_ROWS - 2} serving naval officers and two officers of another post to plant`)
+  }
+
+  return { post, ids: pair }
+}
+const NAMESAKE_PLAN = plantedNamesakes()
+const NAMESAKES = NAMESAKE_PLAN.ids
+const PLANTED = [
+  `update FCT_Commander set CommandType = ${NAMESAKE_PLAN.post}, CareerStart = (select min(CareerStart) from FCT_Commander where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and CommanderType = 0) - ${2 * YEAR} where CommanderID in (${NAMESAKES.join(', ')})`,
+  `update FCT_Commander set Name = (select Name from FCT_Commander where CommanderID = ${NAMESAKES[0]}) where CommanderID = ${NAMESAKES[1]}`,
+  // The fixture holds no shipping line (every fleet of the race is a naval one): the first four fleets of the race that hold a ship become shipping lines, so the Shipping lines switch has rows to add and take off.
+  `update FCT_Fleet set ShippingLine = 1 where FleetID in (select f.FleetID from FCT_Fleet f where f.GameID = ${IDS.GameID} and f.RaceID = ${IDS.RaceID} and exists (select 1 from FCT_Ship s where s.FleetID = f.FleetID) order by f.FleetID limit 4)`,
+]
 // The packages the commanders module imports, for reading its table of posts.
 const STUBS = {
   dayjs: `import { createRequire } from 'node:module'\nexport default createRequire(${JSON.stringify(path.join(root, 'package.json'))})('dayjs')`,
@@ -170,8 +193,7 @@ const readScreen = () => {
 
 // The page that `observe` (scripts/lib/browser-observe.js) opens, made ready: what the app's settings hold before it starts (`seed`, the stored view of the page), the shared readers of the screen installed, the race picked on the Empires page, the Commanders page opened and settled, each step named through `step` and bounded by TIMEOUT. `holding` makes the reads of the naval structure wait in `held` until they are let go, and `onHeld`, when set, is called as one is held. The page and console errors are the helper's.
 const prepare = async (page, url, seed, step) => {
-  const state = { held: [], holding: false, inFlight: 0, last: Date.now(), onHeld: null }
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
+  const state = { held: [], holding: false, onHeld: null }
 
   await page.context().addInitScript((stored) => {
     const key = 'aurora-electrons:config'
@@ -181,21 +203,22 @@ const prepare = async (page, url, seed, step) => {
       sessionStorage.setItem('aurora-check-seeded', '1')
     }
   }, seed)
-  page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight++
-      state.last = Date.now()
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight--
-      state.last = Date.now()
-    }
-  })
   await page.route('**/__aurora-db/query', async (route) => {
-    if (state.holding && /FCT_NavalAdminCommand/.test(route.request().postData() || '')) {
-      state.held.push(route)
+    if (state.holding && state.held.length === 0 && /FCT_NavalAdminCommand/.test(route.request().postData() || '')) {
+      const entry = { route, ids: [] }
+
+      state.held.push(entry)
+
+      const label = `/query ${String(route.request().postDataJSON().sql).replace(/\s+/g, ' ')}`.slice(0, 120)
+      const ids = await page.evaluate((wanted) => {
+        const operation = window.__commandersRead
+
+        operation.held = [...window.__auroraReads.pending].filter(([id, text]) => id > operation.started && text === wanted)
+
+        return operation.held.map(([id]) => id)
+      }, label)
+
+      entry.ids = ids
 
       if (state.onHeld) {
         state.onHeld()
@@ -204,20 +227,6 @@ const prepare = async (page, url, seed, step) => {
       await route.continue()
     }
   })
-
-  const settle = async () => {
-    const started = Date.now()
-
-    while ((state.inFlight > 0 && !state.holding) || Date.now() - state.last < 1500 || await page.evaluate(pageLoading)) {
-      if (Date.now() - started > TIMEOUT) {
-        const where = await page.evaluate(() => { const match = window.$app.$route.matched[0]; const view = match && match.instances.default; return { path: window.$app.$route.path, updating: Object.entries((view && view.$asyncComputed) || {}).filter(([, s]) => s.updating).map(([key]) => key) } })
-
-        throw new Error(`the page did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last, loading ${await page.evaluate(pageLoading)}, ${JSON.stringify(where)})`)
-      }
-
-      await page.waitForTimeout(250)
-    }
-  }
 
   step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
@@ -237,30 +246,48 @@ const prepare = async (page, url, seed, step) => {
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
   step('waiting for the reads that the picking of the race starts')
 
-  const picked = Date.now()
-
   // The page the race opens is not the one under test, and on a save without species it may never report itself as loaded: only its database calls are waited for.
-  while (state.inFlight > 0 || Date.now() - state.last < 1500) {
-    if (Date.now() - picked > TIMEOUT) {
-      throw new Error(`the reads that the picking of the race starts did not finish (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
-    }
-
-    await page.waitForTimeout(250)
-  }
+  await settled(page, { limit: TIMEOUT })
 
   step('opening /commanders')
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/commanders')
   await page.waitForFunction(pageLoading.arrived, '/commanders', { timeout: TIMEOUT })
-  // The first roster name drawn, or the page's reads done with none drawn (a roster a fault leaves empty): either ends the wait, and the screen of an empty roster is judged by the checks.
-  await page.waitForFunction(`document.querySelector('[data-roster-name]') !== null || !(${pageLoading})()`, null, { timeout: TIMEOUT }).catch(() => {})
   step('waiting for the page to settle')
-  await settle()
+  await settled(page, { limit: TIMEOUT, loading: pageLoading })
 
   return { state }
 }
 
 // Runs in the page.
 const read = (page) => page.evaluate(readScreen)
+
+// Scope validation and the screen read run synchronously in one page evaluation. A renewal before or during the read invalidates both the held screen and the completed one.
+const readStructureInPage = (screen, { ids, generation, held }) => {
+  const operation = window.__commandersRead
+  const valid = () => {
+    const store = window.$app.$store
+
+    return operation === window.__commandersRead && operation.reads === window.__auroraReads && operation.view === window.$app.$route.matched[0].instances.default && operation.database === store.state.database && operation.saveGeneration === store.state.freshness.generation && operation.game === store.getters.GameID && operation.race === store.getters.RaceID && operation.view.loadRequests.navalTree === generation && (!ids.length || generation > operation.before) && ids.length === operation.held.length && operation.held.every(([id, label]) => ids.includes(id) && (held ? operation.reads.pending.has(id) && operation.reads.pending.get(id) === label : !operation.reads.pending.has(id)))
+  }
+
+  if (!operation || !valid()) {
+    return { valid: false }
+  }
+
+  const value = screen()
+
+  return valid() ? { valid: true, value } : { valid: false }
+}
+
+const readStructure = async (page, scope) => {
+  const result = await page.evaluate(`(${readStructureInPage})(${readScreen}, ${JSON.stringify(scope)})`)
+
+  if (!result.valid) {
+    throw new HarnessError('the structure screen belongs to another page, save, tracker or read generation, or its exact held calls changed')
+  }
+
+  return result.value
+}
 
 // The render that follows a change the check made: the change is committed by the event the click or the typing dispatched, and Vue's next tick is the flush of every update and watcher it queued.
 const rendered = (page) => page.evaluate(async () => { await window.$app.$nextTick() })
@@ -319,7 +346,7 @@ const within = (promise, ms) => new Promise((resolve) => {
 })
 
 // The reads of the page done: none of its async-computed reads is updating and no progress bar of it runs (scripts/page-loading.js), waited for after a change that started one of them.
-const readsDone = (page) => page.waitForFunction(`!(${pageLoading})()`, null, { timeout: TIMEOUT })
+const readsDone = (page) => settled(page, { limit: TIMEOUT, loading: pageLoading })
 
 // Everything a player does on the page, and what the screen shows after each step: the record of `observe` (scripts/lib/browser-observe.js) whose value is { initial, csvOff, post, postCleared, age, ageCleared, rank, rankCleared, reread, linesOn, csvOn, linesOff }; `initial` holds the words of the choices each select's menu draws, the Post choices each read back to its post through `posts` (the module's table of posts). The page and console errors are in the record, not in the value.
 const observePage = (browser, url, truth, posts) => observe(browser, async ({ page, step }) => {
@@ -377,31 +404,59 @@ const observePage = (browser, url, truth, posts) => observe(browser, async ({ pa
   }
 
   if (first.switch.visible) {
-    // A write through the app's connection drops what the cache kept of the table, so the read the switch asks for goes to the database; its answer is held back, then let go. The screen is read once that read is held (or, when the switch asks for none, once 10 s have passed), after the render it set off.
+    // A write through the app's connection drops what the cache kept of the table. Vue's flush completes the switch event and starts its dependent getter: an advanced generation must reach the held query; an unchanged one (a fault removed the dependency) is judged after the page's reads complete, without an absence timer.
     at('the shipping lines are turned on while the structure read is held')
     await page.evaluate(() => window.$app.$store.state.database.query('update FCT_NavalAdminCommand set AdminCommandName = AdminCommandName where 1 = 0'))
+    await settled(page, { limit: TIMEOUT, loading: pageLoading })
+    await page.evaluate(() => {
+      const view = window.$app.$route.matched[0].instances.default
+      const store = window.$app.$store
+
+      window.__commandersRead = { reads: window.__auroraReads, started: window.__auroraReads.started, view, before: view.loadRequests.navalTree, held: [], database: store.state.database, saveGeneration: store.state.freshness.generation, game: store.getters.GameID, race: store.getters.RaceID }
+    })
     state.held.length = 0
     state.holding = true
 
     const held = new Promise((resolve) => { state.onHeld = resolve })
 
     await page.locator('.v-input--selection-controls__input:has([data-structure-shipping-lines])').click({ timeout: 30000 })
-    await within(held, 10000)
     await rendered(page)
 
-    const during = await read(page)
+    const operation = await page.evaluate(() => {
+      const read = window.__commandersRead
+
+      return { before: read.before, generation: read.view.loadRequests.navalTree }
+    })
+
+    if (operation.generation > operation.before && !await within(held, TIMEOUT)) {
+      throw new HarnessError('the structure read started but its exact database query was not held')
+    }
+
+    const heldIds = state.held.flatMap((entry) => entry.ids)
+
+    if (heldIds.length !== state.held.length || new Set(heldIds).size !== heldIds.length) {
+      throw new HarnessError('a held structure query does not identify exactly one new pending database call')
+    }
+
+    const { generation } = operation
+
+    at('waiting for the other reads while the exact structure read is held')
+    await settled(page, { limit: TIMEOUT, held: heldIds })
+
+    const during = await readStructure(page, { ids: heldIds, generation, held: true })
 
     seen.reread = { held: state.held.length, structure: during.structure, csv: during.csv, markdown: during.markdown }
     state.holding = false
     state.onHeld = null
 
-    for (const route of state.held.splice(0)) {
+    for (const { route } of state.held.splice(0)) {
       await route.continue()
     }
 
     at('the read is answered')
     await readsDone(page)
-    seen.linesOn = await read(page)
+
+    seen.linesOn = await readStructure(page, { ids: heldIds, generation, held: false })
 
     if (seen.linesOn.csv.visible && !seen.linesOn.csv.disabled) {
       at('the structure with the shipping lines is downloaded')
@@ -568,7 +623,7 @@ const BENIGN = [
   { name: 'the Post control bound by an explicit value and event', change: swap('<v-select v-model="postFilter" ', '<v-select :value="postFilter" @input="postFilter = $event" ') },
   { name: 'the CSV button listening by the longhand of the event', change: swap('@click="downloadStructure(\'csv\')"', 'v-on:click="downloadStructure(\'csv\')"') },
   { name: 'the Markdown button listening natively', change: swap('@click="downloadStructure(\'markdown\')"', '@click.native="downloadStructure(\'markdown\')"') },
-  { name: 'the Post control registered under an alias of the page', change: (text) => swap('<v-select v-model="postFilter" ', '<post-choice v-model="postFilter" ')(swap('components: { LoadState, PageLink, ProvenanceMark, StatTiles },', "components: { LoadState, PageLink, ProvenanceMark, StatTiles, PostChoice: Vue.component('VSelect') },")(swap("import { mapGetters } from 'vuex'", "import Vue from 'vue'\nimport { mapGetters } from 'vuex'")(text))) },
+  { name: 'the Post control registered under an alias of the page', change: (text) => swap('<v-select v-model="postFilter" ', '<post-choice v-model="postFilter" ')(swap('components: { LoadState, PageLink, ProvenanceMark, StatTiles, WipNotice },', "components: { LoadState, PageLink, ProvenanceMark, StatTiles, WipNotice, PostChoice: Vue.component('VSelect') },")(swap("import { mapGetters, mapState } from 'vuex'", "import Vue from 'vue'\nimport { mapGetters, mapState } from 'vuex'")(text))) },
   { name: 'the Post control drawing the words of each choice through a function', change: swap(':items="postItems" item-text="text"', ':items="postItems" :item-text="(item) => item.text"') },
   { name: 'the Post control drawn at opacity 1', change: swap('<v-select v-model="postFilter" ', '<v-select v-model="postFilter" style="opacity: 1" ') },
 ]
@@ -636,7 +691,7 @@ const cleanups = []
 const setUp = async () => {
   const { startPageServer } = require('./lib/page-server')
   const { commanders } = await loadUtilities(['commanders'], { stubs: STUBS })
-  const copy = await saveCopy('ae-commanders-', [NAMESAKE_RENAME])
+  const copy = await saveCopy('ae-commanders-', PLANTED)
 
   cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
 
@@ -666,6 +721,10 @@ const told = (label, seen) => {
 
 // The page with `change` made to it (null for the page as it is), read as a player uses it.
 const view = async (change) => {
+  if (change) {
+    refusePlanting('a Commanders page fault or rewrite')
+  }
+
   ENV.server.replace(PAGE_FILE, change ? change(ENV.original) : null)
 
   try {
@@ -677,8 +736,12 @@ const view = async (change) => {
 
 // The save without species and ranks, served from now until the reset after the variant: the results of LACKING_CHECKS over the page with `variant` made to it (null for the page as it is). The roster with nothing stored is read once by the head of that save and kept for the variants after it (`known`); a variant in a worker the head has not run in reads it too.
 const lackingResults = async (variant) => {
+  if (variant) {
+    refusePlanting(`the Commanders page without species: ${variant.name}`)
+  }
+
   if (!ENV.lackingFile) {
-    const lacking = await saveCopy('ae-commanders-lacking-', [NAMESAKE_RENAME, 'drop table FCT_Species', 'drop table FCT_Ranks'])
+    const lacking = await saveCopy('ae-commanders-lacking-', [...PLANTED, 'drop table FCT_Species', 'drop table FCT_Ranks'])
 
     cleanups.push(async () => fs.rmSync(lacking.folder, { recursive: true, force: true }))
     ENV.lackingFile = lacking.file
@@ -830,9 +893,10 @@ const variantsOf = (mutating, lacking) => [
 ]
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const mutating = mutationsEnabled()
   const totals = await runSuite({
     script: __filename,
+    workers: 4,
     inputs: [SAVE],
     variants: variantsOf(mutating, !process.argv.includes('--no-lacking')),
     counts: () => ({ checks, failures }),

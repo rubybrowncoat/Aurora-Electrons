@@ -6,7 +6,7 @@
 
   Fixture: a graph of systems around one origin. A short way to the far system through a dangerous one and a longer way round it; a destination behind an alien-held system that a second alien-held system also reaches, with a barred dead end beside the origin; a destination behind a system whose holder is not known, one behind a system the player flagged, one behind a system held by a race with a trade treaty, one behind a dangerous system the race's own ships protect; jump points charted but not explored, one of them in front of a barred system and one of them a shortcut; systems the race holds no row for; an origin that is itself dangerous. Statements: with nothing avoided a run is the Route Finder's own, a detour has the allowed path's distance and names what it avoids and which setting is responsible, a cut-off run names the observed systems that cut it off and never a dead end or a system behind an unexplored jump point, an unknown control, a player flag and an observed danger are told apart, the origin is never avoided and the destination always is, clearing the settings restores the baseline run and plan, and the Transport and Hauling pages take distance, time, fuel and yearly capacity from the one allowed path, plan nothing while the systems they need are not read, persist the settings per race and say so in the section's own terms.
 
-  Saves: the loader against the saves' own rows, the settings off against the search, and every allowed route against the systems it enters. A save that is not there is reported as skipped and never counted as passed.
+  Saves: the loader against the saves' own rows, the settings off against the search, and every allowed route against the systems it enters. With no --save the default fixture is read (scripts/lib/fixtures.js: game 141, race 784 of the interim 3.1 fixture). A save that is not there is reported as skipped and never counted as passed.
 
   Mutations: each planted fault must fail the checks it names, and every one names a fixture check so that it is caught with no save there; benign edits must leave every fixture check green. Exit code 1 when a check fails.
 */
@@ -18,13 +18,11 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
-const DEFAULT_SAVES = [
-  { label: 'modded', file: 'AuroraDB.db', game: 140, race: 784 },
-  { label: 'stock', file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [{ label: 'fixture', ...fixtureSave() }]
 // The parts run as children of the one that was started, so the saves given on its command line reach them through the environment.
 const SAVES = process.env.SAFE_ROUTES_SAVES ? JSON.parse(process.env.SAFE_ROUTES_SAVES) : DEFAULT_SAVES
 const FILES = {
@@ -71,7 +69,7 @@ const near = (actual, expected, epsilon = 1e-9) => assert.ok(typeof actual === '
 // ---------- the fixture ----------
 
 const M = 1e6
-const VERSION = '2.7.1'
+const VERSION = '3.2.x'
 const TECH = 1.5
 const jp = (id, system, link, x, y, explored = 1) => ({ WarpPointID: id, SystemID: system, WPLink: link, Distance: 0, Xcor: x * M, Ycor: y * M, JumpGateStrength: 0, Explored: explored, MilitaryRestricted: 0, IgnoreForDistance: 0 })
 
@@ -781,7 +779,7 @@ const fixtures = (world) => {
     assert.ok(Array.isArray(safe.AVOID_OPTIONS) && safe.AVOID_OPTIONS.map((option) => option.key).join() === KEYS.join())
   })
 
-  add('voice: what the settings say is impersonal, and no tracked file of the settings cites the game\'s source', () => {
+  add('voice: what the settings say is impersonal, and no tracked file of the settings names a code identifier or file name', () => {
     const vm = transportVm(ON('avoidDanger'), { errors: { avoidSystems: 'boom' } })
     const texts = [
       ...safe.AVOID_OPTIONS.flatMap((option) => [option.label, option.hint]),
@@ -794,7 +792,7 @@ const fixtures = (world) => {
     ]
 
     texts.forEach((text) => assert.ok(!PRONOUNS.test(text), `a pronoun in: ${text}`))
-    ;['safe-routes', 'avoid-routes', 'options'].forEach((key) => assert.ok(!/\b\w+\.cs\b/.test(world.text[key]), `${key} names a source file`))
+    ;['safe-routes', 'avoid-routes', 'options'].forEach((key) => assert.ok(!/\b\w+\.cs\b/.test(world.text[key]), `${key} names a code file`))
   })
 
   add('direction: a haul is planned the way it sails, from the colony that gives to the one that is short, so it is allowed exactly when a run between the same two places is, over the same kilometres, and a short colony in a barred system is not supplied', () => {

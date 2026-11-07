@@ -12,7 +12,7 @@ import { SECONDS_PER_YEAR } from './transport'
 
 const SECONDS_PER_MONTH = 2592000
 const UNSUPPORTED_VERSION = 'the game version the save was played under, which the hangar and shore-leave rates are read for'
-const RUNTIME_VERSIONS = ['2.7.x']
+const RUNTIME_VERSIONS = ['3.2.x']
 // DIM_MaintenanceState: operational and under maintenance (an overhaul).
 const OPERATIONAL = 0
 const UNDER_MAINTENANCE = 2
@@ -48,7 +48,7 @@ registerRule({
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_Game.GameTime', 'FCT_Ship.LastOverhaul'],
-  note: 'The maintenance age of a ship: the game time less the time of its last overhaul, in years of 365 days. Reproduced for one thing only: in 149 intervals of a passive campaign the overhaul date of every military ship moved by exactly the game time that passed.',
+  note: 'The maintenance age of a ship: the game time less the time of its last overhaul, in years of 365 days.',
   assumptions: ['the saved overhaul time is the ship\'s clock now, so the age is the one the game would use in its next maintenance pass'],
 })
 
@@ -91,7 +91,7 @@ registerRule({
 
 registerRule({
   id: SUPPLY_DRAW,
-  versions: RUNTIME_VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP a year',
   verification: 'estimated',
   structure: ['design.averageRepairCost', 'shipRuntime.failureChanceNow'],
@@ -139,7 +139,7 @@ registerRule({
 
 registerRule({
   id: RECOVERY_ETA,
-  versions: RUNTIME_VERSIONS,
+  versions: ['x'],
   units: 'months',
   verification: 'estimated',
   structure: ['shipRuntime.deploymentAge', 'shipRuntime.shoreLeaveRecovery'],
@@ -185,7 +185,7 @@ const classOf = (row, components) => {
 
 const CASE_TEXT = { normal: 'Outside a hangar, not under tow and not overhauling', overhaul: 'Under overhaul', hangared: 'Carried in a hangar', towed: 'Under tow', unknown: 'Support not known' }
 
-// How a ship's maintenance clock runs, in the order the game takes its cases: a ship in a shipyard task that is not paused is out of maintenance and failure testing ('yard'), a race that is not played or a commercial class has its clock set to now ('reset'), a supply ship follows the maintenance cluster it is assigned to ('supply'), a ship that is not commercial in a military hangar has its clock advanced by the hangar ('advanced'), and any other ship's age follows the maintenance support at its location ('support'). A carried ship's cases are given for a 2.7 save only. A setting the game has for overhauls being off, an input the save lacks or a version the hangar rules are not read for leaves it 'unknown'. Returns { mode, reason } with a reason for every mode but 'support' and 'advanced'.
+// How a ship's maintenance clock runs, in the order the game takes its cases: a ship in a shipyard task that is not paused is out of maintenance and failure testing ('yard'), a race that is not played or a commercial class has its clock set to now ('reset'), a supply ship follows the maintenance cluster it is assigned to ('supply'), a ship that is not commercial in a military hangar has its clock advanced by the hangar ('advanced'), and any other ship's age follows the maintenance support at its location ('support'). A carried ship's cases are given only for a version their rules hold for. A setting the game has for overhauls being off, an input the save lacks or a version the hangar rules are not read for leaves it 'unknown'. Returns { mode, reason } with a reason for every mode but 'support' and 'advanced'.
 const clockModeOf = (ship, hangared, yardTask, context) => {
   const commercial = flag(ship.Commercial)
   const supply = flag(ship.SupplyShip)
@@ -453,7 +453,7 @@ const shipyardTasks = async (database, { GameID }) => {
   return tasks
 }
 
-// The race's ships of `classIds` (all its classes when null, none when an empty list), read once and worked out as `buildShipRuntime` does, for `GameID` and `RaceID` of the database at `generation` (the store's freshness generation, null when the caller has none). Only the race's own classes are read: an id that is not one of them is listed in `rejected` and no ship is read for it, and every ship read is the race's own, so no other race's ship is joined through a class. `scenario` as `buildShipRuntime` takes it. Returns { status: 'ok', revision, formulaVersion, ships, classes, rejected, problems }; `revision` is { key, generation, GameID, RaceID, gameTime } and `formulaVersion` the game version the save's schema stands for (null when it is not shown to be 2.7): the hangar and shore-leave rates are given for 2.7 only.
+// The race's ships of `classIds` (all its classes when null, none when an empty list), read once and worked out as `buildShipRuntime` does, for `GameID` and `RaceID` of the database at `generation` (the store's freshness generation, null when the caller has none). Only the race's own classes are read: an id that is not one of them is listed in `rejected` and no ship is read for it, and every ship read is the race's own, so no other race's ship is joined through a class. `scenario` as `buildShipRuntime` takes it. Returns { status: 'ok', revision, formulaVersion, ships, classes, rejected, problems }; `revision` is { key, generation, GameID, RaceID, gameTime } and `formulaVersion` the game version the save's schema stands for (null when it is not shown to be a version the rules hold for): the hangar and shore-leave rates are given only for such a version.
 export const loadShipRuntime = async (database, { GameID, RaceID, classIds = null, generation = null, scenario = {} }) => {
   const asked = requested(classIds)
   const wanted = asked && asked.ids

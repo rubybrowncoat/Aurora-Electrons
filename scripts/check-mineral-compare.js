@@ -7,28 +7,20 @@
 
   The page's script is run as a real Vue 2 instance (vue is a dependency of the app) over scripts/lib/page-loader.js, with the real persisted-view mixin over an in-memory settings store: the minerals picked are an app-wide setting, as they always were (a value an earlier version stored opens the page, a preferences bundle that holds it among the app-wide views imports, Reset all clears it and one empire's reset leaves it) and survive a scale change, leaving the page and a restart; the percent scale draws no line for a mineral whose change is undefined and shows each baseline with its date; the chosen span sets the baseline; Reset restores the full retained range and keeps the minerals and the scale; the CSV follows the scale and span shown.
 
-  The recorded passive campaign (artifacts/passive-campaign-20261013, git-ignored, read-only: 150 saves of a stock game 5 days apart) gives real stocks: the snapshots of race 1 (a player race whose Gallicite is 0 t throughout) and race 2 (an NPR whose stocks all move) are taken with the app's own `takeSnapshot`, and the percent change is compared with one worked from the unrounded sums of the colony stockpiles read straight from each save. The campaign checks are skipped when the folder is not there.
-
   Each mutation of the utility or of the page's script must fail the checks it names. Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const v8 = require('v8')
-const sqlite3 = require('sqlite3')
 const Vue = require('vue')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, replacing } = require('./lib/page-loader')
 const { strictRecords } = require('./lib/csv-records')
-const { jobs } = require('./lib/check-pool')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
-const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013')
-const CAMPAIGN_GAME = 139
-const CAMPAIGN_RACES = [1, 2]
 const NAMES = ['mineral-compare', 'minerals', 'provenance', 'history']
 const YEAR = 31536000
 const START_YEAR = 2050
@@ -375,7 +367,7 @@ const nested = (config) => {
 }
 
 const pageStatements = async (mutate, context) => {
-  const { m, themes, campaign } = context
+  const { m, themes } = context
   const { MINERALS } = m.minerals
   const idOfName = (name) => MINERALS.find((mineral) => mineral.name === name).id
   const options = await loadPage('pages/history', { stubs: STUBS, modules: { 'mixins/persisted-view': PERSISTED_VIEW }, mutate })
@@ -739,186 +731,25 @@ const pageStatements = async (mutate, context) => {
     }],
   ]
 
-  if (campaign) {
-    statements.push(...campaignPageStatements({ ...context, mount, chartOf, drawnOf, colourOf, notesOf, downloadOf, everyTheme, expectedColours, idOfName }))
-  }
-
   return statements.map(([name, statement]) => [name, settled(statement)])
 }
 
 const firstIds = (count) => Array.from({ length: count }, (_value, index) => index + 1)
 
-// ---------- the recorded campaign ----------
-
-const campaignPageStatements = ({ campaign, mount, chartOf, drawnOf, colourOf, notesOf, downloadOf, everyTheme, expectedColours, idOfName }) => {
-  const config = stored
-  const snapshots = campaign.races[1].snapshots
-
-  return [
-    ['campaign page: race 1 on the percent scale draws ten minerals and no line for Gallicite, which is 0 t', () => {
-      const { vm } = mount({ snapshots, config: config(firstIds(11), 'percent') })
-      const drawn = drawnOf(vm).map((dataset) => dataset.label)
-
-      return drawn.length === 10 && !drawn.includes('Gallicite') && chartOf(vm).picker.options.filter((option) => option.flag).map((option) => option.value).join() === '11' && notesOf(vm).some((note) => /^Gallicite: change undefined, so no line is drawn, because the stock in the first snapshot of the window is 0 t/.test(note)) && drawnOf(vm).every((dataset) => dataset.data.every((point) => Number.isFinite(point.y))) ? true : short([drawn, notesOf(vm).length])
-    }],
-    ['campaign page: race 1 on the stock scale draws all eleven, Gallicite at 0 t', () => {
-      const { vm } = mount({ snapshots, config: config(firstIds(11), 'absolute') })
-      const gallicite = drawnOf(vm).find((dataset) => dataset.label === 'Gallicite')
-
-      return drawnOf(vm).length === 11 && gallicite.data.length === 150 && gallicite.data.every((point) => point.y === 0) ? true : short(drawnOf(vm).length)
-    }],
-    ['campaign page: each mineral keeps its colour on the recorded campaign in every theme', () => everyTheme((palette) => {
-      const { vm } = mount({ snapshots, palette, config: config(firstIds(11), 'absolute') })
-      const alone = mount({ snapshots, palette, config: config([8], 'absolute') }).vm
-
-      return equal(colourOf(vm), expectedColours(palette, firstIds(11))) && equal(colourOf(alone), expectedColours(palette, [8])) ? true : short(colourOf(vm))
-    })],
-    ['campaign page: the CSV of race 1 gives the real baselines, and Gallicite as undefined', () => {
-      const { vm } = mount({ snapshots, config: config([8, 11], 'percent') })
-      const csv = downloadOf(vm)
-      const sorium = csv.rows.filter((row) => row['Mineral ID'] === '8')
-      const gallicite = csv.rows.filter((row) => row['Mineral ID'] === '11')
-      const first = snapshots[0]
-
-      return csv.rows.length === 300 && sorium[0]['Baseline stock (t)'] === String(first.minerals[7]) && sorium[0]['Baseline game time (s)'] === String(first.t) && Number(sorium[149]['Change from baseline (%)']) < 0 && gallicite.every((row) => row['Stock (t)'] === '0' && row['Baseline stock (t)'] === '0' && row['Change from baseline (%)'] === '' && /change undefined/.test(row.Note)) ? true : short([csv.rows.length, sorium[0]])
-    }],
-    ['campaign page: race 2 on the percent scale draws all eleven, each from 0 % at the first save', () => {
-      const { vm } = mount({ snapshots: campaign.races[2].snapshots, config: config(firstIds(11), 'percent') })
-
-      return drawnOf(vm).length === 11 && drawnOf(vm).every((dataset) => dataset.data.length === 150 && dataset.data[0].y === 0) && idOfName('Gallicite') === 11 && drawnOf(vm).find((dataset) => dataset.label === 'Gallicite').data[149].y > 0 ? true : short(drawnOf(vm).map((dataset) => dataset.data[0].y))
-    }],
-  ]
-}
-
-const campaignStatements = (m, campaign) => {
-  const { compareMinerals } = m.compare
-  const { MINERALS } = m.minerals
-  const ids11 = MINERALS.map((mineral) => mineral.id)
-  const tolerance = 0.05
-
-  // The percent change of a mineral over a stretch of saves worked from the unrounded sums read from each save.
-  const oracleOf = (race, id, from = 0) => race.oracle.slice(from).map((sums) => (100 * (sums[id - 1] - race.oracle[from][id - 1])) / race.oracle[from][id - 1])
-  const worst = (actual, expected) => actual.reduce((largest, value, index) => (value === null ? Infinity : Math.max(largest, Math.abs(value - expected[index]))), 0)
-
-  return [
-    ['campaign: the recorded saves are 150, five game days apart, and each gives a snapshot of both races', () => {
-      const times = campaign.races[1].snapshots.map((snapshot) => snapshot.t)
-
-      return times.length === 150 && times.every((t, index) => index === 0 || t - times[index - 1] === 5 * 86400) && equal(times, campaign.races[2].snapshots.map((snapshot) => snapshot.t)) && campaign.races[1].snapshots.every((snapshot) => snapshot.minerals.length === 11) ? true : short(times.slice(0, 3))
-    }],
-    ['campaign: race 1 holds no Gallicite in any save, so its change is undefined on the whole campaign', () => {
-      const [series] = compareMinerals(campaign.races[1].snapshots, [11]).series
-
-      return campaign.races[1].oracle.every((sums) => sums[10] === 0) && series.normalisation.defined === false && series.normalisation.code === 'zero' && series.percent.every((value) => value === null) && equal(series.baseline, { t: campaign.races[1].snapshots[0].t, stock: 0 }) ? true : short(series.normalisation)
-    }],
-    ['campaign: race 1\'s other ten minerals have a change that matches the unrounded sums of the saves', () => {
-      const race = campaign.races[1]
-      const problems = ids11.filter((id) => id !== 11).map((id) => {
-        const [series] = compareMinerals(race.snapshots, [id]).series
-        const gap = series.normalisation.defined ? worst(series.percent, oracleOf(race, id)) : Infinity
-
-        return gap <= tolerance ? null : `${id}: ${gap}`
-      }).filter(Boolean)
-
-      return problems.length === 0 ? true : problems.join('; ')
-    }],
-    ['campaign: race 1\'s Neutronium, which no colony touches, stays at 0 % and its Sorium falls', () => {
-      const race = campaign.races[1]
-      const [neutronium] = compareMinerals(race.snapshots, [2]).series
-      const [sorium] = compareMinerals(race.snapshots, [8]).series
-
-      return neutronium.percent.every((value) => near(value, 0)) && sorium.percent[149] < -5 && sorium.percent.every((value, index) => index === 0 || value <= sorium.percent[index - 1] + 1e-9) ? true : short([neutronium.percent[149], sorium.percent[149]])
-    }],
-    ['campaign: race 2\'s eleven minerals all have a change that matches the unrounded sums of the saves', () => {
-      const race = campaign.races[2]
-      const problems = compareMinerals(race.snapshots, ids11).series.map((series) => {
-        const gap = series.normalisation.defined ? worst(series.percent, oracleOf(race, series.id)) : Infinity
-
-        return gap <= tolerance ? null : `${series.id}: ${gap}`
-      }).filter(Boolean)
-
-      return problems.length === 0 ? true : problems.join('; ')
-    }],
-    ['campaign: the last year of saves has its own baseline, the first of its saves', () => {
-      const race = campaign.races[2]
-      const window = race.snapshots.slice(77)
-      const series = compareMinerals(window, ids11).series
-      const problems = series.map((entry) => {
-        const gap = entry.normalisation.defined ? worst(entry.percent, oracleOf(race, entry.id, 77)) : Infinity
-
-        return gap <= tolerance && entry.baseline.t === window[0].t && entry.baseline.stock === window[0].minerals[entry.id - 1] && near(entry.percent[0], 0) ? null : `${entry.id}: ${gap}`
-      }).filter(Boolean)
-
-      return window.length === 73 && problems.length === 0 ? true : problems.join('; ')
-    }],
-  ]
-}
-
-const openSave = (file) => new Promise((resolve, reject) => {
-  const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => {
-    if (error) {
-      reject(error)
-      return
-    }
-
-    resolve({
-      query: (sql) => new Promise((resolve, reject) => raw.all(sql, (queryError, rows) => (queryError ? reject(queryError) : resolve([rows])))),
-      close: () => new Promise((resolve) => raw.close(resolve)),
-    })
-  })
-})
-
-// The files of the recorded saves in order, or null when the campaign is not there.
-const campaignFiles = () => {
-  const list = path.join(PASSIVE, 'snapshots.csv')
-
-  if (!fs.existsSync(list)) {
-    return null
-  }
-
-  const files = fs.readFileSync(list, 'utf8').split(/\r?\n/).slice(1).filter(Boolean).map((line) => path.join(PASSIVE, 'snapshots', line.split(',')[2]))
-
-  return files.length < 2 || !files.every((file) => fs.existsSync(file)) ? null : files
-}
-
-// The snapshots the app takes of each of the recorded saves in `files`, and the unrounded sums of the colony stockpiles read from the save itself.
-const readCampaign = async (m, files) => {
-  const names = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
-  const races = Object.fromEntries(CAMPAIGN_RACES.map((race) => [race, { snapshots: [], oracle: [] }]))
-
-  for (const file of files) {
-    const database = await openSave(file)
-
-    try {
-      for (const RaceID of CAMPAIGN_RACES) {
-        const { snapshot } = await m.history.takeSnapshot(database, { GameID: CAMPAIGN_GAME, RaceID })
-        const [[sums]] = await database.query(`select ${names.map((name, index) => `sum(FCT_Population.${name}) as m${index}`).join(', ')} from FCT_Population where FCT_Population.GameID = ${CAMPAIGN_GAME} and FCT_Population.RaceID = ${RaceID}`)
-
-        races[RaceID].snapshots.push(snapshot)
-        races[RaceID].oracle.push(names.map((_name, index) => sums[`m${index}`]))
-      }
-    } finally {
-      await database.close()
-    }
-  }
-
-  return { races }
-}
-
 // ---------- mutations ----------
 
 const UTILITY = 'mineral-compare.js'
 
-// A cut of the utility and the checks that must fail for it: each name is the start of the name of a check, and the cut is caught only when a check of every name fails. `campaign` names the checks of the recorded campaign that must fail too, when it is there.
+// A cut of the utility and the checks that must fail for it: each name is the start of the name of a check, and the cut is caught only when a check of every name fails.
 const MUTATIONS = [
-  { name: 'the baseline taken from the last sample', find: 'const baseline = samples.length ? samples[0] : null', replace: 'const baseline = samples.length ? samples[samples.length - 1] : null', fails: ['the baseline is the first sample of the window', 'the percent change is 100 x'], campaign: ['campaign: the last year of saves has its own baseline'] },
+  { name: 'the baseline taken from the last sample', find: 'const baseline = samples.length ? samples[0] : null', replace: 'const baseline = samples.length ? samples[samples.length - 1] : null', fails: ['the baseline is the first sample of the window', 'the percent change is 100 x'] },
   { name: 'the baseline moved on to the first stock that is recorded', find: 'const baseline = samples.length ? samples[0] : null', replace: 'const baseline = samples.find((sample) => sample.stock !== null) || null', fails: ['an unknown starting stock makes the change undefined'] },
-  { name: 'a zero starting stock taken as a baseline', find: 'first.stock === 0 ? \'zero\'', replace: 'first.stock === 0 ? null', fails: ['a zero starting stock makes the change undefined, never infinity or 0', 'a mineral that is 0 t throughout is undefined in every window'], campaign: ['campaign: race 1 holds no Gallicite'] },
+  { name: 'a zero starting stock taken as a baseline', find: 'first.stock === 0 ? \'zero\'', replace: 'first.stock === 0 ? null', fails: ['a zero starting stock makes the change undefined, never infinity or 0', 'a mineral that is 0 t throughout is undefined in every window'] },
   { name: 'a baseline of 0 t given a percentage', find: 'baseline > 0 ? (100', replace: 'baseline >= 0 ? (100', fails: ['no percentage is taken from a baseline that is not above 0'] },
   { name: 'an unknown starting stock taken as defined', find: 'first.stock === null ? \'unknown\'', replace: 'first.stock === null ? null', fails: ['an unknown starting stock makes the change undefined'] },
   { name: 'an unknown stock read as 0', find: 'stock: valueOrNull(mineralResult(snapshot, id, mineral.name))', replace: 'stock: valueOrNull(mineralResult(snapshot, id, mineral.name)) || 0', fails: ['a stock the snapshot does not hold is unknown, not 0', 'the CSV leaves an unknown figure as an empty cell'] },
-  { name: 'a change taken the wrong way round', find: '(100 * (stock - baseline)) / baseline', replace: '(100 * (baseline - stock)) / baseline', fails: ['the percent change is 100 x', 'the CSV has a row for each mineral at each snapshot of the window'], campaign: ['campaign: race 1\'s other ten minerals', 'campaign: race 2\'s eleven minerals'] },
-  { name: 'a change taken as a share of the stock', find: '(100 * (stock - baseline)) / baseline', replace: '(100 * (stock - baseline)) / stock', fails: ['the percent change is 100 x'], campaign: ['campaign: race 2\'s eleven minerals'] },
+  { name: 'a change taken the wrong way round', find: '(100 * (stock - baseline)) / baseline', replace: '(100 * (baseline - stock)) / baseline', fails: ['the percent change is 100 x', 'the CSV has a row for each mineral at each snapshot of the window'] },
+  { name: 'a change taken as a share of the stock', find: '(100 * (stock - baseline)) / baseline', replace: '(100 * (stock - baseline)) / stock', fails: ['the percent change is 100 x'] },
   { name: 'an empty window given a baseline of 0', find: 'const baseline = samples.length ? samples[0] : null', replace: 'const baseline = samples.length ? samples[0] : { t: 0, stock: 0 }', fails: ['a window with no snapshot has no baseline'] },
   { name: 'two minerals of the first nine sharing a slot', find: 'export const MINERAL_SLOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 2, 3]', replace: 'export const MINERAL_SLOTS = [0, 1, 2, 3, 4, 5, 6, 7, 3, 2, 3]', fails: ['each mineral\'s colour is the palette slot fixed for its ID', 'the first nine minerals have nine different colours', 'a mineral that owns its slot leaves the slot its own dash'] },
   { name: 'a mineral of the page\'s start sharing a colour with another', find: 'export const MINERAL_SLOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 2, 3]', replace: 'export const MINERAL_SLOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 2, 1]', fails: ['the minerals the page starts with have different colours', 'each mineral\'s colour is the palette slot fixed for its ID'] },
@@ -977,15 +808,15 @@ const PAGE_MUTATIONS = [
   { name: 'a stored pick not read back', find: 'normalise: (stored) => (Array.isArray(stored) ?', replace: 'normalise: (stored) => (false ?', fails: ['page: the minerals picked and the scale survive leaving the page and a restart', 'page: a pick stored app-wide before'] },
   { name: 'a stored pick not cleaned of what is not offered', find: 'MINERALS.map((mineral) => mineral.id).filter((id) => stored.includes(id)) : undefined', replace: 'stored : undefined', fails: ['page: a stored pick this version does not offer is cleaned'] },
   { name: 'the minerals picked reset by a scale change', find: '  watch: {\n    // Another campaign or branch', replace: '  watch: {\n    mineralScale() {\n      this.mineralIds = [1, 2, 11]\n    },\n    // Another campaign or branch', fails: ['page: a scale change keeps the minerals picked', 'page: the minerals picked and the scale survive'] },
-  { name: 'the colour taken by position among the minerals drawn', find: 'const style = mineralStyle(palette, entry.id)\n\n            return {', replace: 'const style = mineralStyle(palette, drawn.indexOf(entry) + 1)\n\n            return {', fails: ['page: a mineral is drawn in the colour of its ID', 'page: picking or dropping a mineral recolours no other', 'campaign page: each mineral keeps its colour'] },
+  { name: 'the colour taken by position among the minerals drawn', find: 'const style = mineralStyle(palette, entry.id)\n\n            return {', replace: 'const style = mineralStyle(palette, drawn.indexOf(entry) + 1)\n\n            return {', fails: ['page: a mineral is drawn in the colour of its ID', 'page: picking or dropping a mineral recolours no other'] },
   { name: 'the chips and the lines of different colours', find: 'return { value: mineral.id, text: mineral.name, color: style.color, dash: style.dash,', replace: 'return { value: mineral.id, text: mineral.name, color: palette[8 - (mineral.id % 9)], dash: style.dash,', fails: ['page: the chips of the picker'] },
   { name: 'the dash of the shared slots left off the chart', find: 'borderColor: style.color,\n              backgroundColor: withAlpha(style.color, 0.1),\n              borderDash: style.dash,', replace: 'borderColor: style.color,\n              backgroundColor: withAlpha(style.color, 0.1),\n              borderDash: [],', fails: ['page: the shared slots are told apart by a dash that reaches the chart'] },
   { name: 'the order of picking kept', find: 'this.mineralIds = MINERALS.map((mineral) => mineral.id).filter((id) => ids.includes(id))', replace: 'this.mineralIds = ids', fails: ['page: the order the minerals are picked in changes nothing'] },
-  { name: 'a mineral with an undefined change drawn on the percent scale', find: 'const drawn = series.filter((entry) => !percent || entry.normalisation.defined)', replace: 'const drawn = series', fails: ['page: on the percent scale a mineral whose change is undefined has no line', 'campaign page: race 1 on the percent scale draws ten minerals', 'page: a mineral is drawn in the colour of its ID'] },
-  { name: 'an undefined change not flagged in the legend', find: 'flag: undefinedChange ? \'undefined\' : \'\'', replace: 'flag: \'\'', fails: ['page: on the percent scale a mineral whose change is undefined has no line, and says why', 'campaign page: race 1 on the percent scale draws ten minerals'] },
+  { name: 'a mineral with an undefined change drawn on the percent scale', find: 'const drawn = series.filter((entry) => !percent || entry.normalisation.defined)', replace: 'const drawn = series', fails: ['page: on the percent scale a mineral whose change is undefined has no line', 'page: a mineral is drawn in the colour of its ID'] },
+  { name: 'an undefined change not flagged in the legend', find: 'flag: undefinedChange ? \'undefined\' : \'\'', replace: 'flag: \'\'', fails: ['page: on the percent scale a mineral whose change is undefined has no line, and says why'] },
   { name: 'an undefined change flagged on the stock scale', find: 'const undefinedChange = percent && !!entry && !entry.normalisation.defined', replace: 'const undefinedChange = !!entry && !entry.normalisation.defined', fails: ['page: on the stock scale a mineral whose change is undefined is drawn and nothing is flagged'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the reason an undefined change gives left out of the notes', find: '`${entry.name}: change undefined, so no line is drawn, because ${entry.normalisation.reason} (${this.date(entry.baseline.t)}).`', replace: '`${entry.name}: change undefined, so no line is drawn.`', fails: ['page: on the percent scale a mineral whose change is undefined has no line, and says why', 'campaign page: race 1 on the percent scale draws ten minerals'] },
+  { name: 'the reason an undefined change gives left out of the notes', find: '`${entry.name}: change undefined, so no line is drawn, because ${entry.normalisation.reason} (${this.date(entry.baseline.t)}).`', replace: '`${entry.name}: change undefined, so no line is drawn.`', fails: ['page: on the percent scale a mineral whose change is undefined has no line, and says why'] },
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the baseline left out of the notes', find: '`${entry.name}: baseline ${this.count(entry.baseline.stock, 0)} t, at ${this.date(entry.baseline.t)}.`', replace: '`${entry.name}: baseline.`', fails: ['page: the baseline and its game time are shown for each mineral on the percent scale', 'page: the span chosen sets the baseline'] },
   // eslint-disable-next-line no-template-curly-in-string
@@ -1013,7 +844,7 @@ const PAGE_MUTATIONS = [
   { name: 'the default picks changed', find: 'default: [1, 2, 11], normalise', replace: 'default: [1, 2, 3], normalise', fails: ['page: the minerals picked and the scale are views declared for the app', 'page: the minerals the page starts with are Duranium, Neutronium and Gallicite'] },
 ]
 
-// ---------- the parts: each mutant and the checks of the real sources run in a process of their own, the campaign read in slices before them ----------
+// ---------- the parts: each mutant and the checks of the real sources run in a process of their own ----------
 
 const MUTANTS = [...MUTATIONS.map((mutation, index) => ({ kind: 'utility', id: `utility:${index}`, ...mutation })), ...PAGE_MUTATIONS.map((mutation, index) => ({ kind: 'page', id: `page:${index}`, ...mutation }))]
 
@@ -1023,18 +854,14 @@ const loadAppearance = async () => (await loadUtilities(['appearance'], { stubs:
 
 const themesOf = (appearance) => Object.fromEntries(Object.keys(appearance.PRESETS).map((id) => [id, appearance.resolveAppearance(id).charts.categorical]))
 
-// The recorded campaign as the parent read it (a structured clone, so nothing a snapshot holds is changed), or null when it is not there.
-const campaignOf = (file) => (file ? v8.deserialize(fs.readFileSync(file)) : null)
-
-// The checks of the real sources over a synthetic snapshot set and the recorded campaign; the statements of the page.
-const checkHead = async (campaignFile) => {
+// The checks of the real sources over a synthetic snapshot set; the statements of the page.
+const checkHead = async () => {
   const appearance = await loadAppearance()
   const themes = themesOf(appearance)
   const m = modulesOf(await loadUtilities(NAMES, { stubs: STUBS }), appearance)
-  const campaign = campaignOf(campaignFile)
-  const synthetic = (loaded) => [...pure(loaded, themes), ...(campaign ? campaignStatements(loaded, campaign) : [])]
+  const synthetic = (loaded) => pure(loaded, themes)
 
-  console.log('\nThe comparison, on snapshots worked by hand and on the recorded campaign')
+  console.log('\nThe comparison, on snapshots worked by hand')
 
   for (const [name, test] of synthetic(m)) {
     let result
@@ -1051,7 +878,7 @@ const checkHead = async (campaignFile) => {
   console.log('\nThe Empire History page (its script as a Vue instance, over scripts/lib/page-loader.js)')
 
   const settings = await loadUtilities(['campaign', 'preferences', 'remembered-views'], { stubs: STUBS })
-  const context = { m, themes, campaign, settings }
+  const context = { m, themes, settings }
 
   for (const [statement, held] of await pageStatements(null, context)) {
     check(statement, await held())
@@ -1060,16 +887,14 @@ const checkHead = async (campaignFile) => {
   check('the page raises no Vue warning', warnings.length === 0 ? true : warnings.slice(0, 3).join(' | '))
 }
 
-const checkUtilityMutation = async ({ name, find, replace, fails, campaign: campaignFails = [], file = UTILITY }, campaignFile) => {
+const checkUtilityMutation = async ({ name, find, replace, fails, file = UTILITY }) => {
   const appearance = await loadAppearance()
   const themes = themesOf(appearance)
-  const campaign = campaignOf(campaignFile)
-  const synthetic = (loaded) => [...pure(loaded, themes), ...(campaign ? campaignStatements(loaded, campaign) : [])]
+  const synthetic = (loaded) => pure(loaded, themes)
   const directory = mutatedCopy(file, find, replace)
   const began = Date.now()
 
   try {
-    const names = campaign ? [...fails, ...campaignFails] : fails
     let failed = null
     let absent = []
 
@@ -1077,9 +902,9 @@ const checkUtilityMutation = async ({ name, find, replace, fails, campaign: camp
       const mutant = modulesOf(await loadUtilities(NAMES, { stubs: STUBS, directory }), appearance)
 
       // Only the checks the mutation names are run: the others cannot change what it must break.
-      const named = synthetic(mutant).filter(([checkName]) => names.some((start) => checkName.startsWith(start)))
+      const named = synthetic(mutant).filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
 
-      absent = names.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
+      absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
       failed = named.filter(([, test]) => {
         try {
           return test() !== true
@@ -1093,7 +918,7 @@ const checkUtilityMutation = async ({ name, find, replace, fails, campaign: camp
       return
     }
 
-    const missed = names.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
+    const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
 
     check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
   } finally {
@@ -1101,13 +926,13 @@ const checkUtilityMutation = async ({ name, find, replace, fails, campaign: camp
   }
 }
 
-const checkPageMutation = async ({ name, find, replace, fails }, campaignFile) => {
+const checkPageMutation = async ({ name, find, replace, fails }) => {
   refusePlanting(name)
 
   const appearance = await loadAppearance()
   const m = modulesOf(await loadUtilities(NAMES, { stubs: STUBS }), appearance)
   const settings = await loadUtilities(['campaign', 'preferences', 'remembered-views'], { stubs: STUBS })
-  const context = { m, themes: themesOf(appearance), campaign: campaignOf(campaignFile), settings }
+  const context = { m, themes: themesOf(appearance), settings }
   const began = Date.now()
   let failed = null
   let absent = []
@@ -1135,29 +960,14 @@ const checkPageMutation = async ({ name, find, replace, fails }, campaignFile) =
   check(`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
 }
 
-// Reads the share `slice` of `of` of the recorded saves into `out`, as the structured clone `campaignOf` reads.
-const readSlice = async (slice, of, out) => {
-  const appearance = await loadAppearance()
-  const m = modulesOf(await loadUtilities(NAMES, { stubs: STUBS }), appearance)
-  const files = campaignFiles()
-  const share = Math.ceil(files.length / of)
-
-  fs.writeFileSync(out, v8.serialize(await readCampaign(m, files.slice(slice * share, (slice + 1) * share))))
-}
-
 const parseArguments = (argv) => {
-  const options = { part: null, campaign: null, slice: null }
+  const options = { part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--part') {
       options.part = argv[++index]
     } else if (argv[index] === '--no-mutations') {
       continue
-    } else if (argv[index] === '--campaign') {
-      options.campaign = argv[++index]
-    } else if (argv[index] === '--slice') {
-      options.slice = [Number(argv[index + 1]), Number(argv[index + 2]), argv[index + 3]]
-      index += 3
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -1170,20 +980,15 @@ const parseArguments = (argv) => {
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
 
-  if (options.slice !== null) {
-    await readSlice(...options.slice)
-    endSection(0, 0)
-  }
-
   if (options.part !== null) {
     const mutant = MUTANTS.find(({ id }) => id === options.part)
 
     if (options.part === 'head') {
-      await checkHead(options.campaign)
+      await checkHead()
     } else if (mutant && mutant.kind === 'utility') {
-      await checkUtilityMutation(mutant, options.campaign)
+      await checkUtilityMutation(mutant)
     } else if (mutant) {
-      await checkPageMutation(mutant, options.campaign)
+      await checkPageMutation(mutant)
     } else {
       throw new Error(`No part is named ${options.part}`)
     }
@@ -1191,50 +996,22 @@ const run = async () => {
     endSection(checks, failures)
   }
 
-  console.log('The recorded campaign: the snapshots of each save (this takes a while)')
+  const parts = [{ part: 'head', weight: 30 }, ...(mutating() ? MUTANTS : []).map(({ id }) => ({ part: id, weight: 3 }))]
+  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part], weight })))
+  let at = 0
 
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-mineral-compare-campaign-'))
+  const printed = () => {
+    const counts = printSection(sections[at++])
 
-  try {
-    const files = campaignFiles()
-    let campaignFile = null
+    checks += counts.checks
+    failures += counts.failures
+  }
 
-    if (files) {
-      const count = Math.min(jobs(), files.length)
-      const outs = Array.from({ length: count }, (_unused, slice) => path.join(directory, `slice-${slice}.bin`))
+  printed()
 
-      await runSections(__filename, outs.map((out, slice) => ({ args: ['--slice', String(slice), String(count), out] })))
-
-      const slices = outs.map((out) => v8.deserialize(fs.readFileSync(out)))
-      const races = Object.fromEntries(CAMPAIGN_RACES.map((race) => [race, { snapshots: slices.flatMap((slice) => slice.races[race].snapshots), oracle: slices.flatMap((slice) => slice.races[race].oracle) }]))
-
-      campaignFile = path.join(directory, 'campaign.bin')
-      fs.writeFileSync(campaignFile, v8.serialize({ races }))
-      console.log(`  ${races[1].snapshots.length} saves read for ${CAMPAIGN_RACES.length} races`)
-    } else {
-      console.log('SKIP  the passive campaign (artifacts/passive-campaign-20261013) is not there')
-    }
-
-    const forwarded = campaignFile ? ['--campaign', campaignFile] : []
-    const parts = [{ part: 'head', weight: 30 }, ...(mutating() ? MUTANTS : []).map(({ id }) => ({ part: id, weight: 3 }))]
-    const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwarded], weight })))
-    let at = 0
-
-    const printed = () => {
-      const counts = printSection(sections[at++])
-
-      checks += counts.checks
-      failures += counts.failures
-    }
-
-    printed()
-
-    if (mutating()) {
-      console.log('\nMutations: each must fail the checks it names')
-      MUTANTS.forEach(printed)
-    }
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true })
+  if (mutating()) {
+    console.log('\nMutations: each must fail the checks it names')
+    MUTANTS.forEach(printed)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

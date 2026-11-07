@@ -1,11 +1,11 @@
 /*
-  Checks what a player sees when the save now open is not an Aurora 2.7 save (src/renderer/components/page/UnsupportedSave.vue, shown by src/renderer/layouts/default.vue on the report routes and by src/renderer/pages/index.vue on the Empires page): the app is served by scripts/lib/page-server.js over copies of a save, opened in Chromium, and what is on screen is read back.
+  Checks what a player sees when the save now open is not an Aurora 3.2 save (src/renderer/components/page/UnsupportedSave.vue, shown by src/renderer/layouts/default.vue on the report routes and by src/renderer/pages/index.vue on the Empires page): the app is served by scripts/lib/page-server.js over copies of a save, opened in Chromium, and what is on screen is read back.
 
   Run: bun scripts/check-unsupported-save-page.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The decision (utilities/capabilities.js `lineResult`, the store's `refused` getter) is checked by scripts/check-capabilities.js; this script proves that it reaches the screen. It reads the screen through the shared readers of scripts/lib/browser-observe.js (`installScreen`): hooks the templates carry only identify an element, and every decision is read from the text the element draws, through the module's own words (utilities/capabilities.js `REFUSALS`), against what SQL written here says of each copy of the save. Three copies of one save are served one after another: a copy with the fourteen columns Aurora 2.7 added dropped (refused), the save as it is (accepted), and a copy with only FCT_Game.AncientRelics dropped (damaged: still of the 2.7 line, never refused).
-  - on the refused copy the Empires page draws the notice, in the words of the reason SQL gives, with the version of the package, the line the app reads, the release that read older saves (its text and its link) and every column the copy lacks, each once, and no list of empires; the Save panel stays on screen and can be used;
-  - on the refused copy a report route (Logistics) draws the same notice in place of the page, none of the page's panels; Settings and About draw their panels and no notice; the status line of the app says the save is refused in the words of the module; the button that checks the save again asks the database for its schema again, and the notice is there afterwards;
+  The decision (utilities/capabilities.js `lineResult`, the store's `refused` getter) is checked by scripts/check-capabilities.js; this script proves that it reaches the screen. It reads the screen through the shared readers of scripts/lib/browser-observe.js (`installScreen`): hooks the templates carry only identify an element, and every decision is read from the text the element draws, through the module's own words (utilities/capabilities.js `REFUSALS`), against what SQL written here says of each copy. Three copies are served one after another: the stock save from before 3.0 as it is, none of the seven columns Aurora 3.0 added in it (refused as a save from before 3.0), the migrated 3.1 fixture as it is (accepted), and a copy of the fixture with FCT_Game.LostColonies dropped (damaged: still of the 3.2 line, never refused).
+  - on the refused copy the Empires page draws the notice, in the words of the reason SQL gives, with the version of the package, the line the app reads, the latest release of the line that reads such saves (its text and its link) and every column the copy lacks, each once, and no list of empires; the Save panel stays on screen and can be used;
+  - on the refused copy a report route (Finances, which the line's saves support) draws the same notice in place of the page, none of the page's panels; Settings and About draw their panels and no notice; the status line of the app says the save is refused in the words of the module; the button that checks the save again asks the database for its schema again, and the notice is there afterwards;
   - on the accepted copy and on the damaged copy the Empires page lists the games of the save and the Save panel is there, and a report route draws its panels and no notice, and the status line says nothing of a refusal;
   - the page raises no error on any of them.
   Every planted fault is served in place of the files of the app and the app is read again: each must fail the checks it names (a notice that is not displayed, one shown on a save that is not refused, the empire list left beside the notice, the Save panel hidden under it, a save with a column missing refused as a save of an older line, the status line saying nothing of the refusal, a button that does nothing, the notice drawn on Settings and About as well). Rewrites that say the same thing (the longhand of an event, a condition in parentheses, a synonym in the prose, a title with its words in another order, a condition written the other way round) must pass every check and draw the same screen. No rewrite of a `v-model` is made: the page has none.
@@ -17,45 +17,45 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
-const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey } = require('./lib/browser-observe')
+const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey, settled } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const NAMES = { game: 'EggSample', race: 'EggSample' }
+// The refusal test: a recorded save from before the line, which the page must refuse, and the fixture, which it must accept.
+const SAVE_271 = 'saves/AuroraDB_271_skoormit_saved.db'
+const SAVE_310 = FIXTURE.file
+// The game and race each copy lists: the save from before 3.0's own, and the 3.1 fixture's, whose race is the one the picker settles.
+const NAMES = { refused: { game: 'EggSample', race: 'Khanate of Inarcs' }, accepted: { game: FIXTURE.gameName, race: 'Galactic Shogunate' }, damaged: { game: FIXTURE.gameName, race: 'Galactic Shogunate' } }
 const TIMEOUT = 120000
-const RELEASE = '0.11.0'
+const RELEASE = '2.7.11'
 const COMPONENT = 'src/renderer/components/page/UnsupportedSave.vue'
 const LAYOUT = 'src/renderer/layouts/default.vue'
 const INDEX = 'src/renderer/pages/index.vue'
 const STATUS = 'src/renderer/components/navigation/SaveStatus.vue'
 const STORE = 'src/renderer/store/capabilities.js'
 const FILES = [COMPONENT, LAYOUT, INDEX, STATUS, STORE]
-// The fourteen columns Aurora 2.7 added over 2.6, written here (the oracle of the copy that is refused).
+// The seven columns Aurora 3.0 added over the releases before it, written here (the oracle of the copy that is refused).
 const LINE_COLUMNS = [
-  'FCT_Game.AllowCMC',
-  'FCT_Game.AncientRelics',
-  'FCT_DesignPhilosophy.MaintenanceModules',
-  'FCT_Fleet.AutoLP',
-  'FCT_Population.AcademyNameThemeID',
-  'FCT_Population.BuildReplacements',
-  'FCT_Population.ReplacementCapacity',
-  'FCT_Population.UseAcademyNameTheme',
-  'FCT_Race.RandomClassName',
-  'FCT_Race.chkCometNames',
-  'FCT_Race.chkComets',
-  'FCT_Ship.MaxActiveResolution',
-  'FCT_Ship.SLRetire',
-  'FCT_ShipClassTemplate.CrewDesignEfficiency',
+  'FCT_Game.LostColonies',
+  'FCT_Game.GenerateNonOxygenRaces',
+  'FCT_Game.NoShieldTechnology',
+  'FCT_Game.OrbitalMovementInSubPulse',
+  'FCT_Ship.ShipSeniorCO',
+  'FCT_Race.NoResearchProjects',
+  'FCT_Population.AlienArtifacts',
 ]
+// The one the damaged copy lacks: a save of the line missing part of the signature is accepted.
+const DAMAGED_COLUMNS = ['FCT_Game.LostColonies']
 const dropStatements = (fields) => fields.map((field) => `alter table ${field.split('.')[0]} drop column ${field.split('.')[1]}`)
-// The copies served, in the order they are read.
+// The copies served, in the order they are read: the save from before 3.0 as it is (refused as a save from before 3.0), the 3.1 fixture as it is, and a copy of the line without part of the signature (still of the line).
 const SCENES = [
-  { key: 'refused', what: 'the copy without the fourteen columns', statements: dropStatements(LINE_COLUMNS) },
-  { key: 'accepted', what: 'the save as it is', statements: [] },
-  { key: 'damaged', what: 'the copy without FCT_Game.AncientRelics', statements: dropStatements(['FCT_Game.AncientRelics']) },
+  { key: 'refused', what: 'the save from before 3.0', source: SAVE_271, statements: [] },
+  { key: 'accepted', what: 'the 3.1 save as it is', source: SAVE_310, statements: [] },
+  { key: 'damaged', what: 'the copy without FCT_Game.LostColonies', source: SAVE_310, statements: dropStatements(DAMAGED_COLUMNS) },
 ]
 const DETAIL = process.argv.includes('--detail')
 
@@ -69,12 +69,12 @@ const short = (value) => {
 
 const all = (raw, sql) => new Promise((resolve, reject) => raw.all(sql, (error, rows) => (error ? reject(error) : resolve(rows))))
 
-// A copy of the save in a folder of its own, with `statements` run on it.
-const saveCopy = async (prefix, statements) => {
+// A copy of `source` in a folder of its own, with `statements` run on it.
+const saveCopy = async (prefix, source, statements) => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
   const file = path.join(folder, 'save.db')
 
-  fs.copyFileSync(path.join(root, SAVE), file)
+  fs.copyFileSync(path.join(root, source), file)
 
   const raw = await new Promise((resolve, reject) => {
     const database = new sqlite3.Database(file, (error) => (error ? reject(error) : resolve(database)))
@@ -91,7 +91,7 @@ const saveCopy = async (prefix, statements) => {
   return { folder, file }
 }
 
-// What the copy is: whether it has FCT_Game, which of the fourteen columns it lacks, the reason SQL gives for refusing it (null when it is not refused: a save with FCT_Game that lacks fewer than all fourteen) and the games it lists.
+// What the copy is: whether it has FCT_Game, which of the seven columns it lacks, the reason SQL gives for refusing it (null when it is not refused: a save with FCT_Game that lacks fewer than all seven) and the games it lists.
 const truthOf = async (file) => {
   const raw = await new Promise((resolve, reject) => {
     const database = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(database)))
@@ -112,7 +112,7 @@ const truthOf = async (file) => {
 
     const games = hasGame ? (await all(raw, 'select GameName from FCT_Game')).map((row) => row.GameName) : []
 
-    return { hasGame, absent, reason: !hasGame ? 'not-aurora' : absent.length === LINE_COLUMNS.length ? 'pre-2.7' : null, games }
+    return { hasGame, absent, reason: !hasGame ? 'not-aurora' : absent.length === LINE_COLUMNS.length ? 'pre-3.0' : null, games }
   } finally {
     raw.close()
   }
@@ -146,45 +146,36 @@ const readScreen = () => {
   }
 }
 
-// The reads the page makes of the database, counted: the requests in flight and when the last one began or ended (the app is settled once none is out and none has been for a while), and how many asked for the schema of the save.
+// Count requests that ask the database for the save's schema, so the retry control can prove that it started a fresh read.
 const track = (page) => {
-  const state = { inFlight: 0, last: Date.now(), schemaReads: 0 }
+  const state = { schemaReads: 0 }
   const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
 
   page.on('request', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight++
-      state.last = Date.now()
-
-      if (/pragma_table_xinfo/.test(request.postData() || '')) {
-        state.schemaReads++
-      }
-    }
-  })
-  page.on('requestfinished', (request) => {
-    if (isDatabaseCall(request)) {
-      state.inFlight--
-      state.last = Date.now()
+    if (isDatabaseCall(request) && /pragma_table_xinfo/.test(request.postData() || '')) {
+      state.schemaReads++
     }
   })
 
   return state
 }
 
-// The page the route mounted is still working, or none is mounted (the layout draws the notice in its place) and nothing is: pageLoading says a missing page is working, so it is asked only of a mounted one.
-const MOUNTED_LOADING = `(() => { const match = window.$app.$route.matched[0]; return Boolean(match && match.instances.default) && (${pageLoading})() })()`
+// A report page is still working when it is mounted and has an async read or a progress bar. A refused save has no mounted report page because the layout shows the notice in its place.
+const MOUNTED_LOADING = () => {
+  const match = window.$app.$route.matched[0]
+  const page = match && match.instances.default
 
-const settle = async (page, state) => {
-  const started = Date.now()
-
-  while (state.inFlight > 0 || Date.now() - state.last < 1500 || await page.evaluate(MOUNTED_LOADING)) {
-    if (Date.now() - started > TIMEOUT) {
-      throw new Error(`the app did not settle (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
-    }
-
-    await page.waitForTimeout(250)
+  if (!page) {
+    return false
   }
+
+  const updating = Object.values(page.$asyncComputed || {}).some((state) => state.updating)
+  const working = [...document.querySelectorAll('.v-main .v-progress-linear')].some((bar) => bar.offsetParent && bar.querySelector('.v-progress-linear__indeterminate--active'))
+
+  return updating || working
 }
+
+const settledPage = (page) => settled(page, { limit: TIMEOUT, loading: MOUNTED_LOADING })
 
 // The screen as the check judges it: what the page draws, with the status line read part by part back to the reason whose words it says (the time of the last read it carries changes, so the words themselves are not kept), and the card of the notice as whether it is on screen (its prose is not a decision).
 const read = async (page, t) => {
@@ -194,12 +185,12 @@ const read = async (page, t) => {
 }
 
 // The route opened by the app's own router, until it is there and either its page is mounted or the layout has drawn the notice in its place.
-const visit = async (page, state, target, t, step) => {
+const visit = async (page, target, t, step) => {
   step(`opening ${target}`)
   await page.evaluate((to) => window.$app.$router.push(to, () => {}, () => {}), target)
   await page.waitForFunction((to) => window.$app.$route.path === to, target, { timeout: TIMEOUT })
   await page.waitForFunction(`(${pageLoading.arrived})(${JSON.stringify(target)}) || document.querySelector('[data-unsupported-save]') !== null`, null, { timeout: TIMEOUT })
-  await settle(page, state)
+  await settledPage(page)
 
   return read(page, t)
 }
@@ -220,8 +211,8 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
   await page.goto(url, { timeout: TIMEOUT })
   await installScreen(page)
   step('waiting for the check of the save')
-  await page.waitForFunction(() => Boolean(window.$app.$store.getters.database) && window.$app.$store.getters['capabilities/line'] !== null, null, { timeout: TIMEOUT })
-  await settle(page, state)
+  await page.waitForFunction(() => Boolean(window.$app && window.$app.$store && window.$app.$store.getters.database) && window.$app.$store.getters['capabilities/line'] !== null, null, { timeout: TIMEOUT })
+  await settledPage(page)
 
   const seen = { home: await read(page, t) }
 
@@ -230,11 +221,11 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
     const picker = page.locator('.empire-list').first()
 
     step('picking the game')
-    await picker.locator('.empire-list__game').filter({ hasText: `${NAMES.game} ·` }).first().click({ timeout: TIMEOUT })
+    await picker.locator('.empire-list__game').filter({ hasText: `${scene.names.game} ·` }).first().click({ timeout: TIMEOUT })
 
     if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
       step('picking the race')
-      await picker.getByText(NAMES.race, { exact: true }).last().click({ timeout: TIMEOUT })
+      await picker.getByText(scene.names.race, { exact: true }).last().click({ timeout: TIMEOUT })
     }
   } else {
     step('selecting the race the way the pick of the list does')
@@ -243,14 +234,14 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
       const found = store.state.empires.games.find((entry) => entry.GameName === game)
 
       return store.dispatch('changeGame', { game: found, race: found.Races.find((entry) => entry.RaceTitle === race) || found.Races[0] })
-    }, { game: NAMES.game, race: NAMES.race })
+    }, { game: scene.names.game, race: scene.names.race })
   }
 
   step('waiting for the save of the race')
   // The recorder holds off while the save is refused, so no campaign is settled and no settings prefix is made for the race: a refused save is waited for by the race alone.
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && (Boolean(window.$app.$store.getters.racePrefix) || window.$app.$store.getters['capabilities/refused']), null, { timeout: TIMEOUT })
-  await settle(page, state)
-  seen.page = await visit(page, state, '/logistics', t, step)
+  await settledPage(page)
+  seen.page = await visit(page, '/finances', t, step)
 
   if (scene.truth.reason === null) {
     return seen
@@ -264,12 +255,12 @@ const observeScene = (browser, url, scene, t) => observe(browser, async ({ page,
     await page.locator('[data-unsupported-retry]').click({ timeout: 30000 })
     await until(() => state.schemaReads > before, 15000)
     await page.waitForFunction(() => window.$app.$store.getters['capabilities/status'] !== 'checking', null, { timeout: TIMEOUT })
-    await settle(page, state)
+    await settledPage(page)
   }
 
   seen.retry = { asked: state.schemaReads > before, screen: await read(page, t) }
-  seen.settings = await visit(page, state, '/settings', t, step)
-  seen.about = await visit(page, state, '/about', t, step)
+  seen.settings = await visit(page, '/settings', t, step)
+  seen.about = await visit(page, '/about', t, step)
 
   return seen
 })
@@ -354,16 +345,16 @@ const acceptedProblems = (o, scene) => {
 }
 
 const CHECKS = [
-  ['refused-notice', 'the Empires page of a copy without the fourteen columns draws one notice, in the words of the reason SQL gives, with the version, the line, the release and each missing column', (o, t) => verdict(noticeProblems(o.refused.home, t.scenes.refused, t).length === 0, noticeProblems(o.refused.home, t.scenes.refused, t))],
+  ['refused-notice', 'the Empires page of the save from before 3.0 (none of the seven columns of the line) draws one notice, in the words of the reason SQL gives, with the version, the line, the release and each missing column', (o, t) => verdict(noticeProblems(o.refused.home, t.scenes.refused, t).length === 0, noticeProblems(o.refused.home, t.scenes.refused, t))],
   ['refused-no-list', 'the Empires page of that copy lists no empire', (o) => verdict(shown(o.refused.home.games).length === 0, shown(o.refused.home.games))],
   ['refused-save-panel', 'the Save panel stays on screen under the notice and can be used', (o) => verdict(o.refused.home.savePanel.visible && !o.refused.home.savePanel.disabled, o.refused.home.savePanel)],
-  ['refused-page', 'a report route of that copy draws the same notice in place of its panels', (o, t) => verdict(noticeProblems(o.refused.page, t.scenes.refused, t).length === 0 && o.refused.page.path === '/logistics' && o.refused.page.panels === 0, { problems: noticeProblems(o.refused.page, t.scenes.refused, t), path: o.refused.page.path, panels: o.refused.page.panels })],
+  ['refused-page', 'a report route of that copy draws the same notice in place of its panels', (o, t) => verdict(noticeProblems(o.refused.page, t.scenes.refused, t).length === 0 && o.refused.page.path === '/finances' && o.refused.page.panels === 0, { problems: noticeProblems(o.refused.page, t.scenes.refused, t), path: o.refused.page.path, panels: o.refused.page.panels })],
   ['open-pages', 'Settings and About draw their panels and no notice', (o) => verdict(['settings', 'about'].every((name) => shown(o.refused[name].card).length === 0 && o.refused[name].panels > 0 && o.refused[name].path === `/${name}`), ['settings', 'about'].map((name) => ({ name, path: o.refused[name].path, cards: shown(o.refused[name].card).length, panels: o.refused[name].panels })))],
   ['refused-status', 'the status line says the save is refused, in the words of the reason SQL gives', (o, t) => verdict(same(o.refused.home.status, [t.scenes.refused.reason]) && same(o.refused.page.status, [t.scenes.refused.reason]), [o.refused.home.status, o.refused.page.status])],
   ['refused-retry', 'the button that checks the save again asks the database for the schema again and the notice is there afterwards', (o, t) => verdict(o.refused.retry.asked && noticeProblems(o.refused.retry.screen, t.scenes.refused, t).length === 0, { asked: o.refused.retry.asked, problems: noticeProblems(o.refused.retry.screen, t.scenes.refused, t) })],
   ['accepted-home', 'the Empires page of the save as it is lists its games with the Save panel and no notice', (o, t) => verdict(acceptedProblems(o.accepted, t.scenes.accepted).filter(([name]) => name !== 'the page').length === 0, acceptedProblems(o.accepted, t.scenes.accepted))],
   ['accepted-page', 'a report route of the save as it is draws its panels, no notice and no refusal in the status line', (o, t) => verdict(acceptedProblems(o.accepted, t.scenes.accepted).length === 0, acceptedProblems(o.accepted, t.scenes.accepted))],
-  ['damaged-home', 'the Empires page of the copy without FCT_Game.AncientRelics lists its games with the Save panel and no notice', (o, t) => verdict(acceptedProblems(o.damaged, t.scenes.damaged).filter(([name]) => name !== 'the page').length === 0, acceptedProblems(o.damaged, t.scenes.damaged))],
+  ['damaged-home', 'the Empires page of the copy without FCT_Game.LostColonies lists its games with the Save panel and no notice', (o, t) => verdict(acceptedProblems(o.damaged, t.scenes.damaged).filter(([name]) => name !== 'the page').length === 0, acceptedProblems(o.damaged, t.scenes.damaged))],
   ['damaged-page', 'a report route of that copy draws its panels, no notice and no refusal in the status line', (o, t) => verdict(acceptedProblems(o.damaged, t.scenes.damaged).length === 0, acceptedProblems(o.damaged, t.scenes.damaged))],
   ['no-errors', 'the app raises no error on any copy', (o) => verdict(o.unexpected.length === 0, o.unexpected.slice(0, 3))],
 ]
@@ -407,7 +398,7 @@ const swap = (from, to) => (text) => {
   return text.replace(from, () => to)
 }
 
-const REFUSAL_ANYWAY = swap('return this.line ? REFUSALS[this.line.reason] : undefined', 'return this.line ? (REFUSALS[this.line.reason] || REFUSALS[\'pre-2.7\']) : undefined')
+const REFUSAL_ANYWAY = swap('return this.line ? REFUSALS[this.line.reason] : undefined', 'return this.line ? (REFUSALS[this.line.reason] || REFUSALS[\'pre-3.0\']) : undefined')
 
 const FAULTS = [
   { name: 'the notice is not displayed', changes: [[COMPONENT, swap('<v-card v-if="refusal" class="unsupported-save"', '<v-card v-if="refusal" v-show="false" class="unsupported-save"')]], fails: ['refused-notice', 'refused-page', 'refused-retry'] },
@@ -424,7 +415,7 @@ const BENIGN = [
   { name: 'the button listening by the longhand of the event', changes: [[COMPONENT, swap('@click="retry"', 'v-on:click="retry"')]] },
   { name: 'the layout\'s condition in parentheses', changes: [[LAYOUT, swap('<unsupported-save v-if="refusedHere" />', '<unsupported-save v-if="(refusedHere)" />')]] },
   { name: 'the Empires page\'s condition in parentheses', changes: [[INDEX, swap('<unsupported-save v-if="refused" />', '<unsupported-save v-if="(refused)" />')]] },
-  { name: 'a synonym in the prose of the notice', changes: [[COMPONENT, swap('a save of any other Aurora version is not read, and', 'a save of any other Aurora version is never read, and')]] },
+  { name: 'a synonym in the prose of the notice', changes: [[COMPONENT, swap('a save of any other Aurora line is not read, and', 'a save of any other Aurora line is never read, and')]] },
   { name: 'the title with its words in another order', changes: [[COMPONENT, swap('</v-icon>Unsupported save</v-card-title>', '</v-icon>Save unsupported</v-card-title>')]] },
   { name: 'the report held back by the condition written the other way round', changes: [[LAYOUT, swap('return this.refused ? null : this.reportOf(this.$route.path)', 'return !this.refused ? this.reportOf(this.$route.path) : null')]] },
 ]
@@ -441,10 +432,10 @@ const setUp = async () => {
   const scenes = {}
 
   for (const scene of SCENES) {
-    const copy = await saveCopy(`ae-unsupported-${scene.key}-`, scene.statements)
+    const copy = await saveCopy(`ae-unsupported-${scene.key}-`, scene.source, scene.statements)
 
     cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
-    scenes[scene.key] = { ...scene, file: copy.file, truth: await truthOf(copy.file) }
+    scenes[scene.key] = { ...scene, names: NAMES[scene.key], file: copy.file, truth: await truthOf(copy.file) }
   }
 
   const reasons = Object.keys(capabilities.REFUSALS)
@@ -463,7 +454,7 @@ const setUp = async () => {
   env.chrome = await require('playwright').chromium.launch()
   cleanups.push(() => env.chrome.close())
 
-  const warmed = await env.server.warm(env.chrome, { routes: ['/', '/logistics', '/settings', '/about'] })
+  const warmed = await env.server.warm(env.chrome, { routes: ['/', '/finances', '/settings', '/about'] })
 
   console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
 
@@ -481,6 +472,10 @@ const told = (label, seen) => {
 
 // The app with `changes` made to it ([[file, change], ...], none for the app as it is), each copy of the save opened and read as a player does.
 const view = async (changes) => {
+  if (changes.length) {
+    refusePlanting('an unsupported-save source override')
+  }
+
   for (const [file, change] of changes) {
     ENV.server.replace(file, change(ENV.originals[file]))
   }
@@ -553,7 +548,7 @@ const controls = async (truth) => {
 
     return results.length === 1 && results[0].kind === 'unobserved' && !caughtAll(results) && stopped(() => resultsOf(closeFailed, truth, { ids: ['no-errors'] })) instanceof HarnessError
   })() ? true : 'a record whose context did not close was judged')
-  report('control: the notice is read back to a reason only through the module\'s words, and words that are no reason\'s read back to none', labelKey(truth.notices['pre-2.7'], truth.notices) === 'pre-2.7' && labelKey('The save is old.', truth.notices) === null ? true : 'the words did not read back as they should')
+  report('control: the notice is read back to a reason only through the module\'s words, and words that are no reason\'s read back to none', labelKey(truth.notices['pre-3.0'], truth.notices) === 'pre-3.0' && labelKey('The save is old.', truth.notices) === null ? true : 'the words did not read back as they should')
 }
 
 // The head: the controls of the harness, then the app as it is, read afresh on the worker's server every time the head runs (the control of the warm page server runs it after a fault), and the controls of the oracle that the three copies are what the checks take them for.
@@ -565,10 +560,11 @@ const checkHead = async () => {
   const baseline = await view([])
 
   resultsOf(baseline, truth, { strict: false, label: 'the app' }).forEach(({ name, result }) => report(name, result))
-  report('control: the copies are what the checks take them for: the first has FCT_Game and lacks all fourteen columns, the second lacks none, the third lacks FCT_Game.AncientRelics only', truth.scenes.refused.hasGame && truth.scenes.refused.reason === 'pre-2.7' && truth.scenes.refused.absent.length === LINE_COLUMNS.length && truth.scenes.accepted.reason === null && truth.scenes.accepted.absent.length === 0 && truth.scenes.damaged.reason === null && same(truth.scenes.damaged.absent, ['FCT_Game.AncientRelics']) && truth.scenes.accepted.games.includes(NAMES.game) ? true : short(truth.scenes))
+  report('control: the copies are what the checks take them for: the first has FCT_Game and lacks all seven columns of the line, the second lacks none, the third lacks FCT_Game.LostColonies only', truth.scenes.refused.hasGame && truth.scenes.refused.reason === 'pre-3.0' && truth.scenes.refused.absent.length === LINE_COLUMNS.length && truth.scenes.accepted.reason === null && truth.scenes.accepted.absent.length === 0 && truth.scenes.damaged.reason === null && same(truth.scenes.damaged.absent, DAMAGED_COLUMNS) && truth.scenes.accepted.games.includes(NAMES.accepted.game) ? true : short(truth.scenes))
 }
 
 const checkFault = async (fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, resultsOf(await view(fault.changes), ENV.truth, { ids: fault.fails, label: `the app with the fault "${fault.name}"` }))
 }
 
@@ -597,11 +593,11 @@ const variantsOf = (mutating) => [
 ]
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const doMutations = mutating()
   const totals = await runSuite({
     script: __filename,
-    inputs: [SAVE],
-    variants: variantsOf(mutating),
+    inputs: [SAVE_271, SAVE_310],
+    variants: variantsOf(doMutations),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
       ENV = await setUp()
@@ -626,7 +622,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: mutating ? { fault: `fault:${FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
+    control: doMutations ? { fault: `fault:${FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 

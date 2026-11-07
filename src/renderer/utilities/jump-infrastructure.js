@@ -3,7 +3,7 @@
 import { jumpPointNumbers } from './places'
 import { ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 // DIM_MoveAction 'Stabilise Jump Point'; a destination of type 1 is the jump point of the order.
 export const STABILISE_JUMP_POINT = 64
@@ -22,13 +22,14 @@ registerRule({
   note: 'Stabilising a jump point is an order of the builder\'s own fleet (move action 64); the point holds no progress. An order that has arrived is construction in progress, counting down while its time required is above 0 and waiting for completion at 0; one that has not arrived is queued or on its way. Only the race\'s own orders are readable, so another race\'s work is not known. The time required has no verified unit, so no time left is given.',
 })
 
+// The salvo rule: the game's orbital position update sets the position of a missile salvo whose `OrbitLagrangeID` names a Lagrange point to the point's, after the point itself has moved.
 registerRule({
   id: 'jumpInfrastructure.ownObjects',
-  versions: VERSIONS,
+  versions: ['3.2.x'],
   units: 'salvos',
   verification: 'estimated',
-  structure: ['FCT_MissileSalvo.MissileSalvoID', 'FCT_MissileSalvo.RaceID', 'FCT_MissileSalvo.MissileSpeed', 'FCT_MissileSalvo.SystemID', 'FCT_MissileSalvo.Xcor', 'FCT_MissileSalvo.Ycor', 'FCT_MissileType.SecondStageID', ...STRUCTURE_POINT],
-  note: 'Mines and sensor buoys have no table of their own: they are the race\'s stationary missile salvos, one count per salvo ID. A salvo of a design with a second stage is taken as a mine and one without as a buoy; that split matches the designs\' names in a save but is not confirmed by the game\'s rules. A salvo counts at a point when it is in the same system within 1 km of it on each axis. A salvo counts as one object, not as the missiles in it.',
+  structure: ['FCT_MissileSalvo.MissileSalvoID', 'FCT_MissileSalvo.RaceID', 'FCT_MissileSalvo.MissileSpeed', 'FCT_MissileSalvo.LurkerMode', 'FCT_MissileSalvo.SystemID', 'FCT_MissileSalvo.Xcor', 'FCT_MissileSalvo.Ycor', 'FCT_MissileType.SecondStageID', ...STRUCTURE_POINT],
+  note: 'Mines and sensor buoys have no table of their own: they are stationary missile salvos, one count per salvo ID. A salvo is stationary when its speed is 0 or when it lurks, whatever its speed. A Lagrange-anchored salvo has the point\'s saved coordinates and counts by that position just like any other stationary salvo; the anchor alone does not establish separation from a jump point. A design with a second stage is taken as a mine and one without as a buoy; this split matches saved design names but is not source-confirmed. A salvo counts in the same system within 1 km on each axis, as one object rather than as the missiles in it.',
   assumptions: ['a stationary salvo of a design with a second stage is a mine', 'a stationary salvo of a design without a second stage is a buoy'],
 })
 
@@ -43,7 +44,7 @@ registerRule({
 
 registerRule({
   id: 'jumpInfrastructure.probes',
-  versions: VERSIONS,
+  versions: ['x'],
   verification: 'estimated',
   structure: ['FCT_Ship.ShipID'],
   note: 'A probe is an ordinary ship of a class the player named: the save has no probe type, and a ship cannot be told to be a probe by its class name, so no probe count is given.',
@@ -110,7 +111,7 @@ where FCT_MoveOrders.GameID = ${GameID} and FCT_MoveOrders.RaceID = ${RaceID} an
     database.query(`select FCT_MissileSalvo.MissileSalvoID, FCT_MissileSalvo.SystemID, FCT_MissileSalvo.Xcor, FCT_MissileSalvo.Ycor, FCT_MissileType.SecondStageID
 from FCT_MissileSalvo
 left join FCT_MissileType on FCT_MissileType.MissileID = FCT_MissileSalvo.MissileID and FCT_MissileType.GameID = FCT_MissileSalvo.GameID
-where FCT_MissileSalvo.GameID = ${GameID} and FCT_MissileSalvo.RaceID = ${RaceID} and FCT_MissileSalvo.MissileSpeed = 0`),
+where FCT_MissileSalvo.GameID = ${GameID} and FCT_MissileSalvo.RaceID = ${RaceID} and (FCT_MissileSalvo.MissileSpeed = 0 or FCT_MissileSalvo.LurkerMode = 1)`),
     database.query(`select FCT_Contacts.ContactID, FCT_Contacts.SystemID, FCT_Contacts.Xcor, FCT_Contacts.Ycor, FCT_Contacts.LastUpdate
 from FCT_Contacts
 where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactType = 3 and FCT_Contacts.Speed = 0`),

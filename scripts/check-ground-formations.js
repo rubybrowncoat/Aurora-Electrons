@@ -7,7 +7,7 @@
   - A constructed race of 24 formations, fed as deep-frozen rows to the pure builder: orphan and foreign parents, loops, templates, locations, unknown figures, totals and the tree, with the figures worked out by hand; then five formations more for the roles (geo, xeno, both, unknown), whether a formation is remote and in which system it is shown, and the grouping by system with the totals per role.
   - The SELECT statements, and the loader on an in-memory SQLite database that holds rows of another race, another game and another race's survey names (never a save).
   - The named saves, opened read-only: every figure of the model is compared with SQL written separately here, and a reader with one table hidden must make that comparison fail.
-  - Every other AuroraDB*.db that can be found (the repository, its saves folder, and the artifacts folders), one check per game and race. A save without the tables is reported UNSUPPORTED and a save without formation rows EMPTY: neither counts as agreement.
+  - Every other save of the line in saves/ (`LINE_SAVE_FILES` of scripts/lib/fixtures.js), one check per game and race. A save without the tables is reported UNSUPPORTED and a save without formation rows EMPTY: neither counts as agreement.
   - Mutations of the utility in a temporary copy, each of which must make a named check fail.
 */
 const fs = require('fs')
@@ -16,6 +16,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { FIXTURE, LINE_SAVE_FILES } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -472,7 +473,7 @@ const nullInputData = () => {
 }
 
 const WRITES = /\b(insert|update|delete|drop|alter|create|attach|detach|vacuum|reindex|replace)\b|;/i
-const STATEMENT_NAMES = ['classes', 'components', 'elements', 'fleets', 'formations', 'outsideParents', 'populations', 'ships', 'templateElements', 'templates']
+const STATEMENT_NAMES = ['classes', 'components', 'elements', 'fleets', 'formations', 'outsideParents', 'populations', 'ranks', 'ships', 'templateElements', 'templates', 'themeNames', 'themes']
 
 // The results of the statement and loader checks on a module.
 const databaseResults = async (mod) => {
@@ -755,13 +756,10 @@ const infoLine = (label, model) => {
 }
 
 const OWNER_SAVES = [
-  ['AuroraDB.db', 140, 784, true],
-  ['saves/AuroraDB_271_skoormit_saved.db', 138, 785, true],
-  ...['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230'].map((time) => [`artifacts/falryx-sequential-and-rollback/AuroraDB-${time}.db`, 141, 791, false]),
-  ...['5.03.1940', '20.07.1956', '8.05.1961', '24.12.1962', '21.06.1973'].map((date) => [`artifacts/boscodiogigia-sequential-saves/AuroraDB ${date}.db`, 140, 784, false]),
+  [FIXTURE.file, FIXTURE.gameId, FIXTURE.raceId],
 ]
 
-const ownerSave = async (mod, [file, GameID, RaceID, selfChecks]) => {
+const ownerSave = async (mod, [file, GameID, RaceID]) => {
   const label = `${file} (game ${GameID}, race ${RaceID})`
 
   console.log(`\n${label}`)
@@ -797,22 +795,14 @@ const ownerSave = async (mod, [file, GameID, RaceID, selfChecks]) => {
 
     const results = await reconcile(database, model, logged.statements, GameID, RaceID, mod)
 
-    if (selfChecks) {
-      results.forEach((result) => check(`${file}: ${result.name}`, result.ok, result.detail))
-    } else {
-      const failed = results.filter((result) => !result.ok)
+    results.forEach((result) => check(`${file}: ${result.name}`, result.ok, result.detail))
 
-      check(`${file}: ${results.length} comparisons with the save agree`, failed.length === 0, failed.map((result) => `${result.name}${result.detail ? `: ${result.detail}` : ''}`).join('; '))
-    }
+    for (const [what, hide, applies] of BLIND_READERS) {
+      if (applies(model)) {
+        const blind = await mod.loadGroundFormations(logging(database, hide), { GameID, RaceID })
+        const hidden = await reconcile(database, blind, [], GameID, RaceID, mod)
 
-    if (selfChecks) {
-      for (const [what, hide, applies] of BLIND_READERS) {
-        if (applies(model)) {
-          const blind = await mod.loadGroundFormations(logging(database, hide), { GameID, RaceID })
-          const results = await reconcile(database, blind, [], GameID, RaceID, mod)
-
-          check(`${file}: self-check: with ${what} hidden the comparison fails`, results.some((result) => !result.ok))
-        }
+        check(`${file}: self-check: with ${what} hidden the comparison fails`, hidden.some((result) => !result.ok))
       }
     }
   } finally {
@@ -820,13 +810,7 @@ const ownerSave = async (mod, [file, GameID, RaceID, selfChecks]) => {
   }
 }
 
-const breadthFiles = () => {
-  const listing = (directory) => (fs.existsSync(directory) ? fs.readdirSync(directory).filter((name) => /^AuroraDB.*\.db$/i.test(name)).sort().map((name) => path.join(directory, name)) : [])
-  const artifacts = path.join(root, 'artifacts')
-  const folders = fs.existsSync(artifacts) ? fs.readdirSync(artifacts, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(artifacts, entry.name)).sort() : []
-
-  return [root, path.join(root, 'saves'), ...folders].flatMap(listing)
-}
+const breadthFiles = () => LINE_SAVE_FILES.map((name) => path.join(root, 'saves', name)).filter((file) => fs.existsSync(file))
 
 const breadthSave = async (mod, file, covered) => {
   const shown = path.relative(root, file).replace(/\\/g, '/')

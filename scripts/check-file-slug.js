@@ -7,7 +7,8 @@
 */
 const fs = require('fs')
 const path = require('path')
-const assert = require('./lib/bounded-assert')
+const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
+const { mutating: mayPlant, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 
@@ -43,17 +44,17 @@ const CHECKS = [
   }],
 ]
 
-// The planted faults: the file, the text to find (exactly once) and what replaces it. Each must make a check fail.
+// The planted faults: the file, the text to find (exactly once) and what replaces it. Each names the check whose wrong value must catch it.
 const MUTATIONS = [
-  ['an accented letter is dropped', 'file-slug', '.normalize(\'NFKD\').replace(/[\\u0300-\\u036F]/g, \'\')', ''],
-  ['a letter no decomposition reduces is dropped', 'file-slug', '.replace(/[æøœßđðłþı]/g, (letter) => LETTERS[letter])', ''],
-  ['a letter no decomposition reduces is spelled as the first of the list', 'file-slug', '(letter) => LETTERS[letter]', '() => \'ae\''],
-  ['a hyphen is left at either end', 'file-slug', '.replace(/^-+|-+$/g, \'\')', ''],
-  ['the preferences file keeps its own slug, which drops accented letters', 'preferences', 'const slug = fileSlug(source.raceName) || \'app\'', 'const slug = String(source.raceName || \'app\').toLowerCase().replace(/[^a-z0-9]+/g, \'-\').replace(/^-+|-+$/g, \'\') || \'app\''],
-  ['the preferences file has no fallback', 'preferences', 'fileSlug(source.raceName) || \'app\'', 'fileSlug(source.raceName)'],
-  ['a long name is not cut', 'file-slug', 'if (slug.length <= SLUG_LIMIT) {', 'if (true) {'],
-  ['a long name is cut in the middle of a word', 'file-slug', 'slug.slice(0, end > 0 ? end : SLUG_LIMIT)', 'slug.slice(0, SLUG_LIMIT)'],
-  ['a long name loses the whole word that ends at the limit', 'file-slug', 'slug.lastIndexOf(\'-\', SLUG_LIMIT)', 'slug.lastIndexOf(\'-\', SLUG_LIMIT - 1)'],
+  ['an accented letter is dropped', 'file-slug', '.normalize(\'NFKD\').replace(/[\\u0300-\\u036F]/g, \'\')', '', ['an accented letter']],
+  ['a letter no decomposition reduces is dropped', 'file-slug', '.replace(/[æøœßđðłþı]/g, (letter) => LETTERS[letter])', '', ['an accented letter']],
+  ['a letter no decomposition reduces is spelled as the first of the list', 'file-slug', '(letter) => LETTERS[letter]', '() => \'ae\'', ['an accented letter']],
+  ['a hyphen is left at either end', 'file-slug', '.replace(/^-+|-+$/g, \'\')', '', ['every other run']],
+  ['the preferences file keeps its own slug, which drops accented letters', 'preferences', 'const slug = fileSlug(source.raceName) || \'app\'', 'const slug = String(source.raceName || \'app\').toLowerCase().replace(/[^a-z0-9]+/g, \'-\').replace(/^-+|-+$/g, \'\') || \'app\'', ['the preferences export']],
+  ['the preferences file has no fallback', 'preferences', 'fileSlug(source.raceName) || \'app\'', 'fileSlug(source.raceName)', ['the preferences export']],
+  ['a long name is not cut', 'file-slug', 'if (slug.length <= SLUG_LIMIT) {', 'if (true) {', ['a long name']],
+  ['a long name is cut in the middle of a word', 'file-slug', 'slug.slice(0, end > 0 ? end : SLUG_LIMIT)', 'slug.slice(0, SLUG_LIMIT)', ['a long name']],
+  ['a long name loses the whole word that ends at the limit', 'file-slug', 'slug.lastIndexOf(\'-\', SLUG_LIMIT)', 'slug.lastIndexOf(\'-\', SLUG_LIMIT - 1)', ['a long name']],
 ]
 
 const modulesOf = async (sources = {}) => {
@@ -62,20 +63,22 @@ const modulesOf = async (sources = {}) => {
   return { slug: loaded['file-slug'], preferences: loaded.preferences }
 }
 
-const failures = (mods) => CHECKS.filter(([, test]) => {
-  try {
-    test(mods)
+// Only named checks run for a fault. Their own marked assertions can credit a wrong value; loader failures and any exception from the subject remain uncredited.
+const failures = async (mods, wanted) => {
+  const selected = CHECKS.filter(([name]) => wanted.some((start) => name.startsWith(start)))
+  const absent = wanted.filter((start) => !selected.some(([name]) => name.startsWith(start)))
 
-    return false
-  } catch (error) {
-    return true
+  if (absent.length) {
+    throw new Error(`no file-slug check begins ${absent.join('; ')}`)
   }
-}).map(([name]) => name)
+
+  return judged(await runChecks(selected.map(([name, test]) => ({ id: name, name, run: () => test(mods) })), {}), 'a file-slug mutation')
+}
 
 const main = async () => {
   const texts = Object.fromEntries(Object.entries(FILES).map(([name, file]) => [name, fs.readFileSync(file, 'utf8')]))
   const wanted = process.argv.filter((argument) => /^mutant:\d+$/.test(argument)).map((argument) => Number(argument.slice('mutant:'.length)))
-  const mutating = !process.argv.includes('--no-mutations')
+  const mutating = mayPlant()
   let checks = 0
   let failed = 0
   const report = (ok, name, detail = '') => {
@@ -100,15 +103,18 @@ const main = async () => {
   if (mutating || wanted.length) {
     console.log('\nMutations: each must fail at least one check')
 
-    for (const [index, [name, file, from, to]] of MUTATIONS.entries()) {
+    for (const [index, [name, file, from, to, fails]] of MUTATIONS.entries()) {
       if (wanted.length && !wanted.includes(index)) {
         continue
       }
 
-      try {
-        const broken = failures(await modulesOf({ [file]: patched(FILES[file], texts[file], from, to) }))
+      refusePlanting(name)
 
-        report(broken.length > 0, `mutant:${index} caught: ${name}`, broken.length ? `${broken.length} checks fail` : 'every check still passes')
+      try {
+        const broken = await failures(await modulesOf({ [file]: patched(FILES[file], texts[file], from, to) }), fails)
+        const caught = fails.every((start) => caughtBy(broken, CHECKS.filter(([name]) => name.startsWith(start)).map(([name]) => name), { name }))
+
+        report(caught, `mutant:${index} caught: ${name}`, broken.length ? broken.map(({ id, detail }) => `${id}: ${detail}`).join('; ') : `the named checks still pass: ${fails.join('; ')}`)
       } catch (error) {
         report(false, `mutant:${index} caught: ${name}`, error.message)
       }

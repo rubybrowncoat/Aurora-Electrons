@@ -6,7 +6,7 @@
   The groups, each check a PASS or FAIL line:
   - A constructed race of 12 formations (at a colony, aboard a ship, stored nowhere, at a colony of another race, at a colony the save lacks; one, both or no rating) whose rows, role filters, marks, totals and sentences are worked out by hand.
   - The view preferences and the deep link of the table.
-  - The named saves, opened read-only: the rows, the remote formations, the systems of the marks and the totals are compared with SQL written separately here, and with the counts the saves are known to hold.
+  - The named saves, opened read-only (the line fixture and the four saves of the played campaign, A, B and the two branches from B, C1 and C2, of scripts/lib/played-chain.js): the rows, the remote formations, the systems of the marks, the totals and, for the played campaign, the formations by role are compared with SQL written separately here, and with the counts the saves are known to hold. The campaign holds no formation with a survey rating, so the geological and xenoarchaeology totals of a played save are 0 and the roles of its remote formations all of one kind.
   - The pages, run on pseudo-instances: the map's mark, role filter, lazy read and panel fact, and the table's rows, link, row click (the handler its template binds, which opens the row's detail and goes nowhere), sort keys and load state.
   - Planted faults in a copy of the utility and of the pages, each of which must make a named check fail.
 
@@ -16,10 +16,12 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
-const assert = require('./lib/bounded-assert')
+const { assert, runChecks, judged, caughtBy } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { loadPage, instantiate } = require('./lib/page-loader')
+const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2 } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -71,7 +73,7 @@ const SURVEY_STUBS = {
   romanum: real('romanum'),
 }
 
-const options = { mutations: !process.argv.includes('--no-mutations') }
+const options = { mutations: mutating() }
 
 let checks = 0
 let failures = 0
@@ -197,9 +199,12 @@ const openSave = (file) => new Promise((resolve, reject) => {
 
 // What the saves are known to hold: formations, those stationed at no colony of the race, the roles of all and of those, and the systems of the marks (null where no figure is held).
 const FIXTURES = [
-  { file: 'AuroraDB.db', GameID: 140, RaceID: 784, formations: 3288, remote: 1568, systems: 31, colony: 1720, remoteRoles: { formations: 1568, geo: 9, xeno: 9, other: 1559, both: 9, unknown: 0 } },
-  { file: 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db', GameID: 141, RaceID: 791, formations: 1455, remote: 0, systems: 0, colony: 1455, allRoles: { geo: 25, xeno: 2 } },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', GameID: 138, RaceID: 785, formations: 206, remote: 11, systems: 9, colony: 195, remoteRoles: { formations: 11, geo: 0, xeno: 0, other: 11, both: 0, unknown: 0 }, allRoles: { geo: 2, xeno: 1 } },
+  { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, formations: 5337, remote: 268, systems: 21, colony: 5069, remoteRoles: { formations: 268, geo: 10, xeno: 10, other: 258, both: 10, unknown: 0 } },
+  // The played campaign (scripts/lib/played-chain.js): A, B and the two branches from B, C1 and C2. None of the formations of the race holds equipment that surveys, so each is of the other role; B has six embarked at no colony, in one system the race has named, and A, C1 and C2 have all of theirs at a colony.
+  { file: PLAYED.file, GameID: PLAYED.gameId, RaceID: PLAYED.raceId, formations: 11, remote: 0, systems: 0, colony: 11, allRoles: { geo: 0, xeno: 0, other: 11 } },
+  { file: PLAYED_NEXT.file, GameID: PLAYED_NEXT.gameId, RaceID: PLAYED_NEXT.raceId, formations: 18, remote: 6, systems: 1, colony: 12, remoteRoles: { formations: 6, geo: 0, xeno: 0, other: 6, both: 0, unknown: 0 }, allRoles: { geo: 0, xeno: 0, other: 18 } },
+  { file: PLAYED_C1.file, GameID: PLAYED_C1.gameId, RaceID: PLAYED_C1.raceId, formations: 20, remote: 0, systems: 0, colony: 20, allRoles: { geo: 0, xeno: 0, other: 20 } },
+  { file: PLAYED_C2.file, GameID: PLAYED_C2.gameId, RaceID: PLAYED_C2.raceId, formations: 23, remote: 0, systems: 0, colony: 23, allRoles: { geo: 0, xeno: 0, other: 23 } },
 ]
 
 // The formations of the race that are stationed at no colony of it, those at a colony the save lacks, and the system of each remote one the race has named, in SQL written here and apart from the module's.
@@ -227,6 +232,13 @@ const oracle = async (database, GameID, RaceID) => {
   const placed = new Set([...bySystem.values()].flat())
 
   return { remote, unknown: new Set(lacking), named, bySystem, unplaced: [...remote].filter((id) => !placed.has(id)) }
+}
+
+// The ratings of the equipment in the four component slots of each element of each formation of the race, summed over the elements of the formation, as SQL written here and apart from the module's: { id, elements, geo, xeno } for each formation (a formation with no element has none).
+const rolesOracle = async (database, GameID, RaceID) => {
+  const rating = (column) => ['a', 'b', 'c', 'd'].map((slot) => `coalesce(slot_${slot}.${column}, 0)`).join(' + ')
+
+  return (await database.query(`select f.FormationID as id, count(e.ElementID) as elements, sum(e.Units * (${rating('Geosurvey')})) as geo, sum(e.Units * (${rating('Xenoarchaeology')})) as xeno from FCT_GroundUnitFormation f left join FCT_GroundUnitFormationElement e on e.FormationID = f.FormationID left join FCT_GroundUnitClass c on c.GroundUnitClassID = e.ClassID left join DIM_GroundComponentType slot_a on slot_a.ComponentTypeID = c.ComponentA left join DIM_GroundComponentType slot_b on slot_b.ComponentTypeID = c.ComponentB left join DIM_GroundComponentType slot_c on slot_c.ComponentTypeID = c.ComponentC left join DIM_GroundComponentType slot_d on slot_d.ComponentTypeID = c.ComponentD where f.GameID = ${GameID} and f.RaceID = ${RaceID} group by f.FormationID order by f.FormationID`))[0]
 }
 
 // ---------- the checks, over a context { mod (remote-formations), links, models, saves, map, survey } ----------
@@ -424,10 +436,22 @@ FIXTURES.forEach((fixture, index) => {
   }
 
   if (fixture.allRoles) {
-    add(`save-${index}-all-roles`, `${label}: the formations of the race with a geological or xenoarchaeology rating are ${JSON.stringify(fixture.allRoles)}`, (ctx) => {
-      const totals = ctx.mod.rowTotals(state(ctx).model, { remoteOnly: false })
+    add(`save-${index}-all-roles`, `${label}: the formations of the race with a geological or xenoarchaeology rating, and those with neither, are ${JSON.stringify(fixture.allRoles)}, as the equipment of the elements of each gives in SQL written here`, (ctx) => {
+      const { model, truth } = state(ctx)
+      const totals = ctx.mod.rowTotals(model, { remoteOnly: false })
+      const worked = { formations: 0, geo: 0, xeno: 0, other: 0, both: 0, unknown: 0 }
 
-      assert.deepEqual({ geo: totals.geo, xeno: totals.xeno }, fixture.allRoles)
+      truth.roles.forEach(({ elements, geo, xeno }) => {
+        worked.formations += 1
+        worked.geo += elements && geo > 0 ? 1 : 0
+        worked.xeno += elements && xeno > 0 ? 1 : 0
+        worked.both += elements && geo > 0 && xeno > 0 ? 1 : 0
+        worked.other += elements && !(geo > 0) && !(xeno > 0) ? 1 : 0
+        worked.unknown += elements ? 0 : 1
+      })
+
+      assert.deepEqual({ formations: totals.formations, geo: totals.geo, xeno: totals.xeno, other: totals.other, both: totals.both, unknown: totals.unknown }, worked)
+      assert.deepEqual({ geo: totals.geo, xeno: totals.xeno, other: totals.other }, fixture.allRoles)
     })
   }
 })
@@ -474,18 +498,36 @@ pageAdd('page-map-roles', 'the role filter of the map narrows the marked systems
 
 pageAdd('page-map-read', 'the map reads the ground formations only while the mark is on', async (ctx) => {
   const asked = []
-  const database = { query: async (sql) => { asked.push(sql); throw new Error('asked') } }
-  const off = mapView(ctx, { marks: [] })
+  const fixture = FIXTURES[0]
+  const source = await openSave(fixture.file)
 
-  off.database = database
-  assert.equal(await off.runAsync('groundFormations'), null)
-  assert.equal(asked.length, 0)
+  assert.ok(source, `the named save ${fixture.file} must be available`)
 
-  const on = mapView(ctx, { marks: ['remote'] })
+  try {
+    const database = { query: async (sql) => { asked.push(sql); return await source.query(sql) } }
+    const off = mapView(ctx, { marks: [] })
 
-  on.database = database
-  await assert.rejects(() => on.runAsync('groundFormations'))
-  assert.ok(asked.length > 0)
+    off.database = database
+    off.GameID = fixture.GameID
+    off.RaceID = fixture.RaceID
+    const idle = await off.runAsync('groundFormations')
+
+    assert.equal(idle ? idle.formations.length : 0, 0, 'no formation rows are read while the mark is off')
+    assert.equal(idle, null)
+    assert.equal(asked.length, 0)
+
+    const on = mapView(ctx, { marks: ['remote'] })
+
+    on.database = database
+    on.GameID = fixture.GameID
+    on.RaceID = fixture.RaceID
+    const read = await on.runAsync('groundFormations')
+
+    assert.equal(read.formations.length, fixture.formations, 'the mark reads the race\'s own formation rows')
+    assert.ok(asked.length > 0)
+  } finally {
+    await source.close()
+  }
 })
 
 pageAdd('page-map-panel', 'the panel of a marked system states its remote formations and opens them in the table, and an unmarked one says nothing', (ctx) => {
@@ -605,6 +647,7 @@ pageAdd('page-survey-reveal', 'a link to a system\'s formations scrolls to the p
   changed('ready')
   changed('ready')
   changed('formationAll')
+  assert.equal(scrolled.length, 1, 'the formations panel is revealed once')
   assert.deepEqual(scrolled, [panel.$el])
   assert.equal(vm.formationsPending, false)
 })
@@ -637,38 +680,25 @@ pageAdd('page-survey-ready', 'the page holds its content back while any read is 
 
 // ---------- running ----------
 
-const run = async (list, ctx) => {
-  const out = []
-
-  for (const item of list) {
-    try {
-      await item.run(ctx)
-      out.push({ id: item.id, name: item.name, ok: true, detail: '' })
-    } catch (error) {
-      out.push({ id: item.id, name: item.name, ok: false, detail: String(error.message).split('\n')[0] })
-    }
-  }
-
-  return out
-}
+const run = (list, ctx) => runChecks(list, ctx)
 
 const MUTANTS = [
-  ['the role filter is ignored', 'inRoles(row.roles, roles) && (!remoteOnly', '(!remoteOnly', REMOTE_FILE, ['select-roles', 'totals-rows']],
+  ['the role filter is ignored', 'inRoles(row.roles, roles) && (!remoteOnly', '(!remoteOnly', REMOTE_FILE, ['select-roles', 'totals-rows', 'save-1-roles', 'save-2-roles', 'save-3-roles', 'save-4-roles']],
   ['only the first role of a formation counts', 'roles.list.some((role) => selected.includes(role))', 'selected.includes(roles.list[0])', REMOTE_FILE, ['select-roles', 'marks', 'totals-rows']],
   ['a formation with no role to count is never shown', 'roles.undetermined ? selected.includes(\'unknown\') : roles.list.some', 'roles.list.some', REMOTE_FILE, ['select-roles', 'totals-rows']],
   ['the marks hold the formations not known to be at a colony', 'place.remote === true && inRoles(roles, selected)', 'place.remote !== false && inRoles(roles, selected)', REMOTE_FILE, ['marks', 'marks-honest']],
   ['the remote switch keeps only what is known to be remote', 'row.remote !== false))', 'row.remote === true))', REMOTE_FILE, ['select-remote', 'totals-rows']],
-  ['the totals of the table count the formations at colonies', 'const inScope = (_node, place) => !remoteOnly || place.remote !== false', 'const inScope = () => true', REMOTE_FILE, ['totals', 'totals-rows']],
+  ['the totals of the table count the formations at colonies', 'const inScope = (_node, place) => !remoteOnly || place.remote !== false', 'const inScope = () => true', REMOTE_FILE, ['totals', 'totals-rows', 'save-1-roles', 'save-2-roles', 'save-2-remote-roles']],
   ['a stored role that is no longer offered is kept', 'ROLE_KEYS.filter((role) => stored.includes(role))', 'stored', REMOTE_FILE, ['views']],
-  ['a formation is listed twice', 'model.formations.map((node) => {', 'model.formations.flatMap((node) => [node, node]).map((node) => {', REMOTE_FILE, ['rows-once', 'select-roles']],
+  ['a formation is listed twice', 'model.formations.map((node) => {', 'model.formations.flatMap((node) => [node, node]).map((node) => {', REMOTE_FILE, ['rows-once', 'select-roles', 'save-1-rows', 'save-2-rows', 'save-3-rows', 'save-4-rows']],
   ['the remote switch starts off', 'default: true })', 'default: false })', REMOTE_FILE, ['views']],
-  ['the map never draws the mark', 'return this.remoteModel ? remoteSystems(this.remoteModel, this.remoteRoles) : null', 'return null', MAP_FILE, ['page-map-mark', 'page-map-roles', 'page-map-panel']],
+  ['the map merges the remote marks into the first map system', 'return this.remoteModel ? remoteSystems(this.remoteModel, this.remoteRoles) : null', 'if (!this.remoteModel) { return null }\n      const grouping = remoteSystems(this.remoteModel, this.remoteRoles)\n      const ids = Object.keys(grouping.systems)\n      const first = this.systemRows[0]\n\n      return { ...grouping, systems: ids.length && first ? { [first.id]: grouping.systems[ids[ids.length - 1]] } : {} }', MAP_FILE, ['page-map-mark', 'page-map-roles', 'page-map-panel']],
   ['the map reads the formations whether or not the mark is on', "|| !this.marksSet.has('remote')) {\n          return null", ') {\n          return null', MAP_FILE, ['page-map-read']],
   ['the table shows every row whatever the filters say', 'selectRows(this.formationAll, { roles: this.remoteRoles, remoteOnly: this.remoteOnly })', 'this.formationAll', SURVEY_FILE, ['page-survey-table']],
   ['the table sorts the Where column by a key its rows lack', "{ text: 'Where', value: 'where' }", "{ text: 'Where', value: 'remoteSort' }", SURVEY_FILE, ['page-survey-sort']],
   ['the page forgets to wait for the naval admins', "  navalAdmins: 'naval admin commands',\n", '', SURVEY_FILE, ['page-survey-ready']],
   ['a link is cleared before the page draws the panel', 'if (this.formationsPending && this.formationAll.length && this.ready) {', 'if (this.formationsPending && this.formationAll.length) {\n        this.formationsPending = false', SURVEY_FILE, ['page-survey-reveal']],
-  ['the reveal is not retried when the page becomes ready', '    ready() {\n      this.revealFormations()\n    },\n', '', SURVEY_FILE, ['page-survey-reveal']],
+  ['the reveal is not retried when the page becomes ready', '    ready() {\n      this.revealFormations()\n    },\n', '    ready() {\n      this.formationsPending = false\n    },\n', SURVEY_FILE, ['page-survey-reveal']],
   ['a click on a formation\'s row opens its system on the map', 'no-data-text="No formation matches the roles and the scope chosen" @click:row="toggleRow"', 'no-data-text="No formation matches the roles and the scope chosen" @click:row="(item) => item.system && $router.push(linkTo.map(item.system.id))"', SURVEY_FILE, ['page-survey-row']],
   ['a click on a row opens its detail and never closes it', '    toggleRow(_item, { expand, isExpanded }) {\n      expand(!isExpanded)', '    toggleRow(_item, { expand }) {\n      expand(true)', SURVEY_FILE, ['page-survey-row']],
 ]
@@ -707,7 +737,7 @@ const main = async () => {
     }
 
     const model = await ground.loadGroundFormations(database, { GameID: fixture.GameID, RaceID: fixture.RaceID })
-    const truth = await oracle(database, fixture.GameID, fixture.RaceID)
+    const truth = { ...(await oracle(database, fixture.GameID, fixture.RaceID)), roles: fixture.allRoles ? await rolesOracle(database, fixture.GameID, fixture.RaceID) : null }
     const all = (await database.query(`select FormationID as id from FCT_GroundUnitFormation where GameID = ${fixture.GameID} and RaceID = ${fixture.RaceID}`))[0].map((row) => row.id)
 
     saves.push({ model, truth: { ...truth, all } })
@@ -732,13 +762,14 @@ const main = async () => {
     console.log('\nPlanted faults')
 
     for (const [name, from, to, file, expected] of MUTANTS) {
+      refusePlanting(name)
       const original = file === REMOTE_FILE ? sources.remote : file === MAP_FILE ? sources.map : sources.survey
       const text = patched(file, original, from, to)
       const given = { remote: file === REMOTE_FILE ? text : sources.remote, map: file === MAP_FILE ? text : sources.map, survey: file === SURVEY_FILE ? text : sources.survey }
       const mod = file === REMOTE_FILE ? (await loadUtilities(['remote-formations'], { sources: { 'remote-formations': text } }))['remote-formations'] : loaded['remote-formations']
-      const failed = (await run(own, context(mod, await pagesOf(given)))).filter((result) => !result.ok).map((result) => result.id)
+      const failed = judged(await run(own, context(mod, await pagesOf(given))), name)
 
-      check(`planted: ${name}: caught by ${failed.join(', ') || 'nothing'}`, expected.some((id) => failed.includes(id)), `expected one of ${expected.join(', ')}`)
+      check(`planted: ${name}: caught by ${failed.filter((result) => result.kind === 'assertion' && !result.threw).map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, expected, { name }), `expected a value of ${expected.join(', ')}; ${failed.map((result) => `${result.id}: ${result.detail}`).join('; ')}`)
     }
 
     console.log('\nBenign rewrites')

@@ -84,7 +84,7 @@
           </div>
           <resource-reserves :key="`${GameID}-${RaceID}`" embedded kind="minerals" :colonies="colonies" :plan="plan" :timed="plannedDays" />
           <div class="panel-foot caption text--secondary">
-            Use it to read why a colony counts as short or as a source, and how the class times are worked out. A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too) needs more than it holds plus the mass-driver packets on their way; with Fill reserves on, it is also short when it holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs, and minerals already in a freighter's hold aren't counted. A class is timed on full holds and round trips at top speed, fully crewed and undamaged, with its Logistics bonuses counted as 1, so a real ship may load faster. A tonne of mineral takes two tonnes of cargo space, and the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load only at a colony with a spaceport or cargo shuttle station and is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held, so its distance, times and fuel follow the way round, and a colony the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
+            Use it to read why a colony counts as short or as a source, and how the class times are worked out. A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too) needs more than it holds plus the mass-driver packets on their way; with Fill reserves on, it is also short when it holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs, and minerals already in a freighter's hold aren't counted. A class is timed on full holds and round trips at top speed, fully crewed and undamaged, with its Logistics bonuses counted as 1, so a real ship may load faster. A tonne of mineral takes two tonnes of cargo space, and the best class is the one a single ship of which finishes soonest. A class over 500 t with no undamaged cargo shuttle bays counts one bay, so it loads at a colony with no spaceport or cargo shuttle station at the technology alone; a stop whose ability to load isn't known is named with the reason and has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held, so its distance, times and fuel follow the way round, and a colony the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
           </div>
           <div class="panel-foot caption text--secondary" data-propagation-basis>
             A class's round trip is flown cycle after cycle for a year, with loading and unloading counted as waits. Independent asteroids, moons, trojans and eccentric bodies within one orbit of their last update are placed where they will be on each arrival. The round trip on the saved positions is shown beside it, with the throughput between them. A haul to anything else, to a system with no survey, to a body whose orbit does not rebuild to within a kilometre, or by a class that is not faster than the body, keeps the saved positions and says why.
@@ -141,7 +141,8 @@
                 <span v-if="item.freightText" class="text-no-wrap" data-haul="moved">{{ item.freightText }}</span><provenance-mark v-if="item.freightText" :result="item.results.freight" />
                 <span v-if="item.freightText && item.colonistsText">, </span>
                 <span v-if="item.colonistsText" class="text-no-wrap">{{ item.colonistsText }}</span><provenance-mark v-if="item.colonistsText" :result="item.results.colonists" />
-                <span v-if="!item.freightText && !item.colonistsText" class="text--secondary">No cargo delivered</span>
+                <div v-if="item.componentsText" class="caption" data-haul="components">{{ item.componentsText }}</div>
+                <span v-if="!item.freightText && !item.colonistsText && !item.componentsText" class="text--secondary">No cargo delivered</span>
               </template>
               <template v-else>
                 <span class="text--secondary">—</span><provenance-mark v-if="item.results" :result="item.results.freight" />
@@ -173,14 +174,14 @@
                 <div v-else class="caption warning--text">{{ item.route.problem }}</div>
                 <div v-if="item.year" class="caption text--secondary mt-2" data-cycle-parts>Each cycle: <span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving{{ item.waitText || item.delayHours > 0 ? ',' : ' and' }} <span data-part="handling">{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading<template v-if="item.delayHours > 0">{{ item.waitText ? ',' : ' and' }} <span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hours of order delays</template><template v-if="item.waitText"> and <span data-part="wait">{{ item.waitText }}</span> waiting for the jump shock<provenance-mark v-if="item.results.wait" :result="item.results.wait" /></template>.<span v-if="item.limiting"> The slowest stop is {{ item.limiting.place }}, set by {{ item.limiting.ship.ShipName }} at a loading strength of {{ fixed(item.limiting.strength, 1) }}.</span></div>
                 <handling-breakdown v-if="item.cargo.settled" :rows="item.handlingRows" class="mt-2" />
-                <div v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ cargoUnsettled }}</div>
+                <div v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ item.cargo.unmodelled || cargoUnsettled }}</div>
                 <fleet-profile :participants="item.participantRows" :speeds="item.speeds" :reasons="[]" :conditions="item.profileNotes" class="mt-2" />
                 <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2" data-hold-share>The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold (a tonne of mineral takes two tonnes of cargo space): {{ item.tripText }} a trip.</div>
               </td>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to see what each route carries and costs. The fleets are those Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders, and the Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed, with loading and unloading timed as Transport times them: every ship works at once and the slowest sets the stop's time. A ship over 500 t with no undamaged cargo shuttle bays can load or unload only at a colony with a spaceport or cargo shuttle station; a route where a ship can't, or where it isn't known whether it can, is named with the reason and left out of the totals. A bonus the save cannot settle counts as 1, so the time errs long, and refuelling and overhauls aren't counted. {{ versionNote }}
+            Use it to see what each route carries and costs. The fleets are those Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders, and the Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed, with loading and unloading timed as Transport times them: every ship works at once and the slowest sets the stop's time. A ship over 500 t with no undamaged cargo shuttle bays counts one bay, so it loads and unloads at a colony with no spaceport or cargo shuttle station at the technology alone; a route where it isn't known whether a ship can load or unload is named with the reason and left out of the totals. Ship components a route loads stay in the hold until an order unloads them, so a later load finds the space they leave, and they count in the stops' times but not in the freight. A bonus the save cannot settle counts as 1, so the time errs long, and refuelling and overhauls aren't counted. {{ versionNote }}
           </div>
           <div class="panel-foot caption text--secondary" data-fleet-basis>
             A fleet sails at its set speed, held to the effective maximum of its slowest ship under its own power (from the undamaged engines, the overhaul and the mass of a ship it tows), and at that maximum when the fleet is set to it. Each ship burns fuel at its own engine power scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted. A fleet that can't be profiled, or whose every hold is in a hangar or under tow, is left out of the totals with the reason.
@@ -270,7 +271,7 @@ import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
 import { cachedPropagation } from '../utilities/orbit-propagation'
-import { ADAPTERS, CONDITIONS, colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions, withSavedComparison } from '../utilities/route-position'
+import { ADAPTERS, CONDITIONS, ORBIT_FAMILIES, colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions, withSavedComparison } from '../utilities/route-position'
 import { fleetTimingOf, flightOnly, loadSystemDust } from '../utilities/route-time'
 import { auditOf, colonyChoices, desiresOf } from '../utilities/route-audit'
 import { loadRouteQueues } from '../utilities/route-queues'
@@ -302,8 +303,6 @@ const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.i
 const MOVE_TO_LOCATION = 2
 const ROUTE_PAGE_SIZES = [15, 30, -1]
 const SUMMARY_PAGE_SIZES = [10, 25, -1]
-// The families whose orbits are read for the page (`loadOrbitFacts`): a place of any other family keeps the position the save stores.
-const ORBIT_FAMILIES = ['body', 'colony', 'lagrange-point']
 
 // A colony's place as a route search takes it.
 const colonyPlace = (colony) => ({ SystemID: colony.SystemID, Xcor: colony.Xcor, Ycor: colony.Ycor })
@@ -435,8 +434,10 @@ export default {
         const label = placeOf(order)
         const exitLabel = !order.Jumps ? label : order.DestinationType === 1 ? `${order.ArrivalSystemName || 'next system'} (arrival)` : order.Description && order.Description.includes(' Jump to ') ? order.Description.split(' Jump to ').pop() : label
         const endpoint = order.PopulationID > 0 ? colonyEndpoint(order, label) : bareEndpoint(label)
+        // A positive undamaged bay total proves the receiver's +1. The fleet-ship read does not include maintenance modules (or all non-cycling receivers), so an unproven addition stays unknown, never a made-up zero.
+        const TargetCargoSupport = order.TargetCargoSupport ?? ((this.shipsByFleet[order.DestinationID] || []).some((ship) => ship.ShuttleStrength > 0) ? 1 : null)
 
-        ;(byFleet[order.FleetID] = byFleet[order.FleetID] || []).push({ ...order, label, exitLabel, endpoint })
+        ;(byFleet[order.FleetID] = byFleet[order.FleetID] || []).push({ ...order, TargetCargoSupport, label, exitLabel, endpoint })
       })
 
       return byFleet
@@ -476,6 +477,7 @@ export default {
         const stops = orders.filter((order) => !order.Jumps && order.MoveActionID !== MOVE_TO_LOCATION).map((order) => `${placeOf(order)}: ${order.ActionName}`)
         const freightText = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null].filter(Boolean).join(', ') : ''
         const colonistsText = year && year.colonists ? `${this.count(year.colonists)} colonists` : ''
+        const componentsText = year && cargo.deliveries.some((delivery) => delivery.kind === 'components' && delivery.amount > 0) ? 'Components delivered, not counted in tonnage' : ''
         const tripText = [cargo.perTrip.minerals ? `${this.tons(cargo.perTrip.minerals)} of minerals` : null, cargo.perTrip.installations ? `${this.tons(cargo.perTrip.installations)} of installations` : null].filter(Boolean).join(' and ')
         const routesLink = this.routesLink(fleet, orders)
 
@@ -515,6 +517,7 @@ export default {
           distanceResult: route.km !== null && savedPositions.caveat ? withPositions(distanceResult(route.km), savedPositions) : null,
           freightText,
           colonistsText,
+          componentsText,
           kmSort: route.km ?? Infinity,
           cycleSort: year ? year.cycleDays : Infinity,
           tripsSort: year ? year.trips : -1,
@@ -821,7 +824,7 @@ export default {
         const from = orderExitEndpoint(orders[(index + orders.length - 1) % orders.length])
         const to = orderEndpoint(order)
 
-        return { steps: [{ kind: 'fly', SystemID: order.SystemID, from, to, via: null }], from, to, leave: orderExitEndpoint(order), delay: order.OrderDelay || 0, wait: handling.stops[index].seconds }
+        return { steps: [{ kind: 'fly', SystemID: order.SystemID, from, to, via: null }], from, to, leave: orderExitEndpoint(order), action: order.MoveActionID, delay: order.OrderDelay || 0, wait: handling.stops[index].seconds }
       })
       const cycle = [...hops.slice(1), hops[0]]
 
@@ -830,7 +833,7 @@ export default {
       }
 
       const timed = !flightOnly(walk, sailing.Speed)
-      const scenario = JSON.stringify([...cycle.map((hop) => [hop.from.key, hop.to.key, hop.leave.key, hop.delay, hop.wait]), timed])
+      const scenario = JSON.stringify([...cycle.map((hop) => [hop.from.key, hop.to.key, hop.leave.key, hop.action, hop.delay, hop.wait]), timed])
 
       return cachedPropagation(this.database, 'hauling-route', { facts: positionRead, profile: sailing.Speed, scenario }, () => simulateCycles({ hops: cycle, facts: positionRead, adapters: ADAPTERS, speed: sailing.Speed, timed }))
     },

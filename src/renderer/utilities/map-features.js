@@ -16,10 +16,10 @@ inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Sys
 inner join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
 left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${RaceID}`
 
-const BODY_COLUMNS = 'FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_Star.Component, FCT_SystemBodyName.Name as SystemBodyName'
+const BODY_COLUMNS = 'FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_Star.ComponentNumber, FCT_SystemBodyName.Name as SystemBodyName'
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
-const FEATURE_VERSIONS = ['2.7.x']
+const FEATURE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'map.ruinState',
@@ -41,7 +41,7 @@ registerRule({
 
 registerRule({
   id: 'map.dangerFlag',
-  versions: FEATURE_VERSIONS,
+  versions: ['2.7.x'],
   units: 'flag',
   verification: 'assumed',
   structure: ['FCT_RaceSysSurvey.DangerRating', 'FCT_ShipClass.ProtectionValue, MaxSpeed', 'FCT_Ship', 'FCT_Fleet.SystemID'],
@@ -147,16 +147,35 @@ group by FCT_Contacts.SystemID, FCT_AlienRace.ContactStatus`),
 // The bands of colony cost the game counts in a system's summary: habitable under 2, low cost under 3 and medium cost under 5. The game scales each by the race's colonisation tech; the costs here leave the tech out, which comes to the same.
 export const COLONY_COST_BANDS = [2, 3, 5]
 
-// How many bodies of each known system fall in each band, as the game counts them for the species the race lives as (its capital's, else its largest): every body's cost now, but for the bodies it can't colonise at all (gas giants, fixed bodies and those too heavy for the species). Returns { species, systems, gaps }: the species' name, null for a race without one, per SystemID as a string one count per band, only for systems with a body in one, and per SystemID as a string the number of bodies whose cost can't be told because the save lacks an input it needs (a body whose test the missing value leaves undecided, or a gas with no stored amount), only for systems with such a body: their counts and bands are lower bounds.
+// The Galaxy Map's own options for each band, as the race stores them (FCT_Race, the normal-gravity column then the include-low-gravity one of each band): the game draws a band's count badge by them, and the layer follows them, not the tactical map's colouring options (chkShowBodyColours, chkCCIncludeLowG, chkGasGiantColour), which only paint body discs. The query in `loadHabitability` names the six columns in full, as the capability scan reads them from the text.
+const BAND_OPTION_COLUMNS = Object.freeze([['chkHabRangeWorlds', 'chkHabRangeWorldsLowG'], ['chkLowCCNormalG', 'chkLowCCLowG'], ['chkMediumCCNormalG', 'chkMediumCCLowG']])
+
+const flagOf = (value) => Number.isFinite(value) && value !== 0
+
+const bandOptions = (row) => Object.freeze(BAND_OPTION_COLUMNS.map(([normalOnly, lowToo]) => Object.freeze({ normalGravityOnly: Boolean(row) && flagOf(row[normalOnly]), includeLowGravity: Boolean(row) && flagOf(row[lowToo]) })))
+
+// Which of a band's two counts the game shows: the bodies at normal gravity (at or above the species' minimum) when that is the only option on, every body when the low-gravity option is on. With neither on the game draws no badge for the band; the layer then counts every body, so the band stays on the map.
+export const bandBasis = ({ normalGravityOnly, includeLowGravity }) => (normalGravityOnly && !includeLowGravity ? 'normal' : 'all')
+
+const BASIS_WORDS = Object.freeze({ normal: 'normal gravity only', all: 'all gravities' })
+
+const optionWords = (options) => (options.normalGravityOnly || options.includeLowGravity ? BASIS_WORDS[bandBasis(options)] : `${BASIS_WORDS.all}, neither option set`)
+
+// The words for how the race's Galaxy Map options shape each band's count, for the legend: `options` is `loadHabitability`'s `options`.
+export const bandBasisNote = ({ bands }) => `Each band follows the Galaxy Map's options for it (${COLONY_COST_BANDS.map((limit, band) => `under ${limit}: ${optionWords(bands[band])}`).join('; ')}); normal gravity is at or above the species' minimum, gas giants and bodies too heavy for the species are not counted, and the cost is the cost now, not the worst over the orbit that the game's own option can use`
+
+// How many bodies of each known system fall in each band, as the game's Galaxy Map counts them for the species the race lives as (its capital's, else its largest): every body's cost now, but for the bodies it can't colonise at all (gas giants, fixed bodies and those too heavy for the species). Returns { species, systems, gaps, options }: the species' name, null for a race without one; per SystemID as a string { normal, all }, the count per band of the bodies at or above the species' minimum gravity and of all of them, only for systems with a body in a band; per SystemID as a string the number of bodies whose cost can't be told because the save lacks an input it needs (a body whose test the missing value leaves undecided, or a gas with no stored amount), only for systems with such a body (their counts and bands are lower bounds); and the race's Galaxy Map options { bands: [{ normalGravityOnly, includeLowGravity }] } per band, which choose between the two counts (`bandCounts`) and which `bandBasisNote` words.
 export const loadHabitability = async (database, { GameID, RaceID }) => {
-  const [species, [capital]] = await Promise.all([
+  const [species, [capital], [race]] = await Promise.all([
     loadSpecies(database, { GameID, RaceID }),
     rows(database, `select FCT_Population.SpeciesID from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_Population.Capital = 1`),
+    rows(database, `select FCT_Race.chkHabRangeWorlds, FCT_Race.chkHabRangeWorldsLowG, FCT_Race.chkLowCCNormalG, FCT_Race.chkLowCCLowG, FCT_Race.chkMediumCCNormalG, FCT_Race.chkMediumCCLowG from FCT_Race where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`),
   ])
+  const options = Object.freeze({ bands: bandOptions(race) })
   const chosen = (capital && species.find((row) => row.SpeciesID === capital.SpeciesID)) || species[0]
 
   if (!chosen) {
-    return Object.freeze({ species: null, systems: {}, gaps: {} })
+    return Object.freeze({ species: null, systems: {}, gaps: {}, options })
   }
 
   const limits = speciesLimits(chosen)
@@ -164,13 +183,14 @@ export const loadHabitability = async (database, { GameID, RaceID }) => {
   // The tidal multiplier of the filters (see costFactors): a moon never takes it and a body not tidally locked neither; a body whose lock or class the save lacks, and could be a locked planet, takes the widest reading (×5), so it is kept (and counted as a gap) unless even that excludes it.
   const tidal = `(case when FCT_SystemBody.BodyClass = ${BODY_CLASS.MOON} then 1 when FCT_SystemBody.TidalLock is not null and not FCT_SystemBody.TidalLock then 1 else 5 end)`
   // Besides the bodies the game can't colonise, this leaves out those whose temperature or pressure alone put them past the last band: each factor is a floor under the cost (see costFactors). On a 2,300-system galaxy that keeps a third of the bodies, and they come one row per system, packed in a string: 0.8 seconds, where a row per body took 4.
+  // The filters keep a body below the species' minimum gravity: the Galaxy Map counts it when a band's low-gravity option is on, and the counts split on it afterwards.
   const filters = `FCT_SystemBody.BodyTypeID not in (${BODY_TYPE.GAS_GIANT}, ${BODY_TYPE.SUPERJOVIAN}) and FCT_SystemBody.FixedBody = 0 and FCT_SystemBody.Gravity <= ${limits.MaximumGravity}
 and (FCT_SystemBody.AtmosPress <= ${limits.MaximumPressure} or FCT_SystemBody.AtmosPress < ${top * limits.MaximumPressure})
 and FCT_SystemBody.SurfaceTemp > ${limits.MinimumTemperature} - ${top * limits.TemperatureDeviation} * ${tidal}
 and FCT_SystemBody.SurfaceTemp < ${limits.MaximumTemperature} + ${top * limits.TemperatureDeviation} * ${tidal}`
   const where = `FCT_SystemBody.GameID = ${GameID} and ${filters}`
   // The fields a body is packed with: a null among them drops the body from the packed string. A moon's tidal lock cannot change its cost, so a moon with none stored is packed as not locked.
-  const fields = `FCT_SystemBody.SystemBodyID || ',' || FCT_SystemBody.BodyClass || ',' || (case when FCT_SystemBody.BodyClass = ${BODY_CLASS.MOON} then coalesce(FCT_SystemBody.TidalLock, 0) else FCT_SystemBody.TidalLock end) || ',' || FCT_SystemBody.AtmosPress || ',' || FCT_SystemBody.HydroExt || ',' || FCT_SystemBody.Gravity || ',' || FCT_SystemBody.SurfaceTemp`
+  const fields = `FCT_SystemBody.SystemBodyID || ',' || FCT_SystemBody.BodyClass || ',' || (case when FCT_SystemBody.BodyClass = ${BODY_CLASS.MOON} then coalesce(FCT_SystemBody.TidalLock, 0) else FCT_SystemBody.TidalLock end) || ',' || FCT_SystemBody.AtmosPress || ',' || FCT_SystemBody.HydroExt || ',' || FCT_SystemBody.HydroID || ',' || FCT_SystemBody.Gravity || ',' || FCT_SystemBody.SurfaceTemp`
   const known = `inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}`
   const [packed, gases, undecided, gasGaps] = await Promise.all([
     rows(database, `select FCT_SystemBody.SystemID, group_concat(${fields}, ';') as Bodies
@@ -178,7 +198,7 @@ from FCT_SystemBody
 ${known}
 where ${where}
 group by FCT_SystemBody.SystemID`),
-    rows(database, `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasAmount, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel
+    rows(database, `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasPercentage, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.DangerousOxygen, DIM_Gases.DangerousPPMOxygen, DIM_Gases.DangerousMethane, DIM_Gases.DangerousPPMMethane, DIM_Gases.DangerousSulphur, DIM_Gases.DangerousPPMSulphur, DIM_Gases.DangerousAmmonia, DIM_Gases.DangerousPPMAmmonia
 from FCT_AtmosphericGas
 inner join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
 inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID
@@ -196,7 +216,7 @@ from FCT_AtmosphericGas
 left join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
 inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID
 ${known}
-where ${where} and (${fields}) is not null and (FCT_AtmosphericGas.GasAtm is null or FCT_AtmosphericGas.AtmosGasAmount is null or FCT_AtmosphericGas.FrozenOut is null or DIM_Gases.GasID is null or DIM_Gases.Dangerous is null or DIM_Gases.DangerousLevel is null)`),
+where ${where} and (${fields}) is not null and (FCT_AtmosphericGas.GasAtm is null or FCT_AtmosphericGas.AtmosGasPercentage is null or FCT_AtmosphericGas.FrozenOut is null or DIM_Gases.GasID is null or DIM_Gases.DangerousOxygen is null or DIM_Gases.DangerousPPMOxygen is null or DIM_Gases.DangerousMethane is null or DIM_Gases.DangerousPPMMethane is null or DIM_Gases.DangerousSulphur is null or DIM_Gases.DangerousPPMSulphur is null or DIM_Gases.DangerousAmmonia is null or DIM_Gases.DangerousPPMAmmonia is null)`),
   ])
   const gaps = {}
   const gasGapped = new Set(gasGaps.map(({ SystemBodyID }) => SystemBodyID))
@@ -212,61 +232,76 @@ where ${where} and (${fields}) is not null and (FCT_AtmosphericGas.GasAtm is nul
 
   // A system whose every body lost a packed field comes back with nothing packed: its bodies are in `gaps`.
   packed.filter(({ Bodies }) => Bodies).forEach(({ SystemID, Bodies }) => {
-    const counts = COLONY_COST_BANDS.map(() => 0)
+    const all = COLONY_COST_BANDS.map(() => 0)
+    const normal = COLONY_COST_BANDS.map(() => 0)
 
     Bodies.split(';').forEach((text) => {
-      const [id, BodyClass, TidalLock, AtmosPress, HydroExt, Gravity, SurfaceTemp] = text.split(',').map(Number)
+      const [id, BodyClass, TidalLock, AtmosPress, HydroExt, HydroID, Gravity, SurfaceTemp] = text.split(',').map(Number)
 
       if (gasGapped.has(id)) {
         return
       }
 
-      const { cost } = costFactors({ BodyClass, TidalLock, AtmosPress, HydroExt, Gravity, Atmosphere: atmospheres[id] || [] }, limits, SurfaceTemp)
+      const { cost } = costFactors({ BodyClass, TidalLock, AtmosPress, HydroExt, HydroID, Gravity, Atmosphere: atmospheres[id] || [] }, limits, SurfaceTemp)
       const band = COLONY_COST_BANDS.findIndex((limit) => cost < limit)
 
       if (band >= 0) {
-        counts[band] += 1
+        all[band] += 1
+        normal[band] += Gravity >= limits.MinimumGravity ? 1 : 0
       }
     })
 
-    if (counts.some(Boolean)) {
-      systems[SystemID] = counts
+    if (all.some(Boolean)) {
+      systems[SystemID] = Object.freeze({ normal, all })
     }
   })
 
-  return Object.freeze({ species: chosen.SpeciesName, systems: Object.freeze(systems), gaps: Object.freeze(gaps) })
+  return Object.freeze({ species: chosen.SpeciesName, systems: Object.freeze(systems), gaps: Object.freeze(gaps), options })
 }
+
+// The colony cost of the three rules below is the planner's own (utilities/habitability.js). The bands are counted as the game's Galaxy Map counts them, for the species the race lives as, by the Galaxy Map's own options for each band; the tactical map's gravity gate is not used. The game's option to count by the worst cost over the orbit is not followed: the cost is the cost now.
+const COST_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'map.bestBand',
-  versions: FEATURE_VERSIONS,
+  versions: COST_VERSIONS,
   units: 'band',
   verification: 'estimated',
-  structure: ['FCT_SystemBody.Gravity, SurfaceTemp, AtmosPress, HydroExt, TidalLock, BodyClass', 'FCT_AtmosphericGas', 'FCT_Species', 'FCT_Population.SpeciesID, Capital'],
-  note: 'The lowest colony-cost band (under 2, 3 or 5) a system has a body in, for the species the race lives as, before colonisation technology. The cost formula follows the planner rules for colony cost and is not reproduced against a stored value; the species falls back to the race\'s largest when its capital has none. Without the cost run, or without a species, the band is unknown, which is not the same as no body under 5.',
+  structure: ['FCT_SystemBody.Gravity, SurfaceTemp, AtmosPress, HydroExt, HydroID, TidalLock, BodyClass', 'FCT_AtmosphericGas', 'FCT_Species', 'FCT_Population.SpeciesID, Capital', 'FCT_Race.chkHabRangeWorlds, chkHabRangeWorldsLowG, chkLowCCNormalG, chkLowCCLowG, chkMediumCCNormalG, chkMediumCCLowG'],
+  note: 'The lowest colony-cost band (under 2, 3 or 5) a system has a body in, for the species the race lives as, before colonisation technology. The cost is the planner\'s colony cost for the species\' breathing gas, which matches the infrastructure stored for populated colonies of every breathing gas the saves hold; the band counts themselves are not compared with the game\'s own. A band counts the bodies the Galaxy Map\'s options for it choose: those at or above the species\' minimum gravity when only the normal-gravity option is on, every body when the low-gravity option is on or neither is. The cost is the cost now; the game\'s option to count by the worst cost over the orbit is not followed. The species falls back to the race\'s largest when its capital has none. Without the cost run, or without a species, the band is unknown, which is not the same as no body under 5.',
 })
 
 registerRule({
   id: 'map.bodiesByCost',
-  versions: FEATURE_VERSIONS,
+  versions: COST_VERSIONS,
   units: 'bodies',
   verification: 'estimated',
-  structure: ['FCT_SystemBody', 'FCT_AtmosphericGas', 'FCT_Species'],
-  note: 'How many bodies of a system fall in each colony-cost band, each counted in the lowest band it fits. The cost formula is as for the best band.',
+  structure: ['FCT_SystemBody', 'FCT_AtmosphericGas', 'FCT_Species', 'FCT_Race.chkHabRangeWorlds, chkHabRangeWorldsLowG, chkLowCCNormalG, chkLowCCLowG, chkMediumCCNormalG, chkMediumCCLowG'],
+  note: 'How many bodies of a system fall in each colony-cost band, each counted in the lowest band it fits. The cost and the Galaxy Map\'s options for each band are as for the best band; where a band counts every body and fewer are at normal gravity, the count at normal gravity follows in brackets.',
 })
 
 registerRule({
   id: 'map.legendCounts',
-  versions: FEATURE_VERSIONS,
+  versions: COST_VERSIONS,
   units: 'systems',
   verification: 'estimated',
-  structure: ['FCT_SystemBody', 'FCT_AtmosphericGas', 'FCT_Species'],
-  note: 'How many systems have each colony-cost band as their best, and how many have no body under the last band. The cost formula is as for the best band.',
+  structure: ['FCT_SystemBody', 'FCT_AtmosphericGas', 'FCT_Species', 'FCT_Race.chkHabRangeWorlds, chkHabRangeWorldsLowG, chkLowCCNormalG, chkLowCCLowG, chkMediumCCNormalG, chkMediumCCLowG'],
+  note: 'How many systems have each colony-cost band as their best, and how many have no body under the last band. The cost and the Galaxy Map\'s options for each band are as for the best band.',
 })
 
-// The index in COLONY_COST_BANDS of the lowest band system `systemId` has a body in, -1 for none (no body under the last band), or null when the bands can't be told: `habitability` is `loadHabitability`'s answer. A system with a body whose cost can't be told (`gaps`) has a known band only when it already has a body in the lowest one, which nothing can beat. The markers read it once `legendCounts` is available (the 'map.bestBand' rule).
-export const bestBandIndex = (habitability, systemId) => {
+// A system's count per band of COLONY_COST_BANDS as the Galaxy Map's options for each band choose it (`bandBasis`), null for a system with no body in a band: `habitability` is `loadHabitability`'s answer.
+export const bandCounts = (habitability, systemId) => {
   const counts = habitability.systems[systemId]
+
+  return counts ? COLONY_COST_BANDS.map((_limit, band) => counts[bandBasis(habitability.options.bands[band])][band]) : null
+}
+
+// Every system's `bandCounts`, for the systems that have a body in a band.
+export const allBandCounts = (habitability) => Object.fromEntries(Object.keys(habitability.systems).map((systemId) => [systemId, bandCounts(habitability, systemId)]))
+
+// The index in COLONY_COST_BANDS of the lowest band system `systemId` has a body in (by `bandCounts`), -1 for none (no body under the last band), or null when the bands can't be told: `habitability` is `loadHabitability`'s answer. A system with a body whose cost can't be told (`gaps`) has a known band only when it already has a body in the lowest one, which nothing can beat. The markers read it once `legendCounts` is available (the 'map.bestBand' rule).
+export const bestBandIndex = (habitability, systemId) => {
+  const counts = bandCounts(habitability, systemId)
   const band = counts ? counts.findIndex(Boolean) : -1
 
   return habitability.gaps[systemId] && band !== 0 ? null : band
@@ -279,7 +314,7 @@ const COSTS_READ = ['the species\' colony costs']
 
 const BODY_GAP = 'a stored value a body\'s colony cost needs (temperature, pressure, gravity, water, tidal lock or a gas\'s amounts)'
 
-// A system's bodies by colony cost as a result of 'map.bodiesByCost': the value is the text, '' where no body falls in a band, and the result is unavailable while the costs are not read or for a system with a body whose cost can't be told. Each band counts the bodies not already in a lower one.
+// A system's bodies by colony cost as a result of 'map.bodiesByCost': the value is the text, '' where no body falls in a band, and the result is unavailable while the costs are not read or for a system with a body whose cost can't be told. Each band counts the bodies not already in a lower one, by the Galaxy Map's options for the band: a band that counts the bodies at normal gravity only says so, and one that counts every body gives the count at normal gravity after it when that is fewer.
 export const bodiesByCost = (habitability, systemId, { reason = null, version = null } = {}) => {
   const gap = costGap(habitability, reason)
   const assumptions = versionAssumptions('map.bodiesByCost', version)
@@ -293,7 +328,14 @@ export const bodiesByCost = (habitability, systemId, { reason = null, version = 
   }
 
   const counts = habitability.systems[systemId]
-  const text = COLONY_COST_BANDS.map((limit, band) => ({ limit, bodies: counts ? counts[band] : 0 })).filter((part) => part.bodies).map((part, index) => `${part.bodies} ${index ? 'more ' : ''}under ${part.limit}`).join(', ')
+  const parts = COLONY_COST_BANDS.map((limit, band) => {
+    const basis = counts ? bandBasis(habitability.options.bands[band]) : 'all'
+    const bodies = counts ? counts[basis][band] : 0
+    const atNormal = counts ? counts.normal[band] : 0
+
+    return { limit, bodies, suffix: basis === 'normal' ? ' at normal gravity' : bodies === atNormal ? '' : ` (${atNormal} at normal gravity)` }
+  }).filter((part) => part.bodies)
+  const text = parts.map((part, index) => `${part.bodies} ${index ? 'more ' : ''}under ${part.limit}${part.suffix}`).join(', ')
 
   return ofRule({ rule: 'map.bodiesByCost', value: text, inputs: { present: COSTS_READ }, assumptions })
 }

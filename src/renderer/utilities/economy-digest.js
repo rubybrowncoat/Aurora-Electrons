@@ -16,7 +16,7 @@ import { isKnownNumber } from './math'
 import { MINERALS } from './minerals'
 import { combine, ofRule, registerRule, unavailable } from './provenance'
 
-const DIGEST_VERSIONS = ['2.7.x']
+const DIGEST_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'digest.installations',
@@ -74,7 +74,7 @@ registerRule({
 
 registerRule({
   id: 'digest.note',
-  versions: DIGEST_VERSIONS,
+  versions: ['x'],
   units: 'fields',
   verification: 'confirmed',
   structure: ['the race\'s project notes in the app\'s scenario records'],

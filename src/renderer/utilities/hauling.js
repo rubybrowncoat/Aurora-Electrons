@@ -3,11 +3,13 @@
 import { bonusProvenance, mergeFactors } from './handling-bonuses'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { RETRY_ASSUMPTION, SQUADRON_ASSUMPTION, flyEvent, handleEvent, heldSpeedIn, nebulaGapOf, speedIn, timingGaps, transitModeOf, unsupportedGaps, waitResult, walkEvents } from './route-time'
-import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, landingThreshold, missingInputsOf, stopHandling } from './transport'
+import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, loadingRulesHold, missingInputsOf, stopHandling } from './transport'
 import { ITEM_LOADS, ITEM_UNLOADS } from './cargo-actions'
 
 // Orders that move up to MaxItems tonnes of one mineral (Load Mineral Type, Unload Mineral Type, Load Mineral when X available); "Load All Minerals" (62) and "...Until Full" (223) take whatever the colony has, up to a full hold.
 const QUANTITY_ACTIONS = new Set([178, 179, 180])
+// Load Ship Component: it loads up to MaxItems components, a number of components, which the order's tonnes cannot be made of since the order carries no size for the component.
+const LOAD_SHIP_COMPONENT = 140
 // The cargo of a hold: what each load put in (`from` the colony, `item` the mineral or installation type, null when the order loads whatever there is) and how much of it is held.
 const sumOf = (entries) => entries.reduce((total, entry) => total + entry.amount, 0)
 
@@ -36,17 +38,23 @@ const sameLedger = (a, b) => Object.keys(a).every((kind) => a[kind].length === b
 const MAX_PASSES = 200
 // How little a pass may change an entry of the ledger, relative to the entry (at least 1 tonne of scale), for the cycle to count as settled.
 const SETTLED = 1e-9
-// Cargo points of the hold one unit of each kind takes: a tonne of mineral takes two (the game loads available capacity / 2 of a mineral), an installation's tonnes are its cargo points. Colonists have their own berths.
-export const CARGO_POINTS = { minerals: 2, installations: 1 }
+// Cargo points of the hold one unit of each kind takes: a tonne of mineral takes two (the game loads available capacity / 2 of a mineral), an installation's tonnes and a ship component's tonnes are their cargo points. Colonists have their own berths.
+export const CARGO_POINTS = { minerals: 2, installations: 1, components: 1 }
 // What the page says of a cycle whose cargo does not settle within the passes.
 export const CARGO_UNSETTLED = 'The cargo of this cycle does not settle within the passes, so what a trip carries and the time its stops take to load and unload are not worked out.'
+// What the page says of a cycle with an order that loads a set number of ship components: the tonnes that put in the hold, and so the free space the next load finds, are not known.
+export const CARGO_COUNTED = 'The cargo of this cycle is not worked out: an order loads a set number of ship components and carries no size for the component, so what it puts in the hold is not known, and with it what a trip carries and the time its stops take to load and unload.'
+// The game times a component unload or transfer by the named component alone, and a bulk load does not record its composition in an order.
+export const CARGO_COMPOSITION = 'The cargo of this cycle is not worked out: a typed unload can remove some or none of the components loaded in bulk. Their composition is not known, so the hold has an unknown remainder and the next load has no known free space or handling time.'
+// The game sends both component unloads to the colony unload even without a population; that is not evidence of a successful transfer to a fleet. Do not free the hold on the strength of the timer.
+export const CARGO_TRANSFER = 'The cargo of this cycle is not worked out: the component unload to another fleet has a handling timer, but its transfer outcome is not established. The hold has an unknown remainder, not a guaranteed empty hold.'
 
 // The rules this module implements, registered once (utilities/provenance.js). Loading time is `transport.handlingTime`, whose strength and landing rules the Hauling page shares with Transport. Evidence: docs/plans/backlog/evidence/AE-080-01.md.
-const HAULING_VERSIONS = ['2.7.x']
+const HAULING_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'hauling.routeDistance',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_MoveOrders', 'FCT_JumpPoint', 'FCT_LagrangePoint', 'FCT_SystemBody'],
@@ -55,7 +63,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.cycleTime',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Fleet.Speed', 'FCT_MoveOrders.OrderDelay', 'FCT_ShipClass.CargoCapacity, ColonistCapacity'],
@@ -65,17 +73,17 @@ registerRule({
 
 registerRule({
   id: 'hauling.freightMoved',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.CargoCapacity'],
-  note: 'The minerals and installations a cycle carries, followed through the orders and the hold (a tonne of mineral takes two cargo points), times the cycles a year. The capacity arithmetic is exact; the cycles a year are estimated.',
+  note: 'The minerals and installations a cycle carries, followed through the orders and the hold (a tonne of mineral takes two cargo points), times the cycles a year. Ship components a cycle loads and unloads take the hold\'s space and the stops\' time but are not counted as freight. The capacity arithmetic is exact; the cycles a year are estimated.',
   assumptions: ['the colony has the stock a load asks for'],
 })
 
 registerRule({
   id: 'hauling.colonistsMoved',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'colonists/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.ColonistCapacity'],
@@ -85,7 +93,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.fleetFuelPerYear',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 'L/yr',
   verification: 'estimated',
   structure: ['FCT_ShipClass.FuelEfficiency, Size', 'FCT_ClassComponent', 'FCT_DamagedComponent', 'FCT_Fleet.Speed, UseMaximumSpeed'],
@@ -105,7 +113,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.deliveries',
-  versions: HAULING_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.PopulationID'],
@@ -184,7 +192,7 @@ export const walkRoute = (orders) => {
   return { legs, km: legs.reduce((sum, leg) => sum + leg.km, 0), problem: null }
 }
 
-// Cargo moved by one order, given what the fleet holds: { kind, direction, amount } or null for an order that doesn't load or unload, the amount in tonnes of minerals, tonnes of installations or colonists. Minerals and installations share the cargo hold (a tonne of mineral takes `CARGO_POINTS.minerals` of its capacity), colonists have their own berths. "Load Mineral Type" (178), "Load Mineral when X available" (180) and "Unload Mineral Type" (179) move up to MaxItems tonnes; every other order moves all it can: a load fills the free space (assuming the colony has the stock), an unload empties what the fleet holds of that kind. "Load/Unload Minerals to Reserve Level" (165) unloads what the fleet holds and loads when it holds none. MaxItems on installation and colonist orders isn't used: it counts items, not tonnes.
+// Cargo moved by one order, given what the fleet holds: { kind, direction, amount } or null for an order that doesn't load or unload; amount is tonnes of minerals, installations or ship components, or colonists. Minerals take two cargo points a tonne, installations and components one, colonists their separate berths. Mineral quantity orders move up to MaxItems tonnes; other loads fill free capacity assuming stock, and unloads take the selected kind or item. A typed component unload cannot select an exact amount from a bulk load of unknown composition: it leaves an unknown remainder and stops the cycle. A fleet-target component unload has a timer but no established transfer outcome, so it cannot promise an empty hold either.
 const moveCargo = (order, ledger, fleet) => {
   const id = order.MoveActionID
   const kind = LOADS[id] || UNLOADS[id]
@@ -198,7 +206,21 @@ const moveCargo = (order, ledger, fleet) => {
   const loading = !!LOADS[id] && !(UNLOADS[id] && heldOf(kind) > 0)
   const item = (loading ? ITEM_LOADS : ITEM_UNLOADS).has(id) ? order.DestinationItemID : null
   const limit = QUANTITY_ACTIONS.has(id) && order.MaxItems > 0 ? order.MaxItems : Infinity
-  const space = kind === 'colonists' ? fleet.ColonistCapacity - heldOf('colonists') : (fleet.CargoCapacity - heldOf('minerals') * CARGO_POINTS.minerals - heldOf('installations') * CARGO_POINTS.installations) / CARGO_POINTS[kind]
+
+  if (!loading && kind === 'components' && entries.some((entry) => item === null || entry.item === null || entry.item === item) && ((item !== null && entries.some((entry) => entry.item === null && entry.amount > 0)) || order.DestinationType === 10)) {
+    entries.forEach((entry) => {
+      if (item === null || entry.item === null || entry.item === item) {
+        entry.maximum = entry.amount
+        entry.amount = null
+        entry.unknownRemainder = true
+      }
+    })
+
+    return { unmodelled: item !== null && entries.some((entry) => entry.item === null && entry.unknownRemainder) ? CARGO_COMPOSITION : CARGO_TRANSFER }
+  }
+
+  const used = Object.entries(CARGO_POINTS).reduce((total, [name, points]) => total + heldOf(name) * points, 0)
+  const space = kind === 'colonists' ? fleet.ColonistCapacity - heldOf('colonists') : (fleet.CargoCapacity - used) / CARGO_POINTS[kind]
   const amount = Math.max(0, Math.min(limit, loading ? space : sumOf(entries.filter((entry) => item === null || entry.item === null || entry.item === item))))
 
   if (loading) {
@@ -220,21 +242,36 @@ const moveCargo = (order, ledger, fleet) => {
   return { kind, direction: 'unload', amount, sources }
 }
 
-// What one cycle carries, in the steady state of a fleet that repeats it. The cargo is followed through the orders (a load@A, unload@B, load@B, unload@A cycle delivers two holds), and the first passes warm up the hold, since it may start the cycle full. The hold is a ledger of what was loaded where (`ledger`: for each kind, the entries `{ from, item, amount }` of the colony it was loaded at and the mineral or installation type), so an unload of one type takes only that type (and what was loaded as any), and each delivery names the colonies its cargo came from. Returns `moves` (one per order, with the `sources` of an unload), `perTrip` (tonnes of minerals, tonnes of installations and colonists unloaded in a cycle), `deliveries` (what each unloading colony gets in a cycle, with its `sources`), `holdShare` (what a cycle delivers in minerals and installations, in holds of cargo points) and `settled`: whether the ledger stopped changing within the passes. A cycle that has not settled (a large hold refilled a little a cycle, or one that keeps a cargo no order unloads) has no steady state: the last pass is not what the fleet carries, so it publishes no move, no tonnes and no delivery.
+// One repeating cycle's cargo in steady state: `moves`, `perTrip` (mineral and installation tonnes and colonists, components excluded from tonnage totals), `deliveries`, `holdShare` and `settled`. Entries follow the source colony and item. Bulk components have a known total but unknown composition (`item: null`); a typed unload of them or an unestablished fleet transfer returns `settled: false`, the reason in `unmodelled`, no exact moves or deliveries, and the retained `ledger` with `amount: null`, `maximum` and `unknownRemainder: true`. Counted components without size and a ledger that does not settle within the passes also publish no exact cycle.
 export const cycleCargo = (orders, fleet) => {
-  const ledger = { minerals: [], installations: [], colonists: [] }
+  const ledger = { minerals: [], installations: [], components: [], colonists: [] }
+  const unsettled = (unmodelled = null) => ({ moves: orders.map(() => null), perTrip: { minerals: 0, installations: 0, colonists: 0 }, deliveries: [], holdShare: 0, settled: false, ledger, ...(unmodelled ? { unmodelled } : {}) })
   let moves = []
   let settled = false
+
+  if (orders.some((order) => order.MoveActionID === LOAD_SHIP_COMPONENT && order.MaxItems > 0)) {
+    return unsettled(CARGO_COUNTED)
+  }
 
   for (let pass = 0; pass < MAX_PASSES && !settled; pass++) {
     const before = JSON.parse(JSON.stringify(ledger))
 
-    moves = orders.map((order) => moveCargo(order, ledger, fleet))
+    moves = []
+
+    for (const order of orders) {
+      const move = moveCargo(order, ledger, fleet)
+
+      if (move && move.unmodelled) {
+        return unsettled(move.unmodelled)
+      }
+
+      moves.push(move)
+    }
     settled = sameLedger(before, ledger)
   }
 
   if (!settled) {
-    return { moves: orders.map(() => null), perTrip: { minerals: 0, installations: 0, colonists: 0 }, deliveries: [], holdShare: 0, settled }
+    return unsettled()
   }
 
   const perTrip = { minerals: 0, installations: 0, colonists: 0 }
@@ -242,7 +279,9 @@ export const cycleCargo = (orders, fleet) => {
 
   moves.forEach((move, index) => {
     if (move && move.direction === 'unload') {
-      perTrip[move.kind] += move.amount
+      if (move.kind in perTrip) {
+        perTrip[move.kind] += move.amount
+      }
 
       if (move.amount > 0 && orders[index].PopulationID > 0) {
         deliveries.push({ PopulationID: orders[index].PopulationID, name: orders[index].PopName || orders[index].label, kind: move.kind, amount: move.amount, sources: move.sources })
@@ -261,6 +300,12 @@ export const cycleHandling = (orders, cargo, fleet, ships, { version = null, sup
     const move = cargo.moves[index]
     const capacity = move ? (move.kind === 'colonists' ? fleet.ColonistCapacity : fleet.CargoCapacity) : 0
     const handled = stopHandling(order, ships, fleet.ShuttleTechnology, capacity > 0 ? (move.amount * (CARGO_POINTS[move.kind] || 1)) / capacity : 0, { version, support })
+
+    if (cargo.settled === false) {
+      const gap = { status: 'unsupported', code: 'cargo-composition', text: cargo.unmodelled || CARGO_UNSETTLED, ship: fleet.FleetName, endpoint: order.label }
+
+      return { order, ...handled, seconds: null, eligibility: { ...handled.eligibility, status: 'unsupported', reasons: [gap] } }
+    }
 
     if (!move || Number.isFinite(capacity)) {
       return { order, ...handled }
@@ -283,7 +328,7 @@ export const cycleHandling = (orders, cargo, fleet, ships, { version = null, sup
     estimate: merged.some((factor) => factor.state === 'unknown'),
     known: merged.filter((factor) => factor.state === 'applies'),
     unsettled: merged.filter((factor) => factor.state === 'unknown'),
-    versionSupported: landingThreshold(version) !== null,
+    versionSupported: loadingRulesHold(version),
   }
 }
 

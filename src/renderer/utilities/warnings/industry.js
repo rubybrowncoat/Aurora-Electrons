@@ -1,11 +1,16 @@
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { MINERALS, projectShortages } from '../minerals'
+import { capacityKind, typesOf } from '../production-types'
 import { QUARTER, amount, bandOf, bandWords, categoriesOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, listWords, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'industry', title: 'Industry', summary: 'Review idle factory capacity, stalled projects and unused shipyards.' }
 
-const PRODUCTION_KINDS = { 1: 'Ordnance', 2: 'Fighters' }
+// The capacity kind of a project as the paused projects list names it (`capacityKind` of utilities/production-types.js): the Ordnance Projects draw on ordnance capacity, the Engineering and Ground Unit Projects on construction.
+const PRODUCTION_KINDS = { ordnance: 'Ordnance', fighter: 'Light Naval', construction: 'Construction' }
+
+// The types of one capacity as the list of a SQL `in (...)`, from the one table of types.
+const typesClause = (kind) => `IN (${typesOf(kind).join(',')})`
 
 // `FCT_Shipyard.TaskType`: what a yard is busy modifying; 0 is nothing.
 const SHIPYARD_ACTIVITIES = {
@@ -55,7 +60,7 @@ const FREE_CAPACITY_STRUCTURE = ['FCT_PopulationInstallations.Amount', 'DIM_Plan
 
 const freeCapacityNote = (kind) => `A colony with ${kind} installations whose projects of that kind (not queued) take under 100% of its capacity, by the stored shares. Whether the shares add up to the capacity the game uses is not checked against the game. A colony counts as having ${kind} installations when an amount above 0 is stored for one; a colony with only installations whose amount is 0, or with none, has none. A colony with no stored amount above 0 and an installation's type or amount not stored, or with a project's share, queue state or type not stored, is listed apart, as not evaluated; the installations total shows a dash while a type or amount is missing.`
 
-const projectKind = (project) => (project.ProductionType === null || project.ProductionType === undefined ? null : PRODUCTION_KINDS[project.ProductionType] || 'Construction')
+const projectKind = (project) => (project.ProductionType === null || project.ProductionType === undefined ? null : PRODUCTION_KINDS[capacityKind(project.ProductionType)])
 
 const PROJECT_RUNNING = '(FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.Pause = 0)'
 
@@ -103,13 +108,14 @@ export const checks = checksOf([
     rule: 'A colony has construction factories while the industrial projects it is building (not queued) take under 100% of its construction capacity.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('construction'),
       assumptions: ['A free share of more than 0.00006% of the capacity counts as free; smaller remainders are rounding.'],
     },
     columns: freeCapacityColumns('Factories'),
     async read(ctx) {
-      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'ConstructionValue', alias: 'ConstructionAmount', types: 'IN (0,3,4)', minimum: 0.00006 }))
+      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'ConstructionValue', alias: 'ConstructionAmount', types: typesClause('construction'), minimum: 0.00006 }))
 
       return freeCapacityRows(ctx, populations, 'ConstructionAmount')
     },
@@ -124,12 +130,13 @@ export const checks = checksOf([
     rule: 'A colony has ordnance factories while the ordnance projects it is building (not queued) take under 100% of its ordnance capacity.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: FREE_CAPACITY_STRUCTURE,
       note: freeCapacityNote('ordnance'),
     },
     columns: freeCapacityColumns('Factories'),
     async read(ctx) {
-      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'OrdnanceProductionValue', alias: 'OrdnanceProductionAmount', types: '= 1', minimum: 0 }))
+      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'OrdnanceProductionValue', alias: 'OrdnanceProductionAmount', types: typesClause('ordnance'), minimum: 0 }))
 
       return freeCapacityRows(ctx, populations, 'OrdnanceProductionAmount')
     },
@@ -140,16 +147,17 @@ export const checks = checksOf([
     severity: 'attention',
     material: 'the free share crossing 25% of the capacity',
     captured: [bandWords('free share under 25% of the capacity', 'free share at 25% or more of the capacity')],
-    title: (count) => `${amount(count, 'population')} with free fighter production capacity`,
-    rule: 'A colony has fighter factories while the fighter projects it is building (not queued) take under 100% of its fighter capacity.',
+    title: (count) => `${amount(count, 'population')} with free light naval production capacity`,
+    rule: 'A colony has light naval factories while the light naval projects it is building (not queued) take under 100% of its light naval capacity.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: FREE_CAPACITY_STRUCTURE,
-      note: freeCapacityNote('fighter'),
+      note: freeCapacityNote('light naval'),
     },
     columns: freeCapacityColumns('Factories'),
     async read(ctx) {
-      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'FighterProductionValue', alias: 'FighterProductionAmount', types: '= 2', minimum: 0 }))
+      const populations = await rowsOf(ctx, freeCapacityQuery(ctx, { value: 'FighterProductionValue', alias: 'FighterProductionAmount', types: typesClause('fighter'), minimum: 0 }))
 
       return freeCapacityRows(ctx, populations, 'FighterProductionAmount')
     },
@@ -164,6 +172,7 @@ export const checks = checksOf([
     rule: 'A colony with people on it has ground force construction complexes staffed at its efficiency while the ground unit training tasks under way (not queued) take under 100% of that capacity, so the rest trains nothing; a colony with no training task at all counts as fully idle.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.GroundTrainingValue', 'FCT_Population.Efficiency, Population', 'FCT_GroundUnitTraining.TaskPercentage'],
       note: 'The complexes are staffed at the colony\'s efficiency and the tasks\' stored shares are summed (to at most 100%); that this is how the game allocates the capacity is not checked against the game. A colony with a complex\'s amount or type, the efficiency, the population or a task\'s share not stored is listed apart, as not evaluated.',
       assumptions: ['The complexes work at the colony\'s efficiency (at most 1), and a remainder of more than 0.005 complexes is idle.'],

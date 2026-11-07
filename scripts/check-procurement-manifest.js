@@ -6,7 +6,7 @@
 
   The manifest is run on hull plans, stock, claims and queued projects worked by hand (labelled synthetic): overlapping plans divide each stocked component once and the stock goes to the first plan in the order listed; the stock at the colony the hulls are needed at is used before the stock elsewhere (the colonies in its system first), and stock before queued manufacture, local before remote; what a task takes is taken when it is made, so a construction or refit task holds nothing, while an automatic refit, a task whose type is not known, an unread task list and a hand entry that is not a number hold back the whole stock of the component they could claim; a stock row with no amount is unknown and an absent row is none; a queued project is counted in whole units from the remaining amount and the part-built unit, a paused or unknown one is no supply, and an unread queue makes a shortage an upper bound; the export separates available, held back, queued and net shortage and local from remote stock, and an unknown figure is an empty cell, never 0.
 
-  The reads run on a small in-memory database of their own (a column or table the save lacks is unknown, not 0), the component and the page are run as pseudo instances and their text is read, and the saves (AuroraDB.db, game 140, race 784, and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only; one that is not there is skipped and counts as neither a pass nor a failure) give the real reads, compared with raw counts, the manifest of real classes with its allocation invariants, the shared component read (cost and mount counts) against the design data, and copies of the saves in memory (temporary tables over the read-only save) with an automatic refit that holds stock back and a stock row left without an amount.
+  The reads run on a small in-memory database of their own (a column or table the save lacks is unknown, not 0), the component and the page are run as pseudo instances and their text is read, and the save (the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141, race 784, read-only; one that is not there is skipped and counts as neither a pass nor a failure) gives the real reads, compared with raw counts, the manifest of real classes with its allocation invariants, the shared component read (cost and mount counts) against the design data, and copies of the save in memory (temporary tables over the read-only save) with an automatic refit that holds stock back and a stock row left without an amount.
 
   Each planted fault in a utility, the component or the page must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -18,6 +18,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const U = 'src/renderer/utilities/procurement-manifest.js'
@@ -28,10 +29,7 @@ const K = 'src/renderer/utilities/capabilities.js'
 const FILES = { [U]: 'procurement-manifest', [D]: 'procurement-data', [K]: 'capabilities' }
 const NAMES = ['csv-cell', 'procurement-manifest', 'procurement-data', 'component-calc', 'design-data', 'provenance', 'production', 'minerals', 'capabilities']
 const NO_SAVES = process.argv.includes('--no-saves')
-const SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const SAVES = [fixtureSave()]
 const STUBS = {
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
@@ -146,8 +144,8 @@ const pure = (ctx) => {
   const add = (name, test) => statements.push([name, test])
   const run = (over = {}) => pm.reconcile(input(over))
 
-  add('rules: both rules are registered for 2.7.x as estimated', () => {
-    const bad = ['production.procurementManifest', 'production.procurementReservations'].filter((id) => { const rule = provenance.getRule(id); return !rule || rule.verification !== 'estimated' || !rule.versions.includes('2.7.x') })
+  add('rules: both rules are registered as estimated, both for 3.2.x', () => {
+    const bad = Object.entries({ 'production.procurementManifest': '3.2.x', 'production.procurementReservations': '3.2.x' }).filter(([id, line]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== 'estimated' || !rule.versions.includes(line) }).map(([id]) => id)
 
     assert.deepEqual(bad, [])
 
@@ -331,6 +329,32 @@ const pure = (ctx) => {
     const unknownFlag = run({ tasks: [{ ...refit, useComponents: null }] })
 
     assert.equal(rowOf(unknownFlag, 102).reserved.unknown, 2)
+
+    return true
+  })
+
+  add('held: a construction or refit task that repeats (it still makes more than one ship) holds back the stock of the components it may take again for each later ship, with no amount proven, and one of a single ship, with no stored count or with Use Components off holds none', () => {
+    const build = { id: 1, populationId: 3, typeId: 0, classId: 1, refitId: 0, useComponents: 1, totalBP: 90, classCost: 100, hulls: 3 }
+    const refit = { id: 2, populationId: 3, typeId: 2, classId: 1, refitId: 2, useComponents: 1, hulls: 2 }
+    const claimsOf = (result) => result.claims.map((claim) => [claim.populationId, claim.componentId, claim.proof, claim.units])
+    const repeating = run({ tasks: [build] })
+    const refitting = run({ tasks: [refit] })
+    const unknownClass = run({ tasks: [{ ...build, classId: 99 }] })
+
+    assert.deepEqual(repeating.tasks.map((task) => [task.state, task.hulls]), [['successors', 3]])
+    assert.ok(repeating.tasks[0].reason.includes('2 more ships'), repeating.tasks[0].reason)
+    assert.deepEqual(claimsOf(repeating), [[3, 101, 'unknown', null], [3, 102, 'unknown', null], [3, 103, 'unknown', null]])
+    assert.deepEqual([rowOf(repeating, 101).reserved, rowOf(repeating, 102).reserved], [{ proven: 0, unknown: 4 }, { proven: 0, unknown: 2 }])
+    assert.deepEqual(refitting.tasks.map((task) => task.state), ['successors'])
+    assert.deepEqual(claimsOf(refitting), [[3, 102, 'unknown', null]])
+    assert.deepEqual(claimsOf(unknownClass), [[3, null, 'unknown', null]])
+    assert.deepEqual(unknownClass.tasks.map((task) => task.state), ['successors'])
+
+    for (const task of [{ ...build, hulls: 1 }, { ...build, hulls: null }, { ...build, hulls: undefined }, { ...build, useComponents: 0 }, { ...refit, hulls: 1 }, { ...refit, useComponents: 0 }]) {
+      const result = run({ tasks: [task] })
+
+      assert.deepEqual([result.claims, result.tasks.map((row) => row.state)], [[], ['taken']])
+    }
 
     return true
   })
@@ -828,10 +852,13 @@ const TABLES = {
   FCT_RaceSysSurvey: ['SystemID', 'RaceID', 'Name'],
   FCT_Shipyard: ['ShipyardID', 'GameID', 'PopulationID'],
   FCT_ShipClass: ['ShipClassID', 'Cost'],
-  FCT_ShipyardTask: ['TaskID', 'GameID', 'RaceID', 'PopulationID', 'TaskTypeID', 'ClassID', 'RefitID', 'Paused', 'UseComponents', 'TotalBP', 'CompletedBP'],
-  FCT_IndustrialProjects: ['ProjectID', 'GameID', 'RaceID', 'PopulationID', 'ProductionType', 'ProductionID', 'Amount', 'PartialCompletion', 'Percentage', 'Queue', 'Description', 'Pause'],
+  FCT_ShipyardTask: ['TaskID', 'GameID', 'RaceID', 'PopulationID', 'TaskTypeID', 'ClassID', 'RefitID', 'Paused', 'UseComponents', 'TotalBP', 'CompletedBP', 'NumShips'],
+  FCT_IndustrialProjects: ['ProjectID', 'GameID', 'RaceID', 'PopulationID', 'SpeciesID', 'ProductionType', 'ProductionID', 'WealthUse', 'Amount', 'PartialCompletion', 'Percentage', 'Queue', 'Description', 'Pause'],
   FCT_ShipDesignComponents: ['SDComponentID', 'GameID', 'Name', 'ComponentTypeID', 'Size', 'Cost'],
   FCT_RaceTech: ['GameID', 'TechID', 'RaceID'],
+  FCT_Race: ['RaceID', 'GameID'],
+  FCT_Species: ['SpeciesID', 'GameID'],
+  DIM_WealthUse: ['WealthUseID', 'Description'],
 }
 
 const FIXTURE_ROWS = {
@@ -855,15 +882,18 @@ const FIXTURE_ROWS = {
   ],
   FCT_ShipClass: [{ ShipClassID: 5, Cost: 100 }],
   FCT_ShipyardTask: [
-    { TaskID: 1, GameID: 1, RaceID: 1, PopulationID: 1, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 1, UseComponents: 1, TotalBP: 90, CompletedBP: 0 },
-    { TaskID: 2, GameID: 1, RaceID: 2, PopulationID: 3, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 0, UseComponents: 1, TotalBP: 100, CompletedBP: 0 },
-    { TaskID: 3, GameID: 1, RaceID: 1, PopulationID: 2, TaskTypeID: 4, ClassID: 5, RefitID: 6, Paused: null, UseComponents: null, TotalBP: null, CompletedBP: null },
+    { TaskID: 1, GameID: 1, RaceID: 1, PopulationID: 1, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 1, UseComponents: 1, TotalBP: 90, CompletedBP: 0, NumShips: 3 },
+    { TaskID: 2, GameID: 1, RaceID: 2, PopulationID: 3, TaskTypeID: 0, ClassID: 5, RefitID: 0, Paused: 0, UseComponents: 1, TotalBP: 100, CompletedBP: 0, NumShips: 1 },
+    { TaskID: 3, GameID: 1, RaceID: 1, PopulationID: 2, TaskTypeID: 4, ClassID: 5, RefitID: 6, Paused: null, UseComponents: null, TotalBP: null, CompletedBP: null, NumShips: null },
   ],
   FCT_IndustrialProjects: [
-    { ProjectID: 1, GameID: 1, RaceID: 1, PopulationID: 1, ProductionType: 3, ProductionID: 102, Amount: 4.0268, PartialCompletion: 0.9732, Percentage: 2, Queue: 0, Description: 'Sensor', Pause: 0 },
-    { ProjectID: 2, GameID: 1, RaceID: 1, PopulationID: 1, ProductionType: 0, ProductionID: 500, Amount: 7, PartialCompletion: 0, Percentage: 5, Queue: 1, Description: 'A ship', Pause: 0 },
-    { ProjectID: 3, GameID: 1, RaceID: 2, PopulationID: 3, ProductionType: 3, ProductionID: 101, Amount: 2, PartialCompletion: 0, Percentage: 5, Queue: 0, Description: 'Other race engine', Pause: 0 },
-    { ProjectID: 4, GameID: 1, RaceID: 1, PopulationID: 2, ProductionType: 3, ProductionID: 101, Amount: null, PartialCompletion: 0.5, Percentage: 5, Queue: 1, Description: 'Engine', Pause: null },
+    { ProjectID: 1, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 1, ProductionType: 3, ProductionID: 102, WealthUse: 40, Amount: 4.0268, PartialCompletion: 0.9732, Percentage: 2, Queue: 0, Description: 'Sensor', Pause: 0 },
+    { ProjectID: 2, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 1, ProductionType: 0, ProductionID: 500, WealthUse: 4, Amount: 7, PartialCompletion: 0, Percentage: 5, Queue: 1, Description: 'A ship', Pause: 0 },
+    { ProjectID: 3, GameID: 1, RaceID: 2, PopulationID: 3, SpeciesID: 2, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: 2, PartialCompletion: 0, Percentage: 5, Queue: 0, Description: 'Other race engine', Pause: 0 },
+    { ProjectID: 4, GameID: 1, RaceID: 1, PopulationID: 2, SpeciesID: 1, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: null, PartialCompletion: 0.5, Percentage: 5, Queue: 1, Description: 'Engine', Pause: null },
+    { ProjectID: 5, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 0, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: 1, PartialCompletion: 0, Percentage: 5, Queue: 2, Description: 'Species the game lacks', Pause: 0 },
+    { ProjectID: 6, GameID: 1, RaceID: 1, PopulationID: 1, SpeciesID: 1, ProductionType: 3, ProductionID: 101, WealthUse: 999, Amount: 1, PartialCompletion: 0, Percentage: 5, Queue: 2, Description: 'Wealth use the game lacks', Pause: 0 },
+    { ProjectID: 7, GameID: 1, RaceID: 1, PopulationID: 99, SpeciesID: 1, ProductionType: 3, ProductionID: 101, WealthUse: 40, Amount: 1, PartialCompletion: 0, Percentage: 5, Queue: 2, Description: 'Colony the game lacks', Pause: 0 },
   ],
   FCT_ShipDesignComponents: [
     { SDComponentID: 101, GameID: 0, Name: 'Engine', ComponentTypeID: 1, Size: 2, Cost: 50 },
@@ -874,6 +904,18 @@ const FIXTURE_ROWS = {
     { GameID: 1, TechID: 101, RaceID: 1 },
     { GameID: 1, TechID: 102, RaceID: 1 },
     { GameID: 1, TechID: 103, RaceID: 2 },
+  ],
+  FCT_Race: [
+    { RaceID: 1, GameID: 1 },
+    { RaceID: 2, GameID: 1 },
+  ],
+  FCT_Species: [
+    { SpeciesID: 1, GameID: 1 },
+    { SpeciesID: 2, GameID: 1 },
+  ],
+  DIM_WealthUse: [
+    { WealthUseID: 4, Description: 'Installation Construction' },
+    { WealthUseID: 40, Description: 'Ship Component Production' },
   ],
 }
 
@@ -939,6 +981,7 @@ const loaders = (ctx) => {
     assert.deepEqual([tasks[0].typeId, tasks[0].classId, tasks[0].totalBP, tasks[0].classCost, tasks[0].paused, tasks[0].useComponents], [0, 5, 90, 100, 1, 1])
     assert.deepEqual([tasks[1].typeId, tasks[1].refitId, tasks[1].useComponents, tasks[1].totalBP, tasks[1].paused], [4, 6, null, null, null])
     assert.equal(tasks[1].classCost, 100)
+    assert.deepEqual([tasks[0].hulls, tasks[1].hulls], [3, null])
     assert.equal(reads.tasks, true)
 
     return true
@@ -950,6 +993,18 @@ const loaders = (ctx) => {
     assert.deepEqual(projects.map((entry) => entry.id), [1, 4])
     assert.deepEqual([projects[0].componentId, projects[0].populationId, projects[0].amount, projects[0].partial, projects[0].paused, projects[0].name], [102, 1, 4.0268, 0.9732, 0, 'Sensor'])
     assert.deepEqual([projects[1].amount, projects[1].paused], [null, null])
+
+    return true
+  })
+
+  add('loaders: a project row the game does not load is no project: a species of 0 or one the game does not hold, a wealth use DIM_WealthUse does not hold and a colony the game does not hold are skipped when the game loads the save, and a save without the tables that say so is not read', async () => {
+    const { projects } = await read()
+    const noSpecies = await read(['FCT_Species'])
+    const noWealth = await read(['DIM_WealthUse'])
+    const noSpeciesColumn = await read(['FCT_IndustrialProjects.SpeciesID'])
+
+    assert.deepEqual(projects.map((entry) => entry.id), [1, 4], 'rows 5 (species 0), 6 (wealth use 999) and 7 (colony 99) are left out')
+    assert.deepEqual([noSpecies.read.projects, noWealth.read.projects, noSpeciesColumn.read.projects], [false, false, false], 'a save that cannot say which rows the game loads leaves the projects unread')
 
     return true
   })
@@ -973,6 +1028,7 @@ const loaders = (ctx) => {
     const noSurvey = await read(['FCT_RaceSysSurvey'])
     const noAmounts = await read(['FCT_IndustrialProjects.Amount', 'FCT_IndustrialProjects.PartialCompletion'])
     const noUse = await read(['FCT_ShipyardTask.UseComponents'])
+    const noShips = await read(['FCT_ShipyardTask.NumShips'])
 
     assert.deepEqual(noPause.projects.map((entry) => entry.paused), [null, null])
     assert.deepEqual(noClassCost.tasks.map((task) => task.classCost), [null, null])
@@ -980,6 +1036,7 @@ const loaders = (ctx) => {
     assert.equal(noSurvey.colonies[1].systemName, null)
     assert.deepEqual(noAmounts.projects.map((entry) => [entry.amount, entry.partial]), [[null, null], [null, null]])
     assert.deepEqual(noUse.tasks.map((task) => task.useComponents), [null, null])
+    assert.deepEqual(noShips.tasks.map((task) => task.hulls), [null, null])
 
     return true
   })
@@ -1618,6 +1675,11 @@ const MUTATIONS = [
   { name: 'the available figure ignores what is held back', file: U, find: 'availableLocal += free', replace: 'availableLocal += held', fails: ['held'] },
   { name: 'an automatic refit claims nothing', file: U, find: 'ids.forEach((componentId) => claims.push(', replace: 'ids.slice(0, 0).forEach((componentId) => claims.push(', fails: ['held', 'save-planted'] },
   { name: 'an automatic refit with Use Components off claims stock', file: U, find: 'if (task.useComponents === 0) {', replace: 'if (false) {', fails: ['held'] },
+  { name: 'a repeating task holding nothing', file: U, find: ' && later > 0 && task.useComponents !== 0) {', replace: ' && false) {', fails: ['held'] },
+  { name: 'a repeating task counted from a single ship', file: U, find: 'const later = isNumber(task.hulls) && task.hulls > 1 ? task.hulls - 1 : 0', replace: 'const later = 0', fails: ['held'] },
+  { name: 'a repeating refit holding every component of its class', file: U, find: 'holdBack(task.typeId === TASK_TYPE.CONSTRUCTION ? (mounted ? mounted.map((part) => part.componentId) : null) : additions(task), reason,', replace: 'holdBack(mounted ? mounted.map((part) => part.componentId) : null, reason,', fails: ['held'] },
+  { name: 'a repeating task with Use Components off holding stock', file: U, find: ' && later > 0 && task.useComponents !== 0) {', replace: ' && later > 0) {', fails: ['held'] },
+  { name: 'a task\'s count of ships read as 1', file: D, find: 'hulls: numberOrNull(row.NumShips)', replace: 'hulls: 1', fails: ['loaders'] },
   { name: 'a construction task holds the stock it used', file: U, find: 'rows.push({ ...base, state: \'taken\', reason: \'The stock this task uses was taken when it was made.\' })', replace: 'rows.push({ ...base, state: \'taken\', reason: \'The stock this task uses was taken when it was made.\' })\n      claims.push({ populationId: task.populationId, componentId: null, units: null, proof: \'unknown\', source: \'task\', taskId: task.id, reason: \'held\' })', fails: ['held', 'save-tasks'] },
   { name: 'an unread task list holds nothing', file: U, find: 'if (!read) {\n    claims.push(', replace: 'if (false) {\n    claims.push(', fails: ['held', 'save-manifest'] },
   { name: 'a task of an unknown type holds nothing', file: U, find: 'claims.push({ populationId: task.populationId === undefined ? null : task.populationId, componentId: null, units: null, proof: \'unknown\', source: \'task\', taskId: task.id, reason })', replace: 'void reason', fails: ['held'] },
@@ -1635,7 +1697,7 @@ const MUTATIONS = [
   { name: 'hulls of a fraction accepted', file: U, find: 'const whole = (value) => isNumber(value) && Number.isInteger(value) && value >= 1', replace: 'const whole = (value) => isNumber(value) && value > 0', fails: ['invalid'] },
   { name: 'no colony needed accepted', file: U, find: 'if (targetId === null || targetId === undefined) {', replace: 'if (false) {', fails: ['invalid'] },
   { name: 'the default colony without a shipyard first', file: U, find: 'const yards = Number(isNumber(colony.yards) && colony.yards > 0)', replace: 'const yards = 0', fails: ['target'] },
-  { name: 'the rule of the claims not for 2.7', file: U, find: 'id: \'production.procurementReservations\',\n  versions: [\'2.7.x\']', replace: 'id: \'production.procurementReservations\',\n  versions: [\'2.6.x\']', fails: ['rules'] },
+  { name: 'the rule of the claims not for 3.2', file: U, find: 'id: \'production.procurementReservations\',\n  versions: [\'3.2.x\']', replace: 'id: \'production.procurementReservations\',\n  versions: [\'2.6.x\']', fails: ['rules'] },
   { name: 'an unknown figure exported as 0', file: U, find: 'const cell = (value) => csvCell(typeof value === \'number\' ? rounded(value) : value, {', replace: 'const cell = (value) => csvCell(typeof value === \'number\' ? rounded(value) : value ?? 0, {', fails: ['csv'] },
   { name: 'the held back and the proven claim run into one column', file: U, find: '\'Reserved (proven)\': row.reserved.proven, \'Held back (claim not known)\': row.reserved.unknown', replace: '\'Reserved (proven)\': row.reserved.proven + row.reserved.unknown, \'Held back (claim not known)\': row.reserved.unknown', fails: ['csv'] },
   { name: 'the stock here and elsewhere not told apart', file: U, find: '\'Stock here\': row.stock.local, \'Stock elsewhere\': row.stock.remote', replace: '\'Stock here\': row.stock.local + row.stock.remote, \'Stock elsewhere\': row.stock.remote', fails: ['csv'] },
@@ -1645,8 +1707,9 @@ const MUTATIONS = [
   { name: 'the copied text without the move lines', file: U, find: 'manifest.moves.forEach((move) => lines.push(`Move', replace: ';[].forEach((move) => lines.push(`Move', fails: ['csv'] },
   { name: 'the copied text drops "at most"', file: U, find: '${row.netBasis === \'at most\' ? \'at most \' : \'\'}${figure(row.net)}', replace: '${figure(row.net)}', fails: ['csv'] },
   // the reads
+  { name: 'project rows the game does not load read', file: D, find: ' and ${loadedProject()} order by', replace: ' order by', fails: ['loaders'] },
   { name: 'another race\'s shipyard tasks read', file: D, find: ' and FCT_ShipyardTask.RaceID = ${RaceID}', replace: '', fails: ['loaders'] },
-  { name: 'projects of every production type read', file: D, find: ' and FCT_IndustrialProjects.ProductionType = ${COMPONENT_PROJECT}', replace: '', fails: ['loaders', 'save-counts'] },
+  { name: 'projects of every production type read', file: D, find: ' and FCT_IndustrialProjects.ProductionType in (${PROJECT_TYPES.join(\', \')})', replace: '', fails: ['loaders', 'save-counts'] },
   { name: 'another race\'s projects read', file: D, find: ' and FCT_IndustrialProjects.RaceID = ${RaceID}', replace: '', fails: ['loaders'] },
   { name: 'another race\'s colonies read', file: D, find: ' where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} order by', replace: ' where FCT_Population.GameID = ${GameID} order by', fails: ['loaders'] },
   { name: 'the system named from another race\'s survey', file: D, find: ' and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID\'', replace: '\'', fails: ['loaders'] },

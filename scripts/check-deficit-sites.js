@@ -5,7 +5,7 @@
 
   The utility is run on deposits, colonies, jump points and mines worked by hand, at a carrier speed where one day is 86,400,000 km. What the shortlist explains: the amount, accessibility and distance of a deposit and the four delays of its first delivery (deployment, extraction of a first load, route out and back, depletion) as figures of their own. What changes the rank: a farther site, a slower carrier, a smaller load, a slower build and a ground that gives way to a carrier's limit each move a site past another. What is never listed: a deposit on a body the race has not surveyed (the loader runs on a small in-memory database of its own, with a body only another race surveyed, a body nobody surveyed and a body in a system the race has no survey of), a deposit under a known alien colony, a deposit with nothing left. What is unknown: a site with no explored route, no explored way back, no destination, speed, load, builder, mine type or number of mines has an unknown first delivery, never 0, and is listed after the ranked; a failed read is named and the rest stands. The panel's script runs as a pseudo instance over scripts/lib/page-loader.js with a change of speed, load and drive recalculating the rows, and its template and the page are read as text. The table draws a page of sites at a time and offers no page of every site: hundreds of rows drawn at once make each later frame of the window take seconds (FU-80).
 
-  The saves (saves/AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) give the real loaders, compared with raw counts of the survey tables, and the ranking of real deposits: its order, its arrival times, the routes compared with an independent search of the explored jump points, and the sites the race already works.
+  The save (the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only; a save that is not there is skipped) gives the real loaders, compared with raw counts of the survey tables, and the ranking of real deposits: its order, its arrival times, the routes compared with an independent search of the explored jump points, and the sites the race already works.
 
   Each mutation of the utility, the panel, the page or the capability table must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -13,10 +13,10 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const assert = require('./lib/bounded-assert')
-const { loadUtilities } = require('./lib/utilities')
-const { loadPage, instantiate } = require('./lib/page-loader')
+const { loadPage, loadModules, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -30,18 +30,14 @@ const V = 'component'
 const P = 'page'
 const C = 'capabilities'
 const NAMES = ['deficit-sites', 'mineral-supply', 'mineral-outlook', 'minerals', 'colony-minerals', 'mining-data', 'provenance', 'jump-graph', 'colony-transit', 'production', 'capabilities']
-const SAVES = [
-  { file: 'saves/AuroraDB.db', game: 138, race: 785 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-]
+const SAVES = [fixtureSave()]
 
 const STUBS = {
+  // The page's history helpers need session storage; aurora.js imports dayjs, its UTC plugin and romanum.
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
-  'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "", inkMuted: "" }); export const withAlpha = (color) => color; export const flowColor = () => ""'
 const MIXIN_STUB = 'export default { methods: {}, asyncComputed: {} }'
@@ -138,10 +134,10 @@ const world = (m) => {
   const JUMPS = [jp(11, 1, 21, KM, 0), jp(21, 2, 11, 0, 0)]
   const SOURCES = { jumpPoints: JUMPS, lagrangePoints: [], classes: [], types: [TYPE], colonies: [HOME], projects: [], race: { MineProduction: 10 }, problems: [] }
   const days = (count) => ({ SystemID: SYSTEM, Xcor: count * KM, Ycor: 0 })
-  const deposit = (id, over = {}) => ({ SystemBodyID: id, MaterialID: 1, Amount: 100000, Accessibility: 1, HalfOriginalAmount: 50000, OriginalAcc: 1, SystemID: SYSTEM, Xcor: 0, Ycor: 0, RadiationLevel: 0, Surveyed: 1, AlienColonies: 0, OwnColonies: 1, SystemName: 'Sol', SystemBodyName: null, Component: null, ...over })
+  const deposit = (id, over = {}) => ({ SystemBodyID: id, MaterialID: 1, Amount: 100000, Accessibility: 1, HalfOriginalAmount: 50000, OriginalAcc: 1, SystemID: SYSTEM, Xcor: 0, Ycor: 0, RadiationLevel: 0, Surveyed: 1, AlienColonies: 0, OwnColonies: 1, SystemName: 'Sol', SystemBodyName: null, ComponentNumber: null, ...over })
   // The new site P, one day from Home: build 100 d, carry 1 d, first load 182.5 d, one day each way.
   const sitePlaced = (id, count, over = {}) => deposit(id, { ...days(count), ...over })
-  const colony = (id, name, over = {}) => ({ PopulationID: id, PopName: name, SystemID: SYSTEM, MassDriverDest: 0, Drivers: 0, DriverGaps: 0, DestinationID: null, DestinationName: null, DestinationRaceID: null, DestinationSystemID: null, ...Object.fromEntries(MINS.map(({ name }) => [name, 0])), ...over })
+  const colony = (id, name, over = {}) => ({ PopulationID: id, PopName: name, SystemID: SYSTEM, MassDriverDest: 0, Drivers: 0, DriverGaps: 0, DestinationID: null, DestinationName: null, DestinationRaceID: null, DestinationSystemID: null, ...Object.fromEntries(MINS.flatMap(({ name }) => [[name, 0], [`Reserve${name}`, 0]])), ...over })
   const toward = (to, over = {}) => ({ MassDriverDest: to.PopulationID, DestinationID: to.PopulationID, DestinationName: to.PopName, DestinationRaceID: RACE, DestinationSystemID: to.SystemID, ...over })
   const surface = (id, name, body, over = {}) => ({ PopulationID: id, PopName: name, SystemID: SYSTEM, SystemName: 'Sol', SystemBodyID: body, MaterialID: 1, MassDriverExport: 0, PurchaseCivilianMinerals: 0, ManualMineCount: 10, AutomatedMineCount: 0, CivilianMineCount: 0, MineProduction: 10, Accessibility: 1, GovernorBonus: 1, SectorBonus: 1, Efficiency: 1, StabilityModifier: 1, PoliticalModifier: 1, RadiationModifier: 1, ...over })
   const packetRow = (id) => ({ PopulationID: id, ...Object.fromEntries(MINS.flatMap(({ name }) => [[name, 0], [`Missing${name}`, 0]])) })
@@ -836,7 +832,7 @@ const memoryDeposits = async ({ without = [], dropRadiation = false } = {}) => {
     FCT_SystemBodySurveys: 'create table FCT_SystemBodySurveys (GameID int, SystemBodyID int, RaceID int)',
     FCT_SystemBody: `create table FCT_SystemBody (GameID int, SystemBodyID int, SystemID int, StarID int, ${dropRadiation ? '' : 'RadiationLevel real, '}Xcor real, Ycor real, BodyClass int, PlanetNumber int, OrbitNumber int)`,
     FCT_RaceSysSurvey: 'create table FCT_RaceSysSurvey (GameID int, SystemID int, RaceID int, Name text)',
-    FCT_Star: 'create table FCT_Star (StarID int, Component int)',
+    FCT_Star: 'create table FCT_Star (StarID int, ComponentNumber int)',
     FCT_SystemBodyName: 'create table FCT_SystemBodyName (SystemBodyID int, RaceID int, Name text)',
     FCT_Population: 'create table FCT_Population (PopulationID int, GameID int, RaceID int, SystemBodyID int)',
     FCT_AlienPopulation: 'create table FCT_AlienPopulation (GameID int, PopulationID int, ViewingRaceID int)',
@@ -1138,12 +1134,13 @@ const sourcesOf = (mutant) => {
 
 const contextOf = async (sources) => {
   const changed = (name) => sources[name] !== TEXTS[name]()
-  const sourcesFor = { ...(changed(U) ? { 'deficit-sites': sources[U] } : {}), ...(changed(C) ? { capabilities: sources[C] } : {}) }
   const utilitySources = { ...(changed(U) ? { 'utilities/deficit-sites': sources[U] } : {}), ...(changed(C) ? { 'utilities/capabilities': sources[C] } : {}) }
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: sourcesFor })
   const modules = { 'components/charts/theme': THEME_STUB, 'mixins/production-modifiers': MIXIN_STUB }
   const options = await loadPage('components/minerals/DeficitSites', { stubs: STUBS, sources: { 'components/minerals/DeficitSites': sources[V], ...utilitySources } })
-  const pageOptions = await loadPage('pages/mineral-outlook', { stubs: STUBS, modules, sources: { 'pages/mineral-outlook': sources[P], ...utilitySources } })
+  // Keep the page and the utilities it imports in one graph: the NO_* defaults are objects, not cross-session singletons.
+  const pageModules = await loadModules([...NAMES.map((name) => `utilities/${name}`), 'pages/mineral-outlook'], { stubs: STUBS, modules, sources: { 'pages/mineral-outlook': sources[P], ...utilitySources } })
+  const loaded = Object.fromEntries(NAMES.map((name) => [name, pageModules[`utilities/${name}`]]))
+  const pageOptions = pageModules['pages/mineral-outlook'].default
   const pageReal = await loadPage('pages/mineral-outlook', { stubs: STUBS, modules: { ...modules, 'mixins/load-state': null }, sources: { 'pages/mineral-outlook': sources[P], ...utilitySources } })
 
   return { m: { ds: loaded['deficit-sites'], ms: loaded['mineral-supply'], outlook: loaded['mineral-outlook'], minerals: loaded.minerals, colony: loaded['colony-minerals'], mining: loaded['mining-data'], provenance: loaded.provenance, graph: loaded['jump-graph'], capabilities: loaded.capabilities }, options, pageOptions, pageReal, componentText: sources[V], pageText: sources[P] }

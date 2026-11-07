@@ -3,7 +3,7 @@
 import { colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from './colony-minerals'
 import { haulByClass, planHauls } from './haul-plan'
 import { loadJumpPoints } from './jump-graph'
-import { MSP_MINERALS, mspProduction } from './logistics'
+import { MSP_MINERALS, mspActiveProduction, mspProduction, mspStockGaps } from './logistics'
 import { MASS_DRIVER_TONS, MINERALS, SECONDS_PER_DAY } from './minerals'
 import { KNOWN_SERVICE_COLUMNS, columnsOf, gaps, hasAll, knownServiceJoin, loadBootstrapFreight, loadShuttleTechnology, selectedColumns } from './mine-bootstrap-data'
 import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlook'
@@ -20,7 +20,7 @@ export const MSP_HORIZONS = [
   { years: 2, label: '2 y' },
 ]
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const EPSILON = 1e-9
 // The game's launcher leaves a surplus below one tonne at the colony.
 const MIN_LAUNCH = 1
@@ -34,29 +34,31 @@ registerRule({
   versions: VERSIONS,
   units: 'MSP/yr',
   verification: 'estimated',
-  structure: ['FCT_Population stockpiles of the input minerals', 'logistics.mspProduction'],
-  note: 'What the colony\'s maintenance facilities make over the period from the present stock alone: production, held to what the stock of the scarcest input mineral allows. No mining, packet or haul is counted, and no other consumer of the stock is. The mineral that limits it is named, with the conditional delivery that would lift it.',
-  assumptions: ['No mining, packet or haul supplies the input minerals', 'The production rate stays what it is now'],
+  structure: ['FCT_Population stockpiles', 'FCT_Race.NPR', 'population.orbitalCensus', 'logistics.mspProduction'],
+  note: 'While surface plus orbital population is positive, maintenance production from whole facility units is limited to what the scarcest input mineral in the present stock allows. NPR output is unavailable without the shared capital mineral stock and its allocation across producers. No mining, packet, haul or other consumer of the stock is counted. The limiting mineral and the conditional delivery that would lift it are named.',
+  assumptions: ['No mining, packet or haul supplies the input minerals', 'The production rate and surface and orbital population stay what they are now'],
 })
 
+// Retained because class-only haul timing omits jump-shock waits.
 registerRule({
   id: 'mspSupply.supplied',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP/yr',
   verification: 'estimated',
   structure: ['FCT_Population stockpiles, reserves and mass driver destination', 'FCT_MineralDeposit.Amount', 'FCT_MassDriverPackets', 'FCT_IndustrialProjects and shipyard tasks', 'the freighter classes and charted jump points'],
-  note: 'What the colony\'s maintenance facilities make over the period when what mining, packets in flight and feasible hauls add is counted on the day each arrives, after the colony\'s other claims on the same minerals: its build queue, and its mass driver export of stock above the reserve. Each mineral is allocated once: a tonne a haul takes from a colony leaves its stock, a packet is counted at its one destination, and a deposit is drawn on by every mine and miner on it together, up to what it holds. The production of the game\'s order runs queue, then export, then maintenance, and the maintenance draw has no reserve to protect it. A delivery of unknown timing or size is not counted.',
-  assumptions: ['Mining continues at today\'s rate until its deposit is spent', 'A packet arrives when its speed has covered its distance to the destination', 'A haul arrives whole once its freighter class has made every trip', 'A daily step stands for the game\'s production ticks', 'Packets the colonies launch during the period are not counted'],
+  note: 'Industrial work uses minerals before mass-driver exports; shipyard work follows exports, then maintenance supply production. Export takes stock above the reserve within driver capacity, and maintenance has no protected reserve. The queue-active scenario draws each phase\'s remaining needs as soon as stock allows; the queue-idle scenario omits both phases. These are conditional scenarios, not guaranteed bounds on every project schedule. Mining, packets in flight and feasible hauls add minerals on their arrival days. Each mineral is allocated once. Unknown donor production or stock leaves the constrained haul and dependent supplied output unavailable; independent stock-only output is unchanged.',
+  assumptions: ['Mining continues at today\'s rate until its deposit is spent', 'A packet arrives when its speed has covered its distance to the destination', 'A haul arrives whole once its freighter class has made every trip', 'Jump shock waits are not counted for a class timed alone, so a haul may land after the selected period', 'A daily step stands for the game\'s production ticks', 'Each queue phase draws its remaining mineral needs as soon as stock allows, without modelling project rates or promotion', 'Packets the colonies launch during the period are not counted'],
 })
 
+// C F2: transport.roundTrip remains retained and timeHauls reads its bare tripDays; retain this descendant until the timing envelope is carried end to end.
 registerRule({
   id: 'mspSupply.delivery',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 't',
   verification: 'estimated',
   structure: ['FCT_MassDriverPackets.<mineral>, Speed, Xcor, Ycor, DestID', 'FCT_SystemBody.Xcor, Ycor', 'the Hauling Planner\'s plan and freighter classes'],
-  note: 'The tonnes of the input minerals a conditional delivery brings the colony within the period, and the days it brings them on. A packet takes its distance over its speed; a haul takes the days its freighter class needs for every trip, a bound that is never earlier than the first load.',
-  assumptions: ['A packet keeps its speed until it lands', 'A haul is counted when the freighter class has made every trip'],
+  note: 'The tonnes of input minerals a conditional delivery brings within the period, and their arrival days. A packet takes its distance over its speed; a haul takes its freighter class\'s time for every trip. A maintenance-producing donor keeps the inputs of its population-gated period production from whole facility units before allocating the rest to hauls. An unavailable donor rate, stock or stock allocation leaves the constrained haul unavailable with the donor\'s missing inputs named.',
+  assumptions: ['A packet keeps its speed until it lands', 'A haul is counted when the freighter class has made every trip', 'Jump shock waits are not counted for a class timed alone, so a haul may land after the selected period', 'A donor reserves minerals for its population-gated period maintenance production before giving to hauls'],
 })
 
 registerRule({
@@ -121,7 +123,7 @@ export const depositsOf = ({ surface, orbital, navalAdmins, days }) => {
   }))
 }
 
-// A colony's minerals run over `days` daily ticks. `colony`: { production (MSP/yr), stock ({ name: t }), inflows, outflows, queue, exporter }. An inflow with a `rate` (t/yr) digs from the colony's deposit day by day, and `scale` ([0..1] by day, 1 when absent) is the share of the asked rate its deposit still gave that day (`depositScales`); one with `tonnes` and a `day` lands at the tick that ends on or after the day. An outflow ({ mineral, tonnes }) leaves at the first tick. `queue` ({ name: t }) is what the build queue still takes, first; `exporter` ({ capacity (t/yr), reserve ({ name: t }), others ([{ stock, reserve }], the exportable minerals besides the input ones) }) ships stock above the reserve, the surplus of every mineral together within the drivers' capacity and only from a surplus of a tonne, before maintenance; maintenance draws last. A stock below 0 is held as 0. Returns the MSP made, what was lost and to which mineral, and every flow by mineral, which balance with the start stock to `residual`.
+// A colony's minerals over `days` daily ticks: inflows land or mine first; `queue.industrial` draws before export, `queue.shipyard` after export, and maintenance last. Each phase greedily draws its remaining mineral needs whenever stock is available; this is a scenario, not a forecast of project scheduling. An outflow leaves at the first tick. Export shares the driver's capacity over the surplus of all minerals; maintenance has no protected reserve.
 export const simulate = ({ production, stock, inflows = [], outflows = [], queue = null, exporter = null, days }) => {
   const start = Object.fromEntries(NAMES.map((name) => [name, Math.max(0, stock[name])]))
   const held = { ...start }
@@ -132,7 +134,7 @@ export const simulate = ({ production, stock, inflows = [], outflows = [], queue
   const windows = {}
   const lumps = new Map()
   const rates = inflows.filter((inflow) => inflow.rate !== undefined)
-  const need = queue ? { ...queue } : null
+  const need = queue ? { industrial: { ...queue.industrial }, shipyard: { ...queue.shipyard } } : null
   const lostBy = zero()
   let made = 0
   let lost = 0
@@ -150,6 +152,18 @@ export const simulate = ({ production, stock, inflows = [], outflows = [], queue
     flows.credited[inflow.mineral] += tonnes
     creditedBy[inflow.group] = (creditedBy[inflow.group] || 0) + tonnes
     windows[inflow.group] = windows[inflow.group] ? { first: Math.min(windows[inflow.group].first, step), last: Math.max(windows[inflow.group].last, step) } : { first: step, last: step }
+  }
+
+  const serve = (phase) => {
+    if (phase) {
+      NAMES.forEach((name) => {
+        const taken = Math.min(held[name], phase[name])
+
+        held[name] -= taken
+        phase[name] -= taken
+        flows.queued[name] += taken
+      })
+    }
   }
 
   for (let step = 1; step <= days; step++) {
@@ -182,15 +196,7 @@ export const simulate = ({ production, stock, inflows = [], outflows = [], queue
 
     landing.forEach((inflow) => credit(inflow, inflow.tonnes, step))
 
-    if (need) {
-      NAMES.forEach((name) => {
-        const taken = Math.min(held[name], need[name])
-
-        held[name] -= taken
-        need[name] -= taken
-        flows.queued[name] += taken
-      })
-    }
+    serve(need && need.industrial)
 
     if (exporter) {
       const surplus = Object.fromEntries(NAMES.map((name) => [name, Math.max(0, held[name] - exporter.reserve[name])]))
@@ -209,6 +215,8 @@ export const simulate = ({ production, stock, inflows = [], outflows = [], queue
         })
       }
     }
+
+    serve(need && need.shipyard)
 
     const wanted = production / DAYS_PER_YEAR
     const allowed = NAMES.map((name) => held[name] / PER_MSP[name])
@@ -236,7 +244,7 @@ export const simulate = ({ production, stock, inflows = [], outflows = [], queue
 // What each group of inflows adds to the MSP made: the run with the group left out, taken from the run with it. Biggest first.
 const contributions = (colony, days, run) => [...new Set(colony.inflows.map((inflow) => inflow.group))].map((group) => ({ group, msp: run.made - simulate({ ...colony, inflows: colony.inflows.filter((inflow) => inflow.group !== group), days }).made, tonnes: run.creditedBy[group] || 0, window: run.windows[group] || null })).sort((a, b) => b.msp - a.msp)
 
-// The three runs of one colony: its present stock alone, the supplied output with the build queue idle (`high`), and with the queue served first (`low`, null while the queue is not known). Each with what its inflow groups add.
+// Three scenarios: present stock alone, supplied with both queues idle (`high`), and supplied with each queue drawing as soon as stock allows in its tick phase (`low`, null while either queue is unknown). Project timing is not known, so these are not guaranteed bounds on every schedule.
 export const allocateMsp = ({ colony, days }) => {
   const stockOnly = simulate({ production: colony.production, stock: colony.stock, days })
   const high = simulate({ ...colony, queue: null, days })
@@ -306,7 +314,7 @@ export const planColonyHauls = ({ colonies, needs, packets, jumpPoints }) => {
   return { ...plan, left: colonies.filter((colony) => !planned.includes(colony)).map((colony) => colony.PopulationID) }
 }
 
-// Every source the supply reads, each on its own: { colonies, needs, packets, packetRows, surface, orbital, plan, freighters, shuttleTechnology, problems }. A read that fails (a save of another shape) is null and named in `problems` ([{ source, text }]), and what rests on it is counted as unknown. `blocked` is the set of commander bonus IDs the save's lookup does not confirm.
+// Every source the supply reads: { colonies, needs (combined), queuePhases ({ industrial, shipyard }), packets, packetRows, surface, orbital, plan, freighters, shuttleTechnology, problems }. A failed read is null, named in `problems`, and leaves its dependent figures unknown. `blocked` holds commander bonus IDs the save's lookup does not confirm.
 export const loadMspSupply = async (database, { GameID, RaceID, blocked = new Set() }) => {
   const problems = []
   const attempt = async (source, read) => {
@@ -320,7 +328,7 @@ export const loadMspSupply = async (database, { GameID, RaceID, blocked = new Se
   }
   const [colonies, needs, packets, packetRows, surface, orbital, jumpPoints, freight, shuttleTechnology] = await Promise.all([
     attempt('colonies', () => loadMspColonies(database, { GameID, RaceID })),
-    attempt('needs', () => loadQueueNeeds(database, { GameID, RaceID })),
+    attempt('needs', () => loadQueueNeeds(database, { GameID, RaceID, byPhase: true })),
     attempt('packets', () => loadPacketsInFlight(database, { GameID, RaceID })),
     attempt('packetRows', () => loadPacketRows(database, { GameID, RaceID })),
     attempt('mining', async () => (await database.query(surfaceMiningQuery({ GameID, RaceID })))[0]),
@@ -334,11 +342,12 @@ export const loadMspSupply = async (database, { GameID, RaceID, blocked = new Se
     problems.push({ source: 'freight', text: `the save lacks ${freight.gaps.join(', ')}` })
   }
 
-  const planned = colonies && needs && packets && jumpPoints ? await attempt('plan', async () => planColonyHauls({ colonies, needs, packets, jumpPoints })) : null
+  const planned = colonies && needs && packets && jumpPoints ? await attempt('plan', async () => planColonyHauls({ colonies, needs: needs.combined, packets, jumpPoints })) : null
 
   return {
     colonies,
-    needs,
+    needs: needs ? needs.combined : null,
+    queuePhases: needs ? { industrial: needs.industrial, shipyard: needs.shipyard } : null,
     packets,
     packetRows,
     surface: surface && gateMiningRows(surface, blocked),
@@ -399,7 +408,7 @@ export const timeHauls = ({ plan, freighters, shuttleTechnology, formulaVersion 
   })
 }
 
-const skip = (colony) => !(colony.MaintenanceFacilities > 0) || colony.MaintProdStatus === 0
+const skip = (colony) => colony.MaintenanceFacilities === 0 || colony.MaintProdStatus === 0
 
 // The ledger of every colony that makes maintenance supplies. `colonies`: the Logistics page's rows; `sources`: `loadMspSupply`'s; `modifierOf(PopulationID)`: the colony's production modifier or null; `navalAdmins`: the mining admins for orbital miners; `formulaVersion`: the save's formula version; `RaceID`; `years`: the period. A colony whose production, stock or modifier is not known has unavailable figures.
 export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, formulaVersion, RaceID, years }) => {
@@ -410,7 +419,7 @@ export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, form
   const sites = sources.colonies && sources.surface && sources.orbital ? Object.fromEntries(NAMES.map((name) => [name, new Map(siteSupply({ surface: sources.surface, orbital: sources.orbital, navalAdmins, routes: sources.colonies, packets: null, RaceID, materialId: MATERIAL[name], flows: null }).map((site) => [site.populationId, site]))])) : null
   const timed = sources.plan && sources.freighters ? timeHauls({ plan: sources.plan, freighters: sources.freighters, shuttleTechnology: sources.shuttleTechnology, formulaVersion }) : null
   const inPlan = (id) => sources.plan && !sources.plan.left.includes(id)
-  const producing = new Map(colonies.filter((colony) => !skip(colony)).map((colony) => [colony.PopulationID, colony]))
+  const producing = new Map(colonies.map((colony) => [colony.PopulationID, colony]))
   const scaled = new Map()
   const deposits = sources.surface && sources.orbital ? depositsOf({ surface: sources.surface, orbital: sources.orbital, navalAdmins, days }) : null
   const gives = new Map()
@@ -425,12 +434,25 @@ export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, form
     gives.forEach((entries, key) => {
       const [fromId, name] = key.split(':')
       const source = producing.get(Number(fromId))
-      const production = source ? mspProduction(source, modifierOf(source.PopulationID)) : null
+      const production = source ? mspActiveProduction(source, modifierOf(source.PopulationID)) : unavailable({ rule: 'mspSupply.delivery', missing: ['the donor\'s maintenance production'] })
       const total = entries.reduce((sum, entry) => sum + entry.tonnes, 0)
-      const cap = source && isNumber(source[name]) && isAvailable(production) ? Math.max(0, source[name] - production.value * days / DAYS_PER_YEAR * PER_MSP[name]) : total
+      const stock = source && isNumber(source[name]) ? result('mspSupply.delivery', source[name], [`the donor's stock of ${name}`]) : unavailable({ rule: 'mspSupply.delivery', missing: [`the donor's stock of ${name}`] })
+      const allocationGaps = source && production.value !== 0 ? mspStockGaps(source) : []
+      const allocation = allocationGaps.length ? unavailable({ rule: 'mspSupply.delivery', missing: allocationGaps }) : result('mspSupply.delivery', true, ['the donor\'s mineral stock allocation'])
+      const reserved = combine({ rule: 'mspSupply.delivery', parts: { production, stock, allocation }, compute: (values) => Math.max(0, values.stock - values.production * days / DAYS_PER_YEAR * PER_MSP[name]) })
+
+      if (!isAvailable(reserved)) {
+        const donor = source ? source.PopName : (sourceBy[fromId] || {}).PopName || fromId
+        const unknown = combine({ rule: 'mspSupply.delivery', parts: { reservation: reserved }, compute: () => 0, inputs: { missing: reserved.inputs.missing.map((text) => `the donor ${donor}: ${text}`) } })
+
+        entries.forEach((entry) => scaled.set(entry.key, unknown))
+        return
+      }
+
+      const cap = reserved.value
       const share = total > cap && total > 0 ? cap / total : 1
 
-      entries.forEach((entry) => scaled.set(entry.key, entry.tonnes * share))
+      entries.forEach((entry) => scaled.set(entry.key, combine({ rule: 'mspSupply.delivery', parts: { reservation: reserved }, compute: () => entry.tonnes * share })))
     })
   }
 
@@ -438,15 +460,18 @@ export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, form
     const id = colony.PopulationID
     const own = sourceBy[id] || null
     const production = mspProduction(colony, modifierOf(id))
+    const active = mspActiveProduction(colony, modifierOf(id))
     const notCounted = []
     const inflows = []
     const outflows = []
     const meta = {}
+    const haulParts = {}
+    const unknownHauls = new Map()
     const note = (kind, text) => notCounted.push({ kind, text })
     const mark = (group, kind, label, conditional) => {
       meta[group] = { group, kind, label, conditional }
     }
-    const missing = [...(isAvailable(production) ? [] : production.inputs.missing), ...(colony.MaintProdStatus === null || colony.MaintProdStatus === undefined ? ['whether maintenance production is on'] : []), ...NAMES.filter((name) => !isNumber(colony[name])).map((name) => `the colony's stock of ${name}`)]
+    const missing = [...(active.value === 0 ? [] : mspStockGaps(colony)), ...(isAvailable(active) ? [] : active.inputs.missing), ...NAMES.filter((name) => !isNumber(colony[name])).map((name) => `the colony's stock of ${name}`)]
 
     if (missing.length) {
       const none = unavailable({ rule: 'mspSupply.supplied', missing })
@@ -545,12 +570,18 @@ export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, form
         }
 
         carried.forEach((mineral) => {
-          if (incoming) {
-            mark(group, 'haul', `a haul from ${other.PopName}`, true)
-            inflows.push({ group, kind: 'haul', mineral: mineral.name, tonnes: scaled.get(`${haul.key}:${mineral.name}`), day: haulDays })
+          const amount = scaled.get(`${haul.key}:${mineral.name}`)
+
+          mark(group, 'haul', `a haul ${incoming ? 'from' : 'to'} ${other.PopName}`, true)
+          ;(haulParts[group] || (haulParts[group] = [])).push(amount)
+
+          if (!isAvailable(amount)) {
+            unknownHauls.set(group, { group, day: Math.min((unknownHauls.get(group) || { day: Infinity }).day, incoming ? haulDays : 0) })
+            note('hauls', `${meta[group].label}: ${amount.inputs.missing.join(', ')}`)
+          } else if (incoming) {
+            inflows.push({ group, kind: 'haul', mineral: mineral.name, tonnes: amount.value, day: haulDays })
           } else {
-            mark(group, 'haul', `a haul to ${other.PopName}`, true)
-            outflows.push({ group, mineral: mineral.name, tonnes: scaled.get(`${haul.key}:${mineral.name}`) })
+            outflows.push({ group, mineral: mineral.name, tonnes: amount.value })
           }
         })
 
@@ -567,10 +598,13 @@ export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, form
       note('hauls', 'the colony is not in the haul plan: its place, stock, reserve, queue or inbound packets are not all recorded')
     }
 
-    // The colony's other claims: its build queue and its mass driver export.
-    const needRow = sources.needs ? sources.needs[id] : undefined
-    const queue = sources.needs ? Object.fromEntries(NAMES.map((name) => [name, needRow ? (needRow[`Missing${name}`] > 0 || !isNumber(needRow[name]) ? null : needRow[name]) : 0])) : null
-    const queueKnown = queue && NAMES.every((name) => queue[name] !== null)
+    // The two queue positions around mass-driver export must remain distinct.
+    const queue = sources.queuePhases ? Object.fromEntries(['industrial', 'shipyard'].map((phase) => {
+      const needRow = sources.queuePhases[phase][id]
+
+      return [phase, Object.fromEntries(NAMES.map((name) => [name, needRow ? (needRow[`Missing${name}`] > 0 || !isNumber(needRow[name]) ? null : needRow[name]) : 0]))]
+    })) : null
+    const queueKnown = queue && Object.values(queue).every((phase) => NAMES.every((name) => phase[name] !== null))
     let exporter = null
 
     if (!queueKnown) {
@@ -597,31 +631,36 @@ export const mspSupplyRows = ({ colonies, sources, modifierOf, navalAdmins, form
       note('export', `the colony's mass driver export: ${problemText('colonies')}`)
     }
 
-    const description = { production: production.value, stock: Object.fromEntries(NAMES.map((name) => [name, colony[name]])), inflows, outflows, queue: queueKnown ? queue : null, exporter }
+    const description = { production: active.value, stock: Object.fromEntries(NAMES.map((name) => [name, colony[name]])), inflows, outflows, queue: queueKnown ? queue : null, exporter }
     const allocation = allocateMsp({ colony: description, days })
     const perYear = (value) => value / (days / DAYS_PER_YEAR)
     const counted = [...new Set(inflows.filter((inflow) => !inflow.sink).map((inflow) => meta[inflow.group].label))]
     const left = [...new Set(notCounted.map((entry) => entry.kind))]
     const standing = [`The period is ${days} days`, ...(counted.length ? [`Counted: ${counted.join(', ')}`] : ['No mining, packet or haul is counted']), ...(left.length ? [`Not counted for want of a figure: ${left.join(', ')}`] : [])]
+    const actualResult = (rule, value, present, assumptions = []) => combine({ rule, parts: { active }, compute: () => value, inputs: { present }, assumptions })
+    const uncertain = Object.fromEntries([...unknownHauls.values()].filter((entry) => entry.day <= days).flatMap((entry) => haulParts[entry.group].map((amount, index) => [`${entry.group}:${index}`, amount])))
+    const suppliedResult = (rule, value, present, assumptions = []) => combine({ rule, parts: { active, ...uncertain }, compute: () => value, inputs: { present }, assumptions })
+    const groupResult = (rule, group, value, present) => combine({ rule, parts: Object.fromEntries((haulParts[group] || []).map((amount, index) => [`amount ${index}`, amount])), compute: () => value, inputs: { present } })
     const deliveryOf = (groups) => {
       const leading = groups.filter((entry) => meta[entry.group] && meta[entry.group].conditional && entry.msp > EPSILON && entry.window)[0]
 
-      return leading ? { group: leading.group, label: meta[leading.group].label, kind: meta[leading.group].kind, tonnes: result('mspSupply.delivery', leading.tonnes, ['FCT_MassDriverPackets', 'the Hauling Planner\'s plan']), firstDay: leading.window.first, lastDay: leading.window.last, msp: result('mspSupply.supplied', perYear(leading.msp), ['the ledger run with and without the delivery'], standing) } : null
+      return leading ? { group: leading.group, label: meta[leading.group].label, kind: meta[leading.group].kind, tonnes: groupResult('mspSupply.delivery', leading.group, leading.tonnes, ['FCT_MassDriverPackets', 'the Hauling Planner\'s plan']), firstDay: leading.window.first, lastDay: leading.window.last, msp: suppliedResult('mspSupply.supplied', perYear(leading.msp), ['the ledger run with and without the delivery'], standing) } : null
     }
-    const figure = (run, groups, rule) => ({ result: result(rule, perYear(run.made), ['the colony\'s stock of the input minerals', 'the colony\'s production'], standing), limiting: run.limiting, delivery: deliveryOf(groups) })
-    const deliveries = allocation.highGroups.filter((entry) => meta[entry.group]).map((entry) => ({ ...meta[entry.group], tonnes: result('mspSupply.delivery', entry.tonnes, ['the sources the group reads']), firstDay: entry.window ? entry.window.first : null, lastDay: entry.window ? entry.window.last : null, msp: result('mspSupply.supplied', perYear(entry.msp), ['the ledger run with and without the group'], standing), mspLow: allocation.lowGroups ? result('mspSupply.supplied', perYear((allocation.lowGroups.find((low) => low.group === entry.group) || { msp: 0 }).msp), ['the ledger run with and without the group'], standing) : null }))
+    const figure = (run, groups, rule) => ({ result: suppliedResult(rule, perYear(run.made), ['the colony\'s stock of the input minerals', 'the colony\'s production'], standing), limiting: Object.keys(uncertain).length ? null : run.limiting, delivery: deliveryOf(groups) })
+    const groups = [...allocation.highGroups, ...[...unknownHauls.values()].filter((entry) => !allocation.highGroups.some((known) => known.group === entry.group)).map((entry) => ({ group: entry.group, tonnes: null, msp: null, window: { first: Math.max(1, Math.ceil(entry.day)), last: Math.max(1, Math.ceil(entry.day)) } }))]
+    const deliveries = groups.filter((entry) => meta[entry.group]).map((entry) => ({ ...meta[entry.group], tonnes: groupResult('mspSupply.delivery', entry.group, entry.tonnes, ['the sources the group reads']), firstDay: entry.window ? entry.window.first : null, lastDay: entry.window ? entry.window.last : null, msp: suppliedResult('mspSupply.supplied', perYear(entry.msp), ['the ledger run with and without the group'], standing), mspLow: allocation.low ? suppliedResult('mspSupply.supplied', perYear((allocation.lowGroups.find((low) => low.group === entry.group) || { msp: 0 }).msp), ['the ledger run with and without the group'], standing) : null }))
 
     return {
       colony,
       populationId: id,
       production,
-      stockOnly: { result: result('mspSupply.stockOnly', perYear(allocation.stockOnly.made), ['the colony\'s stock of the input minerals', 'the colony\'s production'], ['No mining, packet or haul is counted']), limiting: allocation.stockOnly.limiting, delivery: deliveryOf(allocation.highGroups) },
+      stockOnly: { result: actualResult('mspSupply.stockOnly', perYear(allocation.stockOnly.made), ['the colony\'s stock of the input minerals', 'the colony\'s production'], ['No mining, packet or haul is counted']), limiting: allocation.stockOnly.limiting, delivery: deliveryOf(allocation.highGroups) },
       high: figure(allocation.high, allocation.highGroups, 'mspSupply.supplied'),
       low: allocation.low ? figure(allocation.low, allocation.lowGroups, 'mspSupply.supplied') : { result: unavailable({ rule: 'mspSupply.supplied', missing: ['the queue needs of the input minerals'] }), limiting: null, delivery: null },
       deliveries,
       notCounted,
-      balance: Math.max(allocation.stockOnly.residual, allocation.high.residual, allocation.low ? allocation.low.residual : 0),
-      ledger: { high: allocation.high.flows, low: allocation.low ? allocation.low.flows : null },
+      balance: Object.keys(uncertain).length ? null : Math.max(allocation.stockOnly.residual, allocation.high.residual, allocation.low ? allocation.low.residual : 0),
+      ledger: Object.keys(uncertain).length ? null : { high: allocation.high.flows, low: allocation.low ? allocation.low.flows : null },
       days,
       years,
     }

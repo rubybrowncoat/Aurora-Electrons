@@ -3,7 +3,7 @@
 
   node scripts/check-campaigns.js [--no-mutations]
 
-  Everything runs on in-memory installations (a history store, a registry, a migration record and a settings store, each a plain JSON value) and on small synthetic saves that answer the recorder's reads: a game, the lowest-numbered systems, and an increment ledger that is one chain a later save extends, an older save is a prefix of, and a replayed save forks from. No Electron and no network are needed; the two real saves (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db) are opened read-only for the last group when they are present, and are skipped with a note when they are not.
+  Everything runs on in-memory installations (a history store, a registry, a migration record and a settings store, each a plain JSON value) and on small synthetic saves that answer the recorder's reads: a game, the lowest-numbered systems, and an increment ledger that is one chain a later save extends, an older save is a prefix of, and a replayed save forks from. No Electron and no network are needed; the two real saves (the fixture of scripts/lib/fixtures.js and the first played 3.2 save) are opened read-only for the last group when they are present, and are skipped with a note when they are not.
 
   Groups:
   - matrix: the fixture cases of the identity evidence (AE-033-01): independent campaigns that share a GameID and a name stay apart with their histories, warning state and map groups; a rename, a move, a copy and a rewind keep one campaign; a save replayed from an earlier point is a branch seeded up to the fork; a short or thin record is never merged on a guess, and the player's answer (keep apart, attach to the same branch, attach as a new branch) is kept;
@@ -19,16 +19,19 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { routes: routeTable } = require('./lib/store-routes')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { FIXTURE, PLAYED, fixturePath } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
 
-// The packages the utilities import. The stores are given to the recorder by the checks, so electron-store only has to exist.
+// The recorder's stores are supplied by the checks. The imported settings store also answers the snapshot summary's ordinary read, with the same empty-file fallback.
 const STUBS = {
-  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
+  'electron-store': 'export default class Config { get store() { return {} } set store(value) {} get(key, fallback) { return key.split(".").reduce((value, part) => value == null ? undefined : value[part], this.store) ?? fallback } update(change) { this.store = change(this.store) } }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
@@ -226,7 +229,7 @@ const seedLegacy = (inst, { file = legacyFile([100, 200]), settings = legacySett
 // Every check is `{ name, run(m) }` over the loaded modules. A failed assertion is the check failing.
 const defineSuite = (m) => {
   const cases = []
-  const assert = require('./lib/bounded-assert')
+  const { assert } = require('./lib/fault-credit')
   const test = (group, name, run) => cases.push({ group, name, run })
   const { campaign, history } = m
   const attachModule = m['campaign-attach']
@@ -1017,6 +1020,10 @@ const defineSuite = (m) => {
     const state = storeHistory.state()
 
     storeHistory.mutations.resolved(state, { GameID: 1, resolution: { campaignId: 'c1', branchId: 'b1' }, generation: 4 })
+    assert.deepEqual(storeHistory.getters.snapshotSummary(state, {}, rootOf(1, 4))(1, 7), { count: 0, latest: null })
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE stale snapshot summary:', JSON.stringify(storeHistory.getters.snapshotSummary(state, {}, rootOf(1, 5))(1, 7)))
+    }
     assert.equal(storeHistory.getters.snapshotSummary(state, {}, rootOf(1, 5))(1, 7), null)
   })
 
@@ -1652,6 +1659,10 @@ const defineSuite = (m) => {
         return store
       })
 
+      if (process.argv.includes('--detail')) {
+        console.log('VALUE persisted map layer:', JSON.stringify(b.store.campaign.cA.race[7].mapLayer))
+      }
+      assert.equal(b.store.campaign.cA.race[7].mapLayer, 'minerals', 'the selected map layer is persisted after the other window writes')
       assert.equal(calls, 2, 'the change was not made again over what the other window wrote')
       assert.deepEqual(result.campaign.cA.race[7], { mapLayer: 'minerals', mapPinned: [1, 2] })
       assert.deepEqual(b.store, result)
@@ -1931,6 +1942,10 @@ const defineSuite = (m) => {
         const id = first.resolution.campaignId
         const settings = settingsOf(inst)
 
+        if (process.argv.includes('--detail')) {
+          console.log('VALUE migrated campaign IDs:', JSON.stringify(Object.keys(settings.campaign || {})))
+        }
+        assert.deepEqual(Object.keys(settings.campaign || {}), [id], `${label}: the migrated campaign IDs`)
         assert.equal(first.resolution.legacy.verdict, 'single', label)
         assert.deepEqual(settings.campaign[id], legacySettings(), `${label}: the campaign did not get the settings`)
         assert.ok(!Array.isArray(settings.campaign[id].race), `${label}: the race map was copied as a list`)
@@ -2037,9 +2052,10 @@ const defineSuite = (m) => {
 
 // ---- Real saves -------------------------------------------------------------------------------------------------------
 
+// The migrated 3.1 fixture, and the first played 3.2 save (the UEF, game 161) whose systems tell the two campaigns apart.
 const REAL = [
-  { label: 'modded 2.7 save', file: path.join(repo, 'AuroraDB.db'), GameID: 140, RaceID: 784 },
-  { label: 'stock 2.7.1 save', file: path.join(repo, 'saves', 'AuroraDB_271_skoormit_saved.db'), GameID: 138, RaceID: 785 },
+  { label: 'fixture', file: fixturePath(), GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId },
+  { label: 'played 3.2 campaign', file: path.join(repo, PLAYED.file), GameID: PLAYED.gameId, RaceID: PLAYED.raceId },
 ]
 
 const openReadOnly = (file) => new Promise((resolve, reject) => {
@@ -2054,7 +2070,7 @@ const realDatabase = (handle) => ({
 
 const realChecks = async (m) => {
   const results = []
-  const assert = require('./lib/bounded-assert')
+  const { assert } = require('./lib/fault-credit')
   const { campaign, history } = m
   const real = []
 
@@ -2117,7 +2133,7 @@ const realChecks = async (m) => {
   }
 
   if (real.length === 2) {
-    await run('the modded and the stock save are different campaigns by their systems', async () => {
+    await run('the fixture and the played 3.2 campaign are different campaigns by their systems', async () => {
       const [one, two] = await Promise.all(real.map(async (save) => {
         const database = realDatabase(save.handle)
         const [games] = await database.query(campaign.GAMES_SQL)
@@ -2157,6 +2173,12 @@ const runSuite = async (modules, only = null) => {
 }
 
 // Each mutation breaks one rule of a copy of the utilities; the named checks (by the start of their text) must fail, or the check that is meant to guard the rule does not.
+// TFIN-03 catalog audit: zero-based indices and mapped checks are unchanged; a replacement is not proof of its retired operator.
+// [12] Old: "a whole-store change is made only once"; new: "a stale whole-store change returns without being applied".
+// Original ATTEMPTS=1 exhausts at preload/store-client.js:70 and throws before returning a result.
+// Replacement class: a failed compare-and-swap is silently abandoned, observed in persisted mapLayer.
+// Original retry-exhaustion class currently has no credited fault. Its sole throw-only plant is retired, not credited by this replacement.
+
 const MUTATIONS = [
   { name: 'a host that writes the companion before it compares', file: 'main/store-host.js', find: 'if (JSON.stringify(store.store) !== base) {\n        return false\n      }\n\n      store.store = next\n', replace: 'if (also) {\n        put(storeOf(also), also.key, also.value)\n      }\n\n      if (JSON.stringify(store.store) !== base) {\n        return false\n      }\n\n      store.store = next\n', fails: ['an import that lost to another window'] },
   { name: 'a client that does not send the companion', file: 'preload/store-client.js', find: 'also ? { ...also.store.target, key: also.key, value: also.value } : undefined', replace: 'undefined', fails: ['an import that lost to another window'] },
@@ -2170,7 +2192,7 @@ const MUTATIONS = [
   { name: 'an attach copies the unattached settings as they are stored', file: 'campaign-attach.js', find: 'settings: campaignSettingsOf(settings), tip: null }', replace: 'settings: clone(settings), tip: null }', fails: ['a legacy history kept unattached whose settings'] },
   { name: 'the host writes a whole store without comparing it to what the caller read', file: 'main/store-host.js', find: 'if (JSON.stringify(store.store) !== base) {', replace: 'if (false) {', fails: ['a whole-store change that another window wrote under'] },
   { name: 'a whole-store change is written without the host\'s check', file: 'preload/store-client.js', find: "if (this.call('swap', base, next, also ? { ...also.store.target, key: also.key, value: also.value } : undefined)) {", replace: "if (!this.call('write', next)) {", fails: ['a whole-store change that another window wrote under'] },
-  { name: 'a whole-store change is made only once', file: 'preload/store-client.js', find: 'const ATTEMPTS = 50', replace: 'const ATTEMPTS = 1', fails: ['a whole-store change that another window wrote under'] },
+  { name: 'a stale whole-store change returns without being applied', file: 'preload/store-client.js', find: "      if (this.call('swap', base, next, also ? { ...also.store.target, key: also.key, value: also.value } : undefined)) {\n        return next\n      }", replace: "      if (this.call('swap', base, next, also ? { ...also.store.target, key: also.key, value: also.value } : undefined)) {\n        return next\n      }\n\n      return this.call('read')", fails: ['a whole-store change that another window wrote under'] },
   { name: 'a path is set with the store\'s own set, which makes lists of numeric segments', file: 'main/store-host.js', find: '  const next = store.store\n\n  setPath(next, key, value)\n  store.store = next', replace: '  store.set(key, value)', fails: ['two windows share one settings store'] },
   { name: 'an error of the host is not thrown in the window', file: 'preload/store-client.js', find: 'if (!answer || !answer.ok) {', replace: 'if (false) {', fails: ['a write the store refuses'] },
   { name: 'an attach merges over the settings it read before', file: 'campaign-attach.js', find: 'mergeSettings(isObject(all.campaign) ? all.campaign[campaign.id] : undefined, source.settings).settings', replace: 'mergeSettings(undefined, source.settings).settings', fails: ['attaching a history from before campaigns keeps a setting'] },
@@ -2236,6 +2258,8 @@ const MUTATIONS = [
 
 // One mutation broken in `copy` (and put back after), with the cases it names run against it.
 const applyMutation = async (copy, mutation) => {
+  refusePlanting(mutation.name)
+
   const target = path.join(copy, mutation.file.includes('/') ? mutation.file : `renderer/utilities/${mutation.file}`)
   const original = fs.readFileSync(target, 'utf8')
   const parts = original.split(mutation.find)
@@ -2249,8 +2273,18 @@ const applyMutation = async (copy, mutation) => {
   try {
     const modules = await loadModules(copy)
     const outcome = await runSuite(modules, mutation.fails)
+    const invalid = outcome.find((entry) => entry.error && (kindOf(entry.error) !== 'assertion' || isSubjectThrow(entry.error)))
+
+    if (invalid) {
+      throw invalid.error
+    }
+
     const failed = outcome.filter((entry) => entry.error)
     const missed = mutation.fails.filter((start) => !failed.some((entry) => entry.name.startsWith(start)))
+
+    if (process.argv.includes('--detail')) {
+      failed.forEach((entry) => console.log(`CAUGHT ${mutation.name} by ${entry.name}: ${entry.error.message}`))
+    }
 
     return { group: 'mutations', name: `${mutation.name} (fails: ${mutation.fails.join('; ')})`, error: missed.length ? new Error(`the checks that guard this did not fail: ${missed.join('; ')}`) : null }
   } catch (error) {
@@ -2260,11 +2294,13 @@ const applyMutation = async (copy, mutation) => {
   }
 }
 
-// The mutations run in child processes, several side by side (CHECK_JOBS): each child copies the sources once and judges its share one after another, the way the whole run once did in one process, so no two mutations share a copy, a module or a global. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its results.
+// The mutations run in child processes, several side by side (CHECK_JOBS): each child copies the sources once and judges its share one after another, restoring each changed file before the next fault. The loader gives each load its own module tree; a child and its source copy are reused across its chunk. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its results.
 const MUTANTS_PREFIX = 'MUTANTS_RESULT '
 const CHILD_MUTANTS = process.argv.filter((argument) => argument.startsWith('--mutants=')).map((argument) => argument.slice(10).split(',').map(Number))[0]
 
 const childMain = async () => {
+  refusePlanting('the campaign child faults')
+
   const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-campaigns-'))
   const results = []
 
@@ -2284,6 +2320,8 @@ const childMain = async () => {
 }
 
 const applyMutations = async () => {
+  refusePlanting('the campaign faults')
+
   const chunks = chunksOf(MUTATIONS.length)
   const outcomes = spread(chunks, await inParallel(chunks, async (chunk) => lastJson(await runChild(__filename, [`--mutants=${chunk.join(',')}`]), MUTANTS_PREFIX)))
 
@@ -2294,7 +2332,7 @@ const main = async () => {
   const modules = await loadModules(src)
   const results = [...await runSuite(modules), ...await realChecks(modules)]
 
-  if (!process.argv.includes('--no-mutations')) {
+  if (mutating()) {
     results.push(...await applyMutations())
   }
 

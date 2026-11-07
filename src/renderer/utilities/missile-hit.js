@@ -2,7 +2,7 @@ import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailab
 
 // The hit chance of a missile against a target, as scenarios: the raw continuous chance the speeds, guidance, tactical modifier and jammer give, the chance capped at 100, and the whole-number chance one warhead has on its roll, each its own figure with its own rule so none is read for another. Every function is pure and returns provenance results (utilities/provenance.js): a missing, zero or invalid input leaves a result with no value, never 0.
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 export const HIT_CAP = 100
 export const JAMMER_FACTOR = 0.75
@@ -25,7 +25,7 @@ registerRule({
   units: 'multiplier',
   verification: 'estimated',
   structure: ['FCT_MissileType.ECCM', 'the target\'s missile jammer strength (entered)'],
-  note: 'A target\'s missile jammer lowers a missile\'s hit chance only when its strength is above the missile\'s ECCM. The chance is then multiplied by 0.75 to the power of the whole jammer strength, not of the surplus over the ECCM, so one point of ECCM short of the jammer costs the full penalty and an ECCM at or above the jammer costs none. Read from the game\'s rules; the save stores no hit chance to compare with.',
+  note: 'A target\'s missile jammer lowers a missile\'s hit chance only when its strength is above the missile\'s ECCM. The chance is then multiplied by 0.75 to the power of the whole jammer strength, not of the surplus over the ECCM, so one point of ECCM short of the jammer costs the full penalty and an ECCM at or above the jammer costs none. Read from the game\'s rules; the save stores no hit chance to compare with. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -35,7 +35,7 @@ registerRule({
   verification: 'estimated',
   structure: ['FCT_MissileType.Speed, ATG, ECCM', 'the target speed, the target\'s missile jammer strength and the tactical modifier (entered)'],
   assumptions: ['The tactical modifier is entered, 1 unless stated: the launching ship\'s crew, morale and commander bonuses are not read from the save'],
-  note: 'The missile\'s speed over the target\'s speed, times 10, times the tactical modifier, times the terminal guidance (a value under 1 counts as 1), times the jammer effect, as a percentage; a stationary target is hit at 100 before any other factor. The figure is not limited to 100: it is the continuous chance the factors give. Read from the game\'s rules; the save stores no hit chance to compare with.',
+  note: 'The missile\'s speed over the target\'s speed, times 10, times the tactical modifier, times the terminal guidance (a value under 1 counts as 1), times the jammer effect, as a percentage; a stationary target is hit at 100 before any other factor. The figure is not limited to 100: it is the continuous chance the factors give. Read from the game\'s rules; the save stores no hit chance to compare with. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -44,7 +44,7 @@ registerRule({
   units: '%',
   verification: 'estimated',
   structure: ['the raw hit chance'],
-  note: 'The raw hit chance limited to 100, the limit the game applies before a warhead rolls. A raw chance above 100 is no surer than 100.',
+  note: 'The raw hit chance limited to 100, the limit the game applies before a warhead rolls. A raw chance above 100 is no surer than 100. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -54,7 +54,7 @@ registerRule({
   verification: 'estimated',
   structure: ['the capped hit chance'],
   assumptions: ['The roll is a fair whole number from 1 to 100 and a warhead hits when the roll is not above its chance'],
-  note: 'The chance one warhead has on a whole-number roll: the capped chance rounded down to a whole percent. Whether the game keeps a fraction of a percent, rounds or truncates the chance it rolls against is not settled, so this figure is an estimate beside the capped chance, which stays the continuous figure.',
+  note: 'The chance one warhead has on a whole-number roll: the capped chance rounded down to a whole percent. Whether the game keeps a fraction of a percent, rounds or truncates the chance it rolls against is not settled, so this figure is an estimate beside the capped chance, which stays the continuous figure. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -64,7 +64,7 @@ registerRule({
   verification: 'assumed',
   structure: ['FCT_MissileType.MultipleWarheads', 'the capped or whole-number hit chance'],
   assumptions: ['Each warhead rolls independently at the same chance', 'The missile reaches its target with every warhead: no chance of being shot down or of falling short is applied'],
-  note: 'The warheads of one missile times the chance of one warhead hitting, on the independent-roll assumption. A planner figure: it is not a count of penetrating damage, of missiles that survive point defence, or of ships destroyed.',
+  note: 'The warheads of one missile times the chance of one warhead hitting, on the independent-roll assumption. A planner figure: it is not a count of penetrating damage, of missiles that survive point defence, or of ships destroyed. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -73,7 +73,7 @@ registerRule({
   units: 'km/s',
   verification: 'estimated',
   structure: ['FCT_MissileType.Speed, ATG, ECCM', 'the target\'s missile jammer strength and the tactical modifier (entered)'],
-  note: 'The target speed at which the raw hit chance equals a given percentage: the missile\'s speed times 10, the tactical modifier, the terminal guidance and the jammer effect, over the percentage. At 100 it is the fastest target the missile hits at the cap.',
+  note: 'The target speed at which the raw hit chance equals a given percentage: the missile\'s speed times 10, the tactical modifier, the terminal guidance and the jammer effect, over the percentage. At 100 it is the fastest target the missile hits at the cap. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 const MISSILE_SPEED = 'a missile speed above 0'

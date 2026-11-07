@@ -163,7 +163,7 @@ const candidateOf = (tech, v) => ({
   sizeLimit: 0,
   stage: null,
   stages: 0,
-  options: { eccm: v.eccm, terminal: v.terminal, retarget: 0, laser: v.laser },
+  options: { eccm: v.eccm, terminal: v.terminal, retarget: 0, lurker: false, laser: v.laser },
   tech: { warhead: tech.warhead, laserEfficiency: tech.laserEfficiency, reactor: tech.reactor, active: tech.active, thermal: tech.thermal, em: tech.em, geo: tech.geo },
   sensor: { resolution: null, emSensitivity: tech.em },
   groundPod: false,
@@ -752,7 +752,7 @@ const unknownChecks = (m) => [
   ['unknown: a base with an option outside the rules evaluates nothing and says so', () => {
     const draft = m.md.emptyDraft('')
 
-    draft.carried = { ...draft.carried, groundPod: true }
+    draft.carried = { ...draft.carried, enhancedRadiation: true }
 
     const outcome = finish(m, inputOf(m, { goal: 'fastest', hitChance: '', keep: '5' }, { baseDraft: draft }))
     const result = outcome.result
@@ -904,11 +904,18 @@ const coverageChecks = (m) => [
       return skipped('no save is there')
     }
 
-    const fixture = await m.dd.loadSensorFixture(save.database, save.ids.GameID, save.ids.RaceID)
-    const controls = fixture.components.filter((component) => component.row.ComponentTypeID === m.dd.SENSOR_COMPONENT_TYPES.missileFireControl && component.row.MaxSensorRange > 0)
+    const controlsOf = (fixture) => fixture.components.filter((component) => component.row.ComponentTypeID === m.dd.SENSOR_COMPONENT_TYPES.missileFireControl && component.row.MaxSensorRange > 0)
+    let controls = controlsOf(await m.dd.loadSensorFixture(save.database, save.ids.GameID, save.ids.RaceID))
+
+    // The fixture's player race holds no missile fire control; the race that holds the most stands in for it, found by SQL.
+    if (!controls.length) {
+      const [holders] = await save.database.query(`select FCT_RaceTech.RaceID as race from FCT_RaceTech inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :game and FCT_ShipDesignComponents.ComponentTypeID = ${m.dd.SENSOR_COMPONENT_TYPES.missileFireControl} and FCT_ShipDesignComponents.MaxSensorRange > 0 group by FCT_RaceTech.RaceID order by count(*) desc, FCT_RaceTech.RaceID`, { replacements: { game: save.ids.GameID } })
+
+      controls = holders.length ? controlsOf(await m.dd.loadSensorFixture(save.database, save.ids.GameID, holders[0].race)) : []
+    }
 
     if (!controls.length) {
-      return skipped('the race has no missile fire control')
+      return skipped('no race of the save holds a missile fire control')
     }
 
     const problems = []
@@ -931,6 +938,7 @@ const coverageChecks = (m) => [
 // ---------- the nominations ----------
 
 const FIXTURES = require('./lib/missile-fixtures.json').fixtures
+const { fixtureTriple } = require('./lib/fixtures')
 
 const STOCK = { label: 'stock-271-g138', race: 785 }
 const ORDINARY = 154630
@@ -1043,6 +1051,28 @@ const nominateChecks = (m) => [
     const entry = outcome.result.entries[0]
 
     return draft.techMode === 'page' && draft.kind === 'designed' && draft.options.eccm === (entry.values.eccm > 0) && draft.carried.stages === seeded.draft.carried.stages && draft.activeMsp === seeded.draft.activeMsp && Number(draft.engineMsp) === entry.values.engineMsp && Number(draft.fuelMsp) === entry.values.fuelMsp ? true : short([draft.techMode, draft.options, draft.engineMsp, entry.values])
+  }],
+  ['nominate: a base with the lurker carries it into every candidate, half an MSP and half a BP over the same candidate without it, and into the drafts nominated, which the designer reproduces', () => {
+    const plain = reoptimise(m, { goal: 'fastest', hitChance: '', maxMsp: '40', keep: '200' })
+    const draft = { ...plain.seeded.draft, options: { ...plain.seeded.draft.options, lurker: true } }
+    const request = m.opt.readRequest({ fields: plain.fields, scenario: SCENARIO, tech: plain.tech, reference: m.opt.referenceOfColumn(plain.baseline), baseDraft: draft, stage: m.opt.stageOfDraft(designs().fixture, draft) })
+
+    if (!plain.request.ok || !request.ok) {
+      return short([plain.request.errors, request.errors])
+    }
+
+    const without = finish(m, plain.request.input)
+    const lurking = finish(m, request.input)
+    const keyOf = (entry) => JSON.stringify(entry.values)
+    const bare = new Map(without.result.entries.map((entry) => [keyOf(entry), entry]))
+    const matched = lurking.result.entries.filter((entry) => bare.has(keyOf(entry)))
+    const nominated = m.opt.nominations(lurking, { baseDraft: draft })
+    const alternatives = nominated.reduce((list, entry) => m.md.addAlternative(list, entry).list, [])
+    const compared = m.md.compareDesigns(plain.context, { ...plain.spec, alternatives })
+    const wrong = matched.filter((entry) => !close(entry.figures.size - bare.get(keyOf(entry)).figures.size, 0.5, 1e-9) || !close(entry.figures.cost - bare.get(keyOf(entry)).figures.cost, 0.5, 1e-9))
+    const unreproduced = compared.columns.slice(1).filter((column, at) => !close(column.figures.size.value, lurking.result.entries[at].figures.size, 1e-9) || !close(column.figures.cost.value, lurking.result.entries[at].figures.cost, 1e-9))
+
+    return request.ok && plain.seeded.draft.options.lurker === false && matched.length >= 3 && wrong.length === 0 && nominated.length === 3 && nominated.every((entry) => entry.options.lurker === true) && unreproduced.length === 0 && compared.columns.slice(1).every((column) => column.inputs.lurker.value === 1) ? true : short([request.ok, matched.length, wrong.length, nominated.map((entry) => entry.options), unreproduced.length])
   }],
 ]
 
@@ -1534,6 +1564,9 @@ const MUTATIONS = [
   { name: 'the deviation from a reference is an absolute figure', file: 'missile-optimizer.js', find: 'const part = Math.abs(figures[of] - reference[name]) / reference[name]', replace: 'const part = Math.abs(figures[of] - reference[name])', fails: ['goals: the match of a reference missile'] },
   { name: 'the size limit of a reference is twice its size', file: 'missile-optimizer.js', find: 'limits.maxMsp = { value: reference.size, error: \'\' }', replace: 'limits.maxMsp = { value: reference.size * 2, error: \'\' }', fails: ['nominate: the match of a reference defaults the size limit'] },
   { name: 'more than three are nominated', file: 'missile-optimizer.js', find: 'Math.min(limit, MAX_ALTERNATIVES)', replace: 'limit', fails: ['nominate: no more than three are nominated'] },
+  { name: 'the lurker of the base not read from the draft', file: 'missile-optimizer.js', find: 'const lurker = Boolean(draft.options && draft.options.lurker)', replace: 'const lurker = false', fails: ['nominate: a base with the lurker carries it'] },
+  { name: 'the lurker of the base not given to a candidate', file: 'missile-optimizer.js', find: 'retarget: base.retarget, lurker: base.lurker, laser: values.laser }', replace: 'retarget: base.retarget, lurker: false, laser: values.laser }', fails: ['nominate: a base with the lurker carries it'] },
+  { name: 'the lurker of the base not kept in the drafts nominated', file: 'missile-optimizer.js', find: 'lurker: Boolean(draft.options && draft.options.lurker), laser: values.laser }', replace: 'lurker: false, laser: values.laser }', fails: ['nominate: a base with the lurker carries it'] },
   { name: 'a candidate has a name that is not its figures', file: 'missile-optimizer.js', find: 'Math.round(thrust * 1000)}', replace: 'Math.round(thrust * 100)}', fails: ['domain: a candidate has one name'] },
   { name: 'the greatest number of results to keep is cut to 20', file: 'missile-optimizer.js', find: 'export const KEEP_MAX = 1000', replace: 'export const KEEP_MAX = 20', fails: ['keep: more than the greatest number is refused'] },
   { name: 'an ECCM the sensor lacks is read as 0', file: 'launcher-coverage.js', find: 'eccm: counter.value, problems', replace: 'eccm: counter.value || 0, problems', fails: ['coverage: a figure the sensor lacks is unknown'] },
@@ -1575,7 +1608,7 @@ const mutatedCopy = (file, from, to) => {
 // ---------- the saves ----------
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true, mutant: null, probe: null }
+  const options = { modded: fixtureTriple(), stock: null, mutations: true, mutant: null, probe: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1626,20 +1659,22 @@ const openSave = (file) => new Promise((resolve, reject) => {
 })
 
 const openSaves = async (options) => {
-  const [moddedFile, moddedGame, moddedRace] = options.modded
-  const [stockFile, stockGame, stockRace] = options.stock
-  const modded = await openSave(moddedFile)
-  const stock = await openSave(stockFile)
+  const named = {}
 
-  if (modded) {
-    SAVES.modded = { database: modded, ids: { GameID: moddedGame, RaceID: moddedRace } }
+  for (const label of ['modded', 'stock']) {
+    if (options[label]) {
+      const [file, GameID, RaceID] = options[label]
+      const database = await openSave(file)
+
+      named[label] = { file, database }
+
+      if (database) {
+        SAVES[label] = { database, ids: { GameID, RaceID } }
+      }
+    }
   }
 
-  if (stock) {
-    SAVES.stock = { database: stock, ids: { GameID: stockGame, RaceID: stockRace } }
-  }
-
-  return { moddedFile, stockFile, modded, stock }
+  return named
 }
 
 const closeSaves = () => Object.values(SAVES).forEach((save) => save.database.close())
@@ -1721,7 +1756,7 @@ const inChild = async (argv) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 // Every planted fault in a process of its own, as many at a time as the pool allows, results printed in the order of the list.
 const runMutants = async (options) => {
@@ -1785,9 +1820,9 @@ const run = async () => {
   }
 
   const real = await loadAll()
-  const { moddedFile, stockFile, modded, stock } = await openSaves(options)
+  const named = await openSaves(options)
 
-  console.log(`Saves read by the coverage checks: modded ${modded ? moddedFile : `${moddedFile} (not there)`}, stock ${stock ? stockFile : `${stockFile} (not there)`}`)
+  console.log(`Saves read by the coverage checks: ${['modded', 'stock'].map((label) => (named[label] ? `${label} ${named[label].database ? named[label].file : `${named[label].file} (not there)`}` : `${label} (none named)`)).join(', ')}`)
   console.log('The missile optimiser: domain, goals, cheapest per warhead, unreachable hit chances, results kept, incomplete runs, unknown figures, launcher coverage and nominations')
 
   for (const [name, test, detail] of GROUPS(real)) {

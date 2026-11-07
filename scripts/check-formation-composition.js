@@ -6,7 +6,7 @@
   The groups, each check a PASS or FAIL line:
   - A constructed race of 18 formations over 14 templates: exact deficits and excess by class, the two bases told apart, a complete formation, a template that is none, foreign, missing, not stored or empty (no comparison and no invented deficit), a formation with no element rows, units and sizes that are not stored, the mass of the elements reconciled with the units and sizes, the obsolete flag apart from the identity of the templates, an obsolete template with an STO class (a replacement review) and the cases that are none, and whether a formation fits one troop bay now and at the intended mass.
   - The saves, opened read-only: every comparison of every formation, on both bases, is compared with SQL written separately here (the classes, the units on each side, the mass, the flag, the STO classes), and the saves are known to hold the counts of formations, of formations whose original and replacement templates differ and of replacement reviews pinned below.
-  - The page in a browser: the real renderer, served by Vite from a copy of a save that is changed to hold a formation that is short in one class and over in another, a formation that no template covers, one with no elements and one under an obsolete template without an STO class (scripts/lib/page-server.js), is driven through its controls (the basis toggle, each row's expander, the page left and opened again) and what it draws is read back through the shared readers of scripts/lib/browser-observe.js. The expected figures come from SQL; nothing reads the template or the wording of a heading or a sentence.
+  - The page in a browser: the real renderer, served by Vite from a copy of the fixture save that is changed to hold a formation that is short in one class and over in another, a formation that no template covers, one with no elements and one under an obsolete template without an STO class (scripts/lib/page-server.js), is driven through its controls (the basis toggle, each row's expander, the page left and opened again) and what it draws is read back through the shared readers of scripts/lib/browser-observe.js. The expected figures come from SQL; nothing reads the template or the wording of a heading or a sentence.
   - Planted faults in copies of the utility, the model and the page, each of which must make a named check fail on an assertion of its own, by a value it reads and not by a call of the code under test that threw (scripts/lib/fault-credit.js `caughtBy`; a fault in the page is served to the browser), and benign rewrites (an explicit prop and event instead of v-model, a longhand v-on, a qualifier moved from the front to the back, a synonym in generated prose, a parenthesised condition) that must make none fail.
   - Controls of the harness: an assertion of a check is told from an error of the code under test.
 
@@ -25,6 +25,7 @@ const { assert, through, subjectModule, runChecks, judged, caughtBy, unobserved 
 const { runSuite } = require('./lib/suite-runner')
 const { pretendBrowser, NAVIGATION_FAILED } = require('./lib/pretend-browser')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -822,11 +823,9 @@ const openSave = (file) => new Promise((resolve, reject) => {
   const raw = new sqlite3.Database(resolved, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(standIn(raw))))
 })
 
-// The saves, with the counts they are known to hold: the formations of the race, those whose original and replacement templates differ and those whose chosen template is obsolete and holds an STO class (a replacement review), on each basis. The combined save is the one that holds obsolete templates with STO classes.
+// The saves, with the counts they are known to hold: the formations of the race, those whose original and replacement templates differ and those whose chosen template is obsolete and holds an STO class (a replacement review), on each basis. The fixture holds one formation in thousands that differs and no obsolete template with an STO class, so the page is driven on a copy of it that is changed to hold the cases (`plantedCopy`).
 const FIXTURES = [
-  { file: 'AuroraDB.db', GameID: 140, RaceID: 784, formations: 3288, differing: 0, reviews: { original: 0, replacement: 0 } },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', GameID: 138, RaceID: 785, formations: 206, differing: 65, reviews: { original: 0, replacement: 0 } },
-  { file: 'artifacts/combined-map/AuroraDB_combined_maps.db', GameID: 138, RaceID: 785, formations: 2553, differing: 1128, reviews: { original: 151, replacement: 3 } },
+  { file: FIXTURE.file, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, formations: 5337, differing: 1, reviews: { original: 0, replacement: 0 } },
 ]
 
 // The comparison of every formation worked out in SQL written here, apart from the module's: a function of a formation id and a basis that gives { state, reason, templateId, flag, classes (by class id), actualMass, intendedMass, review, same }, and the largest bay the race's troop ships hold.
@@ -1066,8 +1065,8 @@ for (const { fixture, index } of SAVE_ENTRIES) {
 
 // ---------- the page in a browser ----------
 
-const BROWSER_SAVE = 1
-const BROWSER_NAMES = { game: 'EggSample', race: 'EggSample' }
+const BROWSER_SAVE = 0
+const BROWSER_NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const BROWSER_TIMEOUT = 120000
 
 // What the page on screen shows; runs in the page, through the shared readers of scripts/lib/browser-observe.js (`installScreen`: `visible`, `visibleText`, `hooked`). The hooks the template carries (data attributes) find the elements, never a heading or other wording, and only what a player can see counts: an element is on screen when it is `visible` or draws text of its own, and what it says is its `visibleText`. The decisions the hooks carry come back beside the words and figures the elements draw, and the checks read each decision from those words and figures too. `hidden` names the groups with a hook element that is there and not on screen; `grouping` is the page's setting of the thousands separator, in which its figures are read.
@@ -1230,7 +1229,7 @@ const observePage = (browser, url, plan, { timeout = BROWSER_TIMEOUT, viewport =
   return seen
 }, viewport ? { viewport } : {})
 
-// A copy of a save, changed so that one system holds formations in the states the page has to show. Resolves to { file, plan: { system, ids, short, none, empty, obsolete }, troops }, the ids being the formations F (short in one class and over in another on one basis, under an obsolete template that holds an STO class on the other), G (no template), H (no element rows) and K (under an obsolete template without an STO class). The changes are SQL on the copy; the troop bays are made as large as F's actual mass, so that F fits one bay now and not at the intended mass of the replacement template.
+// A copy of a save, changed so that one system holds formations in the states the page has to show. Resolves to { file, plan: { system, ids, short, none, empty, obsolete }, troops }, the ids being the formations F (short in one class and over in another on one basis, under an obsolete template that holds an STO class on the other), G (no template), H (no element rows) and K (under an obsolete template without an STO class). The changes are SQL on the copy; the troop bays are made as large as F's actual mass, so that F fits one bay now and not at the intended mass of the replacement template. A save whose formations all stand under one template (the fixture: one formation in 5,337 differs) gets F's replacement template set to another template of the race that holds F's larger class, and a system that holds hundreds of formations, which the page would list in full, keeps only the formations the case names.
 const plantedCopy = async (fixture) => {
   const file = path.join(os.tmpdir(), `ae-composition-${process.pid}.db`)
 
@@ -1245,6 +1244,9 @@ const plantedCopy = async (fixture) => {
   const candidates = await q(`select f.FormationID as id, f.OriginalTemplateID as original, f.ReplacementTemplateID as replacement, p.SystemID as system from FCT_GroundUnitFormation f inner join FCT_Population p on p.PopulationID = f.PopulationID where f.GameID = ${GameID} and f.RaceID = ${RaceID} and f.PopulationID > 0 and exists (select 1 from FCT_RaceSysSurvey s where s.SystemID = p.SystemID and s.RaceID = ${RaceID} and s.GameID = ${GameID}) and exists (select 1 from FCT_GroundUnitFormationElement e where e.FormationID = f.FormationID) order by p.SystemID, f.FormationID`)
   const totals = await q(`select p.SystemID as system, count(*) as n from FCT_GroundUnitFormation f inner join FCT_Population p on p.PopulationID = f.PopulationID where f.GameID = ${GameID} and f.RaceID = ${RaceID} group by p.SystemID`)
   const size = new Map(totals.map((row) => [row.system, row.n]))
+  // The page lists the formations stationed at no colony before its switch is pressed, so the system needs one: the formations aboard a ship, by the system of the ship's fleet (or of its mothership's), in the systems the race has named.
+  const remote = await q(`select x.system as system, count(*) as n from (select (select coalesce(fl.SystemID, fm.SystemID) from FCT_Ship s left join FCT_Fleet fl on fl.FleetID = s.FleetID left join FCT_Ship ms on ms.ShipID = s.MothershipID left join FCT_Fleet fm on fm.FleetID = ms.FleetID where s.ShipID = f.ShipID) as system from FCT_GroundUnitFormation f where f.GameID = ${GameID} and f.RaceID = ${RaceID} and coalesce(f.PopulationID, 0) <= 0 and f.ShipID > 0) x where exists (select 1 from FCT_RaceSysSurvey r where r.SystemID = x.system and r.RaceID = ${RaceID} and r.GameID = ${GameID} and r.Name is not null and r.Name != '') group by x.system`)
+  const remoteIn = new Map(remote.map((row) => [row.system, row.n]))
   const classesOf = async (id) => (await q(`select ClassID as class, Units as units from FCT_GroundUnitFormationElement where FormationID = ${id} order by ElementID`))
   const holds = async (template, classId) => (await q(`select Units as units from FCT_GroundUnitFormationElementTemplates where GameID = ${GameID} and FormationTemplateID = ${template} and ClassID = ${classId}`))[0]
   const ownedTemplate = async (template) => (await q(`select 1 as ok from FCT_GroundUnitFormationTemplate where GameID = ${GameID} and TemplateID = ${template} and RaceID = ${RaceID}`)).length === 1
@@ -1252,15 +1254,17 @@ const plantedCopy = async (fixture) => {
   const stoFormation = async (id) => (await q(`select 1 as ok from FCT_GroundUnitFormationElement e where e.FormationID = ${id} and exists ${sto('e.ClassID')}`)).length > 0
   let found = null
 
-  for (const system of [...new Set(candidates.map((row) => row.system))]) {
+  const owned = (await q(`select TemplateID as id from FCT_GroundUnitFormationTemplate where GameID = ${GameID} and RaceID = ${RaceID} order by TemplateID`)).map((row) => row.id)
+
+  for (const system of [...new Set(candidates.map((row) => row.system))].sort((a, b) => size.get(a) - size.get(b) || a - b)) {
     const here = candidates.filter((row) => row.system === system)
 
-    if (size.get(system) < 4 || size.get(system) > 15 || here.length < 4) {
+    if (here.length < 4 || !remoteIn.get(system)) {
       continue
     }
 
     for (const F of here) {
-      if (!(F.original > 0 && F.replacement > 0 && F.original !== F.replacement && await ownedTemplate(F.original) && await ownedTemplate(F.replacement))) {
+      if (!(F.original > 0 && F.replacement > 0 && await ownedTemplate(F.original) && await ownedTemplate(F.replacement))) {
         continue
       }
 
@@ -1268,26 +1272,44 @@ const plantedCopy = async (fixture) => {
       const c1 = elements.find((item) => item.units >= 2)
       const c2 = elements.find((item) => c1 && item.class !== c1.class)
 
-      if (!c1 || !c2 || !(await holds(F.original, c1.class)) || !(await holds(F.replacement, c1.class)) || !(await holds(F.original, c2.class)) || (await holds(F.original, c2.class)).units < 1 || await stoTemplate(F.original) || await stoTemplate(F.replacement) || await stoFormation(F.id)) {
+      if (!c1 || !c2 || !(await holds(F.original, c1.class)) || !(await holds(F.original, c2.class)) || (await holds(F.original, c2.class)).units < 1 || await stoTemplate(F.original) || await stoFormation(F.id)) {
+        continue
+      }
+
+      let replacement = F.replacement !== F.original && await holds(F.replacement, c1.class) && !(await stoTemplate(F.replacement)) ? F.replacement : null
+
+      for (const template of replacement === null ? owned : []) {
+        if (template !== F.original && await holds(template, c1.class) && !(await stoTemplate(template))) {
+          replacement = template
+
+          break
+        }
+      }
+
+      if (replacement === null) {
         continue
       }
 
       let K = null
 
       for (const other of here.filter((row) => row.id !== F.id)) {
-        if (other.replacement > 0 && other.replacement !== F.original && other.replacement !== F.replacement && await ownedTemplate(other.replacement) && !(await stoTemplate(other.replacement)) && !(await stoFormation(other.id)) && !(await holds(other.replacement, c1.class)) && !(await classesOf(other.id)).some((item) => item.class === c1.class)) {
+        if (other.replacement > 0 && other.replacement !== F.original && other.replacement !== replacement && await ownedTemplate(other.replacement) && !(await stoTemplate(other.replacement)) && !(await stoFormation(other.id)) && !(await holds(other.replacement, c1.class)) && !(await classesOf(other.id)).some((item) => item.class === c1.class)) {
           K = other
 
           break
         }
       }
 
-      const rest = here.filter((row) => row.id !== F.id && (!K || row.id !== K.id))
+      if (!K) {
+        continue
+      }
+
+      const rest = here.filter((row) => row.id !== F.id && row.id !== K.id)
 
       let J = null
 
       for (const other of rest.slice(2)) {
-        if (other.replacement > 0 && ![F.original, F.replacement, K.replacement].includes(other.replacement) && await ownedTemplate(other.replacement) && !(await stoTemplate(other.replacement)) && !(await stoFormation(other.id)) && !(await holds(other.replacement, c1.class)) && (await classesOf(other.id)).length > 0 && !(await classesOf(other.id)).some((item) => item.class === c1.class)) {
+        if (other.replacement > 0 && ![F.original, replacement, K.replacement].includes(other.replacement) && await ownedTemplate(other.replacement) && !(await stoTemplate(other.replacement)) && !(await stoFormation(other.id)) && !(await holds(other.replacement, c1.class)) && (await classesOf(other.id)).length > 0 && !(await classesOf(other.id)).some((item) => item.class === c1.class)) {
           J = other
 
           break
@@ -1295,7 +1317,7 @@ const plantedCopy = async (fixture) => {
       }
 
       if (K && J && rest.length >= 3) {
-        found = { system, F, c1, c2, K, J, G: rest[0], H: rest[1] }
+        found = { system, F, c1, c2, K, J, G: rest[0], H: rest[1], replacement }
 
         break
       }
@@ -1310,14 +1332,35 @@ const plantedCopy = async (fixture) => {
     throw new HarnessError(`${fixture.file} holds no system with the formations the browser check needs`)
   }
 
-  const { F, c1, c2, K, J, G, H } = found
+  const { F, c1, c2, K, J, G, H, replacement } = found
+
+  // The page lists every formation of the system and the fixture holds hundreds in each: the formations at a colony that the case does not name are deleted from the copy, with their elements, so that the system lists the five the checks name and the formations aboard ships, which the page lists before its switch is pressed.
+  const named = [F.id, G.id, H.id, K.id, J.id]
+  const unnamed = (await q(`select r.id as id from (${rowsOfSystemSql(fixture, found.system)}) r inner join FCT_GroundUnitFormation f on f.FormationID = r.id where f.PopulationID > 0`)).map((row) => row.id).filter((id) => !named.includes(id))
+
+  for (let at = 0; at < unnamed.length; at += 500) {
+    const ids = unnamed.slice(at, at + 500).join(', ')
+
+    await runSql(raw, `delete from FCT_GroundUnitFormationElement where FormationID in (${ids})`)
+    await runSql(raw, `delete from FCT_GroundUnitFormation where FormationID in (${ids})`)
+  }
+
+  // The replacement template has to weigh more than the largest bay, which is made as large as F's own mass, so that F fits one bay now and not at the intended mass; the fixture's templates are lighter than the formations that stand under them, so the units added to F's larger class are as many as that takes (three at least).
+  const weights = (await q(`select (select sum(e.Units * k.Size) from FCT_GroundUnitFormationElement e inner join FCT_GroundUnitClass k on k.GroundUnitClassID = e.ClassID where e.FormationID = ${F.id}) as formation, (select sum(t.Units * k.Size) from FCT_GroundUnitFormationElementTemplates t inner join FCT_GroundUnitClass k on k.GroundUnitClassID = t.ClassID where t.GameID = ${GameID} and t.FormationTemplateID = ${replacement}) as template, (select Size from FCT_GroundUnitClass where GroundUnitClassID = ${c1.class}) as size`))[0]
+
+  if (!(weights.size > 0)) {
+    throw new HarnessError(`${fixture.file}: the class ${c1.class} has no size, so a template cannot be made heavier than a bay by its units`)
+  }
+
+  const added = Math.max(3, Math.ceil((weights.formation - weights.template) / weights.size) + 2)
 
   for (const statement of [
+    ...(replacement === F.replacement ? [] : [`update FCT_GroundUnitFormation set ReplacementTemplateID = ${replacement} where FormationID = ${F.id}`]),
     `update FCT_GroundUnitFormationElement set Units = Units - 1 where FormationID = ${F.id} and ClassID = ${c1.class}`,
-    `update FCT_GroundUnitFormationElementTemplates set Units = Units + 3 where GameID = ${GameID} and FormationTemplateID = ${F.replacement} and ClassID = ${c1.class}`,
+    `update FCT_GroundUnitFormationElementTemplates set Units = Units + ${added} where GameID = ${GameID} and FormationTemplateID = ${replacement} and ClassID = ${c1.class}`,
     `update FCT_GroundUnitFormationElementTemplates set Units = Units - 1 where GameID = ${GameID} and FormationTemplateID = ${F.original} and ClassID = ${c2.class}`,
     `update FCT_GroundUnitFormationTemplate set Obsolete = 0 where GameID = ${GameID} and TemplateID = ${F.original}`,
-    `update FCT_GroundUnitFormationTemplate set Obsolete = 1 where GameID = ${GameID} and TemplateID in (${F.replacement}, ${K.replacement})`,
+    `update FCT_GroundUnitFormationTemplate set Obsolete = 1 where GameID = ${GameID} and TemplateID in (${replacement}, ${K.replacement})`,
     `update FCT_GroundUnitClass set STOWeapon = 1 where GroundUnitClassID = ${c1.class}`,
     `update FCT_GroundUnitFormation set OriginalTemplateID = 0, ReplacementTemplateID = 0 where FormationID = ${G.id}`,
     `delete from FCT_GroundUnitFormationElement where FormationID = ${H.id}`,
@@ -1644,9 +1687,9 @@ add('browser-restored', 'the basis left set is the one the page opens on again',
 // A fault or a benign rewrite: [name, from, to, file, the ids of the checks one of which must fail (a fault), browser (the page is served to the browser and driven), parts (a browser fault: the PARTS of the page its checks are caught on, the drive narrowed to them, with a part each browser check it names reads (READS); [] for the opening screen and the remote only switch alone)]. `from` and `to` may be lists of replacements made in order, each in `file` or, where `file` is a list too, in the file at its place. A rewrite names no parts: its page is driven on every part.
 /* eslint-disable no-template-curly-in-string */
 const MUTANTS = [
-  ['the deficit is not worked out', 'Math.max(0, intended - actual)', '0', COMPOSITION_FILE, ['deficit-excess', 'complete', 'mass-reconcile', 'save-0', 'save-1', 'save-2']],
-  ['the excess is not worked out', 'Math.max(0, actual - intended)', '0', COMPOSITION_FILE, ['deficit-excess', 'save-0', 'save-1', 'save-2']],
-  ['a class that only the template holds is dropped', 'template.elements.forEach((item) => {\n    const found = row(item)', 'template.elements.filter((item) => rows.has(item.classId)).forEach((item) => {\n    const found = row(item)', COMPOSITION_FILE, ['deficit-excess', 'save-1', 'save-2']],
+  ['the deficit is not worked out', 'Math.max(0, intended - actual)', '0', COMPOSITION_FILE, ['deficit-excess', 'complete', 'mass-reconcile', 'save-0']],
+  ['the excess is not worked out', 'Math.max(0, actual - intended)', '0', COMPOSITION_FILE, ['deficit-excess', 'save-0']],
+  ['a class that only the template holds is dropped', 'template.elements.forEach((item) => {\n    const found = row(item)', 'template.elements.filter((item) => rows.has(item.classId)).forEach((item) => {\n    const found = row(item)', COMPOSITION_FILE, ['deficit-excess']],
   ['a template with no elements is compared', "if (template.state !== 'found' || template.elements.length === 0) {", "if (template.state !== 'found') {", COMPOSITION_FILE, ['no-template']],
   ['a formation with no elements is compared', 'if (node.elements.length === 0) {', 'if (false) {', COMPOSITION_FILE, ['no-elements']],
   ['units that are not stored count as none', 'found.actualKnown = false', 'found.actual += 0', COMPOSITION_FILE, ['unknown-units']],
@@ -1670,7 +1713,7 @@ const MUTANTS = [
   ['the troop ships that are not known read as none', "if (!troops) {\n    return { kind: 'unknown'", "if (!troops) {\n    return { kind: 'no-bays'", COMPOSITION_FILE, ['carry', 'troop-fit']],
   ['the default basis is the original template', "default: 'replacement'", "default: 'original'", COMPOSITION_FILE, ['view']],
   ['a stored basis that is not offered is kept', '(BASIS_KEYS.includes(stored) ? stored : undefined)', 'stored', COMPOSITION_FILE, ['view']],
-  ['the template mass leaves out the first class', "figure(items, classes, figures, 'size') : { value: null", "figure(items.slice(1), classes, figures, 'size') : { value: null", GROUND_FILE, ['model-template', 'mass-reconcile', 'save-1', 'save-2']],
+  ['the template mass leaves out the first class', "figure(items, classes, figures, 'size') : { value: null", "figure(items.slice(1), classes, figures, 'size') : { value: null", GROUND_FILE, ['model-template', 'mass-reconcile']],
   ['no class is an STO class by its weapon', 'let found = known && row.STOWeapon > 0', 'let found = false', GROUND_FILE, ['model-template', 'replacement-review']],
   ['no class is an STO class by its equipment', '} else if (component && component.STO > 0) {', '} else if (false) {', GROUND_FILE, ['model-template', 'replacement-review']],
   ['a class that is not known to be STO is not an STO class', 'return found ? true : known ? false : null', 'return found', GROUND_FILE, ['model-template', 'replacement-review']],
@@ -2037,6 +2080,8 @@ const variantsOf = () => [
 const main = async () => {
   const totals = await runSuite({
     script: __filename,
+    // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
+    workers: 4,
     inputs: FIXTURES.map((fixture) => fixture.file),
     variants: variantsOf(),
     counts: () => ({ checks, failures }),

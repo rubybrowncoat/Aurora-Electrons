@@ -1,7 +1,7 @@
 /*
   Checks the planners' design rules (src/renderer/utilities/design-rules.js) against a save: every stored engine, class speed, class range input, jump drive and class maintenance figure (annual failure rate, maintenance supplies, damage roll and thresholds) of one race is recomputed from the rows it was designed with and compared with what the game wrote.
 
-  node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]
+  node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]
 
   Zero mismatches means the rules reproduce every stored row. A row the rules cannot reproduce for a reason outside them (a modded tech, a missing tech row, a design made under older rules) is counted as explained, with its reason; any other difference is a mismatch and sets exit code 1. The race's components are the FCT_ShipDesignComponents rows of its game that it holds through FCT_RaceTech (TechID = SDComponentID), the way the Propulsion Planner selects them; --all-game checks every component of the game instead, other races' designs included. Each check is printed under the id, verification and game versions of the rules it checks, read from the rule registry (utilities/provenance.js, filled by design-rules.js), and a registered rule that no check run covers is listed at the end. The save is opened read-only through the same sqlite3 module the app uses.
 
@@ -9,9 +9,11 @@
 
   The sensor check rebuilds every active sensor, missile fire control, passive sensor and beam fire control the race owns from the techs its components name, each tech found by its tech type and never by the slot it sits in, and compares the strength, range, cost with its Uridium and Corbomite, crew, HTK, ECCM and CTD and, for a beam fire control, the size, range, tracking and special function with what the game stored (utilities/design-data.js `loadSensorFixture`; the rules are the design.*Sensor* and design.beamFireControl* ones of utilities/design-rules.js, the comparison is scripts/lib/sensor-reconcile.js). A figure whose tech the component does not name, names twice or names by a row the save lacks is counted as unknown and never as 0. A difference is explained only by an alternative of the reconciliation that fits (the techs the stored figures imply, a tenth of the cost, an uncapped range) or by a row of KNOWN_SENSOR_ROWS pinned to its stored and computed figures; any other is a mismatch.
 
-  node scripts/check-design-rules.js --fixtures [--no-mutations]  runs the missile and sensor reports on the fixtures in scripts/lib/missile-fixtures.json and scripts/lib/sensor-fixtures.json, the checks of the rules and of the candidate evaluator (utilities/design-rules.js `evaluateMissile`) on them, and every planted fault of the rules, the loaders and the reconciliations (each must fail the checks it names); no save is read; --no-mutations leaves out the planted faults
-  node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]   writes the designs of the scope into the fixtures file
-  node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]    writes the sensors and fire controls of the scope into the fixtures file
+  A pinned row (an engine of scripts/lib/pinned-engines.js, a missile design or a sensor or fire control of the tables in this script) belongs to a pinned save of scripts/lib/pinned-saves.js, which a save is told by its game number, name, start year and game time and not by its file name; on any other save no pin applies and every difference is a mismatch. A pin explains a difference only while the stored and computed figures of its row are the audited ones, and a pin that no comparison used is itself a mismatch that names the reason: the stored figure now agrees with the computed one, a figure changed, the figure is unknown now, or the row is gone (judged from the rows read in a run of --all-game, and from the rows the game holds in a run of one race, whose pins of another race's rows are counted as not read and not judged). The `pins:` note of a check says how many pins the save has, how many a comparison used and how many are stale.
+
+  node scripts/check-design-rules.js --fixtures [--no-mutations]  runs the missile and sensor reports on the fixtures in scripts/lib/missile-fixtures.json and scripts/lib/sensor-fixtures.json, the checks of the rules and of the candidate evaluator (utilities/design-rules.js `evaluateMissile`) on them, the cases of the pins on those fixtures and on synthetic rows, and every planted fault of the rules, the loaders and the reconciliations (each must fail the checks it names); the fixtures read no save, but the files that witness the pinned saves are opened read-only for the identity the registry gives them, and the planted cases of the pins alter copies of the default fixture save in the temp folder and run the save mode on each in a process of its own (a file or a save that is absent is skipped with its reason); --no-mutations leaves out the planted faults and those copies
+  node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]   writes the designs of the scope into the fixtures file
+  node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]    writes the sensors and fire controls of the scope into the fixtures file
   node scripts/check-design-rules.js --run-mutant <name>        one planted fault of the rules in this process, its result printed as JSON: what --fixtures starts for each fault, so no fault shares module state with another or with the checks
 */
 const fs = require('fs')
@@ -20,7 +22,11 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, fixturePath } = require('./lib/fixtures')
 const { inParallel, jobs, runChild } = require('./lib/check-pool')
+const { PINNED_ENGINES } = require('./lib/pinned-engines')
+const { PINNED_SAVES, pinnedSaveOfGame, pinnedRows } = require('./lib/pinned-saves')
+const { plantLurker } = require('./lib/planted-lurker')
 
 const RULES = ['engine', 'speed', 'range', 'jump', 'maintenance', 'missile', 'sensor']
 
@@ -35,21 +41,31 @@ const RELATIVE_TOLERANCE = 1e-6
 const ABSOLUTE_TOLERANCE = 1e-9
 const NAMED_CLASSES = [64475, 62944]
 
-// Rows the rules cannot reproduce for a reason outside them, each checked by hand against the saves. A key is rule:id:field. Nothing else is explained away: a difference not listed here and not matched by a pattern in engineExplainer or jumpExplainer is a mismatch.
-const KNOWN_ROWS = {
-  'engine:500260:cost': "the stored cost is a tenth of the rule's 1500; the sample's other engines on the same thermal tech (500722, 500735, 500606) match the rule, so this cost was changed outside the design rule",
-  'engine:500613:military': "a 0.8 HS engine at thrust 0.9 is military under the rule (commercial needs 25 HS and thrust 0.5 or less); the flag was changed outside the design rule, and the sample's commercial engines (500246, 500707, 500708) obey it",
-}
+// Engine rows the rules cannot reproduce for a reason outside them are pinned in scripts/lib/pinned-engines.js (shared with check-signatures.js), each to its pinned save (scripts/lib/pinned-saves.js), component, field and the stored and computed figures observed. Nothing else is explained away: a difference not pinned there and not matched by a pattern in engineExplainer is a mismatch.
 
-// Missile differences checked by hand, each pinned to its game, design, field and the stored and computed figures observed (the library's `knownDifference` explains a difference only while both still match): a changed figure, or another save that reuses the id, is a mismatch.
-const KNOWN_MISSILE_ROWS = [
+// Missile differences checked by hand, each pinned to its save, design, field and the stored and computed figures observed (the library's `pinFor` explains a difference only while both still match, on the save the pin names): a changed figure, or another save that reuses the game and the id, is a mismatch, and a pin that no comparison of its save used is a mismatch too.
+const MODDED_MISSILE_ROWS = [
   { game: 140, id: 500724, field: 'Cost', stored: 211.85, computed: 349.05, reason: "the stored cost equals the sum of the stored minerals and is 137.2 BP under the rule's: the design carries a thermal sensor of strength 150 on the modded thermal level 10000, far above the stock levels, and its stored Uridium (15.1) is 136.3 under the rule's; the cause is not identified" },
   { game: 140, id: 500724, field: 'Uridium', stored: 15.1, computed: 151.4, reason: "the rule's Uridium is the thermal sensor's 150 plus 0.9 of terminal guidance and 0.5 of retargeting; the stored 15.1 is 136.3 BP less, nearly all of the difference in the stored cost, and the cause is not identified" },
-  { game: 140, id: 500724, field: 'UnstoredMinerals', stored: 0, computed: 0.9, reason: 'the stored cost equals the stored minerals, so the 0.9 Corundium the rule adds for the laser warhead is not in the cost of this design (the laser designs of the other races in the sample do match the rule); the cause is not identified, and it may be the same one as in the Uridium' },
+  { game: 140, id: 500724, field: 'UnstoredMinerals', stored: 0, computed: 0.9, reason: 'the stored cost equals the stored minerals, so the 0.9 Corundium the rule adds for the laser warhead is not in the cost of this design (the laser designs of the other races of game 140 do match the rule); the cause is not identified, and it may be the same one as in the Uridium' },
+]
+
+const STOCK_MISSILE_ROWS = [
   { game: 138, id: 154678, field: 'Endurance', stored: 5643561.9, computed: 5647991.8, reason: "the stored endurance is 0.08% under the rule's, from a 625 L own tank at 0.23 EP and fuel use 1.73205 L/EPH (engine 154677, thrust 0.5, nine second stages); the speed (460), the fuel (850 L with the stages') and every other figure of the design reproduce, so the cause is not identified: the engine's unrounded power (0.234375 EP) would move the endurance 1.9%, not 0.08%" },
   { game: 138, id: 154678, field: 'MaxRange', stored: 2596038501, computed: 2598076228, reason: 'follows the endurance of this design, 154678, the difference of which is not identified' },
   { game: 138, id: 154678, field: 'TotalFlightTime', stored: 6306886, computed: 6311316.8, reason: "follows the endurance of this design, 154678: the second stages' flight time adds to it unchanged" },
 ]
+
+const KNOWN_MISSILE_ROWS = [...pinnedRows('modded-g140', MODDED_MISSILE_ROWS), ...pinnedRows('stock-271-g138', STOCK_MISSILE_ROWS)]
+
+// The pinned save a fixture of scripts/lib is of: the one its label names, or none (a fixture of a save with no pin).
+const fixtureSave = (fixture) => (PINNED_SAVES[fixture.label] ? fixture.label : null)
+
+// Whether a fixture holds every row of its game, by its own account of its scope; a pin of a row it does not hold is stale only then.
+const completeFixture = (fixture) => /^every /.test(fixture.scope)
+
+// The pins of `rows` that belong to the pinned save `save`.
+const pinsOf = (rows, save) => rows.filter((pin) => pin.save === save)
 
 const fail = (message) => {
   console.error(message)
@@ -91,8 +107,14 @@ const parseArguments = (argv) => {
     }
   }
 
+  // No save named: the fixture of scripts/lib/fixtures.js and its player race (a named save needs its race named as well).
+  if (!options.fixtures && options.mutant === null && !options.save) {
+    options.save = fixturePath()
+    options.race = Number.isInteger(options.race) ? options.race : FIXTURE.raceId
+  }
+
   if (!options.fixtures && options.mutant === null && (!options.save || !Number.isInteger(options.race))) {
-    fail('Usage: node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]\n       node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js --fixtures')
+    fail('Usage: node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--rules engine,speed,range,jump,maintenance,missile,sensor] [--all-game] [--ledger]\n       node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js [<save.db> --race <RaceID>] [--all-game] --export-sensor-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js --fixtures')
   }
 
   if ((options.exportFile || options.sensorExportFile) && !options.label) {
@@ -122,7 +144,7 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
 })
 
 const loadRules = async () => {
-  const { 'design-rules': rules, provenance: registry } = await loadUtilities(['design-rules', 'provenance'])
+  const { 'design-rules': rules, provenance: registry } = await loadUtilities(['design-rules', 'design-data', 'provenance'])
 
   return { ...rules, registry, isAvailable: registry.isAvailable }
 }
@@ -131,8 +153,12 @@ const close = (stored, computed) => Math.abs(stored - computed) <= Math.max(ABSO
 
 const format = (value) => (typeof value === 'number' && !Number.isInteger(value) ? Number(value.toPrecision(10)) : value)
 
+// Whether a figure the save stores or the rules give is there at all: a stored NULL, or a figure the rules do not give, is unknown. It never agrees with a figure, and it is never read as 0: a pin audited at stored 0 does not explain a NULL, and reports it stale.
+const isKnown = (value) => value !== null && value !== undefined && !Number.isNaN(value)
+
 class Report {
-  constructor (rule, ruleIds, scope = '') {
+  // `ledger` is the account of the pins of the save the report is on (the library's `createPinLedger`), or null for a report that has no pinned rows.
+  constructor (rule, ruleIds, scope = '', ledger = null) {
     this.rule = rule
     this.ruleIds = ruleIds
     this.scope = scope
@@ -140,18 +166,21 @@ class Report {
     this.mismatches = []
     this.explained = []
     this.notes = []
+    this.ledger = ledger
   }
 
-  // `kind` is 'integer' (exact), 'decimal' (relative tolerance) or 'flag'. The difference is explained when `explain(field, stored, computed)` gives a reason or the row is in KNOWN_ROWS, otherwise it is a mismatch.
+  // `kind` is 'integer' (exact), 'decimal' (relative tolerance) or 'flag'. A figure the save does not store, or the rules do not give, is unknown: never agreement, and never a figure of 0. The difference is explained when `explain(field, stored, computed)` gives a reason or the row is pinned (to its save, component, field and figures), otherwise it is a mismatch. Every comparison goes through the ledger, so that `settle` can tell a pin no comparison used.
   compare (row, field, stored, computed, kind, explain) {
-    const same = kind === 'decimal' ? this.close(Number(stored), Number(computed)) : Number(stored) === Number(computed)
+    const known = isKnown(stored) && isKnown(computed)
+    const same = known && (kind === 'decimal' ? this.close(Number(stored), Number(computed)) : Number(stored) === Number(computed))
+    const pin = this.ledger ? this.ledger.see(row, field, same ? 'agree' : 'differ', stored, computed) : null
 
     if (same) {
       return
     }
 
     const entry = { id: row.id, name: row.name, field, stored: format(stored), computed: format(computed) }
-    const reason = KNOWN_ROWS[`${this.rule}:${row.id}:${field}`] || (explain ? explain(field, Number(stored), Number(computed)) : null)
+    const reason = (pin ? pin.reason : null) || (explain && known ? explain(field, stored, computed) : null)
 
     if (reason) {
       this.explained.push({ ...entry, reason })
@@ -160,8 +189,30 @@ class Report {
     }
   }
 
-  // A row that cannot be recomputed at all.
+  // Ends the comparisons: every pin of the save that no comparison used is a mismatch, whether its row now agrees, is unknown, has a changed figure or is gone from the scope read (a pin of a row not read is judged only where the scope was every row of the game). It says how many pins the save has, so that zero mismatches is read against them.
+  settle () {
+    if (!this.ledger) {
+      return
+    }
+
+    const stale = this.ledger.stale()
+    const unread = this.ledger.unread()
+
+    for (const { pin, name, why } of stale) {
+      this.mismatches.push({ id: pin.id, name, field: pin.field, stored: format(pin.stored), computed: format(pin.computed), stale: why })
+    }
+
+    const pins = this.ledger.pins.length
+
+    this.notes.push(pins ? `pins: ${pins} pinned figures of this save, ${pins - stale.length - unread} used, ${stale.length} stale${unread ? `, ${unread} of rows this run does not read` : ''}` : 'pins: this save has none for this check')
+  }
+
+  // A row that cannot be recomputed at all. The ledger is told the row was read before the skip, so that its pinned fields are stale pins (the run read the row and could not check the figures) and not pins of rows this run does not read.
   skip (row, reason) {
+    if (this.ledger) {
+      this.ledger.read(row)
+    }
+
     this.explained.push({ id: row.id, name: row.name, field: '-', stored: '-', computed: '-', reason })
   }
 
@@ -202,7 +253,7 @@ class Report {
     }
 
     for (const entry of this.mismatches) {
-      console.log(`  MISMATCH ${entry.id} "${entry.name}" ${entry.field}: stored ${entry.stored}, computed ${entry.computed}`)
+      console.log(entry.stale ? `  MISMATCH ${entry.id} "${entry.name}" ${entry.field}: the pin of stored ${entry.stored}, computed ${entry.computed} is stale: ${entry.stale}` : `  MISMATCH ${entry.id} "${entry.name}" ${entry.field}: stored ${entry.stored}, computed ${entry.computed}`)
     }
 
     for (const entry of this.explained) {
@@ -220,10 +271,9 @@ const componentParameters = (parameters, allGame) => (allGame ? { ':game': param
 
 const named = (row) => ({ id: row.SDComponentID, name: row.Name })
 
-const checkEngines = async (context) => {
-  const { database, rules, techs, parameters, allGame } = context
-  const report = new Report('engine', RULE_IDS.engine)
-  const rows = await all(database, componentsSql(allGame, 1), componentParameters(parameters, allGame))
+// Every engine row of the scope against the engine rule, in a report: `rows` are the FCT_ShipDesignComponents rows of the engines, `techs` the tech rows by id, `save` the pinned save the rows are of (a key of scripts/lib/pinned-saves.js, or null), `allGame` whether `rows` are every engine of the game (a pin of an engine not among them is then a stale pin) or only the race's own, and `present` the ids of the engines the game holds whoever holds them (a pin of an engine it lacks is a stale pin in either scope), or null where that is not read.
+const reconcileEngines = (library, rules, techs, rows, { save, game, allGame, present = null }) => {
+  const report = new Report('engine', RULE_IDS.engine, '', library.createPinLedger(PINNED_ENGINES, { save, game, complete: allGame, present }))
   const shippingLine = rows.filter((row) => row.ShippingLineSystem).length
 
   report.notes.push(`scope: ${allGame ? 'every engine of the game' : 'the race\'s engines, held through FCT_RaceTech'}; ${shippingLine} shipping-line engine(s) among them`)
@@ -255,7 +305,32 @@ const checkEngines = async (context) => {
     report.compare(identity, 'military', row.MilitarySystem, design.commercial ? 0 : 1, 'flag', explain)
   }
 
+  report.settle()
+
   return report
+}
+
+// The ids of the rows of a kind ('engine', 'missile' or 'sensor') the game holds whoever holds them: what a pin of a row is judged against in a run that reads one race's rows only, where a pin of a row the game no longer has is a stale pin and a pin of a row of another race is not read.
+const presentIds = async (library, database, parameters, kind) => {
+  const store = appDatabase(database)
+  const game = parameters[':game']
+
+  if (kind === 'missile') {
+    return new Set((await library.ownedMissiles(store, game)).map((row) => row.MissileID))
+  }
+
+  if (kind === 'sensor') {
+    return new Set((await library.ownedSensors(store, game)).map((row) => row.SDComponentID))
+  }
+
+  return new Set((await all(database, componentsSql(true, 1), componentParameters(parameters, true))).map((row) => row.SDComponentID))
+}
+
+const checkEngines = async (context) => {
+  const { database, rules, techs, parameters, allGame, library, save } = context
+  const rows = await all(database, componentsSql(allGame, 1), componentParameters(parameters, allGame))
+
+  return reconcileEngines(library, rules, techs, rows, { save, game: parameters[':game'], allGame, present: allGame ? null : await presentIds(library, database, parameters, 'engine') })
 }
 
 // A stored thermal share under the share of the engine's own thermal tech, where the tech is the "no reduction" row: the modded sample's M-series engines carry 0.08 (the planners read the stored share for an existing engine and the tech's for a designed one).
@@ -273,7 +348,7 @@ const checkSpeeds = async (context) => {
 
     report.checked++
 
-    // The game speeds a class from the exact sum of its engines' power, so the speed comes from the sum of the class's engine rows. The 2.7.1 saves keep that sum in FCT_ShipClass.EnginePower as a whole number, cut (an INTEGER column); the 2.7.0 save keeps it exact. A class without engines keeps the game's starting speed of 1.
+    // The game speeds a class from the exact sum of its engines' power, so the speed comes from the sum of the class's engine rows. The saves of the earlier line's patch release keep that sum in FCT_ShipClass.EnginePower as a whole number, cut (an INTEGER column); the save of its first release keeps it exact. A class without engines keeps the game's starting speed of 1.
     const power = totals ? totals.power : 0
     const expected = totals ? rules.classSpeed({ enginePower: power, sizeHS: row.Size }) : 1
 
@@ -346,7 +421,7 @@ const checkRanges = async (context) => {
   return report
 }
 
-// The game rounds a commercial drive's size to 2 decimals, and the 2.7.0 save's own drives show it; the drives of older games (the 2.6 saves, and game 138 of the 2.7.x saves) keep 1 decimal, so they were designed under an older rule. Only a size equal to the unrounded size cut to 1 decimal is explained.
+// The game rounds a commercial drive's size to 2 decimals, and the drives of the earlier line's first-release save show it; the drives of older games (the 2.6 saves, and game 138 of the earlier line's later saves) keep 1 decimal, so they were designed under an older rule. Only a size equal to the unrounded size cut to 1 decimal is explained.
 const jumpExplainer = (rules, commercial, shipSizeHS, design) => (field, stored) => {
   if (field !== 'size' || !commercial) {
     return null
@@ -519,13 +594,11 @@ const groupBy = (entries, keyOf) => {
   return [...groups.values()]
 }
 
-// The missile rules' report. A comparison is judged by the library (`classify`): 'agree' and 'differ' count as checked, a 'differ' is explained (by the comparison itself or a row of KNOWN_MISSILE_ROWS, which holds only at its audited figures) or a mismatch, and the other two verdicts are counted apart and never as agreement: 'unsupported' (a case the rules do not cover) and 'unknown' (a figure the save or the rules cannot give, never read as 0). `resolvedFromStored` counts the checked comparisons whose technology level was picked by matching the very figure compared: they are in `checked` and show that some held level gives the figure, not that the rule does.
+// The missile rules' report. A comparison is judged by the library (`judge`): 'agree' and 'differ' count as checked, a 'differ' is explained (by the comparison itself or a pin of the save, which holds only at its audited figures) or a mismatch, and the other two verdicts are counted apart and never as agreement: 'unsupported' (a case the rules do not cover) and 'unknown' (a figure the save or the rules cannot give, never read as 0). `resolvedFromStored` counts the checked comparisons whose technology level was picked by matching the very figure compared: they are in `checked` and show that some held level gives the figure, not that the rule does.
 class MissileReport extends Report {
-  constructor (rule, ruleIds, scope, library, game, known = KNOWN_MISSILE_ROWS) {
-    super(rule, ruleIds, scope)
+  constructor (rule, ruleIds, scope, library, ledger) {
+    super(rule, ruleIds, scope, ledger)
     this.library = library
-    this.game = game
-    this.known = known
     this.unsupported = []
     this.unknown = []
     this.resolvedFromStored = 0
@@ -536,7 +609,9 @@ class MissileReport extends Report {
   }
 
   record (row, entry) {
-    const { verdict, reason } = this.library.classify(this.known, this.game, row.id, entry)
+    const verdict = this.library.judge(entry)
+    const pin = this.ledger.see(row, entry.field, verdict, entry.stored, entry.computed)
+    const reason = verdict === 'differ' ? entry.explain || (pin ? pin.reason : null) : null
     const shown = { id: row.id, name: row.name, field: entry.field, stored: format(entry.stored), computed: format(entry.computed) }
 
     if (verdict === 'unsupported') {
@@ -588,11 +663,11 @@ const ledgerText = (ledger, names) => names.filter((name) => ledger[name].msp !=
 
 const levelText = (lines) => Object.entries(lines).filter(([, line]) => line.state === 'resolved').map(([name, line]) => `${name} ${line.level.info}${line.historical ? ` (historical, current ${line.current.info})` : ''}`).join(', ')
 
-const LEDGER_ORDER = ['engine', 'fuel', 'warhead', 'reactor', 'active', 'thermal', 'em', 'geo', 'decoys', 'extraWarheads', 'secondStage', 'eccm', 'terminal', 'retarget', 'laser']
+const LEDGER_ORDER = ['engine', 'fuel', 'warhead', 'reactor', 'active', 'thermal', 'em', 'geo', 'decoys', 'extraWarheads', 'secondStage', 'eccm', 'terminal', 'retarget', 'lurker', 'laser']
 
-// Every comparison of a fixture's designs and engines, in a report. A design that only supplies a second stage to another is read, not reported.
-const reconcileFixture = (library, fixture, scope, { ledger = false, ruleIds = RULE_IDS.missile } = {}) => {
-  const report = new MissileReport('missile', ruleIds, scope, library, fixture.game)
+// Every comparison of a fixture's designs and engines, in a report. A design that only supplies a second stage to another is read, not reported. `save` is the pinned save the fixture is of (a key of scripts/lib/pinned-saves.js, or null) and `complete` whether it holds every design of the game: a pin of a design it does not hold is a stale pin only then.
+const reconcileFixture = (library, fixture, scope, { ledger = false, ruleIds = RULE_IDS.missile, save = null, complete = false, present = null } = {}) => {
+  const report = new MissileReport('missile', ruleIds, scope, library, library.createPinLedger(KNOWN_MISSILE_ROWS, { save, game: fixture.game, complete, present }))
   const designs = fixture.designs.filter((design) => !design.stageOnly)
   const engines = new Set()
   const results = []
@@ -629,6 +704,8 @@ const reconcileFixture = (library, fixture, scope, { ledger = false, ruleIds = R
     }
   }
 
+  report.settle()
+
   return report
 }
 
@@ -643,10 +720,10 @@ const loadSavedFixture = async (library, database, parameters, allGame) => {
 }
 
 const checkMissiles = async (context) => {
-  const { database, parameters, allGame, library, ledger } = context
+  const { database, parameters, allGame, library, ledger, save } = context
   const fixture = await loadSavedFixture(library, database, parameters, allGame)
 
-  return reconcileFixture(library, fixture, allGame ? 'every missile design of the game, each with the techs of the race that researched it' : 'the missile designs the race researched', { ledger })
+  return reconcileFixture(library, fixture, allGame ? 'every missile design of the game, each with the techs of the race that researched it' : 'the missile designs the race researched', { ledger, save, complete: allGame, present: allGame ? null : await presentIds(library, database, parameters, 'missile') })
 }
 
 // Writes the designs of the scope (the race's, or every design of the game with --all-game) as a fixture under `options.label` in the fixtures file, replacing a fixture of that label and keeping the others. The saves are not tracked and the fixtures are, so the checks of the rules and their mutants run without a save.
@@ -709,6 +786,8 @@ const CHECK_NAMES = {
   twelve: 'the Arrow and the Spear of the modded save are 12 MSP with their add-ons',
   addOns: 'the ECCM, terminal guidance and laser add-ons of the Arrow are 0.25 MSP each and carry their own cost',
   retargeting: 'retargeting is 0.5 MSP and costs 0.5 of Uridium at level 1 only',
+  lurker: 'a lurker design is reproduced to its stored size, cost and minerals: the lurker adds 0.5 MSP, 0.5 BP and 0.5 Boronide to a stored design, once, and the speed and range follow the larger size; a design stored without it is no lurker',
+  lurkerCandidate: 'a lurker is an option of the candidate evaluator: known at 0.5 MSP, 0.5 BP and 0.5 Boronide, restored from the stored row, accepted among the options and counted by no rule that does not model it',
   historical: 'a design is rebuilt from the level its race held, not from the level it holds now',
   reactor: 'the reactor of a sensor is a fifth of its strength over the power plant tech times 0.05',
   rounding: 'a midpoint is rounded to the even neighbour',
@@ -738,7 +817,7 @@ const CHECK_NAMES = {
   noStage: 'a second stage the save lacks leaves the size, cost and fuel unknown, not 0',
   engineMsp: 'the engine of the Arrow is 6 MSP and 15 BP, half of it Boronide and half Gallicite',
   pinnedLoss: 'a figure of a fixture moved off its stored value is found by the fixture-wide check',
-  known: 'a pinned difference is explained only at its audited game, design, field and figures',
+  known: 'a pinned difference is explained only at its audited save, game, design, field and figures',
   sizeRounding: 'an oversize is a size limit only where it equals the 4-decimal rounding of the engine size',
   lines: 'a line whose tech type the race does not hold is reported as an unknown level',
   basis: 'a figure rebuilt from a level picked by matching a stored figure is marked resolved from the stored figure',
@@ -793,7 +872,7 @@ const fixtureProblems = (library, data) => {
 
       for (const entry of result.comparisons) {
         const key = `${fixture.label}|${design.id}|${entry.field}`
-        const { verdict, reason } = library.classify(KNOWN_MISSILE_ROWS, fixture.game, design.id, entry)
+        const { verdict, reason } = library.classify(pinsOf(KNOWN_MISSILE_ROWS, fixtureSave(fixture)), fixture.game, design.id, entry)
 
         if (verdict === 'unsupported') {
           problems.push(`${key} is unsupported`)
@@ -818,6 +897,12 @@ const fixtureProblems = (library, data) => {
 
   for (const key of [...EXPECTED_DIFFER, ...EXPECTED_UNKNOWN].filter((pinned) => !seen.has(pinned))) {
     problems.push(`${key} is pinned and no longer differs or unknown`)
+  }
+
+  for (const fixture of data.values()) {
+    for (const entry of reconcileFixture(library, fixture, '', { ruleIds: [], save: fixtureSave(fixture), complete: completeFixture(fixture) }).mismatches) {
+      problems.push(`${fixture.label} ${entry.id} ${entry.field} ${entry.stale ? `has a stale pin: ${entry.stale}` : 'is a mismatch'}`)
+    }
   }
 
   return problems
@@ -862,6 +947,15 @@ const reconciliationChecks = (library, data) => {
       const levelTwo = library.missileAccounting(plainInput({ options: { eccm: 0, terminal: 1, retarget: 2, laser: false } })).contributions.retarget
 
       return firstFailure(expectNear('level 1 size', levelOne.msp, 0.5), expectNear('level 1 Uridium', levelOne.minerals.Uridium, 0.5), expectNear('level 2 size', levelTwo.msp, 0.5), expectNear('level 2 Uridium', levelTwo.minerals.Uridium, 0), expectVerdicts(library, rebuilt(stock, 153731), ['Size', 'Uridium', 'Cost'], 'agree'))
+    }],
+    [N.lurker, () => {
+      const base = rebuilt(stock, 153728)
+      const { copy, design } = plantLurker(stock, 153728)
+      const result = library.reconcileMissile(copy, design)
+      const plain = edited(copy, 153728, (_fixture, planted) => { planted.row.Lurker = 0 }).result
+      const fields = ['Size', 'Cost', 'Boronide', 'Tritanium', 'Uridium', 'Corbomite', 'Gallicite', 'UnstoredMinerals', 'Speed', 'Endurance', 'MaxRange', 'FuelRequired', 'TotalFlightTime']
+
+      return firstFailure(expectNear('lurker size', result.ledger.lurker.msp, 0.5), expectNear('lurker BP', result.ledger.lurker.bp, 0.5), expectNear('lurker Boronide', result.ledger.lurker.minerals.Boronide, 0.5), expectNear('lurker Uridium', result.ledger.lurker.minerals.Uridium ?? 0, 0), expectNear('the size of the lurker design', result.figures.size, base.figures.size + 0.5), expectNear('the sum of the contributions', totalMsp(result), result.figures.size), expectNear('the cost of the lurker design', result.figures.cost, base.figures.cost + 0.5), expectVerdicts(library, result, fields, 'agree'), expectNear('the lurker of the stored design with no lurker', plain.ledger.lurker.msp, 0), expectVerdicts(library, plain, ['Size', 'Cost', 'Boronide'], 'differ'))
     }],
     [N.historical, () => {
       const result = rebuilt(stock, 153728)
@@ -1010,12 +1104,12 @@ const reconciliationChecks = (library, data) => {
     }],
     [N.known, () => {
       const entry = entryOf(rebuilt(modded, 500724), 'Cost')
-      const verdictOf = (game, changed) => library.classify(KNOWN_MISSILE_ROWS, game, 500724, changed)
+      const verdictOf = (game, changed, save = 'modded-g140') => library.classify(pinsOf(KNOWN_MISSILE_ROWS, save), game, 500724, changed)
       const stored = verdictOf(140, { ...entry, stored: 999999 })
       const computed = verdictOf(140, { ...entry, computed: 1 })
       const near = verdictOf(140, { ...entry, stored: entry.stored * (1 + 1e-7) })
 
-      return firstFailure(expectThat('the audited figures are not explained', Boolean(verdictOf(140, entry).reason)), expectThat('another stored figure is explained', stored.verdict === 'differ' && !stored.reason), expectThat('another computed figure is explained', computed.verdict === 'differ' && !computed.reason), expectThat('a stored figure moved by 1e-7 of itself is explained', near.verdict === 'differ' && !near.reason), expectThat('the audited figures of another game are explained', !verdictOf(999, entry).reason))
+      return firstFailure(expectThat('the audited figures are not explained', Boolean(verdictOf(140, entry).reason)), expectThat('another stored figure is explained', stored.verdict === 'differ' && !stored.reason), expectThat('another computed figure is explained', computed.verdict === 'differ' && !computed.reason), expectThat('a stored figure moved by 1e-7 of itself is explained', near.verdict === 'differ' && !near.reason), expectThat('the audited figures of another game are explained', !verdictOf(999, entry).reason), expectThat('the audited figures are explained on the pins of another save', !verdictOf(140, entry, 'stock-271-g138').reason && !verdictOf(140, entry, null).reason))
     }],
     [N.sizeRounding, () => {
       const { result } = edited(modded, 154261, (_fixture, design) => { design.row.MSPFuel += 1 })
@@ -1237,9 +1331,33 @@ const evaluatorChecks = (library, data) => {
         expectThat('an unsupported candidate has a feasibility, a total of 0 or is admitted', refused.every((evaluation) => !isAvailable(evaluation.feasibility) && evaluation.totals.cost.value === null && library.admitMissiles([evaluation]).admitted.length === 0 && library.admitMissiles([evaluation]).rejected[0].verdict === 'unsupported' && unavailableTotals(evaluation, ['cost']).length === 0))
       )
     }],
+    [N.lurkerCandidate, () => {
+      const generous = { maxMsp: 1000, maxBp: 1000000 }
+      const { copy, design } = plantLurker(stock, 153728)
+      const candidate = library.missileCandidateOf(copy, design)
+      const plain = library.missileCandidateOf(stock, designOf(stock, 153728))
+      const lurking = evaluate(candidate, { budget: generous })
+      const dormant = evaluate(plain, { budget: generous })
+      const asked = evaluate({ ...plain, options: { ...plain.options, lurker: true } }, { budget: generous })
+      const option = optionOf(lurking, 'lurker')
+      const effect = effectOf(lurking, 'lurker')
+
+      return firstFailure(
+        expectThat('the candidate of a lurker row is not a lurker, or the candidate of a plain row is', candidate.options.lurker === true && plain.options.lurker === false),
+        expectThat('a lurker is not feasible with its 0.5 MSP, 0.5 BP and 0.5 Boronide', lurking.verdict === 'feasible' && option.status === 'known' && near(option.msp.value, 0.5) && near(option.bp.value, 0.5) && near(option.minerals.value.Boronide, 0.5)),
+        expectNear('the size of the lurker', lurking.totals.size.value, dormant.totals.size.value + 0.5),
+        expectNear('the cost of the lurker', lurking.totals.cost.value, dormant.totals.cost.value + 0.5),
+        expectNear('the size of the lurker design is its stored size', lurking.totals.size.value, design.row.Size),
+        expectNear('the cost of the lurker design is its stored cost', lurking.totals.cost.value, design.row.Cost),
+        expectNear('the Boronide of the lurker design is its stored Boronide', lurking.totals.minerals.Boronide.value, design.row.Boronide),
+        expectNear('a lurker asked of the plain candidate is the lurker design in size', asked.totals.size.value, lurking.totals.size.value),
+        expectThat('a plain candidate lists a lurker of nothing', optionOf(dormant, 'lurker').status === 'known' && near(optionOf(dormant, 'lurker').msp.value, 0) && near(optionOf(dormant, 'lurker').bp.value, 0)),
+        expectThat('the effect of a lurker is not listed with no rule and counted for nothing, or a plain candidate lists it', Boolean(effect) && effect.rule === null && !effect.verified && !effect.counted && !effectOf(dormant, 'lurker'))
+      )
+    }],
     [N.efficacy, () => {
       const candidate = { ...arrow(), warheads: 2, options: { ...arrow().options, retarget: 1 } }
-      const scenario = { targetSpeed: 3000, jammer: 2, modifier: 1, version: '2.7.1' }
+      const scenario = { targetSpeed: 3000, jammer: 2, modifier: 1, version: '3.2.x' }
       const evaluation = evaluate(candidate, { budget: { maxMsp: 1000, maxBp: 1000000 }, scenario })
       const plain = evaluate(candidate)
       const speed = valueOrNull(evaluation.figures.speed)
@@ -1373,7 +1491,7 @@ const evaluatorChecks = (library, data) => {
         expectThat('a design with second stages has a flight time or an endurance that is confirmed', flight.every((name) => statusOf(staged.figures[name]) === 'estimated' && ruleOf(staged.figures[name]) === 'design.missileAccountingExtended' && isAvailable(staged.figures[name]))),
         expectThat('the speed, fuel, size or cost of a design with second stages is not confirmed', [staged.figures.speed, staged.figures.fuelRequired, staged.totals.size].every((result) => statusOf(result) === 'confirmed') && confirmed(staged)),
         expectThat('an estimated endurance or range is counted', !counted(staged, 'endurance') && !counted(staged, 'maxRange') && counted(staged, 'speed')),
-        expectThat('an estimated endurance is not excluded with its reason', staged.efficacy.excluded.some((entry) => entry.id === 'endurance' && entry.reason.includes('estimated') && entry.reason.includes('154678'))),
+        expectThat('an estimated endurance is not excluded with its reason', staged.efficacy.excluded.some((entry) => entry.id === 'endurance' && entry.reason.includes('estimated') && entry.reason.includes('0.08% under'))),
         expectThat('the flight figures of a design with no second stage are not confirmed', flight.every((name) => statusOf(inside.figures[name]) === 'confirmed') && counted(inside, 'endurance') && counted(inside, 'maxRange'))
       )
     }],
@@ -1420,6 +1538,16 @@ const MISSILE_MUTANTS = [
   { name: 'the Corundium of the laser left out of its cost', find: '{ Corundium: tech.laserEfficiency / 100 }', replace: '{}', fails: [N.corundium] },
   { name: 'retargeting costed at every level', find: 'options.retarget === 1 ? 0.5 : 0, { Uridium: options.retarget === 1 ? 0.5 : 0 }', replace: 'options.retarget > 0 ? 0.5 : 0, { Uridium: options.retarget > 0 ? 0.5 : 0 }', fails: [N.retargeting] },
   { name: 'retargeting given half its size', find: 'export const RETARGETING_MSP = 0.5', replace: 'export const RETARGETING_MSP = 0.25', fails: [N.retargeting] },
+  { name: 'the lurker given no size', find: 'options.lurker ? contribution(LURKER_MSP, LURKER_BP, { Boronide: LURKER_BP }) : contribution(0, 0, {})', replace: 'options.lurker ? contribution(0, LURKER_BP, { Boronide: LURKER_BP }) : contribution(0, 0, {})', fails: [N.lurker, N.lurkerCandidate] },
+  { name: 'the lurker given no cost', find: 'options.lurker ? contribution(LURKER_MSP, LURKER_BP, { Boronide: LURKER_BP }) : contribution(0, 0, {})', replace: 'options.lurker ? contribution(LURKER_MSP, 0, { Boronide: LURKER_BP }) : contribution(0, 0, {})', fails: [N.lurker, N.lurkerCandidate] },
+  { name: 'the lurker costed in Uridium', find: 'options.lurker ? contribution(LURKER_MSP, LURKER_BP, { Boronide: LURKER_BP }) : contribution(0, 0, {})', replace: 'options.lurker ? contribution(LURKER_MSP, LURKER_BP, { Uridium: LURKER_BP }) : contribution(0, 0, {})', fails: [N.lurker, N.lurkerCandidate] },
+  { name: 'the lurker given a quarter of its size', find: 'export const LURKER_MSP = 0.5', replace: 'export const LURKER_MSP = 0.25', fails: [N.lurker, N.lurkerCandidate] },
+  { name: 'the lurker given a quarter of its cost', find: 'export const LURKER_BP = 0.5', replace: 'export const LURKER_BP = 0.25', fails: [N.lurker, N.lurkerCandidate] },
+  { name: 'every design given the lurker', find: 'options.lurker ? contribution(LURKER_MSP, LURKER_BP, { Boronide: LURKER_BP }) : contribution(0, 0, {})', replace: 'true ? contribution(LURKER_MSP, LURKER_BP, { Boronide: LURKER_BP }) : contribution(0, 0, {})', fails: [N.lurker, N.lurkerCandidate, N.everything] },
+  { name: 'the lurker column of a saved design not read', find: 'lurker: row.Lurker > 0, laser: row.LaserWarhead > 0 })', replace: 'lurker: false, laser: row.LaserWarhead > 0 })', fails: [N.lurker, N.lurkerCandidate] },
+  { name: 'the lurker refused among the options of a candidate', find: "const OPTION_FIELDS = Object.freeze(['eccm', 'terminal', 'retarget', 'lurker', 'laser'])", replace: "const OPTION_FIELDS = Object.freeze(['eccm', 'terminal', 'retarget', 'laser'])", fails: [N.lurkerCandidate] },
+  { name: 'the lurker of a candidate dropped when it is read', find: 'lurker: Boolean(options.lurker), laser: Boolean(options.laser) },', replace: 'lurker: false, laser: Boolean(options.laser) },', fails: [N.lurkerCandidate] },
+  { name: 'the effect of a lurker given a rule', find: "{ id: 'lurker', option: 'lurker', label: 'Lurker', units: '', rule: null,", replace: "{ id: 'lurker', option: 'lurker', label: 'Lurker', units: '', rule: MISSILE_RULES.accounting,", fails: [N.lurkerCandidate] },
   { name: 'the level the race holds now taken for the level of the design', find: 'lines[name] = level ? line(LINE_STATE.RESOLVED, level, null,', replace: 'lines[name] = level ? line(LINE_STATE.RESOLVED, current, null,', fails: [N.historical] },
   { name: 'a level the race has passed not marked', find: 'historical: current !== null && current.id !== level.id && current.info !== level.info', replace: 'historical: false', fails: [N.historical] },
   { name: 'the reactor given no cost', find: 'export const REACTOR_BP_PER_OUTPUT = 3', replace: 'export const REACTOR_BP_PER_OUTPUT = 0', fails: [N.reactor, N.twelve] },
@@ -1445,7 +1573,7 @@ const MISSILE_MUTANTS = [
   { name: 'a size limit taken as the cause of any oversize', find: 'Math.abs(excess - engineRounding) <= 1e-9', replace: 'true', fails: [N.sizeRounding] },
   { name: 'a pinned difference explained at any figures', find: 'pinned(candidate.stored, entry.stored) && pinned(candidate.computed, entry.computed)', replace: 'true', fails: [N.known] },
   { name: 'a pinned difference explained in any game', find: 'candidate.game === game && ', replace: '', fails: [N.known] },
-  { name: 'a pinned difference explained at 1e-6 of its figures', find: 'const pinned = (audited, found) => agrees(audited, found)', replace: 'const pinned = (audited, found) => Math.abs(audited - found) <= 1e-9 + 1e-6 * Math.max(Math.abs(audited), Math.abs(found))', fails: [N.known] },
+  { name: 'a pinned difference explained at 1e-6 of its figures', find: 'const pinned = (audited, found) => isKnown(audited) && isKnown(found) && agrees(audited, found)', replace: 'const pinned = (audited, found) => isKnown(audited) && isKnown(found) && Math.abs(audited - found) <= 1e-9 + 1e-6 * Math.max(Math.abs(audited), Math.abs(found))', fails: [N.known] },
   { name: 'a resolved level not marked as resolved from the stored figure', find: "RESOLVED: 'resolved-from-stored'", replace: "RESOLVED: 'reproduced'", fails: [N.basis] },
   { name: 'an engine the save lacks costed at 0 BP', find: 'contribution(engine.storedMsp, null, { Boronide: null, Gallicite: null }, engine.reason || ENGINE_MISSING)', replace: 'contribution(engine.storedMsp, 0, { Boronide: 0, Gallicite: 0 }, engine.reason || ENGINE_MISSING)', fails: [N.noEngine] },
   { name: 'the engine cost not shared between Boronide and Gallicite', find: '{ Boronide: engineBp / 2, Gallicite: engineBp / 2 }', replace: '{ Boronide: engineBp, Gallicite: 0 }', fails: [N.engineMsp, N.twelve] },
@@ -1520,87 +1648,126 @@ const MISSILE_MUTANTS = [
 
 // ---------- sensors and fire controls ----------
 
-// Sensor and fire control differences checked by hand, each pinned to its game, component, field and the stored and computed figures observed (the library's `knownDifference` explains a difference only while both still match, in that game). The computed figure is the rule at the component's tech rows. All of them are rows of the modded save (game 140). The reconciliation's alternatives (implied techs, a tenth of the cost, an uncapped range) are diagnostics that point at the pattern of a row; they explain nothing, so a row not pinned here is a mismatch.
-const TENTH_TIE = "the stored Cost is a tenth of the rule's with the .25 tie kept as .3 (the Uridium 1125 or 525 times the ECCM factor 1.25 is a figure ending in .25, stored rounded up to 1 decimal, and the Corbomite is the stored Cost less the Uridium); the other modded fire controls on the same techs store the exact tenth, and the cause is not identified"
-const TENTH_PLUS = "the stored Cost is 1.1 and 0.6 over the Uridium times the ECCM factor on these two multi-weapon fire controls whose Uridium is the exact tenth of the rule's at the stored (uncapped) range, and the Corbomite is the stored Cost less the Uridium; the cause is not identified"
+// Sensor and fire control differences checked by hand, each pinned to its game, component, field and the stored and computed figures observed (the library's `knownDifference` explains a difference only while both still match, in that game). The computed figure is this rule at the component's tech rows. All but three are rows of the modded save (game 140); those three are 154931 of the 1973 save, also game 140. A component designed under the earlier rule stores that rule's cost figures, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not (`premium`), so a stored cost figure on a hardened component is that factor away from it. The reconciliation's alternatives (implied techs, a tenth of the cost, an uncapped range) are diagnostics that point at the pattern of a row; they explain nothing, so a row not pinned here is a mismatch.
+const TENTH_TIE = "the stored Cost is a tenth of the earlier rule's with the .25 tie kept as .3 (the Uridium 1125 or 525 times the ECCM factor 1.25 is a figure ending in .25, stored rounded up to 1 decimal, and the Corbomite is the stored Cost less the Uridium); the other modded fire controls on the same techs store the exact tenth, that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause of the tenth is not identified"
+const TENTH_PLUS = "the stored Cost is 1.1 and 0.6 over the Uridium times the ECCM factor on these two multi-weapon fire controls whose Uridium is the exact tenth of the earlier rule's at the stored (uncapped) range, and the Corbomite is the stored Cost less the Uridium; that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause of the tenth is not identified"
 const TRACKING_FLOOR = 'a tracking multiplier of 0.33 on the speed rating 300000 gives 99000 km/s and the save stores 100000, which is the speed rating of another tech in the modded save; no tracking speed the rules give from the techs this fire control names matches, and the cause is not identified'
-const TENTH_SHORT = "the stored cost figures are a tenth of the rule's at the tracking 99000 the rules give, within 0.1 to 0.2 under it (for example 1732.4 against 1732.5); the stored tracking is 100000 and the cause is not identified"
+const TENTH_SHORT = "the stored cost figures are a tenth of the earlier rule's at the tracking 99000 the rules give, within 0.1 to 0.2 under it (for example 1732.4 against 1732.5); the stored tracking is 100000, that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause is not identified"
 
-const TENTH = "the stored cost figures are one tenth of the rule's (the Uridium agrees at a tenth, and so do the other cost figures of the component); the cause is not identified"
+const TENTH = "the stored cost figures are one tenth of the earlier rule's (the Uridium agrees at a tenth, and so do the other cost figures of the component); that rule multiplied this save's 1.25 hardening cost factor into them and this rule does not, and the cause of the tenth is not identified"
 const UNCAPPED = 'the save stores the range uncapped, above the 1,400,000 km limit the rules apply, and the figures that follow the range are those of the stored one; the cause is not identified'
-const UNCAPPED_TENTH = "the save stores the range uncapped, above the 1,400,000 km limit the rules apply, and the stored cost figures are one tenth of the rule's at that stored range; the cause is not identified"
-const IMPLIED_DISTANCE_UNCAPPED_TENTH = "the stored figures are those of a distance rating other than the one the tech row holds (the stored range over the range multiplier), at which they agree, with the range stored uncapped above 1,400,000 km and the cost figures one tenth of the rule's; the cause is not identified"
-const IMPLIED_STRENGTH = 'the stored figures are those of an active sensor strength other than the one the tech row holds (the stored strength over the size), at which the range and the cost figures also agree; the cause is not identified'
-const IMPLIED_SENSITIVITY_TENTH = "the stored figures are those of a sensitivity other than the one the tech row holds (the stored sensitivity over the size), at which they agree, with the cost figures one tenth of the rule's; the cause is not identified"
+const UNCAPPED_TENTH = "the save stores the range uncapped, above the 1,400,000 km limit the rules apply, and the stored cost figures are one tenth of the earlier rule's at that stored range; that rule multiplied this save's 1.25 hardening cost factor into them and this rule does not, and the cause is not identified"
+const IMPLIED_DISTANCE_UNCAPPED_TENTH = "the stored figures are those of a distance rating other than the one the tech row holds (the stored range over the range multiplier), at which they agree, with the range stored uncapped above 1,400,000 km and the cost figures one tenth of the earlier rule's; that rule multiplied this save's 1.25 hardening cost factor into the cost figures and this rule does not, and the cause is not identified"
+const IMPLIED_STRENGTH = 'the stored figures are those of an active sensor strength other than the one the tech row holds (the stored strength over the size), at which the range agrees and the cost figures are the earlier rule\'s; that rule multiplied this save\'s 1.25 hardening cost factor into them and this rule does not, and the cause is not identified'
+const IMPLIED_SENSITIVITY_TENTH = "the stored figures are those of a sensitivity other than the one the tech row holds (the stored sensitivity over the size), at which the sensitivity agrees and the cost figures are one tenth of the earlier rule's; that rule multiplied this save's 1.25 hardening cost factor into them and this rule does not, and the cause is not identified"
 
-const KNOWN_SENSOR_ROWS = [
-  { game: 140, id: 500238, field: 'Cost', stored: 1406.3, computed: 5468.75, reason: TENTH_TIE },
-  { game: 140, id: 500238, field: 'Corbomite', stored: 281.3, computed: 1093.75, reason: TENTH_TIE },
-  { game: 140, id: 500265, field: 'Cost', stored: 656.3, computed: 6562.5, reason: TENTH_TIE },
-  { game: 140, id: 500265, field: 'Corbomite', stored: 131.3, computed: 1312.5, reason: TENTH_TIE },
+// The stored cost figures of a component designed under the earlier rule, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not, so the stored figures differ by that factor and every other figure of the component agrees.
+const premium = (factor) => `the stored cost figures are the earlier rule's, which multiplied this component's ${factor} hardening cost factor into the Uridium and so into the Cost and Corbomite, and this rule does not; every other figure of the component agrees`
+
+// The components of the migrated save (game 141) whose stored figures the rules do not reproduce, all of the owner's campaign before it was migrated: an active sensor with the stored cost figures of the earlier rule (`premium`), passive sensors and one active sensor whose stored cost figures are a fixed share of this rule's, and beam fire controls whose size and range were set by hand. The played save and the shipped saves of the line reproduce every sensor and fire control they hold, so none of this is a formula of the line.
+const PREMIUM_TENTH = "the stored cost figures are a tenth of the earlier rule's, which multiplied this component's 1.25 hardening cost factor into the Uridium and so into the Cost and Corbomite, and this rule does not (the stored figures are 0.125 of this rule's); every other figure of the component agrees, and the cause of the tenth is not identified"
+const PASSIVE_PREMIUM_TENTH = "the stored cost is a tenth of the earlier rule's, which multiplied this sensor's 1.25 hardening cost factor into its Uridium and so into its Cost, and this rule does not (the stored figures are 0.125 of this rule's, the Uridium is the whole cost); the sensitivity and every other figure of the sensor agree, and the cause of the tenth is not identified"
+const PASSIVE_TENTH = "the stored cost is a tenth of this rule's, the Uridium being the whole cost, on a sensor whose hardening level has a cost factor of 1; the sensitivity and every other figure of the sensor agree, and the cause of the tenth is not identified"
+const PASSIVE_ARRAY = "the stored cost is 0.075 of this rule's, the Uridium being the whole cost, on a sensor array of 1 HS or more with the 1.25 hardening cost factor (the sensors of 0.1 and 0.2 HS on the same techs store 0.125 of it); the sensitivity and every other figure of the array agree, and the cause of the share is not identified"
+const BEAM_SIZE = "the stored size is a fraction of the size this rule gives for the multipliers the component stores (0.2 HS against 3, 0.1 against 1.5), and its cost figures, crew and HTK are far under the rule's too, at a range and tracking the rule reproduces; the figures were set outside the design rule in the campaign this save was migrated from, and the cause is not identified"
+const BEAM_RANGE = "the stored range is not the range multiplier's at the distance tech the component names (1,600,000 km to 120,000,000 km against 350,000 km), the stored size is not the size of its multipliers, and the cost figures, crew and HTK are not those of its multipliers at the techs it names; the figures were set outside the design rule in the campaign this save was migrated from, and the cause is not identified"
+
+// Each group is the pins of one pinned save (scripts/lib/pinned-saves.js): the 1973 campaign of the stock game from before Aurora 3.0, the modded save and the migrated one.
+const NAZI_SENSOR_ROWS = [
+  { game: 140, id: 154931, field: 'Cost', stored: 31.46, computed: 27.3, reason: premium(1.15) },
+  { game: 140, id: 154931, field: 'Uridium', stored: 24.2, computed: 21, reason: premium(1.15) },
+  { game: 140, id: 154931, field: 'Corbomite', stored: 7.26, computed: 6.3, reason: premium(1.15) },
+]
+
+const MODDED_SENSOR_ROWS = [
+  { game: 140, id: 500211, field: 'Cost', stored: 28.125, computed: 22.5, reason: premium(1.25) },
+  { game: 140, id: 500211, field: 'Uridium', stored: 22.5, computed: 18, reason: premium(1.25) },
+  { game: 140, id: 500211, field: 'Corbomite', stored: 5.625, computed: 4.5, reason: premium(1.25) },
+  { game: 140, id: 500238, field: 'Cost', stored: 1406.3, computed: 4375, reason: TENTH_TIE },
+  { game: 140, id: 500238, field: 'Corbomite', stored: 281.3, computed: 875, reason: TENTH_TIE },
+  { game: 140, id: 500239, field: 'Cost', stored: 2734.375, computed: 2187.5, reason: premium(1.25) },
+  { game: 140, id: 500239, field: 'Uridium', stored: 2187.5, computed: 1750, reason: premium(1.25) },
+  { game: 140, id: 500239, field: 'Corbomite', stored: 546.875, computed: 437.5, reason: premium(1.25) },
+  { game: 140, id: 500262, field: 'Cost', stored: 112.5, computed: 90, reason: premium(1.25) },
+  { game: 140, id: 500262, field: 'Uridium', stored: 90, computed: 72, reason: premium(1.25) },
+  { game: 140, id: 500262, field: 'Corbomite', stored: 22.5, computed: 18, reason: premium(1.25) },
+  { game: 140, id: 500265, field: 'Cost', stored: 656.3, computed: 5250, reason: TENTH_TIE },
+  { game: 140, id: 500265, field: 'Corbomite', stored: 131.3, computed: 1050, reason: TENTH_TIE },
   { game: 140, id: 500380, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500380, field: 'Cost', stored: 2165.6, computed: 5414, reason: TENTH_SHORT },
-  { game: 140, id: 500380, field: 'Uridium', stored: 1732.4, computed: 4331.2, reason: TENTH_SHORT },
-  { game: 140, id: 500380, field: 'Corbomite', stored: 433.2, computed: 1082.8, reason: TENTH_SHORT },
+  { game: 140, id: 500380, field: 'Cost', stored: 2165.6, computed: 4331.25, reason: TENTH_SHORT },
+  { game: 140, id: 500380, field: 'Uridium', stored: 1732.4, computed: 3465, reason: TENTH_SHORT },
+  { game: 140, id: 500380, field: 'Corbomite', stored: 433.2, computed: 866.25, reason: TENTH_SHORT },
+  { game: 140, id: 500381, field: 'Cost', stored: 112.5, computed: 90, reason: premium(1.25) },
+  { game: 140, id: 500381, field: 'Uridium', stored: 90, computed: 72, reason: premium(1.25) },
+  { game: 140, id: 500381, field: 'Corbomite', stored: 22.5, computed: 18, reason: premium(1.25) },
+  { game: 140, id: 500382, field: 'Cost', stored: 225, computed: 180, reason: premium(1.25) },
+  { game: 140, id: 500382, field: 'Uridium', stored: 180, computed: 144, reason: premium(1.25) },
+  { game: 140, id: 500382, field: 'Corbomite', stored: 45, computed: 36, reason: premium(1.25) },
+  { game: 140, id: 500393, field: 'Cost', stored: 108000, computed: 86400, reason: premium(1.25) },
+  { game: 140, id: 500393, field: 'Uridium', stored: 86400, computed: 69120, reason: premium(1.25) },
+  { game: 140, id: 500393, field: 'Corbomite', stored: 21600, computed: 17280, reason: premium(1.25) },
   { game: 140, id: 500598, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500598, field: 'Cost', stored: 5568.8, computed: 10828.125, reason: TENTH_SHORT },
-  { game: 140, id: 500598, field: 'Uridium', stored: 4454.8, computed: 8662.5, reason: TENTH_SHORT },
-  { game: 140, id: 500598, field: 'Corbomite', stored: 1114, computed: 2165.625, reason: TENTH_SHORT },
+  { game: 140, id: 500598, field: 'Cost', stored: 5568.8, computed: 8662.5, reason: TENTH_SHORT },
+  { game: 140, id: 500598, field: 'Uridium', stored: 4454.8, computed: 6930, reason: TENTH_SHORT },
+  { game: 140, id: 500598, field: 'Corbomite', stored: 1114, computed: 1732.5, reason: TENTH_SHORT },
   { game: 140, id: 500599, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500599, field: 'Cost', stored: 2784.4, computed: 5414, reason: TENTH_SHORT },
-  { game: 140, id: 500599, field: 'Uridium', stored: 2227.4, computed: 4331.2, reason: TENTH_SHORT },
-  { game: 140, id: 500599, field: 'Corbomite', stored: 557, computed: 1082.8, reason: TENTH_SHORT },
+  { game: 140, id: 500599, field: 'Cost', stored: 2784.4, computed: 4331.25, reason: TENTH_SHORT },
+  { game: 140, id: 500599, field: 'Uridium', stored: 2227.4, computed: 3465, reason: TENTH_SHORT },
+  { game: 140, id: 500599, field: 'Corbomite', stored: 557, computed: 866.25, reason: TENTH_SHORT },
+  { game: 140, id: 500729, field: 'Cost', stored: 1800, computed: 1440, reason: premium(1.25) },
+  { game: 140, id: 500729, field: 'Uridium', stored: 1440, computed: 1152, reason: premium(1.25) },
+  { game: 140, id: 500729, field: 'Corbomite', stored: 360, computed: 288, reason: premium(1.25) },
   { game: 140, id: 500809, field: 'Tracking', stored: 100000, computed: 99000, reason: TRACKING_FLOOR },
-  { game: 140, id: 500809, field: 'Cost', stored: 4331.2, computed: 10828.125, reason: TENTH_SHORT },
-  { game: 140, id: 500809, field: 'Uridium', stored: 3464.8, computed: 8662.5, reason: TENTH_SHORT },
-  { game: 140, id: 500809, field: 'Corbomite', stored: 866.4, computed: 2165.625, reason: TENTH_SHORT },
-  { game: 140, id: 500810, field: 'Cost', stored: 15001.1, computed: 6562.5, reason: TENTH_PLUS },
-  { game: 140, id: 500810, field: 'Corbomite', stored: 3001.1, computed: 1312.5, reason: TENTH_PLUS },
-  { game: 140, id: 500811, field: 'Cost', stored: 7500.6, computed: 3281.25, reason: TENTH_PLUS },
-  { game: 140, id: 500811, field: 'Corbomite', stored: 1500.6, computed: 656.25, reason: TENTH_PLUS },
-  { game: 140, id: 500208, field: 'Cost', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500208, field: 'Uridium', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500209, field: 'Cost', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500209, field: 'Uridium', stored: 125, computed: 1250, reason: TENTH },
-  { game: 140, id: 500213, field: 'Cost', stored: 2625, computed: 26250, reason: TENTH },
-  { game: 140, id: 500213, field: 'Uridium', stored: 2100, computed: 21000, reason: TENTH },
-  { game: 140, id: 500213, field: 'Corbomite', stored: 525, computed: 5250, reason: TENTH },
+  { game: 140, id: 500809, field: 'Cost', stored: 4331.2, computed: 8662.5, reason: TENTH_SHORT },
+  { game: 140, id: 500809, field: 'Uridium', stored: 3464.8, computed: 6930, reason: TENTH_SHORT },
+  { game: 140, id: 500809, field: 'Corbomite', stored: 866.4, computed: 1732.5, reason: TENTH_SHORT },
+  { game: 140, id: 500810, field: 'Cost', stored: 15001.1, computed: 5250, reason: TENTH_PLUS },
+  { game: 140, id: 500810, field: 'Corbomite', stored: 3001.1, computed: 1050, reason: TENTH_PLUS },
+  { game: 140, id: 500811, field: 'Cost', stored: 7500.6, computed: 2625, reason: TENTH_PLUS },
+  { game: 140, id: 500811, field: 'Corbomite', stored: 1500.6, computed: 525, reason: TENTH_PLUS },
+  { game: 140, id: 500208, field: 'Cost', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500208, field: 'Uridium', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500209, field: 'Cost', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500209, field: 'Uridium', stored: 125, computed: 1000, reason: TENTH },
+  { game: 140, id: 500213, field: 'Cost', stored: 2625, computed: 21000, reason: TENTH },
+  { game: 140, id: 500213, field: 'Uridium', stored: 2100, computed: 16800, reason: TENTH },
+  { game: 140, id: 500213, field: 'Corbomite', stored: 525, computed: 4200, reason: TENTH },
   { game: 140, id: 500238, field: 'Range', stored: 3600000, computed: 1400000, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500238, field: 'Uridium', stored: 1125, computed: 4375, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500238, field: 'Uridium', stored: 1125, computed: 3500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
   { game: 140, id: 500240, field: 'Range', stored: 2400000, computed: 1400000, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500240, field: 'Cost', stored: 3750, computed: 21875, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500240, field: 'Uridium', stored: 3000, computed: 17500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500240, field: 'Corbomite', stored: 750, computed: 4375, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
-  { game: 140, id: 500243, field: 'Cost', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500243, field: 'Uridium', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500244, field: 'Cost', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500244, field: 'Uridium', stored: 1250, computed: 12500, reason: TENTH },
-  { game: 140, id: 500265, field: 'Uridium', stored: 525, computed: 5250, reason: TENTH },
+  { game: 140, id: 500240, field: 'Cost', stored: 3750, computed: 17500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500240, field: 'Uridium', stored: 3000, computed: 14000, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500240, field: 'Corbomite', stored: 750, computed: 3500, reason: IMPLIED_DISTANCE_UNCAPPED_TENTH },
+  { game: 140, id: 500243, field: 'Cost', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500243, field: 'Uridium', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500244, field: 'Cost', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500244, field: 'Uridium', stored: 1250, computed: 10000, reason: TENTH },
+  { game: 140, id: 500265, field: 'Uridium', stored: 525, computed: 4200, reason: TENTH },
   { game: 140, id: 500380, field: 'Range', stored: 5600000, computed: 1400000, reason: UNCAPPED },
-  { game: 140, id: 500383, field: 'Cost', stored: 2500, computed: 25000, reason: TENTH },
-  { game: 140, id: 500383, field: 'Uridium', stored: 2500, computed: 25000, reason: TENTH },
-  { game: 140, id: 500384, field: 'Cost', stored: 2500, computed: 25000, reason: TENTH },
-  { game: 140, id: 500384, field: 'Uridium', stored: 2500, computed: 25000, reason: TENTH },
+  { game: 140, id: 500383, field: 'Cost', stored: 2500, computed: 20000, reason: TENTH },
+  { game: 140, id: 500383, field: 'Uridium', stored: 2500, computed: 20000, reason: TENTH },
+  { game: 140, id: 500384, field: 'Cost', stored: 2500, computed: 20000, reason: TENTH },
+  { game: 140, id: 500384, field: 'Uridium', stored: 2500, computed: 20000, reason: TENTH },
   { game: 140, id: 500389, field: 'Range', stored: 19200000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500389, field: 'Cost', stored: 4500, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500389, field: 'Uridium', stored: 3600, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500389, field: 'Corbomite', stored: 900, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500389, field: 'Cost', stored: 4500, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500389, field: 'Uridium', stored: 3600, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500389, field: 'Corbomite', stored: 900, computed: 525, reason: UNCAPPED_TENTH },
   { game: 140, id: 500390, field: 'Range', stored: 12000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500390, field: 'Cost', stored: 2812.5, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500390, field: 'Uridium', stored: 2250, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500390, field: 'Corbomite', stored: 562.5, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500390, field: 'Cost', stored: 2812.5, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500390, field: 'Uridium', stored: 2250, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500390, field: 'Corbomite', stored: 562.5, computed: 525, reason: UNCAPPED_TENTH },
   { game: 140, id: 500391, field: 'Range', stored: 19200000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500391, field: 'Cost', stored: 9000, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500391, field: 'Uridium', stored: 7200, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500391, field: 'Corbomite', stored: 1800, computed: 1312.5, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500391, field: 'Cost', stored: 9000, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500391, field: 'Uridium', stored: 7200, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500391, field: 'Corbomite', stored: 1800, computed: 1050, reason: UNCAPPED_TENTH },
   { game: 140, id: 500392, field: 'Range', stored: 12000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500392, field: 'Cost', stored: 5625, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500392, field: 'Uridium', stored: 4500, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500392, field: 'Corbomite', stored: 1125, computed: 1312.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500394, field: 'Cost', stored: 62500, computed: 625000, reason: TENTH },
-  { game: 140, id: 500394, field: 'Uridium', stored: 62500, computed: 625000, reason: TENTH },
-  { game: 140, id: 500395, field: 'Cost', stored: 62500, computed: 625000, reason: TENTH },
-  { game: 140, id: 500395, field: 'Uridium', stored: 62500, computed: 625000, reason: TENTH },
+  { game: 140, id: 500392, field: 'Cost', stored: 5625, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500392, field: 'Uridium', stored: 4500, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500392, field: 'Corbomite', stored: 1125, computed: 1050, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500394, field: 'Cost', stored: 62500, computed: 500000, reason: TENTH },
+  { game: 140, id: 500394, field: 'Uridium', stored: 62500, computed: 500000, reason: TENTH },
+  { game: 140, id: 500395, field: 'Cost', stored: 62500, computed: 500000, reason: TENTH },
+  { game: 140, id: 500395, field: 'Uridium', stored: 62500, computed: 500000, reason: TENTH },
   { game: 140, id: 500598, field: 'Range', stored: 7200000, computed: 1400000, reason: UNCAPPED },
   { game: 140, id: 500599, field: 'Range', stored: 7200000, computed: 1400000, reason: UNCAPPED },
   { game: 140, id: 500607, field: 'Strength', stored: 0.2, computed: 0.04, reason: IMPLIED_STRENGTH },
@@ -1609,42 +1776,197 @@ const KNOWN_SENSOR_ROWS = [
   { game: 140, id: 500607, field: 'Uridium', stored: 0.2, computed: 0, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500607, field: 'Corbomite', stored: 0.05, computed: 0, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500608, field: 'Sensitivity', stored: 200, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500608, field: 'Cost', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500608, field: 'Uridium', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500608, field: 'Cost', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500608, field: 'Uridium', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
   { game: 140, id: 500609, field: 'Sensitivity', stored: 200, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500609, field: 'Cost', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
-  { game: 140, id: 500609, field: 'Uridium', stored: 25, computed: 1.2, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500609, field: 'Cost', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
+  { game: 140, id: 500609, field: 'Uridium', stored: 25, computed: 1, reason: IMPLIED_SENSITIVITY_TENTH },
   { game: 140, id: 500730, field: 'Strength', stored: 144, computed: 460.8, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500730, field: 'Range', stored: 1354053417.33037, computed: 2422204389.057253, reason: IMPLIED_STRENGTH },
-  { game: 140, id: 500730, field: 'Cost', stored: 225, computed: 720, reason: IMPLIED_STRENGTH },
-  { game: 140, id: 500730, field: 'Uridium', stored: 180, computed: 576, reason: IMPLIED_STRENGTH },
-  { game: 140, id: 500730, field: 'Corbomite', stored: 45, computed: 144, reason: IMPLIED_STRENGTH },
+  { game: 140, id: 500730, field: 'Cost', stored: 225, computed: 576, reason: IMPLIED_STRENGTH },
+  { game: 140, id: 500730, field: 'Uridium', stored: 180, computed: 460.8, reason: IMPLIED_STRENGTH },
+  { game: 140, id: 500730, field: 'Corbomite', stored: 45, computed: 115.2, reason: IMPLIED_STRENGTH },
   { game: 140, id: 500809, field: 'Range', stored: 5600000, computed: 1400000, reason: UNCAPPED },
   { game: 140, id: 500810, field: 'Range', stored: 32000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500810, field: 'Uridium', stored: 12000, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500810, field: 'Uridium', stored: 12000, computed: 4200, reason: UNCAPPED_TENTH },
   { game: 140, id: 500811, field: 'Range', stored: 32000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 500811, field: 'Uridium', stored: 6000, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501040, field: 'Cost', stored: 6250, computed: 62500, reason: TENTH },
-  { game: 140, id: 501040, field: 'Uridium', stored: 6250, computed: 62500, reason: TENTH },
-  { game: 140, id: 501041, field: 'Cost', stored: 6250, computed: 62500, reason: TENTH },
-  { game: 140, id: 501041, field: 'Uridium', stored: 6250, computed: 62500, reason: TENTH },
+  { game: 140, id: 500811, field: 'Uridium', stored: 6000, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 500823, field: 'Cost', stored: 109.375, computed: 87.5, reason: premium(1.25) },
+  { game: 140, id: 500823, field: 'Uridium', stored: 87.5, computed: 70, reason: premium(1.25) },
+  { game: 140, id: 500823, field: 'Corbomite', stored: 21.875, computed: 17.5, reason: premium(1.25) },
+  { game: 140, id: 501040, field: 'Cost', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501040, field: 'Uridium', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501041, field: 'Cost', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501041, field: 'Uridium', stored: 6250, computed: 50000, reason: TENTH },
+  { game: 140, id: 501042, field: 'Cost', stored: 3600, computed: 2880, reason: premium(1.25) },
+  { game: 140, id: 501042, field: 'Uridium', stored: 2880, computed: 2304, reason: premium(1.25) },
+  { game: 140, id: 501042, field: 'Corbomite', stored: 720, computed: 576, reason: premium(1.25) },
   { game: 140, id: 501139, field: 'Range', stored: 24000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501139, field: 'Cost', stored: 5625, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501139, field: 'Uridium', stored: 4500, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501139, field: 'Corbomite', stored: 1125, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501139, field: 'Cost', stored: 5625, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501139, field: 'Uridium', stored: 4500, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501139, field: 'Corbomite', stored: 1125, computed: 525, reason: UNCAPPED_TENTH },
   { game: 140, id: 501140, field: 'Range', stored: 24000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501140, field: 'Cost', stored: 11250, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501140, field: 'Uridium', stored: 9000, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501140, field: 'Corbomite', stored: 2250, computed: 1312.5, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501140, field: 'Cost', stored: 11250, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501140, field: 'Uridium', stored: 9000, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501140, field: 'Corbomite', stored: 2250, computed: 1050, reason: UNCAPPED_TENTH },
   { game: 140, id: 501141, field: 'Range', stored: 40000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501141, field: 'Cost', stored: 18750, computed: 6562.5, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501141, field: 'Uridium', stored: 15000, computed: 5250, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501141, field: 'Corbomite', stored: 3750, computed: 1312.5, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501141, field: 'Cost', stored: 18750, computed: 5250, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501141, field: 'Uridium', stored: 15000, computed: 4200, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501141, field: 'Corbomite', stored: 3750, computed: 1050, reason: UNCAPPED_TENTH },
   { game: 140, id: 501142, field: 'Range', stored: 40000000, computed: 1400000, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501142, field: 'Cost', stored: 9375, computed: 3281.25, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501142, field: 'Uridium', stored: 7500, computed: 2625, reason: UNCAPPED_TENTH },
-  { game: 140, id: 501142, field: 'Corbomite', stored: 1875, computed: 656.25, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501142, field: 'Cost', stored: 9375, computed: 2625, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501142, field: 'Uridium', stored: 7500, computed: 2100, reason: UNCAPPED_TENTH },
+  { game: 140, id: 501142, field: 'Corbomite', stored: 1875, computed: 525, reason: UNCAPPED_TENTH },
 ]
+
+const MIGRATED_SENSOR_ROWS = [
+  { game: 141, id: 500252, field: 'Cost', stored: 750, computed: 10000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500252, field: 'Uridium', stored: 750, computed: 10000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500253, field: 'Cost', stored: 750, computed: 10000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500253, field: 'Uridium', stored: 750, computed: 10000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500351, field: 'Cost', stored: 12.5, computed: 10, reason: premium(1.25) },
+  { game: 141, id: 500351, field: 'Uridium', stored: 10, computed: 8, reason: premium(1.25) },
+  { game: 141, id: 500351, field: 'Corbomite', stored: 2.5, computed: 2, reason: premium(1.25) },
+  { game: 141, id: 500352, field: 'Size', stored: 0.2, computed: 3, reason: BEAM_SIZE },
+  { game: 141, id: 500352, field: 'Cost', stored: 1148.43, computed: 13125, reason: BEAM_SIZE },
+  { game: 141, id: 500352, field: 'Uridium', stored: 918.75, computed: 10500, reason: BEAM_SIZE },
+  { game: 141, id: 500352, field: 'Corbomite', stored: 229.69, computed: 2625, reason: BEAM_SIZE },
+  { game: 141, id: 500352, field: 'Crew', stored: 1, computed: 12, reason: BEAM_SIZE },
+  { game: 141, id: 500352, field: 'HTK', stored: 0, computed: 1, reason: BEAM_SIZE },
+  { game: 141, id: 500353, field: 'Size', stored: 0.1, computed: 1.5, reason: BEAM_SIZE },
+  { game: 141, id: 500353, field: 'Cost', stored: 574.215, computed: 6562.5, reason: BEAM_SIZE },
+  { game: 141, id: 500353, field: 'Uridium', stored: 459.375, computed: 5250, reason: BEAM_SIZE },
+  { game: 141, id: 500353, field: 'Corbomite', stored: 114.84, computed: 1312.5, reason: BEAM_SIZE },
+  { game: 141, id: 500353, field: 'Crew', stored: 0, computed: 6, reason: BEAM_SIZE },
+  { game: 141, id: 500353, field: 'HTK', stored: 0, computed: 1, reason: BEAM_SIZE },
+  { game: 141, id: 500354, field: 'Range', stored: 1600000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500354, field: 'Size', stored: 0.16, computed: 1, reason: BEAM_RANGE },
+  { game: 141, id: 500354, field: 'Cost', stored: 875, computed: 4375, reason: BEAM_RANGE },
+  { game: 141, id: 500354, field: 'Uridium', stored: 700, computed: 3500, reason: BEAM_RANGE },
+  { game: 141, id: 500354, field: 'Corbomite', stored: 175, computed: 875, reason: BEAM_RANGE },
+  { game: 141, id: 500354, field: 'Crew', stored: 1, computed: 4, reason: BEAM_RANGE },
+  { game: 141, id: 500354, field: 'HTK', stored: 0, computed: 1, reason: BEAM_RANGE },
+  { game: 141, id: 500355, field: 'Range', stored: 1600000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500355, field: 'Size', stored: 0.08, computed: 0.5, reason: BEAM_RANGE },
+  { game: 141, id: 500355, field: 'Cost', stored: 437.5, computed: 2187.5, reason: BEAM_RANGE },
+  { game: 141, id: 500355, field: 'Uridium', stored: 350, computed: 1750, reason: BEAM_RANGE },
+  { game: 141, id: 500355, field: 'Corbomite', stored: 87.5, computed: 437.5, reason: BEAM_RANGE },
+  { game: 141, id: 500355, field: 'Crew', stored: 0, computed: 2, reason: BEAM_RANGE },
+  { game: 141, id: 500356, field: 'Range', stored: 2000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500356, field: 'Size', stored: 0.1, computed: 0.5, reason: BEAM_RANGE },
+  { game: 141, id: 500356, field: 'Cost', stored: 546.875, computed: 2187.5, reason: BEAM_RANGE },
+  { game: 141, id: 500356, field: 'Uridium', stored: 437.5, computed: 1750, reason: BEAM_RANGE },
+  { game: 141, id: 500356, field: 'Corbomite', stored: 109.375, computed: 437.5, reason: BEAM_RANGE },
+  { game: 141, id: 500356, field: 'Crew', stored: 0, computed: 2, reason: BEAM_RANGE },
+  { game: 141, id: 500357, field: 'Range', stored: 2000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500357, field: 'Size', stored: 0.2, computed: 1, reason: BEAM_RANGE },
+  { game: 141, id: 500357, field: 'Cost', stored: 1093.75, computed: 4375, reason: BEAM_RANGE },
+  { game: 141, id: 500357, field: 'Uridium', stored: 875, computed: 3500, reason: BEAM_RANGE },
+  { game: 141, id: 500357, field: 'Corbomite', stored: 218.75, computed: 875, reason: BEAM_RANGE },
+  { game: 141, id: 500357, field: 'Crew', stored: 1, computed: 4, reason: BEAM_RANGE },
+  { game: 141, id: 500357, field: 'HTK', stored: 0, computed: 1, reason: BEAM_RANGE },
+  { game: 141, id: 500363, field: 'Cost', stored: 562.5, computed: 450, reason: premium(1.25) },
+  { game: 141, id: 500363, field: 'Uridium', stored: 450, computed: 360, reason: premium(1.25) },
+  { game: 141, id: 500363, field: 'Corbomite', stored: 112.5, computed: 90, reason: premium(1.25) },
+  { game: 141, id: 500364, field: 'Cost', stored: 1500, computed: 20000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500364, field: 'Uridium', stored: 1500, computed: 20000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500365, field: 'Cost', stored: 1500, computed: 20000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500365, field: 'Uridium', stored: 1500, computed: 20000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500366, field: 'Cost', stored: 1875, computed: 25000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500366, field: 'Uridium', stored: 1875, computed: 25000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500367, field: 'Cost', stored: 1875, computed: 25000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500367, field: 'Uridium', stored: 1875, computed: 25000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500370, field: 'Range', stored: 3200000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500370, field: 'Size', stored: 0.24, computed: 0.75, reason: BEAM_RANGE },
+  { game: 141, id: 500370, field: 'Cost', stored: 1312.48, computed: 3281.25, reason: BEAM_RANGE },
+  { game: 141, id: 500370, field: 'Uridium', stored: 1049.984, computed: 2625, reason: BEAM_RANGE },
+  { game: 141, id: 500370, field: 'Corbomite', stored: 262.496, computed: 656.25, reason: BEAM_RANGE },
+  { game: 141, id: 500370, field: 'Crew', stored: 1, computed: 3, reason: BEAM_RANGE },
+  { game: 141, id: 500371, field: 'Range', stored: 3200000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500371, field: 'Size', stored: 0.12, computed: 0.38, reason: BEAM_RANGE },
+  { game: 141, id: 500371, field: 'Cost', stored: 656.24, computed: 1640.625, reason: BEAM_RANGE },
+  { game: 141, id: 500371, field: 'Uridium', stored: 524.992, computed: 1312.5, reason: BEAM_RANGE },
+  { game: 141, id: 500371, field: 'Corbomite', stored: 131.248, computed: 328.125, reason: BEAM_RANGE },
+  { game: 141, id: 500371, field: 'Crew', stored: 1, computed: 2, reason: BEAM_RANGE },
+  { game: 141, id: 500372, field: 'Range', stored: 5000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500372, field: 'Size', stored: 0.38, computed: 0.75, reason: BEAM_RANGE },
+  { game: 141, id: 500372, field: 'Cost', stored: 2050.75, computed: 3281.25, reason: BEAM_RANGE },
+  { game: 141, id: 500372, field: 'Uridium', stored: 1640.6, computed: 2625, reason: BEAM_RANGE },
+  { game: 141, id: 500372, field: 'Corbomite', stored: 410.15, computed: 656.25, reason: BEAM_RANGE },
+  { game: 141, id: 500372, field: 'Crew', stored: 2, computed: 3, reason: BEAM_RANGE },
+  { game: 141, id: 500373, field: 'Range', stored: 5000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500373, field: 'Size', stored: 0.19, computed: 0.38, reason: BEAM_RANGE },
+  { game: 141, id: 500373, field: 'Cost', stored: 1025.375, computed: 1640.625, reason: BEAM_RANGE },
+  { game: 141, id: 500373, field: 'Uridium', stored: 820.3, computed: 1312.5, reason: BEAM_RANGE },
+  { game: 141, id: 500373, field: 'Corbomite', stored: 205.075, computed: 328.125, reason: BEAM_RANGE },
+  { game: 141, id: 500373, field: 'Crew', stored: 1, computed: 2, reason: BEAM_RANGE },
+  { game: 141, id: 500374, field: 'Range', stored: 4000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500374, field: 'Size', stored: 0.3, computed: 0.75, reason: BEAM_RANGE },
+  { game: 141, id: 500374, field: 'Cost', stored: 1640.6, computed: 3281.25, reason: BEAM_RANGE },
+  { game: 141, id: 500374, field: 'Uridium', stored: 1312.48, computed: 2625, reason: BEAM_RANGE },
+  { game: 141, id: 500374, field: 'Corbomite', stored: 328.12, computed: 656.25, reason: BEAM_RANGE },
+  { game: 141, id: 500374, field: 'Crew', stored: 1, computed: 3, reason: BEAM_RANGE },
+  { game: 141, id: 500375, field: 'Range', stored: 4000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500375, field: 'Size', stored: 0.15, computed: 0.38, reason: BEAM_RANGE },
+  { game: 141, id: 500375, field: 'Cost', stored: 820.3, computed: 1640.625, reason: BEAM_RANGE },
+  { game: 141, id: 500375, field: 'Uridium', stored: 656.24, computed: 1312.5, reason: BEAM_RANGE },
+  { game: 141, id: 500375, field: 'Corbomite', stored: 164.06, computed: 328.125, reason: BEAM_RANGE },
+  { game: 141, id: 500375, field: 'Crew', stored: 1, computed: 2, reason: BEAM_RANGE },
+  { game: 141, id: 500376, field: 'Cost', stored: 3750, computed: 50000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500376, field: 'Uridium', stored: 3750, computed: 50000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500377, field: 'Cost', stored: 3750, computed: 50000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500377, field: 'Uridium', stored: 3750, computed: 50000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500378, field: 'Cost', stored: 2625, computed: 35000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500378, field: 'Uridium', stored: 2625, computed: 35000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500379, field: 'Cost', stored: 3000, computed: 40000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500379, field: 'Uridium', stored: 3000, computed: 40000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500380, field: 'Cost', stored: 3000, computed: 40000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500380, field: 'Uridium', stored: 3000, computed: 40000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500381, field: 'Cost', stored: 2625, computed: 35000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500381, field: 'Uridium', stored: 2625, computed: 35000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500394, field: 'Cost', stored: 1687.5, computed: 1350, reason: premium(1.25) },
+  { game: 141, id: 500394, field: 'Uridium', stored: 1350, computed: 1080, reason: premium(1.25) },
+  { game: 141, id: 500394, field: 'Corbomite', stored: 337.5, computed: 270, reason: premium(1.25) },
+  { game: 141, id: 500397, field: 'Range', stored: 16000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500397, field: 'Size', stored: 0.6, computed: 0.38, reason: BEAM_RANGE },
+  { game: 141, id: 500397, field: 'Cost', stored: 3281.2, computed: 1640.625, reason: BEAM_RANGE },
+  { game: 141, id: 500397, field: 'Uridium', stored: 2624.96, computed: 1312.5, reason: BEAM_RANGE },
+  { game: 141, id: 500397, field: 'Corbomite', stored: 656.24, computed: 328.125, reason: BEAM_RANGE },
+  { game: 141, id: 500398, field: 'Range', stored: 16000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500398, field: 'Size', stored: 0.3, computed: 0.19, reason: BEAM_RANGE },
+  { game: 141, id: 500398, field: 'Cost', stored: 1640.6, computed: 820.25, reason: BEAM_RANGE },
+  { game: 141, id: 500398, field: 'Uridium', stored: 1312.48, computed: 656.2, reason: BEAM_RANGE },
+  { game: 141, id: 500398, field: 'Corbomite', stored: 328.12, computed: 164.05, reason: BEAM_RANGE },
+  { game: 141, id: 500400, field: 'Cost', stored: 18000, computed: 144000, reason: PREMIUM_TENTH },
+  { game: 141, id: 500400, field: 'Uridium', stored: 14400, computed: 115200, reason: PREMIUM_TENTH },
+  { game: 141, id: 500400, field: 'Corbomite', stored: 3600, computed: 28800, reason: PREMIUM_TENTH },
+  { game: 141, id: 500401, field: 'Cost', stored: 7500, computed: 100000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500401, field: 'Uridium', stored: 7500, computed: 100000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500402, field: 'Cost', stored: 7500, computed: 100000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500402, field: 'Uridium', stored: 7500, computed: 100000, reason: PASSIVE_ARRAY },
+  { game: 141, id: 500404, field: 'Cost', stored: 1.5, computed: 15, reason: PASSIVE_TENTH },
+  { game: 141, id: 500404, field: 'Uridium', stored: 1.5, computed: 15, reason: PASSIVE_TENTH },
+  { game: 141, id: 500405, field: 'Cost', stored: 125, computed: 1000, reason: PASSIVE_PREMIUM_TENTH },
+  { game: 141, id: 500405, field: 'Uridium', stored: 125, computed: 1000, reason: PASSIVE_PREMIUM_TENTH },
+  { game: 141, id: 500406, field: 'Cost', stored: 125, computed: 1000, reason: PASSIVE_PREMIUM_TENTH },
+  { game: 141, id: 500406, field: 'Uridium', stored: 125, computed: 1000, reason: PASSIVE_PREMIUM_TENTH },
+  { game: 141, id: 500407, field: 'Cost', stored: 1.5, computed: 15, reason: PASSIVE_TENTH },
+  { game: 141, id: 500407, field: 'Uridium', stored: 1.5, computed: 15, reason: PASSIVE_TENTH },
+  { game: 141, id: 500422, field: 'Range', stored: 120000000, computed: 350000, reason: BEAM_RANGE },
+  { game: 141, id: 500422, field: 'Size', stored: 0.075, computed: 0.25, reason: BEAM_RANGE },
+  { game: 141, id: 500422, field: 'Cost', stored: 1367.25, computed: 1093.75, reason: BEAM_RANGE },
+  { game: 141, id: 500422, field: 'Uridium', stored: 1093.8, computed: 875, reason: BEAM_RANGE },
+  { game: 141, id: 500422, field: 'Corbomite', stored: 273.45, computed: 218.75, reason: BEAM_RANGE },
+  { game: 141, id: 500426, field: 'Cost', stored: 225, computed: 180, reason: premium(1.25) },
+  { game: 141, id: 500426, field: 'Uridium', stored: 180, computed: 144, reason: premium(1.25) },
+  { game: 141, id: 500426, field: 'Corbomite', stored: 45, computed: 36, reason: premium(1.25) },
+  { game: 141, id: 500427, field: 'Cost', stored: 250, computed: 2000, reason: PASSIVE_PREMIUM_TENTH },
+  { game: 141, id: 500427, field: 'Uridium', stored: 250, computed: 2000, reason: PASSIVE_PREMIUM_TENTH },
+  { game: 141, id: 500428, field: 'Cost', stored: 250, computed: 2000, reason: PASSIVE_PREMIUM_TENTH },
+  { game: 141, id: 500428, field: 'Uridium', stored: 250, computed: 2000, reason: PASSIVE_PREMIUM_TENTH },
+]
+
+const KNOWN_SENSOR_ROWS = [...pinnedRows('boscodiogigia-1973-g140', NAZI_SENSOR_ROWS), ...pinnedRows('modded-g140', MODDED_SENSOR_ROWS), ...pinnedRows('migrated-g141', MIGRATED_SENSOR_ROWS)]
 
 const loadSensorFixtures = () => new Map(JSON.parse(fs.readFileSync(SENSOR_FIXTURES, 'utf8')).fixtures.map((fixture) => [fixture.label, fixture]))
 
@@ -1661,9 +1983,9 @@ const exportSensorFixture = async (context, options) => {
   return { components: fixture.components.length, techs: Object.keys(fixture.techs).length }
 }
 
-// Every comparison of a fixture's components, in a report.
-const reconcileSensorFixture = (library, fixture, scope, { ruleIds = RULE_IDS.sensor } = {}) => {
-  const report = new MissileReport('sensor', ruleIds, scope, library, fixture.game, KNOWN_SENSOR_ROWS)
+// Every comparison of a fixture's components, in a report. `save` is the pinned save the components are of (a key of scripts/lib/pinned-saves.js, or null) and `complete` whether they are every sensor and fire control of the game: a pin of a component not among them is a stale pin only then.
+const reconcileSensorFixture = (library, fixture, scope, { ruleIds = RULE_IDS.sensor, save = null, complete = false, present = null } = {}) => {
+  const report = new MissileReport('sensor', ruleIds, scope, library, library.createPinLedger(KNOWN_SENSOR_ROWS, { save, game: fixture.game, complete, present }))
   const kinds = {}
 
   for (const component of fixture.components) {
@@ -1675,38 +1997,44 @@ const reconcileSensorFixture = (library, fixture, scope, { ruleIds = RULE_IDS.se
 
   report.notes.push(`scope: ${fixture.components.length} components (${Object.entries(kinds).map(([kind, count]) => `${count} ${kind}`).join(', ')}), each rebuilt from the techs its slots name, found by tech type`)
 
+  report.settle()
+
   return report
 }
 
 const checkSensors = async (context) => {
-  const { database, parameters, allGame, library } = context
+  const { database, parameters, allGame, library, save } = context
   const fixture = await library.loadSensorFixture(appDatabase(database), parameters[':game'], allGame ? null : parameters[':race'])
 
-  return reconcileSensorFixture(library, fixture, allGame ? 'every sensor and fire control a race of the game holds' : 'the sensors and fire controls the race owns')
+  return reconcileSensorFixture(library, fixture, allGame ? 'every sensor and fire control a race of the game holds' : 'the sensors and fire controls the race owns', { save, complete: allGame, present: allGame ? null : await presentIds(library, database, parameters, 'sensor') })
 }
 
-// The components that differ from the rules in the sensor fixtures, as `fixture|component`, each explained by a pinned row above, and how many comparisons of each fixture differ. The stock fixtures have none. A comparison that moves in or out is a change to look at, not one to absorb.
+// The components that differ from the rules in the sensor fixtures, as `fixture|component`, each explained by a pinned row above, and how many comparisons of each fixture differ. The stock fixtures have one: 154931 of the 1973 save, designed under the earlier rule, whose cost rows carry that rule's hardening cost factor. The migrated save holds forty, all of the owner's campaign before it was migrated. A comparison that moves in or out is a change to look at, not one to absorb.
 const EXPECTED_SENSOR_DIFFER = new Set([
-  ...['500208', '500209', '500213', '500238', '500240', '500243', '500244', '500265', '500380', '500383', '500384', '500389', '500390', '500391', '500392', '500394', '500395', '500598', '500599', '500607', '500608', '500609', '500730', '500809', '500810', '500811', '501040', '501041', '501139', '501140', '501141', '501142'].map((id) => `modded-g140|${id}`),
+  ...['500208', '500209', '500211', '500213', '500238', '500239', '500240', '500243', '500244', '500262', '500265', '500380', '500381', '500382', '500383', '500384', '500389', '500390', '500391', '500392', '500393', '500394', '500395', '500598', '500599', '500607', '500608', '500609', '500729', '500730', '500809', '500810', '500811', '500823', '501040', '501041', '501042', '501139', '501140', '501141', '501142'].map((id) => `modded-g140|${id}`),
+  ...['500252', '500253', '500351', '500352', '500353', '500354', '500355', '500356', '500357', '500363', '500364', '500365', '500366', '500367', '500370', '500371', '500372', '500373', '500374', '500375', '500376', '500377', '500378', '500379', '500380', '500381', '500394', '500397', '500398', '500400', '500401', '500402', '500404', '500405', '500406', '500407', '500422', '500426', '500427', '500428'].map((id) => `migrated-g141|${id}`),
+  'boscodiogigia-1973-g140|154931',
 ])
-const EXPECTED_SENSOR_DIFFERENCES = { 'modded-g140': 110 }
+const EXPECTED_SENSOR_DIFFERENCES = { 'modded-g140': 137, 'migrated-g141': 144, 'boscodiogigia-1973-g140': 3 }
+
+// The one stock component whose stored cost figures were made under the earlier rule, which multiplied the 1.15 hardening cost factor into them: this rule gives them without it, so its Cost, Uridium and Corbomite differ and are pinned above, and its other figures still agree. It is left out of the exhaustive rebuild, which would otherwise count its three cost rows as differences.
+const PREMIUM_271_COMPONENTS = new Set(['boscodiogigia-1973-g140|154931'])
 
 // The figures of the sensor fixtures the rules leave unknown, as `fixture|component|field`, each for the reason the reconciliation gives: a fire control of the 1973 save that names no ECCM tech (it stores ECCM 8, cost 0 and Corbomite -25.6) has no ECCM factor to take its cost and Corbomite from. An unknown that is not listed, or a listed one that is known now, is a change to look at.
 const EXPECTED_SENSOR_UNKNOWN = new Set(['boscodiogigia-1973-g140|154909|Cost', 'boscodiogigia-1973-g140|154909|Corbomite', 'boscodiogigia-1973-g140|154909|ECCM'])
 
-// What is wrong with the sensor fixtures `data` as the library reads them: an unsupported or an unknown comparison, a difference with no reason or one not expected above, an expected one that no longer differs, or a pinned row that no longer explains a difference.
+// What is wrong with the sensor fixtures `data` as the library reads them: an unsupported or an unknown comparison, a difference with no reason or one not expected above, an expected one that no longer differs, or a pin of the fixture's save that no comparison uses (stale: its row agrees, is unknown, has a changed figure or is gone), or a pin of a save no fixture is of.
 const sensorFixtureProblems = (library, data) => {
   const problems = []
   const differing = new Set()
   const unknown = new Set()
   const counts = {}
-  const pinned = new Set()
 
   for (const fixture of data.values()) {
     for (const component of fixture.components) {
       for (const entry of library.reconcileSensor(fixture, component).comparisons) {
         const key = `${fixture.label}|${component.id}|${entry.field}`
-        const { verdict, reason } = library.classify(KNOWN_SENSOR_ROWS, fixture.game, component.id, entry)
+        const { verdict, reason } = library.classify(pinsOf(KNOWN_SENSOR_ROWS, fixtureSave(fixture)), fixture.game, component.id, entry)
 
         if (verdict === 'unsupported') {
           problems.push(`${key} is unsupported`)
@@ -1726,8 +2054,6 @@ const sensorFixtureProblems = (library, data) => {
 
           if (!reason) {
             problems.push(`${key} differs with no reason`)
-          } else {
-            pinned.add(`${fixture.game}|${component.id}|${entry.field}`)
           }
         }
       }
@@ -1752,9 +2078,15 @@ const sensorFixtureProblems = (library, data) => {
     }
   }
 
-  for (const row of KNOWN_SENSOR_ROWS) {
-    if (!pinned.has(`${row.game}|${row.id}|${row.field}`)) {
-      problems.push(`the pinned row ${row.id} ${row.field} no longer explains a difference`)
+  for (const fixture of data.values()) {
+    for (const entry of reconcileSensorFixture(library, fixture, '', { ruleIds: [], save: fixtureSave(fixture), complete: completeFixture(fixture) }).mismatches.filter((mismatch) => mismatch.stale)) {
+      problems.push(`${fixture.label} ${entry.id} ${entry.field} has a stale pin: ${entry.stale}`)
+    }
+  }
+
+  for (const save of new Set(KNOWN_SENSOR_ROWS.map((pin) => pin.save))) {
+    if (![...data.values()].some((fixture) => fixtureSave(fixture) === save)) {
+      problems.push(`the pins of ${save} have no fixture of that save`)
     }
   }
 
@@ -1768,10 +2100,11 @@ const sensorFixtureProblems = (library, data) => {
 }
 
 const SENSOR_CHECK_NAMES = {
-  iris: 'the stored Iris of the modded save is rebuilt: range 239,365,088.371173 km, strength 18, cost 28.125 (Uridium 22.5, Corbomite 5.625), size 0.1, resolution 1, ECCM 15, CTD 1',
+  iris: 'the Iris of the modded save is rebuilt: range 239,365,088.371173 km, strength 18, cost 22.5 (Uridium 18, Corbomite 4.5), size 0.1, resolution 1, ECCM 15, CTD 1; the save stores 28.125 (Uridium 22.5, Corbomite 5.625), which is the earlier rule with its 1.25 hardening cost factor',
   active: 'every owned active sensor and missile fire control of the stock saves is rebuilt: strength, range, cost, minerals, crew, HTK, ECCM and CTD',
   pair: 'a missile fire control has twice the range of the search sensor of the same techs, size and resolution, with its strength, and the rules reproduce both',
-  passive: 'the thermal and EM sensors of the stock saves are rebuilt: the sensitivity is the size times the tech, the cost that times the hardening factor to 1 decimal, all of it Uridium',
+  passive: 'the thermal and EM sensors of the stock saves are rebuilt: the sensitivity is the size times the tech, the cost is that rounded to 1 decimal, all of it Uridium, with the hardening tech giving the CTD and no cost premium',
+  unhardened: 'electronic hardening is the CTD and no cost premium: an active sensor, a missile fire control, a passive sensor and a beam fire control with a hardening tech and without one carry the same Uridium, Cost and Corbomite at the same size, techs and ECCM, and a hardening cost factor passed to the design changes nothing',
   resolution: 'a signature under the resolution cuts the range by the square of the ratio, and one at or over it cuts nothing',
   jammer: 'a sensor jammer cuts the range by 0.75 to the jammer less the ECCM only when the jammer is the stronger, and the missile hit penalty is another rule',
   signature: 'a missile is seen by a signature of its size in MSP over 20 HS, never below 0.3',
@@ -1787,7 +2120,7 @@ const SENSOR_CHECK_NAMES = {
   trunc: 'the cost of a fire control uses the tracking in thousands cut to a whole number',
   request: 'a requested range and tracking are met by the smallest legal multipliers, on the tracking the game stores (rounded) and not the unrounded ratio; the next smaller falls short, a range over the limit is beyond the largest, a missing tech is unavailable, and every request is an estimate under the inverse sizing rule',
   roles: 'the techs of a component are found by tech type and not by slot; two of one type are ambiguous, a missing or unheld one makes its figures unknown, and a figure the save lacks is unknown',
-  techNumbers: 'a tech row that stores no number a figure needs makes only the figures that need it unknown (the rating for the CTD or ECCM, the cost factor for the Uridium, Cost and Corbomite) and never reads it as 0',
+  techNumbers: 'a tech row that stores no number a figure needs makes only the figures that need it unknown (the rating for the CTD or ECCM, the ECCM cost factor for the Cost and Corbomite) and never reads it as 0',
   descriptions: 'the tech types the roles are found by are those DIM_TechType describes in every save',
   explanations: 'a difference is explained only by an audited pin of its game, component, field and figures: the alternatives (implied techs, a tenth, an uncapped range) are diagnostics, and an unpinned figure, another game, a changed figure and a re-identified component are mismatches',
   fixtures: 'the sensor fixtures reconcile: the stock saves agree everywhere, the modded save differs only where pinned, no comparison explains itself, and nothing is unknown or unsupported',
@@ -1817,7 +2150,7 @@ const sensorChecks = (library, data) => {
     let count = 0
 
     for (const fixture of unmodded) {
-      for (const component of ofTypes(fixture, wanted).filter((part) => ![...EXPECTED_SENSOR_UNKNOWN].some((key) => key.startsWith(`${fixture.label}|${part.id}|`)))) {
+      for (const component of ofTypes(fixture, wanted).filter((part) => ![...EXPECTED_SENSOR_UNKNOWN].some((key) => key.startsWith(`${fixture.label}|${part.id}|`)) && !PREMIUM_271_COMPONENTS.has(`${fixture.label}|${part.id}`))) {
         const failure = expectVerdicts(library, library.reconcileSensor(fixture, component), fields, 'agree')
 
         if (failure !== true) {
@@ -1867,7 +2200,7 @@ const sensorChecks = (library, data) => {
       const iris = componentOf(modded, 500211).row
       const result = rebuilt(modded, 500211)
 
-      return firstFailure(expectNear('stored range', iris.MaxSensorRange, 239365088.371173), expectNear('stored cost', iris.Cost, 28.125), expectNear('stored Uridium', iris.Uridium, 22.5), expectNear('stored Corbomite', iris.Corbomite, 5.625), expectNear('stored size', iris.Size, 0.1), expectNear('stored resolution', iris.Resolution, 1), expectNear('stored ECCM', iris.ECCM, 15), expectNear('stored CTD', iris.ElectronicCTD, 1), expectNear('stored strength', iris.ComponentValue, 18), expectNear('range', computedOf(result, 'Range'), 239365088.371173), expectNear('strength', computedOf(result, 'Strength'), 18), expectNear('cost', computedOf(result, 'Cost'), 28.125), expectNear('Uridium', computedOf(result, 'Uridium'), 22.5), expectNear('Corbomite', computedOf(result, 'Corbomite'), 5.625), expectNear('ECCM', computedOf(result, 'ECCM'), 15), expectNear('CTD', computedOf(result, 'CTD'), 1), expectVerdicts(library, result, SENSOR_ACTIVE_FIELDS, 'agree'))
+      return firstFailure(expectNear('stored range', iris.MaxSensorRange, 239365088.371173), expectNear('stored cost', iris.Cost, 28.125), expectNear('stored Uridium', iris.Uridium, 22.5), expectNear('stored Corbomite', iris.Corbomite, 5.625), expectNear('stored size', iris.Size, 0.1), expectNear('stored resolution', iris.Resolution, 1), expectNear('stored ECCM', iris.ECCM, 15), expectNear('stored CTD', iris.ElectronicCTD, 1), expectNear('stored strength', iris.ComponentValue, 18), expectNear('range', computedOf(result, 'Range'), 239365088.371173), expectNear('strength', computedOf(result, 'Strength'), 18), expectNear('cost', computedOf(result, 'Cost'), 22.5), expectNear('Uridium', computedOf(result, 'Uridium'), 18), expectNear('Corbomite', computedOf(result, 'Corbomite'), 4.5), expectNear('ECCM', computedOf(result, 'ECCM'), 15), expectNear('CTD', computedOf(result, 'CTD'), 1), expectVerdicts(library, result, ['Strength', 'Range', 'Crew', 'HTK', 'ECCM', 'CTD'], 'agree'), expectVerdicts(library, result, ['Cost', 'Uridium', 'Corbomite'], 'differ'))
     }],
     [S.active, () => firstFailure(reproduces([types.active, types.missileFireControl], SENSOR_ACTIVE_FIELDS, 60), expectThat('the stock saves hold no resolution 50 or more fire control', unmodded.some((fixture) => ofTypes(fixture, [types.missileFireControl]).some((component) => component.row.Resolution >= 50))))],
     [S.pair, () => {
@@ -1884,10 +2217,18 @@ const sensorChecks = (library, data) => {
       }))
     }],
     [S.passive, () => {
-      const small = library.passiveSensorDesign({ sizeHS: 0.3, sensitivityTech: 5, hardeningRating: 100, hardeningCost: 1.23 })
-      const large = library.passiveSensorDesign({ sizeHS: 2, sensitivityTech: 5, hardeningRating: 100, hardeningCost: 1 })
+      const small = library.passiveSensorDesign({ sizeHS: 0.3, sensitivityTech: 5, hardeningRating: 100 })
+      const large = library.passiveSensorDesign({ sizeHS: 2, sensitivityTech: 5, hardeningRating: 100 })
 
-      return firstFailure(reproduces([types.thermal, types.em], SENSOR_PASSIVE_FIELDS, 40), expectNear('sensitivity of 0.3 HS at 5', small.sensitivity, 1.5), expectNear('cost to 1 decimal', small.cost, 1.8), expectNear('all of it Uridium', small.uridium, small.cost), expectNear('crew of 2 HS', large.crew, 4), expectNear('HTK of 2 HS', large.htk, 1), expectNear('HTK of 0.3 HS', small.htk, 0), expectNear('sensitivity of 2 HS at 5', large.sensitivity, 10), expectNear('CTD', large.ctd, 100), expectVerdicts(library, rebuilt(stock, 154091), SENSOR_PASSIVE_FIELDS, 'agree'), expectNear('thermal 1 HS sensitivity', computedOf(rebuilt(stock, 154091), 'Sensitivity'), 5), expectNear('EM 0.1 HS sensitivity', computedOf(rebuilt(stock, 154090), 'Sensitivity'), 0.5), expectNear('EM 0.1 HS crew', computedOf(rebuilt(stock, 154090), 'Crew'), 0))
+      return firstFailure(reproduces([types.thermal, types.em], SENSOR_PASSIVE_FIELDS, 40), expectNear('sensitivity of 0.3 HS at 5', small.sensitivity, 1.5), expectNear('cost to 1 decimal and no premium for the hardening tech', small.cost, 1.5), expectNear('all of it Uridium', small.uridium, small.cost), expectNear('crew of 2 HS', large.crew, 4), expectNear('HTK of 2 HS', large.htk, 1), expectNear('HTK of 0.3 HS', small.htk, 0), expectNear('sensitivity of 2 HS at 5', large.sensitivity, 10), expectNear('CTD', large.ctd, 100), expectVerdicts(library, rebuilt(stock, 154091), SENSOR_PASSIVE_FIELDS, 'agree'), expectNear('thermal 1 HS sensitivity', computedOf(rebuilt(stock, 154091), 'Sensitivity'), 5), expectNear('EM 0.1 HS sensitivity', computedOf(rebuilt(stock, 154090), 'Sensitivity'), 0.5), expectNear('EM 0.1 HS crew', computedOf(rebuilt(stock, 154090), 'Crew'), 0))
+    }],
+    [S.unhardened, () => {
+      const active = (hardeningRating, extra) => library.activeSensorDesign({ sizeHS: 1.5, resolution: 5, strengthTech: 40, emTech: 100, hardeningRating, eccmRating: 2, eccmCost: 1.3, ...extra })
+      const passive = (hardeningRating, extra) => library.passiveSensorDesign({ sizeHS: 1.5, sensitivityTech: 40, hardeningRating, ...extra })
+      const beam = (hardeningRating, extra) => library.beamFireControlDesign({ rangeMultiplier: 1.4, trackingMultiplier: 2.5, distanceRating: 100000, speedRating: 5000, weaponNumber: 1, hardeningRating, eccmRating: 2, eccmCost: 1.3, ...extra })
+      const sameCost = (label, hardened, plain) => firstFailure(expectNear(`${label} Cost with the hardening tech and without it`, hardened.cost, plain.cost), expectNear(`${label} Uridium with the hardening tech and without it`, hardened.uridium, plain.uridium), expectThat(`${label}: the Corbomite is ${hardened.corbomite} with the hardening tech and ${plain.corbomite} without it`, hardened.corbomite === plain.corbomite), expectThat(`${label}: the CTD is ${hardened.ctd} with the hardening tech and ${plain.ctd} without it, not 100 and 0`, hardened.ctd === 100 && plain.ctd === 0))
+
+      return firstFailure(sameCost('an active sensor', active(100), active(0)), sameCost('a missile fire control', active(100, { mode: library.SENSOR_MODES.missileFireControl }), active(0, { mode: library.SENSOR_MODES.missileFireControl })), sameCost('a passive sensor', passive(100), passive(0)), sameCost('a beam fire control', beam(100), beam(0)), expectNear('an active sensor Cost with a hardening cost factor passed', active(0, { hardeningCost: 4 }).cost, active(0).cost), expectNear('a passive sensor Cost with a hardening cost factor passed', passive(0, { hardeningCost: 4 }).cost, passive(0).cost), expectNear('a beam fire control Cost with a hardening cost factor passed', beam(0, { hardeningCost: 4 }).cost, beam(0).cost))
     }],
     [S.resolution, () => {
       const iris = componentOf(modded, 500211).row.MaxSensorRange
@@ -1998,10 +2339,10 @@ const sensorChecks = (library, data) => {
       return firstFailure(expectNear('range of 4 times 8,000,000', capped.rangeKm, 1400000), expectNear('range before the limit', capped.uncappedRangeKm, 32000000), expectThat('the range is not marked clamped', capped.rangeCapped === true), expectNear('Uridium follows the clamped range', capped.uridium, 700), expectNear('range at the limit', atLimit.rangeKm, 1400000), expectThat('the range at the limit is marked clamped', atLimit.rangeCapped === false), expectNear('range just over the limit', over.rangeKm, 1400000), expectThat('the range just over the limit is not marked clamped', over.rangeCapped === true), expectNear('Uridium with another limit', wider.uridium, 16000), expectNear('size of 0.1 and 0.1', floored.sizeHS, 0.01), expectThat('the floor is not marked', floored.sizeFloored === true), expectNear('size at half a weapon number', smallest.sizeHS, 0.01), expectNear('size of 0.1 and 0.2', edge.sizeHS, 0.01), expectThat('the size at the floor is marked floored', edge.sizeFloored === false), expectNear('stored floor size', row.Size, 0.01), expectNear('size of the modded 0.1 by 0.1 fire control', computedOf(result, 'Size'), 0.01), expectNear('its crew', computedOf(result, 'Crew'), 0), expectNear('its HTK', computedOf(result, 'HTK'), 0), expectVerdicts(library, result, ['Size', 'Crew', 'HTK', 'Range', 'Tracking'], 'agree'))
     }],
     [S.trunc, () => {
-      const design = (extra) => library.beamFireControlDesign({ rangeMultiplier: 1, trackingMultiplier: 3.625, distanceRating: 100000, speedRating: 10000, weaponNumber: 1, hardeningRating: 100, hardeningCost: 1.5, eccmRating: 0, eccmCost: 1, ...extra })
+      const design = (extra) => library.beamFireControlDesign({ rangeMultiplier: 1, trackingMultiplier: 3.625, distanceRating: 100000, speedRating: 10000, weaponNumber: 1, hardeningRating: 100, eccmRating: 0, eccmCost: 1, ...extra })
       const stored = componentOf(stock, 154634).row
 
-      return firstFailure(expectNear('tracking', design({}).trackingKmS, 36250), expectNear('Uridium at tracking 36250', design({}).uridium, 270), expectNear('Uridium at tracking 36999', design({ trackingMultiplier: 3.6999 }).uridium, 270), expectNear('Uridium at tracking 37000', design({ trackingMultiplier: 3.7 }).uridium, 277.5), expectNear('the stored Uridium of 154634', stored.Uridium, 33.6), expectNear('its tracking', stored.TrackingSpeed, 7590), expectThat('the stored Uridium is on the tracking in whole thousands', Math.abs(stored.Uridium - 192000 / 20000 * 7.59 * 0.5) > 1), expectVerdicts(library, rebuilt(stock, 154634), ['Uridium', 'Cost', 'Tracking'], 'agree'))
+      return firstFailure(expectNear('tracking', design({}).trackingKmS, 36250), expectNear('Uridium at tracking 36250', design({}).uridium, 180), expectNear('Uridium at tracking 36999', design({ trackingMultiplier: 3.6999 }).uridium, 180), expectNear('Uridium at tracking 37000', design({ trackingMultiplier: 3.7 }).uridium, 185), expectNear('the stored Uridium of 154634', stored.Uridium, 33.6), expectNear('its tracking', stored.TrackingSpeed, 7590), expectThat('the stored Uridium is on the tracking in whole thousands', Math.abs(stored.Uridium - 192000 / 20000 * 7.59 * 0.5) > 1), expectVerdicts(library, rebuilt(stock, 154634), ['Uridium', 'Cost', 'Tracking'], 'agree'))
     }],
     [S.request, () => {
       const result = (extra) => library.beamFireControlForRequest({ rangeKm: 123456, trackingKmS: 4321, ...beamTechs, ...extra })
@@ -2038,8 +2379,9 @@ const sensorChecks = (library, data) => {
       const halfway = request({ trackingKmS: 162.5, speedRating: 1250 })
       const sources = [['an ordinary request', result({})], ['a request beyond the range limit', result({ rangeKm: 1500000, distanceRating: 400000 })], ['a request beyond the largest tracking', result({ trackingKmS: 30000 })], ['a request at the multiplier floors', result({ rangeKm: 1000, trackingKmS: 100 })]]
       const missing = result({ speedRating: null })
+      const unfactored = request({ hardeningCost: null })
 
-      return firstFailure(...cases, ...swept, expectNear('range multiplier of 28,000 km on 80,000', exact.range.multiplier, 0.35), expectNear('tracking multiplier of 1,750 km/s on 5,000', exact.tracking.multiplier, 0.35), expectThat('a request on a multiplier is not sized to it', exact.range.smaller === 0.34), expectThat(`1000 km is ${small.range.status}`, small.range.status === 'minimum-bound' && small.range.smaller === null && small.range.multiplier === 0.1), expectThat(`a tracking of 30000 is ${fast.tracking.status}`, fast.tracking.status === 'beyond-largest' && fast.design === null), expectThat(`1,500,000 km is ${far.range.status}`, far.range.status === 'beyond-largest' && far.design === null), expectNear('138 km/s on the speed rating 1250 is stored by the multiplier 0.11 (137.5 rounds to 138)', rounded.tracking.multiplier, 0.11), expectNear('the design of 0.11 on 1250', rounded.design.trackingKmS, 138), expectNear('162.5 km/s on the speed rating 1250 needs 0.14, since 0.13 stores 162', halfway.tracking.multiplier, 0.14), expectThat('the exact tracking multiplier is the unrounded ratio', Math.abs(rounded.tracking.exactMultiplier - 138 / 1250) < 1e-12), expectThat('the floored request is sized at 0.1 and 0.1', small.tracking.multiplier === 0.1 && small.design.sizeHS === 0.01 && small.design.sizeFloored === true), expectThat('a missing speed rating gives a request', !isAvailable(missing)), expectThat('a request with no speed rating is certified by the inverse sizing rule', missing.rule.id === 'design.sensorInverseSizing'), expectThat('a complete request is unavailable', isAvailable(result({}))), ...sources.map(([label, built]) => firstFailure(expectThat(`${label} is certified by ${built.rule.id}, not the inverse sizing rule`, built.rule.id === 'design.sensorInverseSizing'), expectThat(`${label} is ${built.status}, not estimated`, built.status === 'estimated'))), expectThat('the design of a request is the confirmed forward rule', result({}).value.design !== null && result({}).value.design.trackingKmS >= 4321))
+      return firstFailure(...cases, ...swept, expectNear('range multiplier of 28,000 km on 80,000', exact.range.multiplier, 0.35), expectNear('tracking multiplier of 1,750 km/s on 5,000', exact.tracking.multiplier, 0.35), expectThat('a request on a multiplier is not sized to it', exact.range.smaller === 0.34), expectThat(`1000 km is ${small.range.status}`, small.range.status === 'minimum-bound' && small.range.smaller === null && small.range.multiplier === 0.1), expectThat(`a tracking of 30000 is ${fast.tracking.status}`, fast.tracking.status === 'beyond-largest' && fast.design === null), expectThat(`1,500,000 km is ${far.range.status}`, far.range.status === 'beyond-largest' && far.design === null), expectNear('138 km/s on the speed rating 1250 is stored by the multiplier 0.11 (137.5 rounds to 138)', rounded.tracking.multiplier, 0.11), expectNear('the design of 0.11 on 1250', rounded.design.trackingKmS, 138), expectNear('162.5 km/s on the speed rating 1250 needs 0.14, since 0.13 stores 162', halfway.tracking.multiplier, 0.14), expectThat('the exact tracking multiplier is the unrounded ratio', Math.abs(rounded.tracking.exactMultiplier - 138 / 1250) < 1e-12), expectThat('the floored request is sized at 0.1 and 0.1', small.tracking.multiplier === 0.1 && small.design.sizeHS === 0.01 && small.design.sizeFloored === true), expectThat('a missing speed rating gives a request', !isAvailable(missing)), expectThat('a request with no speed rating is certified by the inverse sizing rule', missing.rule.id === 'design.sensorInverseSizing'), expectThat('a complete request is unavailable', isAvailable(result({}))), ...sources.map(([label, built]) => firstFailure(expectThat(`${label} is certified by ${built.rule.id}, not the inverse sizing rule`, built.rule.id === 'design.sensorInverseSizing'), expectThat(`${label} is ${built.status}, not estimated`, built.status === 'estimated'))), expectThat('the design of a request is the confirmed forward rule', result({}).value.design !== null && result({}).value.design.trackingKmS >= 4321), expectThat('a request whose hardening level stores no cost factor is still sized, the factor no figure reads', unfactored !== null && unfactored.design !== null))
     }],
     [S.roles, () => {
       const slots = (row, values) => TECH_SLOTS.forEach((slot, index) => {
@@ -2059,7 +2401,7 @@ const sensorChecks = (library, data) => {
       }).result
       const reasons = (result, field) => String(entryOf(result, field).reason || '')
 
-      return firstFailure(expectThat('the permuted component computes differently', SENSOR_ACTIVE_FIELDS.every((field) => computedOf(permuted, field) === computedOf(base, field))), expectVerdicts(library, permuted, SENSOR_ACTIVE_FIELDS, 'agree'), expectVerdicts(library, twice, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, twice, ['Strength', 'Range', 'Uridium', 'CTD'], 'agree'), expectThat('a tech of the type twice is not reported as two techs of the type', reasons(twice, 'ECCM').includes('are of type 83')), expectVerdicts(library, unnamed, ['CTD', 'Uridium', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, unnamed, ['Range', 'Strength', 'ECCM'], 'agree'), expectThat('a hardening tech the component does not name is read as 0', computedOf(unnamed, 'CTD') === null && computedOf(unnamed, 'Cost') === null), expectVerdicts(library, unheld, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, unheld, ['Range', 'CTD'], 'agree'), expectThat('a tech row the save lacks is read as 0', computedOf(unheld, 'ECCM') === null), expectThat('the reason of a tech row the save lacks says so', reasons(unheld, 'ECCM').includes('no tech row')), expectVerdicts(library, lacking, ['Uridium'], 'unknown'), expectVerdicts(library, lacking, ['Range'], 'unknown'), expectThat('a figure the save lacks is read as 0', entryOf(lacking, 'Uridium').stored === null && entryOf(lacking, 'Range').computed === null))
+      return firstFailure(expectThat('the permuted component computes differently', SENSOR_ACTIVE_FIELDS.every((field) => computedOf(permuted, field) === computedOf(base, field))), expectVerdicts(library, permuted, ['Strength', 'Range', 'Crew', 'HTK', 'ECCM', 'CTD'], 'agree'), expectVerdicts(library, twice, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, twice, ['Strength', 'Range', 'CTD'], 'agree'), expectThat('the Uridium is not made unknown by an ECCM tech named twice', computedOf(twice, 'Uridium') !== null), expectThat('a tech of the type twice is not reported as two techs of the type', reasons(twice, 'ECCM').includes('are of type 83')), expectVerdicts(library, unnamed, ['CTD'], 'unknown'), expectVerdicts(library, unnamed, ['Range', 'Strength', 'ECCM'], 'agree'), expectThat('a hardening tech the component does not name leaves the cost figures known', ['Uridium', 'Cost', 'Corbomite'].every((field) => computedOf(unnamed, field) !== null)), expectThat('a hardening tech the component does not name is read as 0', computedOf(unnamed, 'CTD') === null), expectVerdicts(library, unheld, ['ECCM', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, unheld, ['Range', 'CTD'], 'agree'), expectThat('a tech row the save lacks is read as 0', computedOf(unheld, 'ECCM') === null), expectThat('the reason of a tech row the save lacks says so', reasons(unheld, 'ECCM').includes('no tech row')), expectVerdicts(library, lacking, ['Uridium'], 'unknown'), expectVerdicts(library, lacking, ['Range'], 'unknown'), expectThat('a figure the save lacks is read as 0', entryOf(lacking, 'Uridium').stored === null && entryOf(lacking, 'Range').computed === null))
     }],
     [S.techNumbers, () => {
       const without = (fixture, id, role, member) => edited(fixture, id, (copy) => {
@@ -2072,7 +2414,7 @@ const sensorChecks = (library, data) => {
       const noStrength = without(stock, 154596, 'strength', 'info')
       const beam = without(later, 155094, 'hardening', 'info2')
 
-      return firstFailure(expectVerdicts(library, noFactor, ['Cost', 'Uridium', 'Corbomite'], 'unknown'), expectVerdicts(library, noFactor, ['CTD', 'Range', 'Strength', 'ECCM', 'Crew', 'HTK'], 'agree'), expectThat('a cost factor the tech row lacks is read as 0', ['Cost', 'Uridium', 'Corbomite'].every((field) => computedOf(noFactor, field) === null)), expectVerdicts(library, noRating, ['CTD'], 'unknown'), expectVerdicts(library, noRating, ['Cost', 'Uridium', 'Corbomite', 'Range', 'ECCM'], 'agree'), expectThat('a rating the tech row lacks is read as 0', computedOf(noRating, 'CTD') === null), expectVerdicts(library, noEccmFactor, ['Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, noEccmFactor, ['Uridium', 'ECCM', 'CTD', 'Range'], 'agree'), expectVerdicts(library, noEccmRating, ['ECCM'], 'unknown'), expectVerdicts(library, noEccmRating, ['Cost', 'Uridium', 'Corbomite', 'CTD'], 'agree'), expectVerdicts(library, noStrength, ['Strength', 'Range', 'Cost', 'Uridium', 'Corbomite'], 'unknown'), expectVerdicts(library, noStrength, ['CTD', 'ECCM', 'Crew'], 'agree'), expectThat('a strength the tech row lacks is read as 0', computedOf(noStrength, 'Strength') === null && computedOf(noStrength, 'Range') === null), expectVerdicts(library, beam, ['Uridium', 'Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, beam, ['Range', 'Tracking', 'Size', 'Crew', 'HTK', 'ECCM', 'CTD', 'SpecialFunction'], 'agree'), expectThat('a cost factor the tech row of a fire control lacks is read as 0', ['Uridium', 'Cost', 'Corbomite'].every((field) => computedOf(beam, field) === null)))
+      return firstFailure(expectVerdicts(library, noFactor, ['Cost', 'Uridium', 'Corbomite', 'CTD', 'Range', 'Strength', 'ECCM', 'Crew', 'HTK'], 'agree'), expectThat('a hardening cost factor the tech row lacks is read as 0', ['Cost', 'Uridium', 'Corbomite'].every((field) => computedOf(noFactor, field) !== null)), expectVerdicts(library, noRating, ['CTD'], 'unknown'), expectVerdicts(library, noRating, ['Cost', 'Uridium', 'Corbomite', 'Range', 'ECCM'], 'agree'), expectThat('a rating the tech row lacks is read as 0', computedOf(noRating, 'CTD') === null), expectVerdicts(library, noEccmFactor, ['Cost', 'Corbomite'], 'unknown'), expectVerdicts(library, noEccmFactor, ['Uridium', 'ECCM', 'CTD', 'Range'], 'agree'), expectVerdicts(library, noEccmRating, ['ECCM'], 'unknown'), expectVerdicts(library, noEccmRating, ['Cost', 'Uridium', 'Corbomite', 'CTD'], 'agree'), expectVerdicts(library, noStrength, ['Strength', 'Range', 'Cost', 'Uridium', 'Corbomite'], 'unknown'), expectVerdicts(library, noStrength, ['CTD', 'ECCM', 'Crew'], 'agree'), expectThat('a strength the tech row lacks is read as 0', computedOf(noStrength, 'Strength') === null && computedOf(noStrength, 'Range') === null), expectVerdicts(library, beam, ['Range', 'Tracking', 'Size', 'Crew', 'HTK', 'ECCM', 'CTD', 'SpecialFunction', 'Uridium', 'Cost', 'Corbomite'], 'agree'), expectThat('a hardening cost factor the tech row of a fire control lacks is read as 0', ['Uridium', 'Cost', 'Corbomite'].every((field) => computedOf(beam, field) !== null)))
     }],
     [S.descriptions, () => {
       const described = { thermal: 'Thermal Sensor Sensitivity', em: 'EM Sensor Sensitivity', strength: 'Active Sensor Strength', hardening: 'Hardening', eccm: 'ECCM', distance: 'Fire Control Distance Rating', speed: 'Fire Control Speed Rating', singleWeapon: 'Single Weapon Fire Control' }
@@ -2086,10 +2428,6 @@ const sensorChecks = (library, data) => {
       const alternative = (result, field) => entryOf(result, field)?.alternative || null
       const impliedAll = edited(modded, 500607, (copy) => {
         copy.techs[strengthOf.id].info = implied
-      }).result
-      const tenth = edited(modded, 500208, (_copy, component) => {
-        component.row.Cost *= 10
-        component.row.Uridium *= 10
       }).result
       const uncapped = rebuilt(modded, 500389)
       const row = componentOf(modded, 500389).row
@@ -2112,15 +2450,184 @@ const sensorChecks = (library, data) => {
       reidentified.row.Uridium /= 10
 
       const tenthOfStock = library.reconcileSensor(copy, reidentified)
+      const moddedPins = pinsOf(KNOWN_SENSOR_ROWS, 'modded-g140')
       const pinnedFigures = [[500607, 'Strength'], [500607, 'Range'], [500208, 'Cost'], [500389, 'Range'], [500389, 'Cost'], [500238, 'Cost'], [500238, 'Range'], [500608, 'Sensitivity'], [500810, 'Cost'], [500380, 'Tracking']]
-      const pins = pinnedFigures.map(([id, field]) => firstFailure(expectThat(`${id} ${field} is ${classified(rebuilt(modded, id), field).verdict} with no pin, not a mismatch`, classified(rebuilt(modded, id), field).verdict === 'differ' && !classified(rebuilt(modded, id), field).reason), expectThat(`${id} ${field} is not explained by its pin`, Boolean(classified(rebuilt(modded, id), field, KNOWN_SENSOR_ROWS).reason)), expectThat(`${id} ${field} is explained by a pin of another game`, !classified(rebuilt(modded, id), field, KNOWN_SENSOR_ROWS, 138).reason)))
+      const pins = pinnedFigures.map(([id, field]) => firstFailure(expectThat(`${id} ${field} is ${classified(rebuilt(modded, id), field).verdict} with no pin, not a mismatch`, classified(rebuilt(modded, id), field).verdict === 'differ' && !classified(rebuilt(modded, id), field).reason), expectThat(`${id} ${field} is not explained by its pin`, Boolean(classified(rebuilt(modded, id), field, moddedPins).reason)), expectThat(`${id} ${field} is explained by a pin of another game`, !classified(rebuilt(modded, id), field, moddedPins, 138).reason), expectThat(`${id} ${field} is explained by the pins of another save`, !classified(rebuilt(modded, id), field, pinsOf(KNOWN_SENSOR_ROWS, 'migrated-g141')).reason)))
 
-      return firstFailure(...pins, expectNear('strength the stored figure implies', implied, 10), expectThat('the stored strength of 500607 is the tech row', Math.abs(strengthOf.info - implied) > 1), expectVerdicts(library, impliedAll, SENSOR_ACTIVE_FIELDS, 'agree'), expectThat('the techs a stored strength implies are not diagnosed', Boolean(alternative(rebuilt(modded, 500607), 'Strength'))), expectVerdicts(library, tenth, SENSOR_PASSIVE_FIELDS, 'agree'), expectThat('a tenth of the stored cost is not diagnosed', Boolean(alternative(rebuilt(modded, 500208), 'Cost'))), expectThat('an uncapped range is not diagnosed', Boolean(alternative(uncapped, 'Range'))), expectNear('the range of the rule with no limit', wide.rangeKm, row.ComponentValue), expectNear('the Uridium of the rule with no limit at a tenth', wide.uridium / 10, row.Uridium), expectThat('a strength alone is diagnosed by the techs it implies', alternative(lone, 'Strength') === null), expectThat('a range off by 1.5 is diagnosed', alternative(off, 'Range') === null), expectThat('a strength alone is not a mismatch', classified(lone, 'Strength', KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(lone, 'Strength', KNOWN_SENSOR_ROWS, 138).reason), expectThat('a range off by 1.5 is not a mismatch', classified(off, 'Range', KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(off, 'Range', KNOWN_SENSOR_ROWS, 138).reason), expectThat('a changed pinned Cost is explained', classified(moved, 'Cost', KNOWN_SENSOR_ROWS).verdict === 'differ' && !classified(moved, 'Cost', KNOWN_SENSOR_ROWS).reason), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not differences', ['Cost', 'Uridium'].every((field) => library.judge(entryOf(tenthOfStock, field)) === 'differ')), expectThat('the Cost and Uridium of a stock sensor of another id cut to a tenth are explained', ['Cost', 'Uridium'].every((field) => classified(tenthOfStock, field, KNOWN_SENSOR_ROWS, 138).verdict === 'differ' && !classified(tenthOfStock, field, KNOWN_SENSOR_ROWS, 138).reason)), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not diagnosed as a tenth', ['Cost', 'Uridium'].every((field) => Boolean(alternative(tenthOfStock, field)))), expectThat('a comparison explains a difference by itself', modded.components.every((component) => library.reconcileSensor(modded, component).comparisons.every((entry) => !entry.explain))))
+      return firstFailure(...pins, expectNear('strength the stored figure implies', implied, 10), expectThat('the stored strength of 500607 is the tech row', Math.abs(strengthOf.info - implied) > 1), expectVerdicts(library, impliedAll, SENSOR_ACTIVE_FIELDS, 'agree'), expectThat('the techs a stored strength implies are not diagnosed', Boolean(alternative(rebuilt(modded, 500607), 'Strength'))), expectThat('an uncapped range is not diagnosed', Boolean(alternative(uncapped, 'Range'))), expectNear('the range of the rule with no limit', wide.rangeKm, row.ComponentValue), expectNear('the Uridium of the earlier rule with no limit at a tenth', wide.uridium * uncapped.roles.hardening.info2 / 10, row.Uridium), expectThat('a strength alone is diagnosed by the techs it implies', alternative(lone, 'Strength') === null), expectThat('a range off by 1.5 is diagnosed', alternative(off, 'Range') === null), expectThat('a strength alone is not a mismatch', classified(lone, 'Strength', moddedPins, 138).verdict === 'differ' && !classified(lone, 'Strength', moddedPins, 138).reason), expectThat('a range off by 1.5 is not a mismatch', classified(off, 'Range', moddedPins, 138).verdict === 'differ' && !classified(off, 'Range', moddedPins, 138).reason), expectThat('a changed pinned Cost is explained', classified(moved, 'Cost', moddedPins).verdict === 'differ' && !classified(moved, 'Cost', moddedPins).reason), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not differences', ['Cost', 'Uridium'].every((field) => library.judge(entryOf(tenthOfStock, field)) === 'differ')), expectThat('the Cost and Uridium of a stock sensor of another id cut to a tenth are explained', ['Cost', 'Uridium'].every((field) => classified(tenthOfStock, field, moddedPins, 138).verdict === 'differ' && !classified(tenthOfStock, field, moddedPins, 138).reason)), expectThat('the Cost and Uridium of a stock sensor cut to a tenth are not diagnosed as a tenth', ['Cost', 'Uridium'].every((field) => Boolean(alternative(tenthOfStock, field)))), expectThat('a comparison explains a difference by itself', modded.components.every((component) => library.reconcileSensor(modded, component).comparisons.every((entry) => !entry.explain))))
     }],
     [S.fixtures, () => {
       const problems = sensorFixtureProblems(library, data)
 
       return firstFailure(expectThat(problems.slice(0, 3).join('; ') || 'no problem', problems.length === 0), expectThat('the stock fixtures hold too few components', unmodded.reduce((total, fixture) => total + fixture.components.length, 0) >= 150), expectThat('a stock fixture lacks a kind of sensor', unmodded.every((fixture) => fixture.components.length > 0) && sizesOf(later, [types.thermal]) > 0 && sizesOf(later, [types.em]) > 0 && sizesOf(later, [types.beamFireControl]) > 0))
+    }],
+  ]
+}
+
+const PIN_CHECK_NAMES = {
+  sensors: 'a pin of a sensor or beam fire control is judged on the saved state it names and on both its figures: a row whose stored figure now agrees with the computed one, whose stored or computed figure changed, whose tech or whole row is gone is a stale pin and a mismatch (a vanished row only where the scope is every row of the game), and the pins of another save, of another game or of none explain nothing',
+  missiles: 'a pin of a missile design is judged the same way: a design whose stored figure now agrees, whose figure changed or that is gone is a stale pin and a mismatch, and the pins of another save or of none explain nothing',
+  engines: 'a pin of an engine is judged the same way on the save and the game it names: an engine that now agrees, whose figure changed or that is gone is a stale pin and a mismatch, and the pins of another save, of another game or of none explain nothing',
+}
+
+const P = PIN_CHECK_NAMES
+
+// The checks of the pins that explain a difference of a saved state, over the fixtures and synthetic rows, run on `library`: the real one, or a mutated copy that must fail the checks its mutant names. Each is [name, test], the test returning true or the reason it failed. They are the planted cases of the rule that a pin whose row no longer matches, or no longer exists, is a mismatch and never silent.
+const pinChecks = (library, data, sensorData) => {
+  const migrated = sensorData.get('migrated-g141')
+  const modded = data.get('modded-g140')
+  const split = (report) => ({ stale: report.mismatches.filter((entry) => entry.stale), plain: report.mismatches.filter((entry) => !entry.stale) })
+  const shown = (result) => `${result.plain.length} plain mismatches, ${result.stale.length} stale pins (${result.stale.slice(0, 3).map((entry) => `${entry.id} ${entry.field}: ${entry.stale}`).join('; ')})`
+  const expectState = (what, result, { stale, plain, reason, name = null }) => firstFailure(
+    expectThat(`${what}: ${shown(result)}, expected ${stale} stale`, result.stale.length === stale),
+    expectThat(`${what}: ${shown(result)}, expected ${plain} plain mismatches`, plain === null || result.plain.length === plain),
+    expectThat(`${what}: the stale pins do not say ${reason}: ${shown(result)}`, result.stale.every((entry) => reason.test(entry.stale))),
+    expectThat(`${what}: a stale pin names ${result.stale[0]?.name}, expected ${name}`, name === null || result.stale.every((entry) => entry.name === name))
+  )
+  const sensors = (edit, options = {}) => {
+    const fixture = clone(migrated)
+
+    edit(fixture, (id) => fixture.components.find((component) => component.id === id))
+
+    const report = reconcileSensorFixture(library, fixture, '', { ruleIds: [], save: 'migrated-g141', complete: true, ...options })
+
+    return { report, ...split(report) }
+  }
+  const missiles = (edit, options = {}) => {
+    const fixture = clone(modded)
+
+    edit(fixture, (id) => designOf(fixture, id))
+
+    const report = reconcileFixture(library, fixture, '', { ruleIds: [], save: 'modded-g140', complete: true, ...options })
+
+    return { report, ...split(report) }
+  }
+  const techsOf = (engineTech) => new Map([[1, { AdditionalInfo: engineTech, AdditionalInfo2: 1 }], [2, { AdditionalInfo: 1, AdditionalInfo2: 1 }], [3, { AdditionalInfo: 1, AdditionalInfo2: 1 }]])
+  const engineRow = (id, power, engineTech = 935) => {
+    const design = library.engineDesign({ sizeHS: 10, thrust: 1, engineTech, fuelTech: 1, thermalTech: 1, thermalCost: 1 })
+
+    return { SDComponentID: id, Name: `Engine ${id}`, Size: 10, EnginePowerMod: 1, BGTech1: 1, BGTech2: 2, BGTech3: 3, ShippingLineSystem: 0, ComponentValue: power === undefined ? design.power : power, FuelEfficiency: design.fuelPerEph, Cost: design.cost, Crew: design.crew, HTK: design.htk, ExplosionChance: design.explosionChance, MaxExplosionSize: design.maxExplosion, StealthRating: 1, MilitarySystem: design.commercial ? 0 : 1 }
+  }
+  const engines = (rows, { engineTech = 935, ...options } = {}) => {
+    const report = reconcileEngines(library, library, techsOf(engineTech), rows, { save: 'migrated-g141', game: 141, allGame: false, ...options })
+
+    return { report, ...split(report) }
+  }
+
+  return [
+    [P.sensors, () => {
+      const nothing = () => {}
+      const pinned = sensors(nothing)
+      const agrees = sensors((_fixture, part) => { part(500252).row.Cost = 10000 })
+      const changed = sensors((_fixture, part) => { part(500252).row.Cost = 900 })
+      const resized = sensors((_fixture, part) => { part(500252).row.Size *= 2 })
+      const unheld = sensors((fixture, part) => { delete fixture.techs[library.sensorTechOf(fixture, part(500252).row, library.SENSOR_TECH.thermal).id] })
+      const removal = (fixture) => { fixture.components = fixture.components.filter((component) => component.id !== 500252) }
+      const gone = sensors(removal)
+      const goneInPart = sensors(removal, { complete: false })
+      const goneFromGame = sensors(removal, { complete: false, present: new Set(migrated.components.map((component) => component.id).filter((id) => id !== 500252)) })
+      const heldElsewhere = sensors(removal, { complete: false, present: new Set(migrated.components.map((component) => component.id)) })
+      const agreesInPart = sensors((_fixture, part) => { part(500252).row.Cost = 10000 }, { complete: false })
+      const beam = sensors((_fixture, part) => { part(500352).row.Cost = 1148.5 })
+      const unsaved = sensors(nothing, { save: null })
+      const elsewhere = sensors(nothing, { save: 'modded-g140' })
+      const reused = [500380, 500381].map((id) => [...new Set(KNOWN_SENSOR_ROWS.filter((pin) => pin.id === id).map((pin) => pin.save))].sort().join())
+
+      return firstFailure(
+        expectThat(`the migrated fixture has ${pinned.report.ledger.pins.length} pins, expected ${pinsOf(KNOWN_SENSOR_ROWS, 'migrated-g141').length}`, pinned.report.ledger.pins.length === pinsOf(KNOWN_SENSOR_ROWS, 'migrated-g141').length && pinned.report.ledger.pins.length > 100),
+        expectState('the audited rows', pinned, { stale: 0, plain: 0, reason: /./ }),
+        expectThat(`the audited rows explain ${pinned.report.explained.length} differences, fewer than the ${pinned.report.ledger.pins.length} pins`, pinned.report.explained.length >= pinned.report.ledger.pins.length),
+        expectState('a stored figure changed to the computed one', agrees, { stale: 1, plain: 0, reason: /now agrees with the computed 10000/ }),
+        expectThat('the pin of an agreeing row is not the pinned figure', agrees.stale[0]?.id === 500252 && agrees.stale[0]?.field === 'Cost'),
+        expectState('a stored figure changed to another that differs', changed, { stale: 1, plain: 1, reason: /a figure changed: stored 900, pinned 750/ }),
+        expectState('a size changed under the pinned computed figures', resized, { stale: 2, plain: null, reason: /a figure changed: computed 20000, pinned 10000/ }),
+        expectThat('the figures of a resized row that no pin explains are mismatches', resized.plain.length >= 2),
+        expectState('a tech the save no longer holds', unheld, { stale: unheld.stale.length, plain: null, reason: /the figure is unknown now/ }),
+        expectThat(`the pins of 500252 are stale where its tech is gone: ${shown(unheld)}`, ['Cost', 'Uridium'].every((field) => unheld.stale.some((entry) => entry.id === 500252 && entry.field === field))),
+        expectState('a row the save no longer has, in a scope of every row', gone, { stale: 2, plain: 0, reason: /no such row/, name: '(not in the save)' }),
+        expectState('a row the save no longer has, in a scope of some rows', goneInPart, { stale: 0, plain: 0, reason: /./ }),
+        expectState('a row the game no longer has, in a scope of some rows', goneFromGame, { stale: 2, plain: 0, reason: /the game has no such row/, name: '(not in the save)' }),
+        expectState('a row of another race, in a scope of some rows', heldElsewhere, { stale: 0, plain: 0, reason: /./ }),
+        expectThat(`the pins of a row of another race are ${heldElsewhere.report.ledger.unread()} unread, expected 2`, heldElsewhere.report.ledger.unread() === 2),
+        expectState('a row that agrees now, in a scope of some rows', agreesInPart, { stale: 1, plain: 0, reason: /now agrees/ }),
+        expectState('a beam fire control stored figure changed within its category', beam, { stale: 1, plain: 1, reason: /a figure changed: stored 1148.5, pinned 1148.43/ }),
+        expectThat(`the rows with no save identified are ${unsaved.report.ledger.pins.length} pins and ${unsaved.report.explained.length} explained`, unsaved.report.ledger.pins.length === 0 && unsaved.report.explained.length < pinned.report.explained.length),
+        expectState('the rows with no save identified', unsaved, { stale: 0, plain: pinned.report.ledger.pins.length, reason: /./ }),
+        expectThat('a pin of another save explains a difference of the migrated save', elsewhere.report.explained.length === unsaved.report.explained.length),
+        expectState('the pins of another save', elsewhere, { stale: pinsOf(KNOWN_SENSOR_ROWS, 'modded-g140').length, plain: pinned.report.ledger.pins.length, reason: /the pin is of game 140 and the scope read is of game 141/ }),
+        expectThat(`the sensors 500380 and 500381 are pinned in the saves ${reused.join(' and ')}, expected two saves each (the ids are reused)`, reused.every((saves) => saves.split(',').length >= 2))
+      )
+    }],
+    [P.missiles, () => {
+      const nothing = () => {}
+      const computed = entryOf(library.reconcileMissile(modded, designOf(modded, 500724)), 'Cost').computed
+      const pinned = missiles(nothing)
+      const agrees = missiles((_fixture, design) => { design(500724).row.Cost = computed })
+      const changed = missiles((_fixture, design) => { design(500724).row.Cost = 999 })
+      const retuned = missiles((_fixture, design) => { design(500724).row.Retargeting += 1 })
+      const removal = (fixture) => { fixture.designs = fixture.designs.filter((design) => design.id !== 500724) }
+      const gone = missiles(removal)
+      const goneInPart = missiles(removal, { complete: false })
+      const goneFromGame = missiles(removal, { complete: false, present: new Set(modded.designs.map((design) => design.id).filter((id) => id !== 500724)) })
+      const heldElsewhere = missiles(removal, { complete: false, present: new Set(modded.designs.map((design) => design.id)) })
+      const unsaved = missiles(nothing, { save: null })
+      const elsewhere = missiles(nothing, { save: 'stock-271-g138' })
+
+      return firstFailure(
+        expectThat(`the modded fixture has ${pinned.report.ledger.pins.length} missile pins, expected ${pinsOf(KNOWN_MISSILE_ROWS, 'modded-g140').length}`, pinned.report.ledger.pins.length === pinsOf(KNOWN_MISSILE_ROWS, 'modded-g140').length && pinned.report.ledger.pins.length >= 3),
+        expectState('the audited designs', pinned, { stale: 0, plain: 0, reason: /./ }),
+        expectState('a stored cost changed to the computed one (the stored figure of the unstored minerals follows it)', agrees, { stale: 2, plain: 1, reason: /(now agrees with the computed 349.05|a figure changed: stored 137.2, pinned 0)/ }),
+        expectThat(`the first stale pin of an agreeing design is ${agrees.stale[0]?.id} ${agrees.stale[0]?.field}`, agrees.stale[0]?.id === 500724 && agrees.stale[0]?.field === 'Cost' && /now agrees/.test(agrees.stale[0]?.stale)),
+        expectState('a stored cost changed to another that differs', changed, { stale: 2, plain: 2, reason: /a figure changed: stored (999|787.15), pinned (211.85|0)/ }),
+        expectThat(`a retargeting level changed under the pinned computed cost makes its pin stale: ${shown(retuned)}`, retuned.stale.some((entry) => entry.id === 500724 && entry.field === 'Cost' && /a figure changed: computed [0-9.]+, pinned 349.05/.test(entry.stale))),
+        expectState('a design the save no longer has, in a scope of every design', gone, { stale: pinned.report.ledger.pins.filter((pin) => pin.id === 500724).length, plain: 0, reason: /no such row/, name: '(not in the save)' }),
+        expectState('a design the save no longer has, in a scope of some designs', goneInPart, { stale: 0, plain: 0, reason: /./ }),
+        expectState('a design the game no longer has, in a scope of some designs', goneFromGame, { stale: pinned.report.ledger.pins.filter((pin) => pin.id === 500724).length, plain: 0, reason: /the game has no such row/, name: '(not in the save)' }),
+        expectState('a design of another race, in a scope of some designs', heldElsewhere, { stale: 0, plain: 0, reason: /./ }),
+        expectThat(`the pins of a design of another race are ${heldElsewhere.report.ledger.unread()} unread, expected ${pinned.report.ledger.pins.length}`, heldElsewhere.report.ledger.unread() === pinned.report.ledger.pins.length),
+        expectState('the designs with no save identified', unsaved, { stale: 0, plain: pinned.report.ledger.pins.length, reason: /./ }),
+        expectThat('the stock save has no missile pin to read as another save', pinsOf(KNOWN_MISSILE_ROWS, 'stock-271-g138').length > 0),
+        expectState('the pins of another save', elsewhere, { stale: pinsOf(KNOWN_MISSILE_ROWS, 'stock-271-g138').length, plain: pinned.report.ledger.pins.length, reason: /the pin is of game 138 and the scope read is of game 140/ })
+      )
+    }],
+    [P.engines, () => {
+      const pins = pinsOf(PINNED_ENGINES, 'migrated-g141')
+      const pinned = engines([engineRow(500361, 9375)])
+      const agrees = engines([engineRow(500361, 9350)])
+      const changed = engines([engineRow(500361, 9400)])
+      const ruled = engines([engineRow(500361, 9375, 940)], { engineTech: 940 })
+      const unsaved = engines([engineRow(500361, 9375)], { save: null })
+      const elsewhere = engines([engineRow(500361, 9375)], { save: 'modded-g140', allGame: true })
+      const game = engines([engineRow(500361, 9375)], { game: 142 })
+      const none = engines([], { allGame: true })
+      const one = engines([engineRow(500361, 9375)], { allGame: true })
+      const noneInPart = engines([])
+      const goneFromGame = engines([], { present: new Set() })
+      const heldElsewhere = engines([], { present: new Set([500361]) })
+      const nullFlag = engines([{ ...engineRow(500403), MilitarySystem: null }])
+      const missingTech = engines([{ ...engineRow(500361, 9375), BGTech1: -1 }])
+
+      return firstFailure(
+        expectThat(`the migrated save has ${pins.length} engine pins, expected 17`, pins.length === 17),
+        expectState('the audited engine', pinned, { stale: 0, plain: 0, reason: /./ }),
+        expectThat(`the audited engine is explained ${pinned.report.explained.length} times, expected once`, pinned.report.explained.length === 1),
+        expectState('a stored power changed to the computed one', agrees, { stale: 1, plain: 0, reason: /now agrees with the computed 9350/ }),
+        expectState('a stored power changed to another that differs', changed, { stale: 1, plain: 1, reason: /a figure changed: stored 9400, pinned 9375/ }),
+        expectState('a computed power changed by the rule under the pinned stored one', ruled, { stale: 1, plain: 1, reason: /a figure changed: computed 9400, pinned 9350/ }),
+        expectState('an engine of a game with no save identified', unsaved, { stale: 0, plain: 1, reason: /./ }),
+        expectState('an engine of a save whose pins are of another save', elsewhere, { stale: 2, plain: 1, reason: /(no such row|the pin is of game 140)/ }),
+        expectState('an engine read as another game than its pin', game, { stale: 1, plain: 1, reason: /the pin is of game 141 and the scope read is of game 142/ }),
+        expectState('no engine in a scope of every engine', none, { stale: 17, plain: 0, reason: /no such row/, name: '(not in the save)' }),
+        expectState('one engine of the pins in a scope of every engine', one, { stale: 16, plain: 0, reason: /no such row/ }),
+        expectState('no engine in a scope of some engines', noneInPart, { stale: 0, plain: 0, reason: /./ }),
+        expectState('no engine in the game, in a scope of some engines', goneFromGame, { stale: 17, plain: 0, reason: /the game has no such row/, name: '(not in the save)' }),
+        expectState('one engine of another race, in a scope of some engines', heldElsewhere, { stale: 16, plain: 0, reason: /the game has no such row/ }),
+        expectThat(`the pins of an engine of another race are ${heldElsewhere.report.ledger.unread()} unread, expected 1`, heldElsewhere.report.ledger.unread() === 1),
+        expectState('a stored flag the save does not store, against the pin audited at stored 0', nullFlag, { stale: 1, plain: 1, reason: /a figure changed: stored null, pinned 0/ }),
+        expectThat(`the pins of the engines this run does not read are ${nullFlag.report.ledger.unread()} unread, expected 16`, nullFlag.report.ledger.unread() === 16),
+        expectState('an engine this run reads whose tech row is missing', missingTech, { stale: 1, plain: 0, reason: /the figure is unknown now/ }),
+        expectThat(`the pins of an engine read with no tech row are ${missingTech.report.ledger.unread()} unread, expected 16 (the engines this run does not read)`, missingTech.report.ledger.unread() === 16)
+      )
     }],
   ]
 }
@@ -2132,8 +2639,9 @@ const SENSOR_MUTANTS = [
   { name: 'the resolution exponent of the sensor range taken as a half', find: 'export const SENSOR_RESOLUTION_EXPONENT = 2 / 3', replace: 'export const SENSOR_RESOLUTION_EXPONENT = 0.5', fails: [S.active] },
   { name: 'the sensor range unit taken as 100,000 km', find: 'export const SENSOR_RANGE_UNIT_KM = 1000000', replace: 'export const SENSOR_RANGE_UNIT_KM = 100000', fails: [S.iris, S.active, S.inverse] },
   { name: 'the strength of a sensor taken as twice the tech times the size', find: 'const strength = strengthTech * sizeHS', replace: 'const strength = 2 * strengthTech * sizeHS', fails: [S.iris, S.active] },
-  { name: 'the Uridium of a sensor taken without the hardening factor', find: 'roundHalfEven(sizeHS * strengthTech * hardeningCost, 1)', replace: 'roundHalfEven(sizeHS * strengthTech, 1)', fails: [S.iris] },
+  { name: 'the Uridium of a sensor multiplied by the hardening rating', find: 'const uridium = roundHalfEven(sizeHS * strengthTech, 1)', replace: 'const uridium = roundHalfEven(sizeHS * strengthTech * hardeningRating / 100, 1)', fails: [S.unhardened, S.iris] },
   { name: 'the crew of a sensor taken as a HS', find: 'export const SENSOR_CREW_PER_HS = 2', replace: 'export const SENSOR_CREW_PER_HS = 1', fails: [S.active, S.passive] },
+  { name: 'the cost of a passive sensor multiplied by the hardening rating', find: 'const cost = roundHalfEven(sensitivity, 1)', replace: 'const cost = roundHalfEven(sensitivity * hardeningRating / 100, 1)', fails: [S.unhardened] },
   { name: 'the Uridium of a passive sensor left out', find: 'uridium: cost, crew:', replace: 'uridium: 0, crew:', fails: [S.passive] },
   { name: 'the HTK of a passive sensor always 1', find: 'htk: sizeHS < 1 ? 0 : 1, ctd: Math.trunc(hardeningRating), sizeHS, tons: sizeHS * TONS_PER_HS', replace: 'htk: 1, ctd: Math.trunc(hardeningRating), sizeHS, tons: sizeHS * TONS_PER_HS', fails: [S.passive] },
   { name: 'the resolution cut taken as the plain ratio', find: '(signature / resolution) ** 2 : 1', replace: '(signature / resolution) : 1', fails: [S.resolution] },
@@ -2156,6 +2664,7 @@ const SENSOR_MUTANTS = [
   { name: 'the fire control of a pair sized as a search sensor', find: 'fireControl: sensorSizeForRange({ ...request, mode: SENSOR_MODES.missileFireControl })', replace: 'fireControl: sensorSizeForRange({ ...request, mode: SENSOR_MODES.search })', fails: [S.pairSize] },
   { name: 'a sizing request that needs no EM sensitivity tech', find: "['EM sensitivity tech', emTech, POSITIVE, 'the EM sensitivity tech above zero'],", replace: '', fails: [S.unavailable] },
   { name: 'a fire control request that needs no speed rating tech', find: "['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],", replace: '', fails: [S.request] },
+  { name: 'a fire control request that requires the hardening cost factor', find: "export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating, speedRating, weaponNumber, hardeningRating, eccmRating, eccmCost }) => {\n  const rule = SENSOR_RULES.sizing\n  const { present, missing } = sensorInputs([\n    ['wanted range', rangeKm, POSITIVE, 'the range wanted, above zero'],\n    ['wanted tracking speed', trackingKmS, POSITIVE, 'the tracking speed wanted, above zero'],\n    ['distance rating tech', distanceRating, POSITIVE, 'the fire control distance rating tech above zero'],\n    ['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],\n    ['single weapon number', weaponNumber, POSITIVE, 'the single weapon fire control tech\\'s number above zero'],\n    ['hardening', hardeningRating, NON_NEGATIVE, 'the hardening tech\\'s rating'],", replace: "export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost }) => {\n  const rule = SENSOR_RULES.sizing\n  const { present, missing } = sensorInputs([\n    ['wanted range', rangeKm, POSITIVE, 'the range wanted, above zero'],\n    ['wanted tracking speed', trackingKmS, POSITIVE, 'the tracking speed wanted, above zero'],\n    ['distance rating tech', distanceRating, POSITIVE, 'the fire control distance rating tech above zero'],\n    ['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],\n    ['single weapon number', weaponNumber, POSITIVE, 'the single weapon fire control tech\\'s number above zero'],\n    ['hardening', hardeningRating, NON_NEGATIVE, 'the hardening tech\\'s rating'],\n    ['hardening cost factor', hardeningCost, NON_NEGATIVE, 'the hardening tech\\'s cost factor'],", fails: [S.request] },
   { name: 'a fire control request over the limit sized', find: 'const range = rangeKm > BEAM_FIRE_CONTROL_MAX_RANGE_KM ?', replace: 'const range = false ?', fails: [S.request] },
   { name: 'a fire control range multiplier met only above the wanted range', find: 'multiplier * distanceRating >= rangeKm * (1 - SENSOR_RANGE_TOLERANCE)', replace: 'multiplier * distanceRating > rangeKm', fails: [S.request] },
   { name: 'a fire control tracking multiplier chosen from the unrounded ratio', find: 'fireControlTracking(multiplier, speedRating) >= trackingKmS * (1 - SENSOR_RANGE_TOLERANCE)', replace: 'multiplier * speedRating >= trackingKmS * (1 - SENSOR_RANGE_TOLERANCE)', fails: [S.request] },
@@ -2169,7 +2678,7 @@ const SENSOR_MUTANTS = [
   { name: 'the tracking of a fire control cost not cut', find: 'Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP)', replace: '(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP)', fails: [S.trunc, S.beam] },
   { name: 'the fire control cost step of 500', find: 'export const BEAM_FIRE_CONTROL_TRACKING_COST_STEP = 1000', replace: 'export const BEAM_FIRE_CONTROL_TRACKING_COST_STEP = 500', fails: [S.trunc, S.beam] },
   { name: 'the fire control cost range unit of 10,000 km', find: 'export const BEAM_FIRE_CONTROL_KM_PER_COST_UNIT = 20000', replace: 'export const BEAM_FIRE_CONTROL_KM_PER_COST_UNIT = 10000', fails: [S.beam, S.trunc] },
-  { name: 'the fire control Uridium without the hardening factor', find: 'hardeningCost * weaponNumber, 1)', replace: 'weaponNumber, 1)', fails: [S.trunc] },
+  { name: 'the fire control Uridium multiplied by the hardening rating', find: 'Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP) * weaponNumber, 1)', replace: 'Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP) * weaponNumber * hardeningRating / 100, 1)', fails: [S.unhardened] },
   { name: 'the fire control size rounded to a tenth', find: 'trackingMultiplier / 2 * weaponNumber, 2)', replace: 'trackingMultiplier / 2 * weaponNumber, 1)', fails: [S.beam] },
   { name: 'the fire control size not halved', find: 'rangeMultiplier * trackingMultiplier / 2 * weaponNumber', replace: 'rangeMultiplier * trackingMultiplier * weaponNumber', fails: [S.beam] },
   { name: 'the crew of a fire control of 2 a HS', find: 'export const FIRE_CONTROL_CREW_PER_HS = 4', replace: 'export const FIRE_CONTROL_CREW_PER_HS = 2', fails: [S.beam] },
@@ -2187,10 +2696,27 @@ const SENSOR_MUTANTS = [
   { name: 'a difference explained by the alternative that fits it', find: 'alternative: alternatives.get(item.entry.name) || null', replace: 'explain: alternatives.get(item.entry.name) || null', fails: [S.explanations, S.fixtures] },
   { name: 'a cost factor a tech row lacks read as 0', find: 'const info2 = finite(found.info2) ? found.info2 : NaN', replace: 'const info2 = finite(found.info2) ? found.info2 : 0', fails: [S.techNumbers] },
   { name: 'a rating a tech row lacks read as 0', find: 'const info = finite(found.info) ? found.info : NaN', replace: 'const info = finite(found.info) ? found.info : 0', fails: [S.techNumbers] },
-  { name: 'the Uridium of an active sensor needing the hardening rating', find: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength', 'hardeningCost'], (design) => design.uridium", replace: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength', 'hardening'], (design) => design.uridium", fails: [S.techNumbers] },
+  { name: 'the Uridium of an active sensor needing the hardening rating', find: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength'], (design) => design.uridium", replace: "field('Uridium', 'Uridium', 'decimal', ['size', 'strength', 'hardening'], (design) => design.uridium", fails: [S.techNumbers] },
 ]
 
-const ALL_MUTANTS = [...MISSILE_MUTANTS, ...SENSOR_MUTANTS]
+// A planted fault of the account of the pins in the reconciliation: a stale pin that goes unreported, a vanished or a changed row that is not stale, a pin of another save that explains, or a pin that matches too much; `find` is found once in scripts/lib/missile-reconcile.js and every check named in `fails` must then fail.
+const PIN_MUTANTS = [
+  { name: 'a pin no comparison used never reported', find: 'const isStale = (pin) => !used.has(pin) && (complete ||', replace: 'const isStale = (pin) => false && (complete ||', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a pin of a row the save no longer has not reported', find: '(complete || seen.has(keyOf(pin))', replace: '(seen.has(keyOf(pin))', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a scope of some rows judged to hold every row', find: '(complete || seen.has(keyOf(pin))', replace: '(true || seen.has(keyOf(pin))', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a pin of a row the game no longer has not reported in a scope of some rows', find: ' || (present !== null && !present.has(pin.id)))', replace: ')', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a pin that explained a difference not marked used', find: 'used.add(pin)', replace: 'void pin', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'the pins of a game taken for the pins of the save', find: 'const mine = known.filter((pin) => pin.save === save)', replace: 'const mine = known.filter((pin) => pin.game === game)', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a row that agrees not seen by the account of the pins', find: 'if (!keys.has(key)) {', replace: "if (!keys.has(key) || verdict === 'agree') {", fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a pin that explains the stored figure alone', find: ' && pinned(candidate.computed, entry.computed)', replace: '', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a pin that explains the computed figure alone', find: 'pinned(candidate.stored, entry.stored) && ', replace: '', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a stale pin that does not say the stored figure changed', find: 'pinned(pin.stored, sight.stored) ? [] :', replace: 'true ? [] :', fails: [P.sensors, P.missiles, P.engines] },
+  { name: 'a stale pin of another game not told from one of the same game', find: 'if (pin.game !== game) {', replace: 'if (false) {', fails: [P.sensors, P.engines] },
+  { name: 'the stored figure of a pin read as 0 where the save stores none', find: 'const pinned = (audited, found) => isKnown(audited) && isKnown(found) && agrees(audited, found)', replace: 'const pinned = (audited, found) => agrees(Number(audited), Number(found))', fails: [P.engines] },
+  { name: 'a row this run reads but cannot rebuild left to the pins of rows it does not read (the observation after the skip)', find: 'read: (row) => {', replace: 'read: (row) => { return', fails: [P.engines] },
+]
+
+const ALL_MUTANTS = [...MISSILE_MUTANTS, ...SENSOR_MUTANTS, ...PIN_MUTANTS]
 
 // What a planted fault can change: the rules and the loaders of the utilities and the reconciliation of scripts/lib. `UTILITY_CLOSURE` is every utility the first two load, copied with them so the mutant loads on its own.
 const PLANTABLE = [{ name: 'design-rules', directory: UTILITIES }, { name: 'design-data', directory: UTILITIES }, { name: 'missile-reconcile', directory: MISSILE_LIBRARY }, { name: 'sensor-reconcile', directory: MISSILE_LIBRARY }]
@@ -2236,7 +2762,7 @@ const tryMutant = async ({ find, replace, fails }, data, sensorData) => {
     planted = plantedFault(find, replace)
 
     const library = await loadMissileLibrary(planted)
-    const named = [...missileChecks(library, data), ...sensorChecks(library, sensorData)].filter(([checkName]) => fails.includes(checkName))
+    const named = [...missileChecks(library, data), ...sensorChecks(library, sensorData), ...pinChecks(library, data, sensorData)].filter(([checkName]) => fails.includes(checkName))
     const absent = fails.filter((start) => !named.some(([checkName]) => checkName === start))
     const passing = named.filter(([, test]) => outcome(test) === true).map(([checkName]) => checkName)
 
@@ -2287,18 +2813,111 @@ const printMutants = (results) => {
   return { caught, missed: ALL_MUTANTS.length - caught }
 }
 
-// The reports of the fixtures, the checks of the rules and the mutants of the library, with no save. The exit code is 1 when a report has a mismatch, a check fails or a mutant survives.
+// The pinned saves against the files that witness them: each registered file the repository holds is opened read-only and its game must be the pinned save the registry gives by that file, so that the registry cannot drift from the saves its pins were audited in. A file the repository does not hold is skipped with its reason.
+const witnessChecks = async () => {
+  const results = []
+
+  for (const [key, entry] of Object.entries(PINNED_SAVES)) {
+    for (const file of entry.witnessed) {
+      const name = `the pinned save ${key} is game ${entry.game} of ${file}`
+      const full = path.resolve(__dirname, '..', file)
+
+      if (!fs.existsSync(full)) {
+        results.push({ name, skipped: `${file} is not present` })
+        continue
+      }
+
+      const database = await open(full)
+
+      try {
+        const found = await pinnedSaveOfGame((sql, parameters) => all(database, sql, parameters), entry.game)
+
+        results.push({ name, result: found === key ? true : `game ${entry.game} of ${file} is ${found ? `the pinned save ${found}` : 'none of the pinned saves'}` })
+      } finally {
+        database.close()
+      }
+    }
+  }
+
+  return results
+}
+
+const savedComponent = (id, set) => `update FCT_ShipDesignComponents set ${set} where SDComponentID = ${id} and GameID = ${FIXTURE.gameId}`
+const savedGone = (id) => `delete from FCT_ShipDesignComponents where SDComponentID = ${id} and GameID = ${FIXTURE.gameId}`
+
+// The planted cases of save mode: each alters a copy of the fixture save in the temp folder (the save itself is never opened for writing), runs save mode on the copy in a process of its own and reads its exit code and its output, so that what a person sees on a save is what is checked and not the same code reached another way. `rules` are the checks run, `allGame` whether the run reads every row of the game, `code` the exit code, `shows` and `hides` what the output has and lacks.
+const SAVED_PIN_CASES = [
+  { name: 'the audited save explains its pinned rows and reports no stale pin', statements: [], rules: 'engine,sensor', code: 0, shows: [/^pinned save: migrated-g141 /m, /pins: 17 pinned figures of this save, 17 used, 0 stale/, /pins: 144 pinned figures of this save, 144 used, 0 stale/, /^0 mismatches, /m], hides: [/is stale/] },
+  { name: 'a pinned sensor whose stored figure now agrees with the computed one is reported as a stale pin', statements: [savedComponent(500252, 'Cost = 10000')], rules: 'sensor', code: 1, shows: [/MISMATCH 500252 "[^"]*" Cost: the pin of stored 750, computed 10000 is stale: the stored 10000 now agrees with the computed 10000/, /pins: 144 pinned figures of this save, 143 used, 1 stale/, /^1 mismatches, /m] },
+  { name: 'a pinned sensor whose stored figure changed to another that differs is a stale pin and a mismatch', statements: [savedComponent(500252, 'Cost = 900')], rules: 'sensor', code: 1, shows: [/MISMATCH 500252 "[^"]*" Cost: the pin of stored 750, computed 10000 is stale: a figure changed: stored 900, pinned 750/, /MISMATCH 500252 "[^"]*" Cost: stored 900, computed 10000/, /^2 mismatches, /m] },
+  { name: 'a pinned beam fire control whose stored cost moved within its category is a stale pin and a mismatch', statements: [savedComponent(500352, 'Cost = 1148.5')], rules: 'sensor', code: 1, shows: [/MISMATCH 500352 "[^"]*" Cost: the pin of stored 1148.43, computed 13125 is stale: a figure changed: stored 1148.5, pinned 1148.43/, /MISMATCH 500352 "[^"]*" Cost: stored 1148.5, computed 13125/, /^2 mismatches, /m] },
+  { name: 'a pinned sensor the save no longer has is reported as a stale pin', statements: [savedGone(500252)], rules: 'sensor', code: 1, shows: [/MISMATCH 500252 "\(not in the save\)" Cost: the pin of stored 750, computed 10000 is stale: the save has no such row in the scope read/, /MISMATCH 500252 "\(not in the save\)" Uridium: .* is stale: the save has no such row in the scope read/, /pins: 144 pinned figures of this save, 142 used, 2 stale/, /^2 mismatches, /m] },
+  { name: 'a pinned sensor the game no longer has is reported as a stale pin in a run of one race', statements: [savedGone(500252)], rules: 'sensor', allGame: false, code: 1, shows: [/MISMATCH 500252 "\(not in the save\)" Cost: .* is stale: the game has no such row/, /pins: 144 pinned figures of this save, 142 used, 2 stale/] },
+  { name: 'a pinned engine whose stored power now agrees with the computed one is reported as a stale pin', statements: [savedComponent(500361, 'ComponentValue = 9350')], rules: 'engine', code: 1, shows: [/MISMATCH 500361 "[^"]*" power: the pin of stored 9375, computed 9350 is stale: the stored 9350 now agrees with the computed 9350/, /pins: 17 pinned figures of this save, 16 used, 1 stale/, /^1 mismatches, /m] },
+  { name: 'a pinned engine whose stored power changed to another that differs is a stale pin and a mismatch', statements: [savedComponent(500361, 'ComponentValue = 9400')], rules: 'engine', code: 1, shows: [/MISMATCH 500361 "[^"]*" power: the pin of stored 9375, computed 9350 is stale: a figure changed: stored 9400, pinned 9375/, /MISMATCH 500361 "[^"]*" power: stored 9400, computed 9350/, /^2 mismatches, /m] },
+  { name: 'a pinned engine the save no longer has is reported as a stale pin', statements: [savedGone(500361)], rules: 'engine', code: 1, shows: [/MISMATCH 500361 "\(not in the save\)" power: the pin of stored 9375, computed 9350 is stale: the save has no such row in the scope read/, /^1 mismatches, /m] },
+  { name: 'a pinned engine the game no longer has is reported as a stale pin in a run of one race', statements: [savedGone(500361)], rules: 'engine', allGame: false, code: 1, shows: [/MISMATCH 500361 "\(not in the save\)" power: .* is stale: the game has no such row/, /^1 mismatches, /m] },
+  { name: 'a pinned flag the save no longer stores is a stale pin and a mismatch, and not the figure of the pin audited at 0', statements: [savedComponent(500403, 'MilitarySystem = NULL')], rules: 'engine', code: 1, shows: [/MISMATCH 500403 "[^"]*" military: the pin of stored 0, computed 1 is stale: a figure changed: stored null, pinned 0/, /MISMATCH 500403 "[^"]*" military: stored null, computed 1/, /pins: 17 pinned figures of this save, 16 used, 1 stale/, /^2 mismatches, /m] },
+  { name: 'a pinned engine the run reads whose tech row is missing is a stale pin, not a row the run does not read', statements: [savedComponent(500361, 'BGTech1 = -1')], rules: 'engine', allGame: false, code: 1, shows: [/tech row missing \(BGTech1\.\.3 = -1, 500090, 26092\)/, /MISMATCH 500361 "[^"]*" power: the pin of stored 9375, computed 9350 is stale: the figure is unknown now/, /pins: 17 pinned figures of this save, 16 used, 1 stale/, /^1 mismatches, /m], hides: [/rows this run does not read/] },
+  { name: 'a pinned row of another race the run does not read is counted and not judged', statements: [], rules: 'engine', allGame: false, code: 0, shows: [/pins: 17 pinned figures of this save, 17 used, 0 stale/, /^0 mismatches, /m] },
+  { name: 'a save of the same game number with another name is no pinned save: every difference is a mismatch and no pin is stale', statements: [`update FCT_Game set GameName = 'Another Campaign' where GameID = ${FIXTURE.gameId}`], rules: 'engine,sensor', code: 1, shows: [/^pinned save: none, /m, /pins: this save has none for this check/, /engine .*: 34 checked, 17 mismatches, 0 explained/, /^161 mismatches, /m], hides: [/is stale/] },
+  { name: 'a save of the same campaign at another game time is no pinned save', statements: [`update FCT_Game set GameTime = GameTime + 1 where GameID = ${FIXTURE.gameId}`], rules: 'engine,sensor', code: 1, shows: [/^pinned save: none, /m, /^161 mismatches, /m], hides: [/is stale/] },
+]
+
+// One case of `SAVED_PIN_CASES`: { name, result } with the result true or the reason it failed.
+const runSavedCase = async ({ name, statements, rules, allGame = true, code, shows, hides = [] }) => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'design-rules-pins-'))
+  const file = path.join(folder, 'AuroraDB.db')
+
+  try {
+    fs.copyFileSync(fixturePath(), file)
+
+    if (statements.length) {
+      const database = await new Promise((resolve, reject) => {
+        const opened = new sqlite3.Database(file, sqlite3.OPEN_READWRITE, (error) => (error ? reject(error) : resolve(opened)))
+      })
+
+      await new Promise((resolve, reject) => database.exec(statements.join(';\n'), (error) => (error ? reject(error) : resolve())))
+      await new Promise((resolve) => database.close(resolve))
+    }
+
+    const { code: exited, stdout, stderr } = await runChild(__filename, [file, '--race', String(FIXTURE.raceId), ...(allGame ? ['--all-game'] : []), '--rules', rules])
+    const problems = [
+      ...(exited === code ? [] : [`exited with ${exited}, expected ${code}: ${(stderr || stdout).trim().split('\n').slice(-2).join(' | ').slice(0, 300)}`]),
+      ...shows.filter((pattern) => !pattern.test(stdout)).map((pattern) => `the output lacks ${pattern}`),
+      ...hides.filter((pattern) => pattern.test(stdout)).map((pattern) => `the output has ${pattern}`),
+    ]
+
+    return { name, result: problems.length ? problems.join('; ') : true }
+  } catch (error) {
+    return { name, result: error.message }
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true })
+  }
+}
+
+// The cases of `SAVED_PIN_CASES` on copies of the fixture save, two at a time: { results } or, with no save to copy, { skipped } and the reason.
+const plantedSaveChecks = async () => {
+  if (!fs.existsSync(fixturePath())) {
+    return { results: [], skipped: `the save ${FIXTURE.file} is not present, so no copy of it can be altered` }
+  }
+
+  return { results: (await inParallel(SAVED_PIN_CASES, runSavedCase, 2)).map((entry, index) => (entry instanceof Error ? { name: SAVED_PIN_CASES[index].name, result: entry.message } : entry)), skipped: null }
+}
+
+// The reports of the fixtures, the checks of the rules, the planted cases on altered copies of the fixture save and the mutants of the library. The exit code is 1 when a report has a mismatch, a check fails or a mutant survives.
 const runFixtures = async () => {
   const data = loadFixtures()
   const sensorData = loadSensorFixtures()
   const library = await loadMissileLibrary()
   const pending = mutating() ? startMutants() : null
+  const pendingSaved = mutating() ? plantedSaveChecks() : null
   const registry = () => JSON.stringify(library.provenance.listRules())
   const registryBefore = registry()
   const totals = { checked: 0, mismatches: 0, explained: 0, unsupported: 0, unknown: 0, resolved: 0 }
 
   for (const fixture of data.values()) {
-    const report = reconcileFixture(library, fixture, `fixture ${fixture.label} (${fixture.save}, game ${fixture.game}; ${fixture.scope}): ${fixture.note}`, { ruleIds: [] })
+    const report = reconcileFixture(library, fixture, `fixture ${fixture.label} (${fixture.save}, game ${fixture.game}; ${fixture.scope}): ${fixture.note}`, { ruleIds: [], save: fixtureSave(fixture), complete: completeFixture(fixture) })
 
     report.print(null)
     totals.checked += report.checked
@@ -2312,7 +2931,7 @@ const runFixtures = async () => {
   const sensorTotals = { checked: 0, mismatches: 0, explained: 0, unsupported: 0, unknown: 0, resolved: 0 }
 
   for (const fixture of sensorData.values()) {
-    const report = reconcileSensorFixture(library, fixture, `fixture ${fixture.label} (${fixture.save}, game ${fixture.game}; ${fixture.scope}): ${fixture.note}`, { ruleIds: [] })
+    const report = reconcileSensorFixture(library, fixture, `fixture ${fixture.label} (${fixture.save}, game ${fixture.game}; ${fixture.scope}): ${fixture.note}`, { ruleIds: [], save: fixtureSave(fixture), complete: completeFixture(fixture) })
 
     report.print(null)
     sensorTotals.checked += report.checked
@@ -2324,10 +2943,35 @@ const runFixtures = async () => {
   }
 
   let failedChecks = 0
-  const checks = [...missileChecks(library, data), ...sensorChecks(library, sensorData)]
+  const checks = [...missileChecks(library, data), ...sensorChecks(library, sensorData), ...pinChecks(library, data, sensorData)]
 
   for (const [name, test] of checks) {
     const result = outcome(test)
+
+    if (result !== true) {
+      failedChecks++
+    }
+
+    console.log(result === true ? `check passed: ${name}` : `CHECK FAILED: ${name}: ${result}`)
+  }
+
+  const saved = pendingSaved ? await pendingSaved : { results: [], skipped: null }
+
+  for (const { name, result } of saved.results) {
+    if (result !== true) {
+      failedChecks++
+    }
+
+    console.log(result === true ? `check passed: saved copy: ${name}` : `CHECK FAILED: saved copy: ${name}: ${result}`)
+  }
+
+  const witnessed = await witnessChecks()
+
+  for (const { name, result, skipped } of witnessed) {
+    if (skipped) {
+      console.log(`check skipped: ${name}: ${skipped}`)
+      continue
+    }
 
     if (result !== true) {
       failedChecks++
@@ -2343,7 +2987,9 @@ const runFixtures = async () => {
   console.log(registrySame ? `check passed: the rule registry of the checks is the same after the checks${pending ? ' and the mutants' : ''}` : `CHECK FAILED: the rule registry of the checks is not the same after the checks${pending ? ' and the mutants' : ''}: a check${pending ? ' or a mutant' : ''} registered or changed a rule of the shared registry`)
   console.log(`fixtures: ${data.size}, ${totals.checked} compared, ${totals.mismatches} mismatches, ${totals.explained} explained, ${totals.unsupported} unsupported, ${totals.unknown} unknown; ${totals.resolved} of the compared resolved from the stored figure`)
   console.log(`sensor fixtures: ${sensorData.size}, ${sensorTotals.checked} compared, ${sensorTotals.mismatches} mismatches, ${sensorTotals.explained} explained, ${sensorTotals.unsupported} unsupported, ${sensorTotals.unknown} unknown; ${sensorTotals.resolved} of the compared resolved from the stored figure`)
-  console.log(`checks: ${checks.length + 1 - failedChecks - (registrySame ? 0 : 1)} of ${checks.length + 1} pass; mutants: ${pending ? `${mutants.caught} of ${ALL_MUTANTS.length} caught` : 'not run (--no-mutations)'}`)
+  const held = witnessed.filter((entry) => !entry.skipped).length
+
+  console.log(`checks: ${checks.length + saved.results.length + held + 1 - failedChecks - (registrySame ? 0 : 1)} of ${checks.length + saved.results.length + held + 1} pass; pinned saves read: ${held} of ${witnessed.length} witnesses; planted saved copies: ${saved.skipped ? `not run, ${saved.skipped}` : pendingSaved ? `${saved.results.length}` : 'not run (--no-mutations)'}; mutants: ${pending ? `${mutants.caught} of ${ALL_MUTANTS.length} caught` : 'not run (--no-mutations)'}`)
 
   return totals.mismatches || sensorTotals.mismatches || failedChecks || !registrySame || mutants.missed ? 1 : 0
 }
@@ -2377,7 +3023,9 @@ const main = async () => {
 
   const rules = await loadRules()
   const techs = new Map((await all(database, 'select TechSystemID, TechTypeID, AdditionalInfo, AdditionalInfo2 from FCT_TechSystem')).map((row) => [row.TechSystemID, row]))
-  const context = { database, rules, techs, parameters: { ':game': race.GameID, ':race': race.RaceID }, allGame: options.allGame, ledger: options.ledger, library: await loadMissileLibrary() }
+  const library = await loadMissileLibrary()
+  const save = await pinnedSaveOfGame((sql, parameters) => all(database, sql, parameters), race.GameID)
+  const context = { database, rules, techs, parameters: { ':game': race.GameID, ':race': race.RaceID }, allGame: options.allGame, ledger: options.ledger, library, save }
 
   if (options.exportFile || options.sensorExportFile) {
     const saved = options.sensorExportFile ? await exportSensorFixture(context, options) : await exportMissileFixture(context, options)
@@ -2388,6 +3036,7 @@ const main = async () => {
   }
 
   console.log(`${path.basename(options.save)}: race ${race.RaceID} "${race.RaceName}", game ${race.GameID}`)
+  console.log(save ? `pinned save: ${save} (game ${PINNED_SAVES[save].game} "${PINNED_SAVES[save].name}", started ${PINNED_SAVES[save].startYear}): its pinned rows apply, and each must still explain a difference${options.allGame ? '' : ' of a row this run reads'}` : 'pinned save: none, the game is none of the registered ones (scripts/lib/pinned-saves.js): no pinned row applies, so every difference is a mismatch')
 
   let mismatches = 0
   let explained = 0

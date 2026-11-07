@@ -29,14 +29,29 @@ const FILES = {
 }
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
+const rawPackage = (specifier) => `export default ${JSON.stringify(fs.readFileSync(require.resolve(specifier), 'utf8'))}`
 
 const STUBS = {
+  // Repository storage and flags/history IPC need an in-memory session, not the running Electron app.
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
   electron: 'export const ipcRenderer = { invoke: () => Promise.resolve(null) }',
+  // Discovery loads every utility, including appearance state; resolve Vue from this checkout, not from the generated modules' temp folder.
+  vue: `import { createRequire } from 'node:module'\nexport default ${requireOf('vue')}`,
+  // color.js constructs its hashers while discovery imports it.
+  'color-hash': `import { createRequire } from 'node:module'\nexport default ${requireOf('color-hash')}.default`,
+  // database.js exports functions using these classes; load the real package without opening a database.
+  sequelize: `import { createRequire } from 'node:module'\nconst sequelize = ${requireOf('sequelize')}\nexport const Model = sequelize.Model\nexport const Sequelize = sequelize.Sequelize`,
+  // colonization-data.js and map-features.js import groupBy.
+  'lodash/groupBy': `import { createRequire } from 'node:module'\nexport default ${requireOf('lodash/groupBy')}`,
+  // credits.js imports the actual bundled notices and package versions while discovery loads it.
+  '@mdi/font/LICENSE?raw': rawPackage('@mdi/font/LICENSE'),
+  '@mdi/font/package.json': `import { createRequire } from 'node:module'\nexport const version = ${requireOf('@mdi/font/package.json')}.version`,
+  'roboto-fontface/LICENSE?raw': rawPackage('roboto-fontface/LICENSE'),
+  'roboto-fontface/package.json': `import { createRequire } from 'node:module'\nexport const version = ${requireOf('roboto-fontface/package.json')}.version`,
+  // aurora.js extends dayjs with UTC at module load and imports romanum for display names.
   dayjs: `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs')}`,
   'dayjs/plugin/utc.js': `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs/plugin/utc.js')}`,
   romanum: 'export default { toNumeral: String }',
-  'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
   './notices/solaris-theme-license.txt?raw': "export default ''",
   './notices/t2d-theme-license.txt?raw': "export default ''",
 }

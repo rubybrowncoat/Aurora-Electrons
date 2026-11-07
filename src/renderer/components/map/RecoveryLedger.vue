@@ -81,7 +81,7 @@
       <div v-if="view.notes.length" class="px-4 caption text--secondary" data-recovery-notes>{{ view.notes.length }} {{ view.notes.length === 1 ? 'status' : 'statuses' }} written by another version of the app or not valid {{ view.notes.length === 1 ? 'is' : 'are' }} not listed.</div>
 
       <div class="px-4 py-3 caption text--secondary" data-recovery-foot>
-        Use it to keep track of what is worth a recovery. A status is the player's own note for the race on this branch: it gives the game no order and changes nothing in the save. The statuses are pending (none kept), acknowledged and a personal recovery. An object that is no longer in the save is listed as no longer observed, with its status as it was kept. The save does not say why it is gone, so no outcome is assumed, and the same ID and details seen again are the same object again. What a wreck holds and how long a pod's life support lasts are not shown; a field the race cannot see is shown as Unknown. {{ observationRule }}
+        Use it to keep track of what is worth a recovery. A status is the player's own note for the race on this branch: it gives the game no order and changes nothing in the save. The statuses are pending (none kept), acknowledged and a personal recovery. An object that is no longer in the save is listed as no longer observed, with its status as it was kept. The save does not say why it is gone, so no outcome is assumed, and the same ID and details seen again are the same object again. What a wreck holds and how long a pod's life support lasts are not shown: a wreck that a salvage left with part of its contents stays listed, and a pod an evacuation left to its officers alone is listed as having no crew and its officers. A pod or a wreck tied to a body or a Lagrange point is told apart by that point and not by where it is now. A field the race cannot see is shown as Unknown. {{ observationRule }}
       </div>
     </template>
   </v-card>
@@ -97,7 +97,7 @@ import { gameDateText } from '../../utilities/history-milestones'
 import { observationEstimate } from '../../utilities/observations'
 import { lastCaptureLine, observationText } from '../../utilities/observation-view'
 import { roundToDecimal } from '../../utilities/math'
-import { ageOf, classTextOf, GROUP_TEXT, GROUPS, IDENTITY_TEXT, labelOf, placeKeyOf, removeStatus, setStatus, STATE_TEXT, STATUS_HINT, STATUS_ORDER, STATUS_TEXT } from '../../utilities/recovery-ledger'
+import { ageOf, classTextOf, GROUP_TEXT, GROUPS, IDENTITY_TEXT, labelOf, placeKeyOf, removeStatus, setStatus, STATE_TEXT, STATUS_HINT, STATUS_ORDER, STATUS_TEXT, survivorsText } from '../../utilities/recovery-ledger'
 
 const KIND_NAMES = { ownLifepod: 'the own life pods', lifepod: 'the life pods of other races', ownWreck: 'the own wrecks', wreck: 'the wrecks of other races' }
 
@@ -283,7 +283,7 @@ export default {
         systemName: object.systemName,
         routeLink: linkTo.routes({ to: placeKeyOf(object) }),
         classText: classTextOf(object) || 'Unknown',
-        size: object.place === 'wreck' ? (object.tons === null ? 'Unknown' : `${this.count(object.tons)} tons`) : object.own ? (object.crew === null ? 'Unknown' : `${this.count(object.crew)} crew`) : 'Unknown',
+        size: object.place === 'wreck' ? (object.tons === null ? 'Unknown' : `${this.count(object.tons)} tons`) : object.own ? (object.crew === null ? 'Unknown' : survivorsText(object, this.count)) : 'Unknown',
         age: object.place === 'lifepod' ? (object.own ? (age === null ? 'Unknown' : this.span(age)) : 'Unknown') : '—',
         copies: object.copies,
         ambiguous: !object.own && object.copies > 1,

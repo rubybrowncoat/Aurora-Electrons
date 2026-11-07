@@ -28,7 +28,7 @@
             <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :custom-sort="sortNullLast" :sort-by.sync="racesTable.sortBy" :sort-desc.sync="racesTable.sortDesc" :items-per-page.sync="racesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: racePageSizes }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
               <template #[`item.AlienRaceName`]="{ item }">
                 <div class="py-2">
-                  <div class="font-weight-medium">{{ item.AlienRaceName }}</div>
+                  <div class="font-weight-medium"><span v-if="item.colourSwatch" class="race-colour" :style="{ background: item.colourSwatch }" :title="`Race colour ${item.colourSwatch}`" />{{ item.AlienRaceName }}</div>
                   <div class="caption text--secondary">{{ item.Abbrev }}</div>
                 </div>
               </template>
@@ -36,7 +36,8 @@
                 <v-chip small outlined :color="item.status.color"><v-icon small left>{{ item.status.icon }}</v-icon>{{ item.status.label }}</v-chip>
               </template>
               <template #[`item.CommStatus`]="{ item }">
-                <span class="caption">{{ item.communication }}</span>
+                <div class="caption">{{ item.communication }}</div>
+                <div v-if="item.prisonerText" class="caption text--secondary">{{ item.prisonerText }}<provenance-mark :result="unknown(item.prisonerResult)" /></div>
               </template>
               <template #[`item.DiplomaticPoints`]="{ item }">
                 <div>{{ count(item.DiplomaticPoints) }}<provenance-mark :result="item.standingResult" /></div>
@@ -67,9 +68,61 @@
                 <v-row dense>
                   <v-col v-for="fact in facts" :key="fact.label" cols="12" sm="6" md="4" lg="3">
                     <div class="caption text--secondary">{{ fact.label }}</div>
-                    <div>{{ fact.value }}<provenance-mark v-for="(result, index) in fact.results" :key="index" :result="result" /></div>
+                    <div><span v-if="fact.swatch" class="race-colour" :style="{ background: fact.swatch }" />{{ fact.value }}<provenance-mark v-for="(result, index) in fact.results" :key="index" :result="result" /></div>
                   </v-col>
                 </v-row>
+              </div>
+              <div class="panel-foot caption text--secondary">
+                Use it to read where the race stands with the player and what has been gathered about it. Race colour is the colour picked for the race in the Diplomacy window: a race with none set shows as not set, and the game draws such a race in white. Hostile contact interrupts counts the systems where the setting is on, listed under Systems and species. It only silences the player's event interrupt for a new hostile contact or a hostile contact update: the event is still logged and shown in the event log, and nothing else about the contact changes. A system with no stored setting is not silenced.
+              </div>
+            </v-card>
+
+            <v-card v-if="attempt" class="panel" data-summary="Review how communication with the selected alien race stands: the prisoners processed, the contact rating and what an attempt does at each roll." elevation="1">
+              <div class="panel-head">
+                <span>Communication attempt<provenance-mark v-for="rule in COMMUNICATION_RULES" :key="rule" :rule="rule" /><v-chip small outlined class="ml-1">{{ attempt.active ? 'Attempts running' : 'No attempt running' }}</v-chip></span>
+              </div>
+              <div v-if="attempt.notice" class="panel-body caption warning--text">{{ attempt.notice }}</div>
+              <div class="panel-body">
+                <v-row dense>
+                  <v-col v-for="fact in attempt.facts" :key="fact.label" cols="12" sm="6" md="4" lg="3">
+                    <div class="caption text--secondary">{{ fact.label }}</div>
+                    <div>{{ fact.value }}<provenance-mark v-for="(result, index) in fact.results" :key="index" :result="unknown(result)" /></div>
+                  </v-col>
+                </v-row>
+              </div>
+              <v-simple-table v-if="attempt.active" dense class="communication-table">
+                <thead>
+                  <tr>
+                    <th>Contact rating when</th>
+                    <th class="text-end">Rating</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in attempt.ratings" :key="row.key">
+                    <td>{{ row.label }}</td>
+                    <td class="text-end">
+                      <template v-if="row.rating === null">—<provenance-mark :result="row.result" /></template>
+                      <template v-else>{{ rating(row.rating) }}<span v-if="row.rating !== row.base" class="caption text--secondary"> ({{ rating(row.base) }} and the prisoners' {{ rating(row.rating - row.base) }}, held at 1)</span></template>
+                    </td>
+                  </tr>
+                </tbody>
+              </v-simple-table>
+              <v-simple-table v-if="attempt.active && attempt.columns.length" dense class="communication-table">
+                <thead>
+                  <tr>
+                    <th>Roll</th>
+                    <th v-for="column in attempt.columns" :key="column.key">{{ column.label }}<provenance-mark v-if="column.result" :result="column.result" /></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="band in attempt.bands" :key="band.label">
+                    <td>{{ band.label }}</td>
+                    <td v-for="(cell, index) in band.cells" :key="index">{{ cell }}<provenance-mark v-if="band.results[index]" :result="band.results[index]" /></td>
+                  </tr>
+                </tbody>
+              </v-simple-table>
+              <div class="panel-foot caption text--secondary">
+                Use it to see how an attempt at communication with the selected race stands and what the prisoners add to it. The game runs attempts only while the status is Attempting communication; with another status the panel keeps the prisoners and says that no attempt is running, and shows no rating or roll. An attempt runs at the contact rating of its situation: 0 while the two races detect nothing of each other in a system in common, 0.5 when they do, or the Communications bonus of the best captain of a ship with a working Diplomacy Module there. Where the two races detect each other is worked out at each increment and is not saved, so the rating is listed by its sources and not as one figure. While the rating is below 1, the prisoners of the race held on the player's colonies add 1 for each full 200 processed, up to 1 in all; with a rating of 0 and fewer than 200 processed the attempt does not run. Where the processed count of a prisoner group is not saved, a rating below 1 has no figure, since the prisoners could add nothing or 1 to it, and the roll column that rests on it has none either; a rating of 1 or more does not rest on the prisoners and stays. Where a captain's Communications row is stored without a value, the rating that rests on it has no figure, since that bonus could be any value, and neither has the roll column that rests on that rating; a captain with no such row at all counts 1. An attempt stalls while the other race's own record of the player's race holds no communication, unless prisoners have been processed, and always once that record holds communication as impossible. A roll of 100 or more establishes communication. Below that the roll sets the change to the progress as a multiple of the rating, worded as the game words it, and a change below -3 ends the attempts. The roll is a d100 plus the progress and the translation traits of both races, which the save does not hold, so the bands are those of the total.
               </div>
             </v-card>
 
@@ -103,13 +156,21 @@
               </div>
 
               <template v-if="detailView === 'classes'">
-                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" :custom-sort="sortNullLast" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
+                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" group-by="branch" :custom-sort="sortClasses" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
+                  <template #[`group.header`]="{ group, items, headers, isOpen, toggle }">
+                    <td :colspan="headers.length">
+                      <v-btn icon small :aria-label="isOpen ? `Collapse ${group}` : `Expand ${group}`" @click="toggle"><v-icon small>{{ isOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>
+                      <span class="font-weight-medium">Ship Classes - {{ group }}</span>
+                      <span class="caption text--secondary ml-2">{{ items.length }} {{ items.length === 1 ? 'class' : 'classes' }}</span>
+                    </td>
+                  </template>
                   <template #[`item.ClassName`]="{ item }">
                     <div class="py-1">
                       <div class="font-weight-medium">{{ item.ClassName }}</div>
                       <div class="caption text--secondary">
                         {{ engineType(item.EngineType) }} · {{ classRole(item.AlienClassRole) }}<span v-if="item.DiplomaticShip"> · diplomatic</span><span v-if="item.ObservedMissileDefence"> · point defence</span>
                       </div>
+                      <div v-if="item.typeNote" class="caption warning--text">{{ item.typeNote }}<provenance-mark :result="flagged(item.typeResult)" /></div>
                     </div>
                   </template>
                   <template #[`item.TCS`]="{ item }">{{ tons(item.tons) }}<provenance-mark :result="unknown(item.sizeResult)" /></template>
@@ -186,6 +247,17 @@
                   <v-chip v-for="species in selectedSpecies" :key="species.SpeciesID" small outlined class="mr-1 mb-1">{{ species.SpeciesName }} · {{ speciesStatus(species.Status) }}</v-chip>
                   <span v-if="!selectedSpecies.length" class="caption text--secondary">None identified.</span>
                 </div>
+                <div class="caption text--secondary mb-1 mt-3">Hostile contact interrupts</div>
+                <div>
+                  <v-chip v-for="setting in selectedSettings" :key="setting.SystemID" small outlined class="mr-1 mb-1" :color="setting.silenced ? 'warning' : undefined">{{ setting.name }} · {{ setting.silenced === null ? 'unknown' : setting.silenced ? 'silenced' : 'not silenced' }}<provenance-mark v-if="setting.stored || setting.silenced === null" :result="setting.result" /></v-chip>
+                  <span v-if="!selectedSettings.length" class="caption text--secondary">No system seen.</span>
+                </div>
+              </div>
+              <div v-if="detailView === 'places'" class="panel-foot caption text--secondary">
+                Use it to see where the player's event interrupt for a hostile contact is silenced for the selected race. A setting belongs to one system and one alien race and only silences that interrupt: the event is still logged. A system with no stored setting is not silenced.
+              </div>
+              <div v-if="detailView === 'classes'" class="panel-foot caption text--secondary">
+                Use it to see which branch of the game's class tree an observed class sits under and what moves a class between branches. The branch is worked out as the game's own intelligence window works it out each time it is drawn: Light Naval when the observed size is above 0 and at most 20 hull spaces (1,000 tons, the limit included), otherwise Military for a military engine, Commercial for a commercial one and Unknown for any other engine or none seen. The game saves that type with the class and works it out again only when it draws the window, so a saved type can lag behind what has been observed since: the classes are grouped by the type the size and engine give, and a class saved under another type is marked with the type it was saved as, beside its name, never left out. Observation moves a class as it goes, and none of it is recomputed here: an active sensor contact raises the observed size to the largest seen, which makes a class of 20 hull spaces or fewer Light Naval whatever its designation; a thermal contact of a moving ship whose class has no engine seen gives the class a commercial or a military engine; a shield contact makes an Unknown class Military; a weapon recovered from a wreck makes an Unknown or Commercial class Military; revealing the whole class fills in its size and engine; and a kill raises the observed size to the hull's, which moves a Light Naval class above 20 hull spaces to Military.
               </div>
             </v-card>
           </template>
@@ -211,7 +283,7 @@ import { activeAppearance, toneColor } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { branchStore } from '../utilities/history'
-import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, DIPLOMACY_LINES, ENGINE_TYPES, GROUND_THRESHOLD, POPULATION_LEVELS, REWARD_COST, SECONDS_PER_YEAR, SENSOR_THRESHOLD, SPECIES_STATUS, TONS_PER_SIZE, aliveByClass, aliveShips, alienRacesSql, classTons, coloniesObserved, communicationLabel, contactStatus, contactTime, diplomaticPoints, gameYear, groundReveal, intelSnapshot, lastShipContact, lostShips, observed, populationField, populationLevel, rebuildFleet, rewardAttempts, sensorReveal, sizedColonies, snapshotSeries, standing, trackedTons, translationProgress, treatiesGranted, treatiesReceived, treatyNames } from '../utilities/intelligence'
+import { ATTEMPTING_COMMUNICATION, CLASS_BRANCHES, CLASS_ROLES, COMMUNICATION_IMPOSSIBLE, DIPLOMACY_LINES, ENGINE_TYPES, GROUND_THRESHOLD, NO_COMMUNICATION, POPULATION_LEVELS, PRISONER_STEP, REWARD_COST, SECONDS_PER_YEAR, SENSOR_THRESHOLD, SPECIES_STATUS, TONS_PER_SIZE, aliveByClass, aliveShips, alienRacesSql, attemptRows, classBranch, classTons, classType, coloniesObserved, colourText, communicationLabel, contactRatings, contactStatus, contactTime, diplomacyShipsSql, diplomaticPoints, gameYear, groundReveal, hostileSettings, hostileSummary, intelSnapshot, lastShipContact, lostShips, observed, populationField, populationLevel, prisonerRating, prisonersSql, raceColour, raceOptionsSql, rebuildFleet, rewardAttempts, sensorReveal, sizedColonies, snapshotSeries, standing, trackedTons, translationProgress, treatiesGranted, treatiesReceived, treatyNames } from '../utilities/intelligence'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { describeResult, getRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
@@ -226,6 +298,9 @@ const INPUT_LABELS = {
   groundUnits: 'the observed ground units',
   systems: 'the systems they were seen in',
   species: 'the known species',
+  raceOptions: 'the race colours and the hostile contact settings',
+  prisoners: 'the prisoners held',
+  diplomacyShips: 'the ships with a Diplomacy Module',
   formulaVersion: 'the save\'s schema',
 }
 
@@ -255,10 +330,11 @@ const RACE_PAGE_SIZES = [15, 50, -1]
 const DETAIL_PAGE_SIZES = [5, 10, 15, -1]
 const COMMUNICATION_ESTABLISHED = 2
 // The rules each panel's figures follow, as the marks on its head.
-const RACE_RULES = ['intelligence.standing', 'intelligence.diplomaticPoints', 'intelligence.shipsTracked', 'intelligence.tonsTracked', 'intelligence.contactDate']
+const RACE_RULES = ['intelligence.standing', 'intelligence.diplomaticPoints', 'intelligence.shipsTracked', 'intelligence.tonsTracked', 'intelligence.contactDate', 'intelligence.prisonerRating']
 const FACT_RULES = ['intelligence.contactDate', 'intelligence.diplomaticPoints', 'intelligence.standing', 'intelligence.treaties', 'intelligence.translationProgress', 'intelligence.observed']
+const COMMUNICATION_RULES = ['intelligence.translationProgress', 'intelligence.prisonerRating', 'intelligence.contactRating', 'intelligence.attemptOutcome']
 const DETAIL_RULES = {
-  classes: ['intelligence.tonsTracked', 'intelligence.shipsTracked', 'intelligence.contactDate', 'intelligence.observed'],
+  classes: ['intelligence.classType', 'intelligence.tonsTracked', 'intelligence.shipsTracked', 'intelligence.contactDate', 'intelligence.observed'],
   colonies: ['intelligence.coloniesObserved', 'intelligence.populationLevel', 'intelligence.observed'],
   sensors: ['intelligence.sensorReveal', 'intelligence.observed'],
   ground: ['intelligence.groundReveal', 'intelligence.observed'],
@@ -306,6 +382,7 @@ export default {
       SENSOR_THRESHOLD,
       RACE_RULES,
       FACT_RULES,
+      COMMUNICATION_RULES,
       DETAIL_RULES,
       linkTo,
     }
@@ -327,6 +404,21 @@ export default {
       return chartTheme(this.appearance)
     },
 
+    // The colour stored for each alien race the race knows, by race id: what the Diplomacy window gave it.
+    colours() {
+      return Object.fromEntries(this.raceOptions.colours.map((row) => [row.AlienRaceID, row.AlienRaceColour]))
+    },
+
+    // The bonus IDs the save's lookup rows do not confirm (utilities/capabilities.js `blockedBonuses`), none while the store has no answer.
+    blockedBonuses() {
+      return this.$store.getters['capabilities/blockedBonuses'] || new Set()
+    },
+
+    // The prisoners the race holds of each alien race, by race id: its row of `prisonersSql`.
+    prisonerByRace() {
+      return Object.fromEntries(this.prisoners.map((row) => [row.AlienRaceID, row]))
+    },
+
     rows() {
       return this.races.map((race) => {
         const status = contactStatus(race.ContactStatus)
@@ -335,6 +427,8 @@ export default {
         const tonnage = trackedTons(race)
         const lastContact = lastShipContact(race, this.StartYear)
         const standingResult = standing(race.DiplomaticPoints, this.formulaVersion)
+        const colourResult = raceColour(this.colours[race.AlienRaceID])
+        const prisonerResult = prisonerRating(this.prisonerByRace[race.AlienRaceID])
 
         // The figures that can be unknown replace their raw columns, so a table sorts them last and shows a dash; `source` is the row as the query gave it.
         return {
@@ -344,6 +438,8 @@ export default {
           communication: communicationLabel(race.CommStatus),
           standingResult,
           standingText: valueOrNull(standingResult) || '—',
+          colourResult,
+          colourSwatch: isAvailable(colourResult) && colourResult.value.set ? colourResult.value.css : null,
           firstContact: this.dateResult(race.FirstDetected, 'the first contact time'),
           lastContact,
           LastContact: lastContact && isAvailable(lastContact) ? lastContact.value : null,
@@ -353,6 +449,8 @@ export default {
           KnownShips: valueOrNull(alive),
           DestroyedShips: valueOrNull(lost),
           KnownTons: valueOrNull(tonnage),
+          prisonerResult,
+          prisonerText: this.prisonerText(race, prisonerResult),
         }
       })
     },
@@ -433,6 +531,7 @@ export default {
       const progress = translationProgress(race.CommModifier)
       const intelligence = observed(race.AlienRaceIntelligencePoints, 'the race intelligence points')
       const damage = observed(race.DamageCausedByAlienRace, 'the damage received')
+      const hostile = hostileSummary(this.selectedSettings)
       let communication = { value: race.communication, results: [] }
 
       if (race.CommEstablished > 0) {
@@ -452,6 +551,8 @@ export default {
         { label: 'Treaties received', value: treaties(received), results: [received] },
         { label: 'Race intelligence', value: isAvailable(intelligence) ? `${this.count(intelligence.value, 1)} points; a discovery each time it passes ${REWARD_COST}` : '—', results: [intelligence] },
         { label: 'Damage received', value: this.count(valueOrNull(damage)), results: [damage] },
+        { label: 'Race colour', value: colourText(race.colourResult), swatch: race.colourSwatch, results: [race.colourResult] },
+        { label: 'Hostile contact interrupts', value: hostile.text, results: [hostile.result] },
       ]
 
       if (race.CommStatus === ATTEMPTING_COMMUNICATION) {
@@ -547,9 +648,50 @@ export default {
 
       return classes.map((shipClass) => {
         const size = classTons(shipClass.TCS)
+        const type = classType(shipClass)
 
-        return { ...shipClass, alive: valueOrNull(alive[shipClass.AlienClassID]), aliveResult: alive[shipClass.AlienClassID], sizeResult: size, tons: valueOrNull(size) }
+        return { ...shipClass, branch: classBranch(type), typeResult: type, typeNote: this.typeNote(type), alive: valueOrNull(alive[shipClass.AlienClassID]), aliveResult: alive[shipClass.AlienClassID], sizeResult: size, tons: valueOrNull(size) }
       })
+    },
+
+    // How communication with the selected race stands while it is not established: the prisoners processed and what they add and, while attempts run (the status Attempting communication, the only one the game processes), the sources of the contact rating and what an attempt does in each band of the roll (`prisonerRating`, `contactRatings` and `attemptRows`, utilities/intelligence.js). With another status the prisoners stay and `active` is false: no rating or roll is shown for an attempt that does not run. A rating that rests on prisoners whose processed count is not saved has no figure, in its row and in the column of the bands. Null once communication is established.
+    attempt() {
+      const race = this.selected
+
+      if (!race || race.CommStatus === COMMUNICATION_ESTABLISHED) {
+        return null
+      }
+
+      const active = race.CommStatus === ATTEMPTING_COMMUNICATION
+      const prisoners = prisonerRating(this.prisonerByRace[race.AlienRaceID])
+      const held = isAvailable(prisoners) ? prisoners.value : null
+      const groups = (count) => `${count} ${count === 1 ? 'group' : 'groups'}`
+      const prisonerFacts = [
+        { label: 'Prisoners held', value: !held ? '—' : held.groups ? `${this.count(held.held)} in ${groups(held.groups)}` : 'None', results: [prisoners] },
+        { label: 'Prisoners processed', value: !held ? '—' : held.groups ? `${this.count(held.processed)}${held.atLimit ? `, ${groups(held.atLimit)} at the limit of ${PRISONER_STEP}` : ''}` : 'None', results: [prisoners] },
+        { label: active ? 'Rating from the prisoners' : 'Rating the prisoners would add', value: !held ? '—' : held.added ? '+1, the most they add' : held.groups ? `Nothing yet: ${this.count(held.toNext)} more processed adds 1` : 'Nothing: no prisoner of the race is held', results: [prisoners] },
+      ]
+
+      if (!active) {
+        return { active, notice: this.inactiveText(race), facts: prisonerFacts, ratings: [], columns: [], bands: [] }
+      }
+
+      const ratings = contactRatings(this.diplomacyShips, prisoners, this.blockedBonuses)
+      const progress = translationProgress(race.CommModifier)
+      const rated = ratings.value.rows.map((row) => row.rating).filter((rating) => rating !== null && rating > 0)
+      // The lowest and the highest rating an attempt can run at, so the bands show the spread between them, and a column with no figure for each reason a rating has none (`unresolved`): prisoners whose count is not saved, and a captain's Communications row stored without a value.
+      const columns = [
+        ...[...new Set(rated.length ? [Math.min(...rated), Math.max(...rated)] : [])].map((rating) => ({ key: `${rating}`, rating, label: `At rating ${this.rating(rating)}`, result: null, rows: attemptRows(rating) })),
+        ...ratings.value.unresolved.map((column) => ({ key: column.key, rating: null, label: column.label, result: column.result, rows: attemptRows(null) })),
+      ]
+      const bands = attemptRows(1).map((band, index) => ({ label: band.label, cells: columns.map((column) => this.outcomeText(column.rows[index].outcome)), results: columns.map((column) => column.result) }))
+      const facts = [
+        { label: 'Translation progress', value: this.count(valueOrNull(progress), 1), results: [progress] },
+        ...prisonerFacts,
+        { label: 'Ships with a working Diplomacy Module', value: `${ratings.value.working} (${ratings.value.crewed} with a captain)`, results: [ratings] },
+      ]
+
+      return { active, notice: '', facts, ratings: ratings.value.rows, columns, bands }
     },
 
     selectedPopulations() {
@@ -580,6 +722,11 @@ export default {
 
     selectedSpecies() {
       return this.species.filter((entry) => entry.AlienRaceID === this.selectedId)
+    },
+
+    // The hostile contact setting of the selected race in each system it was seen in or has a stored setting for (utilities/intelligence.js `hostileSettings`).
+    selectedSettings() {
+      return hostileSettings({ seen: this.selectedSystems, stored: this.raceOptions.settings.filter((row) => row.AlienRaceID === this.selectedId) })
     },
 
     raceHeaders() {
@@ -720,6 +867,65 @@ export default {
 
       return sorted.concat(items.filter((item) => !known(item)))
     },
+    // The caption of a race in the races table while communication is not established: the prisoners processed and the rating they add (with attempts running) or would add (with another status, which runs none); empty for a race with none held.
+    prisonerText(race, result) {
+      if (race.CommStatus === COMMUNICATION_ESTABLISHED) {
+        return ''
+      } else if (!isAvailable(result)) {
+        return 'Prisoners processed: —'
+      }
+
+      const { groups, processed, added } = result.value
+
+      if (!groups) {
+        return ''
+      }
+
+      return race.CommStatus === ATTEMPTING_COMMUNICATION ? `${this.count(processed)} prisoners processed: ${added ? 'adds 1 to the contact rating' : 'adds nothing to the contact rating yet'}` : `${this.count(processed)} prisoners processed: ${added ? 'would add 1' : 'would add nothing yet'} to the contact rating of an attempt, and no attempt is running`
+    },
+    // Why the panel of a race whose communication is not established shows no attempt: the game runs attempts only for the status Attempting communication, and the Diplomacy window starts them only from no communication.
+    inactiveText(race) {
+      const attempting = communicationLabel(ATTEMPTING_COMMUNICATION)
+      const status = communicationLabel(race.CommStatus)
+
+      if (race.CommStatus === COMMUNICATION_IMPOSSIBLE) {
+        return `No attempt is running: communication is impossible. The game runs attempts only while the status is ${attempting} and starts none for a race whose communication is impossible.`
+      }
+
+      return `No attempt is running: the status is ${status}. The game runs attempts only while the status is ${attempting}${race.CommStatus === NO_COMMUNICATION ? ', which the Diplomacy window sets from no communication' : ''}.`
+    },
+    rating(value) {
+      return this.count(value, 2)
+    },
+    // A change to the translation progress, with its sign.
+    signed(value) {
+      return value > 0 ? `+${this.count(value, 2)}` : value < 0 ? `−${this.count(-value, 2)}` : '0'
+    },
+    // What an attempt does at one roll and rating (a result of `attemptOutcome`): the game's wording and the change to the progress.
+    outcomeText(result) {
+      if (!isAvailable(result)) {
+        return '—'
+      }
+
+      const outcome = result.value
+
+      return outcome.established ? 'Communication established' : outcome.impossible ? 'Communication impossible' : `${this.signed(outcome.change)}: ${outcome.wording}`
+    },
+    // Why a class is not simply under the branch its saved type names: the saved type that differs, or what keeps the branch from being worked out.
+    typeNote(result) {
+      if (!isAvailable(result)) {
+        return `Not placed: ${result.inputs.missing.join(' and ')} not saved`
+      }
+
+      return result.value.differs ? `Saved as ${result.value.storedLabel}; the observed size and engine place the class under ${result.value.label}` : ''
+    },
+    // The classes in the order of the game's class tree: the branches as `CLASS_BRANCHES` lists them, and inside each the column sorted on, by class name until one is picked. `sortBy` and `sortDesc` begin with the grouping key.
+    sortClasses(items, sortBy, sortDesc) {
+      const [, ...keys] = sortBy
+      const sorted = keys.length ? this.sortNullLast(items, keys, sortDesc.slice(1)) : items.slice().sort((a, b) => (a.ClassName || '').localeCompare(b.ClassName || '', undefined, { numeric: true }))
+
+      return sorted.sort((a, b) => CLASS_BRANCHES.indexOf(a.branch) - CLASS_BRANCHES.indexOf(b.branch))
+    },
     engineType(code) {
       return ENGINE_TYPES[code] || 'Unknown'
     },
@@ -802,7 +1008,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_AlienClass.AlienClassID, FCT_AlienClass.AlienRaceID, FCT_AlienClass.ClassName, FCT_AlienClass.TCS, FCT_AlienClass.MaxSpeed, FCT_AlienClass.EngineType, FCT_AlienClass.AlienClassRole, FCT_AlienClass.ArmourStrength, FCT_AlienClass.ShieldStrength, FCT_AlienClass.ShipCount, FCT_AlienClass.FirstDetected, FCT_AlienClass.DiplomaticShip, FCT_AlienClass.ObservedMissileDefence, (select group_concat(FCT_ShipDesignComponents.Name || ' ×' || FCT_AlienClassWeapon.Amount, ', ') from FCT_AlienClassWeapon inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_AlienClassWeapon.WeaponID where FCT_AlienClassWeapon.AlienClassID = FCT_AlienClass.AlienClassID) as Weapons from FCT_AlienClass where FCT_AlienClass.GameID = ${this.GameID} and FCT_AlienClass.ViewRaceID = ${this.RaceID} order by FCT_AlienClass.FirstDetected`).then(([items]) => items)
+        return await this.database.query(`select FCT_AlienClass.AlienClassID, FCT_AlienClass.AlienRaceID, FCT_AlienClass.ClassName, FCT_AlienClass.TCS, FCT_AlienClass.MaxSpeed, FCT_AlienClass.EngineType, FCT_AlienClass.AlienClassType, FCT_AlienClass.AlienClassRole, FCT_AlienClass.ArmourStrength, FCT_AlienClass.ShieldStrength, FCT_AlienClass.ShipCount, FCT_AlienClass.FirstDetected, FCT_AlienClass.DiplomaticShip, FCT_AlienClass.ObservedMissileDefence, (select group_concat(FCT_ShipDesignComponents.Name || ' ×' || FCT_AlienClassWeapon.Amount, ', ') from FCT_AlienClassWeapon inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_AlienClassWeapon.WeaponID where FCT_AlienClassWeapon.AlienClassID = FCT_AlienClass.AlienClassID) as Weapons from FCT_AlienClass where FCT_AlienClass.GameID = ${this.GameID} and FCT_AlienClass.ViewRaceID = ${this.RaceID} order by FCT_AlienClass.FirstDetected`).then(([items]) => items)
       }),
       default: [],
     },
@@ -857,6 +1063,43 @@ export default {
       }),
       default: [],
     },
+    // The colour each alien race was given in the Diplomacy window and the hostile contact settings stored for the systems (`raceOptionsSql`, utilities/intelligence.js).
+    raceOptions: {
+      get: tracked('raceOptions', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return { colours: [], settings: [] }
+        }
+
+        const sql = raceOptionsSql(this.GameID, this.RaceID)
+        const [colours] = await this.database.query(sql.colours)
+        const [settings] = await this.database.query(sql.settings)
+
+        return { colours, settings }
+      }),
+      default: { colours: [], settings: [] },
+    },
+    // The prisoners the race holds of each alien race, one row per race (`prisonersSql`, utilities/intelligence.js).
+    prisoners: {
+      get: tracked('prisoners', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(prisonersSql(this.GameID, this.RaceID)).then(([items]) => items)
+      }),
+      default: [],
+    },
+    // The race's ships with a Diplomacy Module, with their captains and the captains' Communications bonuses (`diplomacyShipsSql`, utilities/intelligence.js).
+    diplomacyShips: {
+      get: tracked('diplomacyShips', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(diplomacyShipsSql(this.GameID, this.RaceID)).then(([items]) => items)
+      }),
+      default: [],
+    },
   },
 }
 </script>
@@ -876,12 +1119,27 @@ export default {
     opacity: 0.7;
   }
 
+  .race-colour {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    border: 1px solid rgba(128, 128, 128, 0.6);
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
   td {
     font-variant-numeric: tabular-nums;
   }
 
   td.text-end {
     white-space: nowrap;
+  }
+
+  .communication-table tbody tr {
+    cursor: default;
   }
 
   tbody tr {

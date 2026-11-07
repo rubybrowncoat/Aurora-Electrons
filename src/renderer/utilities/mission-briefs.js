@@ -20,7 +20,7 @@ export const MAX_AXES = 3
 export const KM_PER_BN = 1e9
 export const CARGO_POINTS_PER_HS = 50
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 const EMPTY_LIST = Object.freeze([])
 
@@ -45,7 +45,7 @@ export const hangarTonsOfCapacity = (capacity) => capacity * TONS_PER_HS
 
 // ---- Rules ---------------------------------------------------------------------------------------------------------
 
-const rule = (id, verification, note, units, assumptions = []) => registerRule({ id, versions: VERSIONS, note, units, verification, assumptions })
+const rule = (id, verification, note, units, assumptions = [], versions = VERSIONS) => registerRule({ id, versions, note, units, verification, assumptions })
 
 rule('brief.setSize', STATUS.ASSUMED, 'The finished size of a designed set: the hull entered or taken from a saved class, with the engines and tanks the planner sized', 'HS', ['The hull is the size entered, or the size of the saved class it was taken from'])
 rule('brief.setPayloadSpace', STATUS.ASSUMED, 'The finished size of a designed set less its engines and tanks: what is left of the hull for everything else', 'HS', ['The hull is the size entered, or the size of the saved class it was taken from'])
@@ -58,7 +58,7 @@ rule('brief.classHangar', STATUS.CONFIRMED, 'A saved class\'s hangar capacity as
 rule('brief.classDeployment', STATUS.CONFIRMED, 'A saved class\'s planned deployment, as the save stores it', 'months')
 rule('brief.classClassification', STATUS.CONFIRMED, 'A saved class is commercial or military as the save stores it', '')
 rule('brief.engineClassification', STATUS.CONFIRMED, 'A class with a military engine is military; a class with commercial engines only is not decided by them (every component, 1 HS of engineering and 3 months of deployment decide it)', '')
-rule('brief.notModelled', STATUS.ASSUMED, 'A figure this alternative does not give: it is unknown, never 0', '')
+rule('brief.notModelled', STATUS.ASSUMED, 'A figure this alternative does not give: it is unknown, never 0', '', [], ['x'])
 
 // ---- What a brief asks ---------------------------------------------------------------------------------------------
 

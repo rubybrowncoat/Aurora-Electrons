@@ -82,7 +82,7 @@
               <v-card class="pa-4 planner-menu" :style="sectionColors">
                 <div class="subtitle-2 mb-1">How targets are ranked</div>
                 <div class="caption text--secondary mb-3">
-                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before the race's colonisation tech, so the scale means the same for every race), years of terraforming, and AU from the nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
+                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before the race's colonisation tech, so the scale means the same for every race), years of terraforming, and AU from the nearest colony. A plan that drains surface water counts its minimum years, the terraformers' time, so its discount is the most that plan can earn. A plan that raises the pressure or the surface water to damp the seasons of an eccentric orbit counts that work, and its years, like any other step. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
                 </div>
                 <v-row dense>
                   <v-col v-for="field in rankingFields" :key="field.key" cols="12" sm="6">
@@ -251,7 +251,7 @@
               <v-tooltip top>
                 <template #activator="{ on }">
                   <span class="text-no-wrap" v-on="on">
-                    <template v-if="item.best.strategy === 'terraform'"><span class="text--secondary">{{ costText(item.best.assessment.cost.worst) }}</span> → </template>{{ costText(item.best.cost) }}<span v-if="item.best.lowGravity" class="caption"> LG</span>
+                    <template v-if="item.best.strategy === 'terraform'"><span class="text--secondary">{{ costText(item.best.assessment.cost.worst) }}</span> → </template>{{ costText(item.best.cost) }}<span v-if="item.best.gravityClass" class="caption" :title="gravityText(item.best.gravityClass)" data-cell="gravity-class"> {{ item.best.gravityClass }}</span>
                   </span>
                 </template>
                 <span>{{ costTooltip(item.best) }}</span>
@@ -376,6 +376,7 @@ import { activeAppearance, toneColor } from '../utilities/appearance'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
+import { GRAVITY_CLASSES } from '../utilities/habitability'
 import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normaliseRanking, NO_OUTLOOK, rankBodies, rowProvenance, terraformCapacityResult, UNKNOWN_STATE } from '../utilities/colonization'
 import { loadBodies, loadCmcRules, loadGases, loadLagrangePoints, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies, loadTransitClasses, NO_RACE_RULES, speciesPopulationResult } from '../utilities/colonization-data'
 import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-links'
@@ -391,6 +392,7 @@ import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sectionById } from '../utilities/navigation'
 import { combine, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
 import { NO_TERRAFORM_SOURCES, loadTerraformSources } from '../utilities/terraform-capacity'
+import { timeWords } from '../utilities/terraforming'
 
 const INPUT_LABELS = {
   bodies: 'the bodies of known systems',
@@ -826,6 +828,11 @@ export default {
     }
   },
   methods: {
+    // What a gravity class (LG, LGR or N) says.
+    gravityText(name) {
+      return GRAVITY_CLASSES[name]
+    },
+
     // The colour of a plan state's or outcome's tone under the appearance in force.
     tone(name) {
       return toneColor(this.appearance, name)
@@ -914,6 +921,10 @@ export default {
     years(value) {
       return !Number.isFinite(value) ? 'never' : value < 0.1 ? '< 0.1 y' : `${separatedNumber(roundToDecimal(value, 1), this.separator)} y`
     },
+    // The years of a time of `basis`, a minimum worded as one (`timeWords`), at the one decimal `years` shows: a bound floored there never reads above itself.
+    time(value, basis) {
+      return timeWords(value, basis, this.years, 1)
+    },
     rowsToFit() {
       return typeof window !== 'undefined' && window.innerHeight >= 1200 ? 15 : DEFAULT_ROWS
     },
@@ -923,7 +934,7 @@ export default {
     // What the state says for this body, then how the ranking reads it.
     stateTooltip(row) {
       const { state, best } = row
-      const ranked = row.rank ? ` Ranked ${row.rank} of the targets, ${best.strategy === 'terraform' ? `after ${this.years(best.years)} of terraforming` : 'settled as it is'}.` : state.target ? ' Not ranked: too small or poor to be worth the trip (see Ranking).' : ''
+      const ranked = row.rank ? ` Ranked ${row.rank} of the targets, ${best.strategy === 'terraform' ? `after ${this.time(best.years, best.yearsBasis)} of terraforming` : 'settled as it is'}.` : state.target ? ' Not ranked: too small or poor to be worth the trip (see Ranking).' : ''
 
       return `${state.text(row.facts)}${ranked}`
     },

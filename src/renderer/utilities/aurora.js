@@ -20,10 +20,10 @@ export const systemBodyName = (body, system = null) => {
 
     switch (body.BodyClass) {
       case 1: {
-        return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
+        return `${systemPrefix}${convertDisplayBase(body.Star?.ComponentNumber ?? body.ComponentNumber, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
       }
       case 2: {
-        return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
+        return `${systemPrefix}${convertDisplayBase(body.Star?.ComponentNumber ?? body.ComponentNumber, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
       }
       case 3: {
         return `Asteroid #${body.OrbitNumber}`
@@ -52,7 +52,7 @@ export const populationName = (population, prefix = '', suppressSystem = false) 
     OrbitNumber: population[`${prefix}OrbitNumber`] || population.OrbitNumber,
     BodyClass: population[`${prefix}BodyClass`] || population.BodyClass,
     SystemBodyName: population[`${prefix}SystemBodyName`] || population.SystemBodyName,
-    Component: population[`${prefix}Component`] || population.Component,
+    ComponentNumber: population[`${prefix}ComponentNumber`] || population.ComponentNumber,
     PopName: population[`${prefix}PopName`] || population.PopName,
   } : population
 

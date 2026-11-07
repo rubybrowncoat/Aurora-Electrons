@@ -3,7 +3,9 @@
 // The game lists a project as researchable when its field matches, it is not ruin-only, it belongs to nobody or to the race (or the race made it eligible), its prerequisites are researched, and it is not researched, running or queued. A prerequisite id that has no tech row can never be researched, so a tech that needs one is out of reach for good. `evaluateResearch` computes that once for every tech, with the path to it, so the page only reads.
 
 import { toBoolean } from './aurora'
+import * as decimal from './decimal'
 import { countText, isKnownNumber, UNKNOWN_TEXT } from './math'
+import { loadOrbitalCensus } from './orbital-census'
 import { combine, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
 export const DONE = 'done'
@@ -13,7 +15,9 @@ export const AVAILABLE = 'available'
 export const LOCKED = 'locked'
 export const BLOCKED = 'blocked'
 
-const RESEARCH_VERSIONS = ['2.7.x']
+const RESEARCH_VERSIONS = ['3.2.x']
+// Saved points and continuous carry into the queued technologies.
+const SAVED_VERSIONS = ['3.2.x']
 const RATE_RULE = 'research.projectRate'
 const LANDING_RULE = 'research.landing'
 // The key a construct row with no research field is kept under, so every field's bonus reads as unknown.
@@ -66,11 +70,11 @@ registerRule({
 
 registerRule({
   id: 'research.remaining',
-  versions: RESEARCH_VERSIONS,
+  versions: SAVED_VERSIONS,
   units: 'RP',
   verification: 'confirmed',
   structure: ['FCT_ResearchProject.ResearchPointsRequired', 'FCT_TechSystem.DevelopCost', 'FCT_PausedResearch.PointsAccumulated'],
-  note: 'RP still to pay for a tech: a running project\'s stored RP left, else its development cost less the points banked in paused research (none banked is 0). Arithmetic on stored values, never below 0.',
+  note: 'RP still to pay for a tech: a running project\'s stored RP left, else its stored development cost less the points saved from cancelled research (none saved is 0). The saved points are read as stored, decimals included, and the cost is the stored one whatever its size. Arithmetic on stored values, never below 0.',
 })
 
 registerRule({
@@ -87,8 +91,9 @@ registerRule({
   versions: RESEARCH_VERSIONS,
   units: 'RP/yr',
   verification: 'estimated',
-  structure: ['FCT_ResearchProject.Facilities, ResSpecID', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses.BonusValue (Research bonus 3)', 'FCT_Species.ResearchRateModifier', 'FCT_Race.Research, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PopPoliticalStatus.ProductionMod', 'FCT_Game.ResearchSpeed', 'FCT_AncientConstruct.ResearchField, ResearchBonus'],
-  note: 'RP a year the project\'s labs make: output per lab times the labs, the scientist\'s Research bonus (a scientist with no stored Research bonus has none, read as 1; counted four times over on a project of the scientist\'s own field), the colony\'s own ancient construct bonus and a tenth of every active construct\'s bonus above 1 for the field. A project with no scientist makes none in the research list, so it has no rate here. The rate is not compared with the game\'s research list.',
+  structure: ['FCT_ResearchProject.Facilities, ResSpecID', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses.BonusValue (Research bonus 3)', 'FCT_Species.ResearchRateModifier', 'FCT_Race.Research, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints, Population and eligible orbital colonists', 'FCT_SystemBody.RadiationLevel', 'DIM_PopPoliticalStatus.ProductionMod', 'FCT_Game.ResearchSpeed', 'FCT_AncientConstruct.Active, ResearchField, ResearchBonus'],
+  note: 'Output per lab times the assigned labs, the scientist\'s Research bonus (four times the bonus less 3 in the scientist\'s own field), the local construct bonus in its matching field even while dormant, and the racial field factor. The radiation production modifier is at least 0. Each active construct adds a tenth of its bonus above 1 to its racial field factor for every colony with at least a million surface and eligible orbital people. A project without a scientist has no rate here.',
+  assumptions: ['The rate uses the stored lab assignment and scientist; future automatic lab assignment is not forecast'],
 })
 
 registerRule({
@@ -97,7 +102,7 @@ registerRule({
   units: 'RP/yr',
   verification: 'estimated',
   structure: ['the research.projectRate figure of each running project'],
-  note: 'Sum of the rates of the projects that are running. A paused project makes none; a project with no rate leaves the sum short and is named as missing.',
+  note: 'Sum of the effective rates of the projects that are running. A paused project makes none; a project with no rate leaves the sum short and is named as missing.',
 })
 
 registerRule({
@@ -111,11 +116,12 @@ registerRule({
 
 registerRule({
   id: LANDING_RULE,
-  versions: RESEARCH_VERSIONS,
+  versions: SAVED_VERSIONS,
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_ResearchProject.ResearchPointsRequired', 'FCT_ResearchQueue.ResearchOrder', 'FCT_TechSystem.DevelopCost', 'the research.projectRate figure'],
-  note: 'Years until a project lands: its RP left over its rate. A queued tech starts when the one before it lands and is paid at the project\'s labs and scientist at the queued tech\'s own field. A project that is paused or makes no RP never lands, and nothing behind it does.',
+  note: 'Years until a project lands: its RP left over its processor rate. A queued tech starts when the one before it lands and is paid at the project\'s labs and scientist at the queued tech\'s own field, for the cost less the points saved on it. The game hands the part of a landing increment the project does not need to the next queued tech at that tech\'s own rate, so this figure is the carry in continuous time: the game lands the tech at the end of the first increment at or after it. A project that is paused or makes no RP never lands, and nothing behind it does.',
+  assumptions: ['The current labs, scientist, colony output and racial field bonuses stay fixed throughout the queue'],
 })
 
 registerRule({
@@ -124,7 +130,7 @@ registerRule({
   units: 'years',
   verification: 'estimated',
   structure: ['the research.landing figure of each running project', 'FCT_Game.StartYear, GameTime'],
-  note: 'The soonest landing among the running projects, dated from the game clock.',
+  note: 'The soonest processor landing among the running projects, dated from the game clock. The date is the calendar day of the continuous landing time of the project, so it is an estimate: the game lands a tech at the end of the first increment at or after that time, and the day it shows can be later.',
 })
 
 // Why a tech can never be researched by the race, as a player reads it.
@@ -133,6 +139,12 @@ export const BLOCK_REASONS = {
   foreign: "Another empire's technology",
   'no-prerequisite': 'Needs a technology the game does not provide',
   prerequisite: 'Needs a technology that cannot be researched',
+}
+
+// Why a tech with saved points that the game lists cannot be started (`notResearchable` of `evaluateResearch`).
+export const NOT_RESEARCHABLE_REASONS = {
+  ruin: 'Found only in ancient ruins',
+  prerequisite: 'A prerequisite is not researched',
 }
 
 export const STATUS_LABELS = {
@@ -144,9 +156,10 @@ export const STATUS_LABELS = {
   [BLOCKED]: 'Out of reach',
 }
 
-// The catalogue as `rows` from FCT_TechSystem (GameID 0, plus the race's eligible alien projects) with DIM_TechType's Description (TypeName) and FieldID: tech by id, with its prerequisites and dependents.
-export const buildTechGraph = (rows) => {
+// The catalogue includes baseline techs, the race's own designs and its eligible alien projects, with stored type names and fields. `categories` names each tech's research category (`categoryName`, null when the save has no such row).
+export const buildTechGraph = (rows, categories = []) => {
   const techs = new Map()
+  const categoryNames = new Map(categories.map((row) => [row.CategoryID, row.Name]))
 
   rows.forEach((row) => techs.set(row.TechSystemID, {
     id: row.TechSystemID,
@@ -156,6 +169,8 @@ export const buildTechGraph = (rows) => {
     fieldId: row.FieldID,
     typeId: row.TechTypeID,
     typeName: row.TypeName,
+    categoryId: row.CategoryID === undefined ? null : row.CategoryID,
+    categoryName: categoryNames.has(row.CategoryID) && categoryNames.get(row.CategoryID) ? categoryNames.get(row.CategoryID) : null,
     raceId: row.RaceID,
     ruinOnly: toBoolean(row.RuinOnly),
     automatic: toBoolean(row.AutomaticResearch),
@@ -186,12 +201,16 @@ export const researchState = ({ raceId, researched, eligible = [], projects = []
   paused: new Map(paused.map((row) => [row.TechSystemID, row.PointsAccumulated])),
 })
 
-// Per tech: { status, reason, remaining, missing, pathRp, unlocks, gaps }.
+// Per tech: { status, reason, remaining, missing, pathRp, unlocks, gaps, hasSaved, saved, inList, notResearchable }.
 //   remaining  RP still to pay for this tech (a running project's RP left, else its cost less banked points), null when the cost, the project's RP left or the banked points are not stored
 //   missing    ids of the unresearched techs it needs, deepest prerequisite first, itself not included
 //   pathRp     remaining of the tech plus all of `missing`: the game's "Path RP", less progress already made; null when any of those is not known
 //   unlocks    direct dependents that are not researched yet
 //   gaps       { remaining, pathRp }: the stored values each of those two lacks, by name, for `remainingResult` and `pathRpResult`
+//   hasSaved   whether the race has a row of points saved from cancelled research for it
+//   saved      the points saved, as stored (a decimal as it is), null when there is no row or the points are not stored
+//   inList     whether the game lists it: not researched, running or queued, belonging to nobody, to the race or to a race that made it eligible, and either with a saved row (whatever else stops it being started) or startable (not ruin-only, every prerequisite researched)
+//   notResearchable  why a listed tech with saved points cannot be started: 'ruin' (found only in ruins) and 'prerequisite' (a prerequisite is not researched), both when both hold, empty when it can be started
 export const evaluateResearch = (graph, state) => {
   const { techs } = graph
   const { raceId, researched, eligible, projects, queued, paused } = state
@@ -283,6 +302,12 @@ export const evaluateResearch = (graph, state) => {
       entry.reason = blockReason(tech)
       entry.status = entry.reason ? BLOCKED : open.length ? LOCKED : AVAILABLE
     }
+
+    // A saved ruin-only tech or one with an unresearched prerequisite stays listed as not researchable, while another empire's tech does not. With no saved row, only a startable tech is listed.
+    entry.hasSaved = paused.has(tech.id)
+    entry.saved = entry.hasSaved && isKnownNumber(paused.get(tech.id)) ? paused.get(tech.id) : null
+    entry.inList = entry.status === AVAILABLE || (entry.hasSaved && ![DONE, ACTIVE, QUEUED].includes(entry.status) && (tech.raceId === 0 || tech.raceId === raceId || eligible.has(tech.id)))
+    entry.notResearchable = entry.inList ? [...(tech.ruinOnly ? ['ruin'] : []), ...(tech.prerequisites.some((id) => !researched.has(id)) ? ['prerequisite'] : [])] : []
 
     entry.unlocks = tech.dependents.filter((id) => !researched.has(id)).length
 
@@ -423,18 +448,72 @@ export const prerequisiteChain = (graph, info, targetId) => {
   }
 }
 
+// One row per colony contributing a racial construct bonus; eligibility comes only from the shared population census.
+export const loadResearchConstructs = async (database, { GameID, RaceID }) => {
+  const [totals, [constructs]] = await Promise.all([
+    loadOrbitalCensus(database, { GameID, RaceID }),
+    database.query(`select FCT_Population.PopulationID, FCT_AncientConstruct.Active, FCT_AncientConstruct.ResearchField as FieldID, FCT_AncientConstruct.ResearchBonus from FCT_AncientConstruct inner join FCT_Population on FCT_Population.SystemBodyID = FCT_AncientConstruct.SystemBodyID and FCT_Population.GameID = FCT_AncientConstruct.GameID where FCT_AncientConstruct.GameID = ${GameID} and (FCT_Population.RaceID = ${RaceID} or FCT_Population.RaceID is null)`),
+  ])
+
+  return constructs.flatMap((row) => {
+    const population = totals.get(row.PopulationID)
+    const gate = population ? valueOrNull(population.millionEligible) : null
+    const eligible = gate === false ? false : population && population.raceMatches === true ? gate : null
+    const missing = [...(row.Active === 1 ? [] : ['whether the ancient construct is active']), ...(eligible === null ? population ? [...population.millionEligible.inputs.missing, ...(population.raceMatches === true ? [] : ['the race of a colony on the construct\'s body'])] : ['the population of a colony on the construct\'s body'] : [])]
+
+    return row.Active === 0 || eligible === false ? [] : [{ ...row, ResearchBonus: (row.Active === 1 && eligible === true) || row.ResearchBonus === 1 ? row.ResearchBonus : null, CensusMissing: row.ResearchBonus === 1 ? [] : missing }]
+  })
+}
+
 // A scientist on a project of the scientist's own field counts the Research bonus four times over (1.15 becomes 1.60); null when the bonus is not known.
 export const researchMultiplier = (bonus, specialised) => (!isKnownNumber(bonus) ? null : specialised ? 4 * bonus - 3 : bonus)
+
+const RESEARCH_OUTPUT_INPUTS = ['ResearchRateModifier', 'ResearchBase', 'EconomicProdModifier', 'Efficiency', 'RadiationLevel', 'UnrestPoints', 'ProductionMod', 'ResearchSpeed']
+const RESEARCH_ONE = decimal.fromString('1')
+const RESEARCH_HUNDRED = decimal.fromString('100')
+const RESEARCH_TEN_THOUSAND = decimal.fromString('10000')
+
+// Stored per-lab factors multiply left to right in decimal. Only the final speed percentage uses a double division before decimal conversion. Radiation clamps at zero; stability is one less the unrest percentage.
+export const researchOutputPerLab = (project) => {
+  if (!RESEARCH_OUTPUT_INPUTS.every((key) => isKnownNumber(project[key]))) {
+    return null
+  }
+  const radiation = decimal.subtract(RESEARCH_ONE, decimal.divide(decimal.fromDouble(project.RadiationLevel), RESEARCH_TEN_THOUSAND))
+  const stability = decimal.subtract(RESEARCH_ONE, decimal.divide(decimal.fromDouble(project.UnrestPoints), RESEARCH_HUNDRED))
+  let output = decimal.multiply(decimal.fromDouble(project.ResearchRateModifier), decimal.fromDouble(project.ResearchBase))
+
+  output = decimal.multiply(output, decimal.fromDouble(project.EconomicProdModifier))
+  output = decimal.multiply(output, decimal.fromDouble(project.Efficiency))
+  output = decimal.multiply(output, decimal.negative(radiation) ? decimal.ZERO : radiation)
+  output = decimal.multiply(output, stability)
+  output = decimal.multiply(output, decimal.fromDouble(project.ProductionMod))
+
+  return decimal.multiply(output, decimal.fromDouble(project.ResearchSpeed / 100.0))
+}
+
+// Combine scientist, local and racial factors first, then multiply exact per-lab output and labs in decimal. No intermediate per-lab result is converted back to double.
+export const researchAnnualRate = ({ outputPerLab, facilities, scientist, local, racial }) => {
+  const multiplier = decimal.multiply(decimal.multiply(decimal.fromDouble(scientist), decimal.fromDouble(local)), decimal.fromDouble(racial))
+
+  return decimal.toNumber(decimal.multiply(decimal.multiply(outputPerLab, decimal.fromDouble(facilities)), multiplier))
+}
 
 // The race-wide bonus per field from its active ancient constructs: each adds a tenth of its bonus above 1. `constructs` has one row per populated colony on a construct, as the game counts them. A field with no construct has no entry (no bonus); a construct row without its bonus makes its field's entry null, and one without a field adds an `unknown` entry that leaves every field's bonus unknown.
 export const fieldBonuses = (constructs) => {
   const bonuses = {}
 
   constructs.forEach((row) => {
+    if (row.ResearchBonus === 1) {
+      return
+    }
     const key = isKnownNumber(row.FieldID) ? row.FieldID : FIELD_UNKNOWN
     const current = key in bonuses ? bonuses[key] : 1
 
     bonuses[key] = current === null || !isKnownNumber(row.ResearchBonus) ? null : current + (row.ResearchBonus - 1) / 10
+    if (row.CensusMissing && row.CensusMissing.length) {
+      bonuses.missing = bonuses.missing || {}
+      bonuses.missing[key] = [...new Set([...(bonuses.missing[key] || []), ...row.CensusMissing])]
+    }
   })
 
   return bonuses
@@ -447,27 +526,30 @@ export const annualResearchPointsResult = (project, fieldId, bonuses = {}) => {
   }
 
   const known = isKnownNumber(fieldId)
+  const outputPerLab = researchOutputPerLab(project)
   const onConstruct = known && isKnownNumber(project.LocalConstructField) && project.LocalConstructField === fieldId
-  const fieldBonus = known && fieldId in bonuses ? bonuses[fieldId] : 1
+  const zeroOutput = (outputPerLab !== null && outputPerLab.m === 0n) || project.Facilities === 0
+  const fieldBonus = zeroOutput ? 1 : known && fieldId in bonuses ? bonuses[fieldId] : 1
   const needed = [
-    ['the colony\'s research output per lab', project.OutputPerLab],
     ['the labs assigned to the project', project.Facilities],
     ['the scientist\'s Research bonus', project.ResearchBonus],
     ['the scientist\'s research field', project.ScientistField],
     ['the research field of the tech', fieldId],
+    ...(project.LocalConstructID != null ? [['the colony\'s ancient construct field', project.LocalConstructField]] : []),
     ...(onConstruct ? [['the colony\'s ancient construct bonus', project.LocalConstructBonus]] : []),
     ['the ancient construct bonus of the field', fieldBonus],
-    ...(FIELD_UNKNOWN in bonuses ? [['the research field of an ancient construct', null]] : []),
+    ...(!zeroOutput && FIELD_UNKNOWN in bonuses ? [['the research field of an ancient construct', null]] : []),
+    ...(!zeroOutput ? [...(bonuses.missing ? bonuses.missing[fieldId] || [] : []), ...(bonuses.missing ? bonuses.missing[FIELD_UNKNOWN] || [] : [])].map((name) => [name, null]) : []),
   ]
-  const missing = needed.filter(([, value]) => !isKnownNumber(value)).map(([name]) => name)
+  const missing = [...(outputPerLab === null ? ['the colony\'s research output per lab'] : []), ...needed.filter(([, value]) => !isKnownNumber(value)).map(([name]) => name)]
 
   if (missing.length) {
-    return unavailable({ rule: RATE_RULE, missing, present: needed.filter(([, value]) => isKnownNumber(value)).map(([name]) => name) })
+    return unavailable({ rule: RATE_RULE, missing, present: [...(outputPerLab === null ? [] : ['the colony\'s research output per lab']), ...needed.filter(([, value]) => isKnownNumber(value)).map(([name]) => name)] })
   }
 
   const local = onConstruct ? project.LocalConstructBonus : 1
 
-  return ofRule({ rule: RATE_RULE, value: project.OutputPerLab * project.Facilities * researchMultiplier(project.ResearchBonus, project.ScientistField === fieldId) * local * fieldBonus, inputs: { present: ['the project\'s scientist', ...needed.map(([name]) => name)] } })
+  return ofRule({ rule: RATE_RULE, value: researchAnnualRate({ outputPerLab, facilities: project.Facilities, scientist: researchMultiplier(project.ResearchBonus, project.ScientistField === fieldId), local, racial: fieldBonus }), inputs: { present: ['the project\'s scientist', 'the colony\'s research output per lab', ...needed.map(([name]) => name)] } })
 }
 
 // RP a year, or null when the project has no rate (see `annualResearchPointsResult` for why).
@@ -559,7 +641,7 @@ export const outputResult = (schedule) => {
     return { result: unavailable({ rule: 'research.output', missing }), unknown: unknown.length, projects: schedule.length }
   }
 
-  return { result: ofRule({ rule: 'research.output', value: counted.reduce((total, project) => total + project.rate, 0), inputs: { present: counted.length ? counted.map((project) => `the rate of ${projectName(project)}`) : ['the research projects'], missing } }), unknown: unknown.length, projects: schedule.length }
+  return { result: combine({ rule: 'research.output', parts: Object.fromEntries(counted.map((project, index) => [`project ${index + 1}`, project.rateResult])), compute: (values) => Object.values(values).reduce((total, rate) => total + rate, 0), inputs: { present: counted.length ? counted.map((project) => `the rate of ${projectName(project)}`) : ['the research projects'], missing } }), unknown: unknown.length, projects: schedule.length }
 }
 
 // The labs built, the labs the projects assigned and those idle, as results of `research.labs`, with `over`, the labs assigned beyond those built. `labRows` have one `Labs` count per colony; a count that is not stored, or a project without its labs, makes that figure unavailable.
@@ -586,7 +668,7 @@ export const nextLandingResult = (schedule, game) => {
     return { project: best, result: unavailable({ rule: 'research.nextLanding', missing: [...(best ? [] : ['a running project with a rate and RP left']), ...clock] }), unknown: undated.length, causes }
   }
 
-  return { project: best, result: combine({ rule: 'research.nextLanding', parts: { landing: best.yearsResult }, compute: (values) => values.landing, inputs: { present: ['the game clock'], missing: undated } }), unknown: undated.length, causes }
+  return { project: best, result: combine({ rule: 'research.nextLanding', parts: Object.fromEntries(dated.map((project, index) => [`project ${index + 1}`, project.yearsResult])), compute: (values) => Math.min(...Object.values(values)), inputs: { present: ['the game clock'], missing: undated } }), unknown: undated.length, causes }
 }
 
 // "9 d", "7.5 mo", "3.4 y": a span of years as a player reads it, the figure of a long one grouped with `separator`.

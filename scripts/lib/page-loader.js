@@ -1,7 +1,7 @@
 /*
   Loads a page of the renderer (a .vue file) into a Node check script, and runs its component options against a pseudo instance.
 
-  The page's <script> is read with vue/compiler-sfc and loaded the way scripts/lib/utilities.js loads a utility: from its source as a file of the process (scripts/lib/module-files.js), its relative imports of utilities and mixins replaced by the URLs of those modules (loaded from source in turn), so the page runs the real utilities and mixins. What a page imports only to render stands in as a small stub module: every .vue component is `export default {}`, `vuex` reads the store the instance is given, and the mixins and helpers that need the app around them (persisted-view, deep-link, load-state, the chart theme, the appearance) are stubbed in MODULE_STUBS. `options.stubs` is { [package specifier]: module source } for the packages the utilities import, as for `loadUtilities`; `options.modules` is { [module name]: module source } and replaces a module by name ('mixins/persisted-view'), a real one with null.
+  The page's <script> is read with vue/compiler-sfc and loaded the way scripts/lib/utilities.js loads a utility: from its source as a file of the process (scripts/lib/module-files.js), its relative imports of utilities and mixins replaced by the URLs of those modules (loaded from source in turn), so the page runs the real utilities and mixins. Each call owns independent instances of its whole graph, package and component stubs included; repeated imports within that graph share one instance. What a page imports only to render stands in as a small stub module: every .vue component is `export default {}`, `vuex` reads the store the instance is given, and the mixins and helpers that need the app around them (persisted-view, deep-link, load-state, the chart theme, the appearance) are stubbed in MODULE_STUBS. `options.stubs` is { [package specifier]: module source } for the packages the utilities import, as for `loadUtilities`; `options.modules` is { [module name]: module source } and replaces a module by name ('mixins/persisted-view'), a real one with null.
 
   `options.mutate(text)` rewrites the page's script text before it loads: a check of the checks cuts one gate out of the page and expects a page check to fail (`replacing`).
 
@@ -12,7 +12,7 @@ const path = require('path')
 
 const rendererDirectory = path.resolve(__dirname, '..', '..', 'src', 'renderer')
 
-const { urlOfSource } = require('./module-files')
+const { moduleTree } = require('./module-files')
 
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -45,14 +45,14 @@ const MODULE_STUBS = {
   'utilities/appearance-font': 'export const whenFontsReady = () => Promise.resolve()',
 }
 
-const pageScript = (text) => require(path.join(rendererDirectory, '..', '..', 'node_modules', 'vue', 'compiler-sfc')).parse({ source: text }).script.content
+const pageScript = (text) => require('vue/compiler-sfc').parse({ source: text }).script.content
 
 const moduleUrl = (name, context) => {
-  const { urls, directory, stubs, modules, mutate, sources, texts, namedComponents, dynamicImports } = context
+  const { urls, directory, stubs, modules, mutate, sources, texts, namedComponents, dynamicImports, urlOfSource } = context
 
   if (!urls.has(name)) {
     if (modules[name] !== undefined && modules[name] !== null) {
-      urls.set(name, urlOfSource(modules[name]))
+      urls.set(name, urlOfSource(modules[name], `module:${name}`))
 
       return urls.get(name)
     }
@@ -67,22 +67,31 @@ const moduleUrl = (name, context) => {
     const text = sources[name] !== undefined ? sources[name] : texts.get(file)
     const source = isPage ? pageScript(text) : text
     const mutated = isPage && mutate ? mutate(source) : source
-    const components = mutated.replace(/from '([^']+\.vue)'/g, (_match, specifier) => `from '${urlOfSource(VUE_STUB(specifier, namedComponents))}'`)
+    const components = mutated.replace(/from '([^']+\.vue)'/g, (_match, specifier) => `from '${urlOfSource(VUE_STUB(specifier, namedComponents), `component:${path.posix.join(path.posix.dirname(name), specifier)}`)}'`)
     const relative = components.replace(dynamicImports ? /(from |import\()'(\.\.?\/[\w\-/.]+)'/g : /(from )'(\.\.?\/[\w\-/.]+)'/g, (_match, lead, specifier) => `${lead}'${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), context)}'`)
-    const stubbed = Object.entries({ ...PACKAGE_STUBS, ...stubs }).reduce((result, [specifier, stub]) => result.replace(new RegExp(`from '${escaped(specifier)}'`, 'g'), `from '${urlOfSource(stub)}'`), relative)
+    const stubbed = Object.entries({ ...PACKAGE_STUBS, ...stubs }).reduce((result, [specifier, stub]) => result.replace(new RegExp(`from '${escaped(specifier)}'`, 'g'), () => `from '${urlOfSource(stub, `package:${specifier}`)}'`), relative)
 
-    urls.set(name, urlOfSource(stubbed))
+    urls.set(name, urlOfSource(stubbed, `module:${name}`))
   }
 
   return urls.get(name)
 }
 
-// A page's module, 'pages/lagrange', or any other module of the renderer folder, with its named exports. `sources` is { [module name]: source text } for modules (or the page itself, as the text of its .vue file) whose text is given instead of read from the folder, for a check that plants a fault in one of them; `texts` is a Map the caller keeps from call to call, so each file is read once: give it only where the files do not change between the calls.
-const loadModule = async (name, { directory = rendererDirectory, stubs = {}, modules = {}, mutate = null, sources = {}, texts = new Map(), namedComponents = false, dynamicImports = false } = {}) => {
-  const context = { urls: new Map(), directory, stubs, modules: { ...MODULE_STUBS, ...modules }, mutate, sources, texts, namedComponents, dynamicImports }
+// The named modules of the renderer folder, with their exports, in one isolated graph. Request a page and its utilities together when a check compares their object identities; separate calls deliberately own separate instances. `sources` holds replacement source texts, and `texts` caches reads only while the files stay unchanged.
+const loadModules = async (names, { directory = rendererDirectory, stubs = {}, modules = {}, mutate = null, sources = {}, texts = new Map(), namedComponents = false, dynamicImports = false } = {}) => {
+  const context = { urls: new Map(), urlOfSource: moduleTree(), directory, stubs, modules: { ...MODULE_STUBS, ...modules }, mutate, sources, texts, namedComponents, dynamicImports }
 
-  return import(moduleUrl(name, context))
+  const loaded = {}
+
+  for (const name of names) {
+    loaded[name] = await import(moduleUrl(path.posix.normalize(name), context))
+  }
+
+  return loaded
 }
+
+// One module, 'pages/lagrange' or any other module of the renderer folder, with its named exports.
+const loadModule = async (name, options) => (await loadModules([name], options))[name]
 
 // The component options of a page: the default export of its module.
 const loadPage = async (name, options) => (await loadModule(name, options)).default
@@ -169,4 +178,4 @@ const instantiate = (options, { $store, database = null, GameID = null, RaceID =
   return vm
 }
 
-module.exports = { loadPage, loadModule, replacing, instantiate }
+module.exports = { loadPage, loadModule, loadModules, replacing, instantiate }

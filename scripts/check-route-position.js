@@ -9,7 +9,8 @@
   - every dependent output states the same positions: the plan's legs, its totals and its running distances, a Transport run, a Hauling plan and a repeating route all take the records of the same endpoints from the same gate, so their mode and unknown conditions agree;
   - a result that rests on positions is an estimate that names what is held and unknown, an unavailable one stays so, and a route of fixed places is left as it was;
   - the read is schema-aware: a missing column or table reads as unknown, a fleet follows a body only at its exact position, and the read keeps to the race;
-  - the kind of the body a place stands on (a body, a colony, a Lagrange point, an order's destination, a waypoint, a fleet orbiting a body) is read from the saved fields as the game moves it, a trojan following the planet switch and an independent asteroid also its own, and is unknown where the fields were not read, for every pair of switches, driven from the real loaders over saves of every kind of body;
+  - the kind of the body a place stands on (a body, a colony, a Lagrange point, an order's destination, a waypoint, a fleet orbiting a body or riding a Lagrange point) is read from the saved fields as the game moves it, every body that moves, an independent asteroid and a trojan included, following the one planet and moon switch whatever the asteroid switch the save stores says, a fixed body with no parent never moving, and is unknown where the fields were not read, driven from the real loaders over saves of every kind of body;
+  - a fleet at a Lagrange point (`OrbitLagrangeID`) follows it only while it stands at the point's position, a waypoint carried by one moves with it, the mode of a fleet is `LagrangeStatus` (never the `AutoLP` text) and says whether an order takes Lagrange jumps, and the clock reads the cadence of the update (`OrbitalMovementInSubPulse`, `SubPulseLength` and the length of the latest increment);
   - each page tracks the read as an optional input under the key its label has, never holds the page back, shows the strip in its loading, failed and ready states and has a summary on every panel.
 
   Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Each benign edit and all of them together must leave every check green. Representative faults also run with all rewrites, for every check and reader path. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults and the benign edits. `--only=text|text` selects fault and rewrite names or their stable `fault:N`, `composed:N`, `benign:N` and `benign:all` keys; the head still runs every check. `--detail` prints the named failures that catch a fault.
@@ -17,14 +18,17 @@
   The pages are checked by what they do (their computed rows evaluated on a pseudo instance) and by the compiled templates' elements and bound expressions. No statement matches source text or prose; only a planted fault names a source anchor, and each is found by an identifier, a key or a code expression.
 */
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const compiler = require('vue/compiler-sfc')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
-const { loadPage, instantiate } = require('./lib/page-loader')
+const { loadPage, loadModule, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { FIXTURE, PLAYED } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
@@ -33,6 +37,7 @@ const FILES = {
   position: inRenderer('utilities', 'route-position.js'),
   plan: inRenderer('utilities', 'route-plan.js'),
   orbit: inRenderer('utilities', 'orbit-propagation.js'),
+  jumpGraph: inRenderer('utilities', 'jump-graph.js'),
   mixin: inRenderer('mixins', 'route-position.js'),
   component: inRenderer('components', 'page', 'RoutePositions.vue'),
   routesPage: inRenderer('pages', 'routes.vue'),
@@ -53,27 +58,36 @@ const GAME_TIME = 1000000
 const BODY_TIME = 900000
 const KM = 1e6
 
-const CLOCK = { gameTime: GAME_TIME, lastGrowthTime: BODY_TIME, orbitalMotion: 1, orbitalMotionAst: 1 }
+// Synthetic consumer flights use one-second sub-pulses so boundary jumps fit inside the arrival tolerance. The loader and real-save checks separately preserve the saved 7200/1800-second cadences.
+const CADENCE = { orbitalMovementInSubPulse: 1, subPulseLength: 1, incrementLength: 432000 }
 
-// The race's fleets as the read gives them: 5 idle since 950000, 6 orbiting a body with nothing queued, 7 with two queued orders, 11 anchored to fleet 5 with no orders of its own. The race's waypoints: 31 carried by no body, 32 by a planet, 33 by an asteroid, 34 with an orbit association that is not recorded.
+const CLOCK = { gameTime: GAME_TIME, lastGrowthTime: BODY_TIME, orbitalMotion: 1, ...CADENCE }
+
+// The race's fleets as the read gives them: 5 idle since 950000, 6 orbiting a body with nothing queued, 7 with two queued orders, 11 anchored to fleet 5 with no orders of its own, 13 riding the Lagrange point of a planet (91), 14 riding a point of an asteroid (92), which the game never moves, and 15 anchored to point 91 but no longer at its position. Each has the mode `LagrangeStatus` stores. The race's waypoints: 31 carried by no body, 32 by a planet, 33 by an asteroid, 34 with an orbit association that is not recorded, 38 carried by the point of a planet, 39 by a point that never moves and 40 by a point that is not recorded.
 const FACTS = {
   clock: CLOCK,
   fleets: {
     5: { lastMoveTime: 950000, following: false, orders: 0, anchor: 0 },
-    6: { lastMoveTime: 100, following: true, orders: 0, anchor: 0 },
+    6: { lastMoveTime: 100, following: true, group: 'moving', orders: 0, anchor: 0 },
     7: { lastMoveTime: 970000, following: false, orders: 2, anchor: 0 },
     11: { lastMoveTime: 960000, following: false, orders: 0, anchor: 5 },
+    13: { lastMoveTime: 960000, following: true, group: 'moving', point: 91, mode: 'plotted', orders: 0, anchor: 0 },
+    14: { lastMoveTime: 960000, following: true, group: 'static', point: 92, mode: 'manual', orders: 0, anchor: 0 },
+    15: { lastMoveTime: 960000, following: false, group: null, point: 91, mode: 'dynamic', orders: 0, anchor: 0 },
   },
   waypoints: {
-    31: { orbit: 0, group: null },
-    32: { orbit: 3, group: 'planet' },
-    33: { orbit: 4, group: 'asteroid' },
-    34: { orbit: null, group: null },
+    31: { orbit: 0, point: 0, group: null },
+    32: { orbit: 3, point: 0, group: 'moving' },
+    33: { orbit: 4, point: 0, group: 'moving' },
+    34: { orbit: null, point: 0, group: null },
+    38: { orbit: 0, point: 91, group: 'moving' },
+    39: { orbit: 0, point: 92, group: 'static' },
+    40: { orbit: 0, point: null, group: null },
   },
   problems: [],
 }
 
-const BODY = { family: 'body', key: 'body:3', id: 3, name: 'Earth', SystemID: 1, Xcor: 10, Ycor: 5, group: 'planet' }
+const BODY = { family: 'body', key: 'body:3', id: 3, name: 'Earth', SystemID: 1, Xcor: 10, Ycor: 5, group: 'moving' }
 const FIXED = { family: 'jump-point', key: 'jump:11', id: 11, name: 'Gate', SystemID: 1, Xcor: 100, Ycor: 0 }
 const IDLE = { family: 'fleet', key: 'fleet:5', id: 5, name: 'Idle', SystemID: 1, Xcor: 1, Ycor: 1 }
 const FOLLOWER = { family: 'fleet', key: 'fleet:6', id: 6, name: 'Follower', SystemID: 1, Xcor: 10, Ycor: 5 }
@@ -82,6 +96,10 @@ const ANCHORED = { family: 'fleet', key: 'fleet:11', id: 11, name: 'Anchored', S
 const WAYPOINTS = Object.fromEntries([[31, 'Fixed waypoint'], [32, 'Planet waypoint'], [33, 'Asteroid waypoint'], [34, 'Unread waypoint']].map(([id, name]) => [id, { family: 'waypoint', key: `waypoint:${id}`, id, name, SystemID: 1, Xcor: 7, Ycor: 7 }]))
 const SEEN = { family: 'contact', key: 'contact:9', id: 9, name: 'Seen', SystemID: 1, Xcor: 3, Ycor: 3, lastUpdate: 990000 }
 const CURRENT = { ...SEEN, key: 'contact:10', id: 10, name: 'Current', lastUpdate: GAME_TIME }
+const RIDER = { family: 'fleet', key: 'fleet:13', id: 13, name: 'Rider', SystemID: 1, Xcor: 20, Ycor: 20 }
+const HELD_RIDER = { family: 'fleet', key: 'fleet:14', id: 14, name: 'Rider of a held point', SystemID: 1, Xcor: 30, Ycor: 30 }
+const LEFT_POINT = { family: 'fleet', key: 'fleet:15', id: 15, name: 'Left its point', SystemID: 1, Xcor: 21, Ycor: 20 }
+const POINT_WAYPOINTS = Object.fromEntries([[38, 'Waypoint at a planet\'s point'], [39, 'Waypoint at a held point'], [40, 'Waypoint at an unread point']].map(([id, name]) => [id, { family: 'waypoint', key: `waypoint:${id}`, id, name, SystemID: 1, Xcor: 20, Ycor: 20 }]))
 
 const stop = (kind, id, extra = {}) => ({ key: `${kind}:${id}`, kind, name: `${kind} ${id}`, SystemID: 1, Xcor: 10, Ycor: 5, ...extra })
 
@@ -97,29 +115,38 @@ const canonical = (positions) => ({ ...asJson(positions), records: asJson(positi
 
 // ---- A SQLite database that answers the loader's queries --------------------------------------------------------------
 const SCHEMA = `
-  create table FCT_Game (GameID integer, GameTime real, LastGrowthTime real, OrbitalMotion integer, OrbitalMotionAst integer);
-  create table FCT_Fleet (FleetID integer, GameID integer, RaceID integer, LastMoveTime real, OrbitBodyID integer, Xcor real, Ycor real, AnchorFleetID integer);
+  create table FCT_Game (GameID integer, GameTime real, LastGrowthTime real, OrbitalMotion integer, OrbitalMotionAst integer, OrbitalMovementInSubPulse integer, SubPulseLength integer);
+  create table FCT_Increments (IncrementID integer, GameID integer, GameTime real, Length integer);
+  create table FCT_Fleet (FleetID integer, GameID integer, RaceID integer, LastMoveTime real, OrbitBodyID integer, Xcor real, Ycor real, AnchorFleetID integer, OrbitLagrangeID integer, LagrangeStatus integer, AutoLP text, SystemID integer default 1);
   create table FCT_MoveOrders (FleetID integer, GameID integer, MoveOrder integer);
   create table FCT_SystemBody (SystemBodyID integer, Xcor real, Ycor real, BodyClass integer, TrojanAsteroid integer, ParentBodyID integer, FixedBody integer);
-  create table FCT_Waypoint (WaypointID integer, GameID integer, RaceID integer, OrbitBodyID integer);
+  create table FCT_LagrangePoint (LagrangePointID integer, GameID integer, PlanetID integer, Xcor real, Ycor real, SystemID integer default 1);
+  create table FCT_Waypoint (WaypointID integer, GameID integer, RaceID integer, OrbitBodyID integer, OrbitLagrangeID integer);
 `
 
+// Every fleet stores the legacy `AutoLP` text 'TRUE' as the saves of the line do, whatever its mode: the mode is `LagrangeStatus` (0 Manual, 1 Plotted, 2 Dynamic, as listed below), so a read that took the text for the mode would give every fleet the same one.
 const ROWS = `
-  insert into FCT_Game values (1, 1000000, 900000, 1, 0);
+  insert into FCT_Game values (1, 1000000, 900000, 1, 0, 1, 7200);
+  insert into FCT_Increments values (1, 1, 100000, 5000), (2, 1, 990000, 10000), (3, 2, 999999, 777);
   insert into FCT_SystemBody values (3, 10, 5, 1, 0, 0, 0);
   insert into FCT_SystemBody values (4, null, 5, 3, 0, 0, 0);
-  insert into FCT_Fleet values (5, 1, 2, 950000, 0, 1, 1, 0);
-  insert into FCT_Fleet values (6, 1, 2, 100, 3, 10, 5, 0);
-  insert into FCT_Fleet values (7, 1, 2, 970000, 0, 2, 2, 0);
-  insert into FCT_Fleet values (8, 1, 2, 960000, 3, 10, 6, 0);
-  insert into FCT_Fleet values (9, 1, 2, null, 3, null, null, 0);
-  insert into FCT_Fleet values (10, 1, 2, 960000, 4, 10, 5, 0);
-  insert into FCT_Fleet values (11, 1, 2, 960000, 0, 5, 5, 5);
-  insert into FCT_Fleet values (12, 1, 2, 960000, 0, 6, 6, null);
-  insert into FCT_Fleet values (20, 1, 3, 960000, 0, 4, 4, 0);
-  insert into FCT_Fleet values (21, 2, 2, 960000, 0, 4, 4, 0);
+  insert into FCT_LagrangePoint (LagrangePointID, GameID, PlanetID, Xcor, Ycor) values (91, 1, 3, 20, 20), (92, 1, 4, 30, 30), (93, 1, 3, null, null);
+  insert into FCT_Fleet values (5, 1, 2, 950000, 0, 1, 1, 0, 0, 0, 'TRUE', 1);
+  insert into FCT_Fleet values (6, 1, 2, 100, 3, 10, 5, 0, 0, 2, 'TRUE', 1);
+  insert into FCT_Fleet values (7, 1, 2, 970000, 0, 2, 2, 0, 0, 1, 'TRUE', 1);
+  insert into FCT_Fleet values (8, 1, 2, 960000, 3, 10, 6, 0, 0, 2, 'TRUE', 1);
+  insert into FCT_Fleet values (9, 1, 2, null, 3, null, null, 0, 0, 2, 'TRUE', 1);
+  insert into FCT_Fleet values (10, 1, 2, 960000, 4, 10, 5, 0, 0, 0, 'TRUE', 1);
+  insert into FCT_Fleet values (11, 1, 2, 960000, 0, 5, 5, 5, 0, 2, 'TRUE', 1);
+  insert into FCT_Fleet values (12, 1, 2, 960000, 0, 6, 6, null, 0, 2, 'TRUE', 1);
+  insert into FCT_Fleet values (13, 1, 2, 960000, 0, 20, 20, 0, 91, 1, 'TRUE', 1);
+  insert into FCT_Fleet values (14, 1, 2, 960000, 0, 30, 30, 0, 92, 0, 'TRUE', 1);
+  insert into FCT_Fleet values (15, 1, 2, 960000, 0, 21, 20, 0, 91, 2, 'TRUE', 1);
+  insert into FCT_Fleet values (16, 1, 2, 960000, 0, 20, 20, 0, 93, 2, 'TRUE', 1);
+  insert into FCT_Fleet values (20, 1, 3, 960000, 0, 4, 4, 0, 0, 0, 'TRUE', 1);
+  insert into FCT_Fleet values (21, 2, 2, 960000, 0, 4, 4, 0, 0, 0, 'TRUE', 1);
   insert into FCT_MoveOrders values (7, 1, 1), (7, 1, 2), (7, 2, 1), (21, 2, 1);
-  insert into FCT_Waypoint values (31, 1, 2, 0), (32, 1, 2, 3), (33, 1, 2, 4), (34, 1, 2, null), (35, 1, 2, 99), (36, 1, 3, 3), (37, 2, 2, 3);
+  insert into FCT_Waypoint values (31, 1, 2, 0, 0), (32, 1, 2, 3, 0), (33, 1, 2, 4, 0), (34, 1, 2, null, 0), (35, 1, 2, 99, 0), (36, 1, 3, 3, 0), (37, 2, 2, 3, 0), (38, 1, 2, 0, 91), (39, 1, 2, 0, 92), (40, 1, 2, 0, null);
 `
 
 // A save of an older schema: no motion switches, no last move or orbit and no orders table.
@@ -134,6 +161,12 @@ const OLD_ROWS = `
   insert into FCT_Fleet values (5, 1, 2, 1, 1);
 `
 
+// The loaders' `database.query(sql, { replacements })` over a node-sqlite3 handle.
+const wrapped = (raw) => ({
+  query: (sql, { replacements = {} } = {}) => new Promise((resolve, reject) => raw.all(sql.replace(/:([A-Za-z]+)\b/g, (_match, name) => String(replacements[name])), (error, found) => (error ? reject(error) : resolve([found])))),
+  close: () => raw.close(),
+})
+
 const databaseOf = async (schema, rows) => {
   const raw = new sqlite3.Database(':memory:')
   const exec = (sql) => new Promise((resolve, reject) => raw.exec(sql, (error) => (error ? reject(error) : resolve())))
@@ -141,10 +174,7 @@ const databaseOf = async (schema, rows) => {
   await exec(schema)
   await exec(rows)
 
-  return {
-    query: (sql, { replacements = {} } = {}) => new Promise((resolve, reject) => raw.all(sql.replace(/:([A-Za-z]+)\b/g, (_match, name) => String(replacements[name])), (error, found) => (error ? reject(error) : resolve([found])))),
-    close: () => raw.close(),
-  }
+  return wrapped(raw)
 }
 
 const STORE = { getters: { 'capabilities/result': {}, 'capabilities/report': () => null, 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} }
@@ -164,9 +194,6 @@ const resolved = (edit, text) => {
   return { ...edit, from: found[0][0], to: edit.to(found[0]) }
 }
 
-// A stable copy exposes the pages' cacheQueries without forcing another module graph for every world. The cache itself keeps databases apart with a WeakMap, as in the app.
-const QUERY_CACHE = `${fs.readFileSync(inRenderer('utilities', 'query-cache.js'), 'utf8')}\nglobalThis.__routePositionQueryCache = { cacheQueries }`
-
 const worldOf = (edits = []) => {
   const text = { ...ORIGINALS }
 
@@ -176,11 +203,12 @@ const worldOf = (edits = []) => {
     text[edit.target] = patched(FILES[edit.target], text[edit.target], change.from, change.to)
   })
 
-  const utilitySources = { 'route-position': text.position, 'route-plan': text.plan, 'orbit-propagation': text.orbit }
+  const utilitySources = { 'route-position': text.position, 'route-plan': text.plan, 'orbit-propagation': text.orbit, 'jump-graph': text.jumpGraph }
   const pageSources = {
     'utilities/route-position': text.position,
     'utilities/route-plan': text.plan,
     'utilities/orbit-propagation': text.orbit,
+    'utilities/jump-graph': text.jumpGraph,
     'mixins/route-position': text.mixin,
     'components/page/RoutePositions': text.component,
     'pages/routes': text.routesPage,
@@ -191,7 +219,20 @@ const worldOf = (edits = []) => {
   const modules = memo(() => loadUtilities(['route-position', 'route-plan', 'orbit-propagation', 'jump-graph', 'transport', 'haul-plan', 'provenance', 'places'], { sources: utilitySources }))
   const component = memo(() => loadPage('components/page/RoutePositions', { sources: pageSources }))
   const load = (name) => memo(() => loadPage(name, { sources: pageSources, modules: { 'mixins/load-state': labelsOf } }))
-  const kept = (name) => ({ cache: () => globalThis.__routePositionQueryCache, load: memo(() => loadPage(name, { sources: pageSources, modules: { 'mixins/load-state': labelsOf, 'utilities/query-cache': QUERY_CACHE } })) })
+  // Export the cache function from the page's own private graph, so its database wrapper and cached calculations use one WeakMap even when another page loads between them.
+  const kept = (name) => {
+    let cache = null
+    const load = memo(async () => {
+      const source = patched(`${name}.vue`, pageSources[name], '</script>', "\nexport { cacheQueries as __routePositionCacheQueries } from '../utilities/query-cache'\n</script>")
+      const page = await loadModule(name, { sources: { ...pageSources, [name]: source }, modules: { 'mixins/load-state': labelsOf } })
+
+      cache = { cacheQueries: page.__routePositionCacheQueries }
+
+      return page.default
+    })
+
+    return { cache: () => cache, load }
+  }
   const transport = kept('pages/information')
   const hauling = kept('pages/hauling')
 
@@ -226,8 +267,8 @@ check('static-baseline', 'static positions are reproducible at a save timestamp:
   const body = recordOf(first, 'body:3')
 
   assert.deepEqual({ ...body.position }, { SystemID: 1, Xcor: 10, Ycor: 5 }, 'the position is the one the save stores')
-  assert.equal(body.observedAt, BODY_TIME)
-  assert.equal(body.age, GAME_TIME - BODY_TIME, 'age is the game time less the last body update')
+  assert.equal(body.observedAt, GAME_TIME)
+  assert.equal(body.age, 0, 'saved coordinates are current at the game time, not the construction time')
   assert.equal(body.clock, 'body')
   assert.equal(body.moves, true)
   assert.equal(body.identity.family, 'body')
@@ -237,12 +278,12 @@ check('legs-own-age', 'a body, a fleet and a contact each give their own age and
   const positions = await positionsOf(w, [BODY, IDLE, FOLLOWER, BUSY, SEEN, CURRENT, FIXED])
   const [body, idle, follower, busy, seen, current, fixed] = positions.records
 
-  assert.equal(body.age, GAME_TIME - BODY_TIME)
+  assert.equal(body.age, 0)
   assert.equal(idle.age, GAME_TIME - 950000, 'an idle fleet is dated by its last move')
   assert.equal(idle.clock, 'fleet')
   assert.equal(idle.moves, false)
   assert.equal(follower.clock, 'body', 'a fleet orbiting a body moves with it and takes the body clock')
-  assert.equal(follower.age, GAME_TIME - BODY_TIME)
+  assert.equal(follower.age, 0)
   assert.equal(busy.age, GAME_TIME - 970000)
   assert.equal(seen.age, GAME_TIME - 990000, 'a contact is dated by its last update')
   assert.equal(seen.clock, 'contact')
@@ -267,10 +308,10 @@ check('legs-own-age', 'a body, a fleet and a contact each give their own age and
   assert.deepEqual(positions.unsupported, ['contact:9'])
   assert.ok(positions.unknown)
   assert.ok(positions.caveat)
-  assert.equal(positions.oldest, GAME_TIME - BODY_TIME, 'the oldest saved position')
+  assert.equal(positions.oldest, GAME_TIME - 970000, 'the oldest moving position is the independent busy fleet')
 })
 
-check('motion-switch', 'whether a body moves follows the game\'s orbital motion switches, an unrecorded switch is unknown and the life pod family is not supported', async (w) => {
+check('motion-switch', 'whether a body moves follows the game\'s one orbital motion switch, an unrecorded switch is unknown, the asteroid switch gates nothing and the life pod family is not supported', async (w) => {
   const off = await positionsOf(w, [BODY], { facts: { ...FACTS, clock: { ...CLOCK, orbitalMotion: 0 } } })
 
   assert.equal(off.records[0].moves, false, 'a body that does not move is exact')
@@ -282,28 +323,40 @@ check('motion-switch', 'whether a body moves follows the game\'s orbital motion 
   assert.ok(unknown.records[0].conditions.includes('motion-switch'))
 
   const rock = { ...BODY, key: 'body:4', id: 4, group: 'asteroid' }
-  const held = { bodies: { 4: { id: 4, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance: 2, bearing: 90, year: 8760, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: 1, ycor: 1 } }, stars: {}, points: {}, hidden: {}, hiddenPoints: {}, bodyOf: {}, problems: [] }
-  const pickedOnly = await positionsOf(w, [rock], { facts: { ...FACTS, clock: { ...CLOCK, orbitalMotion: 1, orbitalMotionAst: 0 } } })
+  const bodyFields = { id: 4, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance: 2, bearing: 90, year: 8760, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: 1, ycor: 1 }
+  const readOf = (fields) => ({ bodies: { 4: { ...bodyFields, ...fields } }, stars: {}, points: {}, hidden: {}, hiddenPoints: {}, bodyOf: {}, problems: [] })
+  const held = readOf({})
+  const clockOf = (planets, asteroids) => ({ ...CLOCK, orbitalMotion: planets, orbitalMotionAst: asteroids })
+  const pickedOnly = await positionsOf(w, [rock], { facts: { ...FACTS, clock: clockOf(1, 0) } })
 
-  assert.equal(pickedOnly.records[0].moves, null, 'a body the picker calls an asteroid is a trojan or an independent asteroid, and the orbit read that would tell which is missing')
-  assert.ok(pickedOnly.records[0].conditions.includes('motion-switch'))
+  assert.equal(pickedOnly.records[0].moves, null, 'a picker label does not read the fixed flag or parent classification')
+  assert.deepEqual(pickedOnly.records[0].conditions, ['motion-classification'])
 
-  const split = await positionsOf(w, [rock], { facts: { ...FACTS, orbits: held, clock: { ...CLOCK, orbitalMotion: 1, orbitalMotionAst: 0 } } })
+  for (const asteroids of [0, null, 1]) {
+    const split = await positionsOf(w, [rock], { facts: { ...FACTS, orbits: held, clock: clockOf(1, asteroids) } })
 
-  assert.equal(split.records[0].moves, false, 'an asteroid whose own switch reads off is held where it is saved, a known value and not an unknown one')
-  assert.deepEqual(split.records[0].conditions, [])
-  assert.equal(split.caveat, false)
+    assert.equal(split.records[0].moves, true, `an independent asteroid moves with the planet and moon switch, its own switch reading ${asteroids} gating nothing`)
+    assert.deepEqual(split.records[0].conditions, [])
+  }
 
-  const unreadRocks = await positionsOf(w, [rock], { facts: { ...FACTS, orbits: held, clock: { ...CLOCK, orbitalMotion: 1, orbitalMotionAst: null } } })
-
-  assert.equal(unreadRocks.records[0].moves, null, 'an asteroid switch that was never read leaves it unknown')
-  assert.ok(unreadRocks.records[0].conditions.includes('motion-switch'))
-
-  const frozen = await positionsOf(w, [rock], { facts: { ...FACTS, orbits: held, clock: { ...CLOCK, orbitalMotion: 0, orbitalMotionAst: 1 } } })
+  const frozen = await positionsOf(w, [rock], { facts: { ...FACTS, orbits: held, clock: clockOf(0, 1) } })
 
   assert.equal(frozen.records[0].moves, false, 'with planet and moon motion off nothing moves, whatever the asteroid switch says')
   assert.deepEqual(frozen.records[0].conditions, [])
   assert.equal(frozen.caveat, false)
+
+  const unread = await positionsOf(w, [rock], { facts: { ...FACTS, orbits: held, clock: clockOf(null, 1) } })
+
+  assert.equal(unread.records[0].moves, null, 'a planet and moon switch that was never read leaves it unknown, whatever the asteroid switch says')
+  assert.ok(unread.records[0].conditions.includes('motion-switch'))
+
+  for (const planets of [1, 0, null]) {
+    const fixed = await positionsOf(w, [rock], { facts: { ...FACTS, orbits: readOf({ fixed: 1, fixedParentId: 0 }), clock: clockOf(planets, 1) } })
+
+    assert.equal(fixed.records[0].moves, false, `a fixed body with no parent is held where it is saved, a known value (planet switch ${planets})`)
+    assert.deepEqual(fixed.records[0].conditions, [])
+    assert.equal(fixed.caveat, false)
+  }
 
   const drifting = await positionsOf(w, [{ family: 'lifepod', key: 'lifepod:1', id: 1, SystemID: 1, Xcor: 1, Ycor: 1 }])
 
@@ -314,7 +367,47 @@ check('motion-switch', 'whether a body moves follows the game\'s orbital motion 
   assert.equal((await positionsOf(w, [{ family: 'moon-base', key: 'x:1', id: 1, SystemID: 1, Xcor: 1, Ycor: 1 }])).records[0].conditions[0], 'family-unknown')
 })
 
-check('motion-matrix', 'whether an endpoint moves follows the two motion switches for every kind of place, a switch read as 0 being known to be off and one never read unknown: branch by planet switch by asteroid switch, each cell against the rule written out here', async (w) => {
+check('unread-classification', 'unread body, waypoint and following-fleet classifications stay unknown with motion on and static with motion off', async (w) => {
+  const rp = (await w.modules())['route-position']
+  const endpoints = [{ ...BODY, group: 'planet' }, WAYPOINTS[32], FOLLOWER]
+
+  for (const group of [null, undefined, 'unknown', 'planet']) {
+    for (const motion of [1, 0]) {
+      const facts = { ...FACTS, clock: { ...CLOCK, orbitalMotion: motion }, fleets: { ...FACTS.fleets, 6: { ...FACTS.fleets[6], group } }, waypoints: { ...FACTS.waypoints, 32: { ...FACTS.waypoints[32], group } } }
+      const records = rp.routePositions(endpoints, { facts }).records
+
+      records.forEach((record) => {
+        assert.equal(record.moves, motion === 0 ? false : null, `${record.family}: unread classification is not movement`)
+        assert.equal(record.conditions.includes('motion-classification'), motion === 1, `${record.family}: the cause is disclosed`)
+      })
+    }
+  }
+})
+
+check('point-identity', 'a fleet follows only its referenced point in the same game and system; coincidence without identity and inconsistent references do not make followers', async (w) => {
+  const rp = (await w.modules())['route-position']
+  const rows = ROWS + `
+    insert into FCT_LagrangePoint values (94, 1, 3, 20, 20, 2), (95, 2, 3, 20, 20, 1), (96, 1, 3, 20, 20, 1);
+    insert into FCT_Fleet values (30, 1, 2, 960000, 0, 20, 20, 0, 94, 2, 'TRUE', 1), (31, 1, 2, 960000, 0, 20, 20, 0, 95, 2, 'TRUE', 1), (32, 1, 2, 960000, 0, 20, 20, 0, 0, 2, 'TRUE', 1), (33, 1, 2, 960000, 0, 20, 20, 0, 96, 2, 'TRUE', 1);
+  `
+  const database = await databaseOf(SCHEMA, rows)
+  const facts = await rp.loadPositionFacts(database, { GameID: 1, RaceID: 2 })
+
+  for (const id of [30, 31]) {
+    assert.equal(facts.fleets[id].following, false, 'a same-position point in another system or game is not the referenced local point')
+    assert.equal(facts.fleets[id].pointInconsistent, true)
+    const record = rp.positionRecord({ ...RIDER, id, key: 'fleet:' + id }, { facts })
+
+    assert.ok(record.conditions.includes('fleet-point-inconsistent'))
+    assert.notEqual(record.assumption, 'fleet-following')
+    assert.equal(record.clock, 'fleet')
+  }
+  assert.equal(facts.fleets[32].following, false, 'coincident coordinates without a positive reference do not imply following')
+  assert.equal(facts.fleets[33].following, true, 'a consistent positive identity at exactly the point follows')
+  database.close()
+})
+
+check('motion-matrix', 'whether an endpoint moves follows the one motion switch for every kind of place, a switch read as 0 being known to be off and one never read unknown, the asteroid switch the save stores gating nothing: branch by planet switch by asteroid switch, each cell against the rule written out here', async (w) => {
   const rp = (await w.modules())['route-position']
   const rock = (id, extra = {}) => Object.freeze({ id, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance: 2, bearing: 90, year: 8760, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: 1, ycor: 1, ...extra })
   const bodies = { 1: rock(1, { bodyClass: 1, eccentricity: 0.1 }), 2: rock(2, { bodyClass: 2, parentId: 1 }), 3: rock(3, { trojan: 60, parentId: 1 }), 4: rock(4), 5: rock(5, { bodyClass: 5, eccentricity: 0.5 }), 6: rock(6, { eccentricity: 0.3 }), 7: rock(7, { fixed: 1, fixedParentId: 0 }), 8: rock(8, { fixed: 1, fixedParentId: 1 }), 9: rock(9, { fixed: 1, fixedParentId: 4 }), 10: rock(10, { fixed: 1, fixedParentId: null }) }
@@ -322,12 +415,11 @@ check('motion-matrix', 'whether an endpoint moves follows the two motion switche
   const at = { SystemID: 1, Xcor: 1, Ycor: 1 }
   const body = (id, group) => ({ family: 'body', key: 'body:' + id, id, ...at, ...(group ? { group } : {}) })
   const waypoint = (id) => ({ family: 'waypoint', key: 'waypoint:' + id, id, ...at })
-  const waypoints = { 1: { orbit: 0, group: null }, 2: { orbit: 1, group: 'planet' }, 3: { orbit: 4, group: 'asteroid' }, 4: { orbit: 4, group: 'unknown' }, 5: { orbit: null, group: null }, 6: { orbit: 9, group: 'static' } }
+  const waypoints = { 1: { orbit: 0, point: 0, group: null }, 2: { orbit: 1, point: 0, group: 'moving' }, 3: { orbit: 4, point: 0, group: 'moving' }, 4: { orbit: 4, point: 0, group: 'unknown' }, 5: { orbit: null, point: 0, group: null }, 6: { orbit: 9, point: 0, group: 'static' }, 7: { orbit: 0, point: 91, group: 'moving' }, 8: { orbit: 0, point: 92, group: 'static' }, 9: { orbit: 0, point: null, group: null } }
 
-  // The rule: nothing moves with the planet and moon switch off; an independent asteroid, which needs both, stays where it is saved with its own switch off; a planet, moon, comet or trojan follows the planet switch; what is not read is unknown.
+  // The rule: nothing moves with the planet and moon switch off; a fixed body with no parent never moves; every other body (a planet, moon, comet, trojan or independent asteroid, or what rides one) follows the planet switch whatever the asteroid switch says; what is not read is unknown.
   const planetRule = (planets) => (planets === 1 ? true : planets === 0 ? false : null)
-  const rockRule = (planets, rocks) => (planets === 0 ? false : rocks === 0 ? false : planets === 1 && rocks === 1 ? true : null)
-  const bothRule = (planets, rocks) => (planets === 0 ? false : planets === 1 && rocks === 1 ? true : null)
+  const unreadRule = (planets) => (planets === 0 ? false : null)
   const BRANCHES = [
     { name: 'planet', endpoint: body(1), rule: planetRule },
     { name: 'moon', endpoint: body(2), rule: planetRule },
@@ -335,31 +427,37 @@ check('motion-matrix', 'whether an endpoint moves follows the two motion switche
     { name: 'comet', endpoint: body(5), rule: planetRule },
     { name: 'fixed body with no parent', endpoint: body(7), rule: () => false },
     { name: 'fixed body of a planet', endpoint: body(8), rule: planetRule },
-    { name: 'fixed body of an independent asteroid', endpoint: body(9), rule: rockRule },
-    { name: 'fixed body whose parent was not read', endpoint: body(10), rule: bothRule },
+    { name: 'fixed body of an independent asteroid', endpoint: body(9), rule: planetRule },
+    { name: 'fixed body whose parent was not read', endpoint: body(10), rule: unreadRule },
     { name: 'type 15 order on a fixed body with no parent', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 7, SystemID: 1, X: 1, Y: 1 }), rule: () => false },
     { name: 'type 15 order on a fixed body of a planet', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 8, SystemID: 1, X: 1, Y: 1 }), rule: planetRule },
-    { name: 'type 15 order on a fixed body of an independent asteroid', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 9, SystemID: 1, X: 1, Y: 1 }), rule: rockRule },
-    { name: 'type 15 order on a fixed body whose parent was not read', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 10, SystemID: 1, X: 1, Y: 1 }), rule: bothRule },
-    { name: 'independent asteroid, circular', endpoint: body(4), rule: rockRule },
-    { name: 'independent asteroid, eccentric', endpoint: body(6), rule: rockRule },
-    { name: 'body the orbit read lacks, picked as a planet', endpoint: body(99, 'planet'), rule: planetRule },
-    { name: 'body the orbit read lacks, picked as an asteroid', endpoint: body(98, 'asteroid'), rule: bothRule },
-    { name: 'body the orbit read lacks, picked as a moon', endpoint: body(97, 'moon'), rule: planetRule },
-    { name: 'body the orbit read lacks, picked as a comet', endpoint: body(96, 'comet'), rule: planetRule },
-    { name: 'body the orbit read lacks, with no group', endpoint: body(95), rule: bothRule },
-    { name: 'colony whose body the orbit read lacks', endpoint: { family: 'colony', key: 'colony:79', id: 79, ...at }, rule: bothRule },
-    { name: 'Lagrange point whose body the orbit read lacks', endpoint: { family: 'lagrange-point', key: 'lagrange:99', id: 99, ...at }, rule: bothRule },
+    { name: 'type 15 order on a fixed body of an independent asteroid', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 9, SystemID: 1, X: 1, Y: 1 }), rule: planetRule },
+    { name: 'type 15 order on a fixed body whose parent was not read', endpoint: rp.orderEndpoint({ DestinationType: 15, DestinationID: 10, SystemID: 1, X: 1, Y: 1 }), rule: unreadRule },
+    { name: 'independent asteroid, circular', endpoint: body(4), rule: planetRule },
+    { name: 'independent asteroid, eccentric', endpoint: body(6), rule: planetRule },
+    { name: 'body the orbit read lacks, picked as a planet', endpoint: body(99, 'planet'), rule: unreadRule },
+    { name: 'body the orbit read lacks, picked as an asteroid', endpoint: body(98, 'asteroid'), rule: unreadRule },
+    { name: 'body the orbit read lacks, picked as a moon', endpoint: body(97, 'moon'), rule: unreadRule },
+    { name: 'body the orbit read lacks, picked as a comet', endpoint: body(96, 'comet'), rule: unreadRule },
+    { name: 'body the orbit read lacks, with no group', endpoint: body(95), rule: unreadRule },
+    { name: 'colony whose body the orbit read lacks', endpoint: { family: 'colony', key: 'colony:79', id: 79, ...at }, rule: unreadRule },
+    { name: 'Lagrange point whose body the orbit read lacks', endpoint: { family: 'lagrange-point', key: 'lagrange:99', id: 99, ...at }, rule: unreadRule },
     { name: 'colony on a planet', endpoint: { family: 'colony', key: 'colony:71', id: 71, ...at }, rule: planetRule },
-    { name: 'colony on an asteroid', endpoint: { family: 'colony', key: 'colony:72', id: 72, ...at }, rule: rockRule },
+    { name: 'colony on an asteroid', endpoint: { family: 'colony', key: 'colony:72', id: 72, ...at }, rule: planetRule },
     { name: 'Lagrange point of a planet', endpoint: { family: 'lagrange-point', key: 'lagrange:91', id: 91, ...at }, rule: planetRule },
     { name: 'Lagrange point of an asteroid, which the game never moves', endpoint: { family: 'lagrange-point', key: 'lagrange:92', id: 92, ...at }, rule: () => false },
     { name: 'waypoint carried by no body', endpoint: waypoint(1), rule: () => false },
     { name: 'waypoint carried by a planet', endpoint: waypoint(2), rule: planetRule },
-    { name: 'waypoint carried by an asteroid', endpoint: waypoint(3), rule: rockRule },
-    { name: 'waypoint carried by a body of unread kind', endpoint: waypoint(4), rule: bothRule },
+    { name: 'waypoint carried by an asteroid', endpoint: waypoint(3), rule: planetRule },
+    { name: 'waypoint carried by a body of unread kind', endpoint: waypoint(4), rule: unreadRule },
     { name: 'waypoint carried by a body that stays', endpoint: waypoint(6), rule: () => false },
     { name: 'waypoint whose body is unread', endpoint: waypoint(5), rule: () => null, unread: 'waypoint-orbit-unread' },
+    { name: 'waypoint carried by the point of a planet', endpoint: waypoint(7), rule: planetRule },
+    { name: 'waypoint carried by a point the game never moves', endpoint: waypoint(8), rule: () => false },
+    { name: 'waypoint whose point is unread', endpoint: waypoint(9), rule: () => null, unread: 'waypoint-orbit-unread' },
+    { name: 'fleet riding the point of a planet', endpoint: { family: 'fleet', key: 'fleet:13', id: 13, ...at }, rule: planetRule },
+    { name: 'fleet riding a point the game never moves', endpoint: { family: 'fleet', key: 'fleet:14', id: 14, ...at }, rule: () => false },
+    { name: 'fleet that left its point', endpoint: { family: 'fleet', key: 'fleet:15', id: 15, ...at }, rule: () => false },
     { name: 'system centre', endpoint: { family: 'system', key: 'system:1', id: 1, ...at }, rule: () => false },
     { name: 'jump point', endpoint: { family: 'jump-point', key: 'jump:1', id: 1, ...at }, rule: () => false },
   ]
@@ -377,7 +475,8 @@ check('motion-matrix', 'whether an endpoint moves follows the two motion switche
         cells += 1
         assert.equal(record.moves, expected, label + ': moves ' + expected)
         assert.equal(record.supported, true, label + ': the contract supports the place')
-        assert.equal(record.conditions.includes('motion-switch'), expected === null && !branch.unread && rp.FAMILY_NAMES.includes(branch.endpoint.family) && !['system', 'jump-point'].includes(branch.endpoint.family), label + ': names the switch only when it is the unknown')
+        assert.equal(record.conditions.includes('motion-switch'), expected === null && planets === null && !branch.unread, label + ': names an unread switch')
+        assert.equal(record.conditions.includes('motion-classification'), expected === null && planets === 1 && !branch.unread, label + ': names unread classification')
       })
     })
   })
@@ -404,10 +503,14 @@ check('clock-unread', 'a clock that is not read gives no age and never 0, the su
   assert.equal(partial.records[0].age, null, 'a game time that is not read leaves no age')
   assert.equal(partial.ageKnown, false)
 
-  const behind = rp.routePositions([BODY], { facts: { clock: { ...CLOCK, lastGrowthTime: GAME_TIME + 10 }, fleets: {}, problems: [] } })
+  const behind = rp.routePositions([SEEN], { facts: { ...FACTS, clock: { ...CLOCK, gameTime: SEEN.lastUpdate - 10 } } })
 
-  assert.equal(behind.records[0].age, null, 'a position dated after the game time has no age')
+  assert.equal(behind.records[0].age, null, 'a contact dated after the game time has no age')
   assert.ok(behind.records[0].conditions.includes('clock-inconsistent'))
+  const construction = rp.routePositions([BODY], { facts: { ...FACTS, clock: { ...CLOCK, lastGrowthTime: GAME_TIME + 10 } } })
+
+  assert.equal(construction.records[0].age, 0, 'construction time is not a coordinate epoch')
+  assert.ok(!construction.records[0].conditions.includes('clock-inconsistent'))
 
   const nothing = rp.routePositions([FIXED], { facts: null })
 
@@ -706,7 +809,7 @@ check('result-caveat', 'a result that rests on positions is an estimate that nam
   assert.ok(plan.detailTotal(KM, 0, flat.positions).status === 'confirmed')
 })
 
-check('waypoint-carried', 'a waypoint carried by a body moves with the body\'s clock and switches, one carried by none is fixed, and one whose association is not read is unknown, never fixed', async (w) => {
+check('waypoint-carried', 'a waypoint carried by a body or by a Lagrange point moves with the clock and switch of what carries it, one carried by none is fixed, and one whose association is not read is unknown, never fixed', async (w) => {
   const rp = (await w.modules())['route-position']
   const [fixed, planet, rock, unread] = Object.values(WAYPOINTS)
   const positions = rp.routePositions([fixed, planet, rock, unread], { facts: FACTS })
@@ -718,7 +821,7 @@ check('waypoint-carried', 'a waypoint carried by a body moves with the body\'s c
   assert.equal(fixedRecord.assumption, 'fixed')
   assert.equal(planetRecord.moves, true, 'a waypoint carried by a planet moves with it')
   assert.equal(planetRecord.clock, 'body')
-  assert.equal(planetRecord.age, GAME_TIME - BODY_TIME, 'and is as old as the last body update')
+  assert.equal(planetRecord.age, 0, 'saved carried positions are current at GameTime')
   assert.deepEqual(planetRecord.conditions, [])
   assert.deepEqual({ ...planetRecord.position }, { SystemID: 1, Xcor: 7, Ycor: 7 }, 'it is held where the save has it')
   assert.equal(rockRecord.moves, true)
@@ -734,15 +837,32 @@ check('waypoint-carried', 'a waypoint carried by a body moves with the body\'s c
 
   assert.deepEqual(switched({ orbitalMotion: 0 }).records.map((record) => record.moves), [false, false], 'with motion off a carried waypoint does not move, and states none of the unknowns')
   assert.equal(switched({ orbitalMotion: 0 }).caveat, false)
-  assert.deepEqual(switched({ orbitalMotionAst: 0 }).records.map((record) => record.moves), [true, false], 'a waypoint carried by an asteroid follows the asteroids\' own switch as well, and a switch read as off is known')
+  assert.deepEqual(switched({ orbitalMotionAst: 0 }).records.map((record) => record.moves), [true, true], 'a waypoint carried by an asteroid follows the one switch alone: the asteroid switch the save stores gates nothing')
   assert.ok(!switched({ orbitalMotionAst: 0 }).records[1].conditions.includes('motion-switch'))
-  assert.deepEqual(switched({ orbitalMotionAst: null }).records.map((record) => record.moves), [true, null], 'and one never read is not')
-  assert.ok(switched({ orbitalMotionAst: null }).records[1].conditions.includes('motion-switch'))
+  assert.deepEqual(switched({ orbitalMotionAst: null }).records.map((record) => record.moves), [true, true], 'and one never read gates nothing either')
+  assert.ok(!switched({ orbitalMotionAst: null }).records[1].conditions.includes('motion-switch'))
   assert.deepEqual(switched({ orbitalMotion: null }).records.map((record) => record.moves), [null, null], 'a switch the save does not record leaves it unknown')
 
-  const unknownBody = rp.routePositions([rock], { facts: { ...FACTS, waypoints: { 33: { orbit: 4, group: 'unknown' } }, clock: { ...CLOCK, orbitalMotionAst: 0 } } })
+  const unknownBody = (clock) => rp.routePositions([rock], { facts: { ...FACTS, waypoints: { 33: { orbit: 4, point: 0, group: 'unknown' } }, clock: { ...CLOCK, ...clock } } })
 
-  assert.equal(unknownBody.records[0].moves, null, 'a body whose kind is not read needs both switches')
+  assert.equal(unknownBody({ orbitalMotionAst: 0 }).records[0].moves, null, 'unread classification cannot establish motion')
+  assert.ok(unknownBody({ orbitalMotionAst: 0 }).records[0].conditions.includes('motion-classification'))
+  assert.equal(unknownBody({ orbitalMotion: null }).records[0].moves, null, 'and is unknown with that switch unread')
+
+  const [atPlanet, atHeld, atUnread] = Object.values(POINT_WAYPOINTS)
+  const pointed = rp.routePositions([atPlanet, atHeld, atUnread], { facts: FACTS })
+  const [pointedRecord, heldRecord, unreadPointRecord] = pointed.records
+
+  assert.equal(pointedRecord.moves, true, 'a waypoint at the Lagrange point of a planet moves with the point')
+  assert.equal(pointedRecord.clock, 'body')
+  assert.equal(pointedRecord.age, 0)
+  assert.deepEqual({ ...pointedRecord.lagrange }, { point: 91 }, 'and says which point carries it')
+  assert.equal(heldRecord.moves, false, 'one at a point of a body the game never moves stays')
+  assert.equal(heldRecord.assumption, 'fixed')
+  assert.deepEqual({ ...heldRecord.lagrange }, { point: 92 })
+  assert.equal(unreadPointRecord.moves, null, 'one whose point is not recorded is unknown, never fixed')
+  assert.ok(unreadPointRecord.conditions.includes('waypoint-orbit-unread'))
+  assert.equal(pointedRecord.lagrange.mode, undefined, 'a waypoint has no mode')
 
   const never = rp.routePositions([fixed, planet], { facts: { ...FACTS, waypoints: undefined } })
 
@@ -788,6 +908,48 @@ check('fleet-anchored', 'a fleet anchored to another fleet may move in formation
   const missing = rp.routePositions([IDLE], { facts: { ...FACTS, fleets: { 5: { lastMoveTime: 950000, following: false, orders: 0 } } } }).records[0]
 
   assert.ok(missing.conditions.includes('fleet-state-unread'), 'and neither is a read that has no anchor at all')
+})
+
+check('lagrange-anchor', 'a fleet at a Lagrange point rides it only while it stands at the point\'s saved position (OrbitLagrangeID), and says the point and the mode LagrangeStatus gives it (never AutoLP) and whether its orders take Lagrange jumps: Plotted always, Manual never, Dynamic only with no order queued, none of it known where the save does not say', async (w) => {
+  const rp = (await w.modules())['route-position']
+  const graph = (await w.modules())['jump-graph']
+  const [rider, held, left] = rp.routePositions([RIDER, HELD_RIDER, LEFT_POINT], { facts: FACTS }).records
+
+  assert.equal(rider.moves, true, 'a fleet at the point of a planet moves with it')
+  assert.equal(rider.assumption, 'fleet-following')
+  assert.equal(rider.clock, 'body')
+  assert.equal(rider.age, 0, 'followers are current at GameTime')
+  assert.deepEqual({ ...rider.lagrange }, { point: 91, mode: 'plotted', shortcuts: true }, 'its point, its Plotted mode and that its orders take Lagrange jumps')
+  assert.equal(held.moves, false, 'a fleet at a point of a body the game never moves a point for stays')
+  assert.deepEqual({ ...held.lagrange }, { point: 92, mode: 'manual', shortcuts: false })
+  assert.equal(left.moves, false, 'a fleet whose point moved on without it has left it and stays where it is')
+  assert.equal(left.assumption, 'fleet-idle')
+  assert.equal(left.clock, 'fleet')
+  assert.deepEqual({ ...left.lagrange }, { point: 91, mode: 'dynamic', shortcuts: true }, 'though it is still said to be anchored to the point, with a Dynamic mode and no order queued')
+
+  const fleetWith = (patch, endpoint = RIDER, clock = {}) => rp.routePositions([endpoint], { facts: { ...FACTS, clock: { ...CLOCK, ...clock }, fleets: { [endpoint.id]: { ...FACTS.fleets[endpoint.id], ...patch } } } }).records[0]
+
+  assert.equal(fleetWith({ mode: 'dynamic', orders: 2 }).lagrange.shortcuts, false, 'a Dynamic fleet with an order queued does not take Lagrange jumps')
+  assert.equal(fleetWith({ mode: 'dynamic', orders: 0 }).lagrange.shortcuts, true, 'and takes them with none queued')
+  assert.equal(fleetWith({ mode: 'dynamic', orders: null }).lagrange.shortcuts, null, 'a queue that is not read leaves it unknown')
+  assert.equal(fleetWith({ mode: 'plotted', orders: 2 }).lagrange.shortcuts, true, 'a Plotted fleet takes them whatever is queued')
+  assert.equal(fleetWith({ mode: 'manual', orders: 0 }).lagrange.shortcuts, false, 'a Manual fleet never does')
+  assert.equal(fleetWith({ mode: null }).lagrange.mode, null, 'a mode the save does not state is not Manual')
+  assert.equal(fleetWith({ mode: null }).lagrange.shortcuts, null)
+  assert.equal(fleetWith({ point: null }).lagrange.point, null, 'nor is a point it does not state none')
+
+  assert.equal(fleetWith({}, RIDER, { orbitalMotion: 0 }).moves, false, 'with motion off the point stands still, and so does the fleet')
+  assert.equal(fleetWith({}, RIDER, { orbitalMotion: null }).moves, null, 'a switch that was never read leaves it unknown')
+  assert.ok(fleetWith({}, RIDER, { orbitalMotion: null }).conditions.includes('motion-switch'))
+  assert.equal(fleetWith({}, RIDER, { orbitalMotionAst: 0 }).moves, true, 'and the asteroid switch the save stores gates nothing')
+  assert.equal(fleetWith({ following: null }).moves, null, 'a fleet whose position against its point is not read is not said to ride it or not')
+  assert.ok(fleetWith({ following: null }).conditions.includes('fleet-state-unread'))
+  assert.equal(fleetWith({ orders: 1 }).moves, null, 'a rider with an order queued may leave the point, so where it will be is not known')
+  assert.equal(fleetWith({ anchor: 5 }).moves, null, 'and so may one anchored to another fleet')
+
+  assert.deepEqual([0, 1, 2, 3, undefined, null, ''].map((status) => graph.lagrangeModeOf(status)), ['manual', 'plotted', 'dynamic', null, null, null, null], 'LagrangeStatus 0, 1 and 2 are Manual, Plotted and Dynamic and any other value is none of them')
+  assert.deepEqual(Object.values(graph.LAGRANGE_MODES), ['manual', 'plotted', 'dynamic'])
+  assert.equal(graph.lagrangeModeOf('TRUE'), null, 'the AutoLP text is no mode')
 })
 
 check('unread-position', 'a present endpoint with no coordinate is unknown, whether it moves or not, and is never described as holding its saved position', async (w) => {
@@ -914,27 +1076,37 @@ check('loader-schema', 'the read gives the clock, the race\'s fleets and waypoin
   const database = await databaseOf(SCHEMA, ROWS)
   const facts = await rp.loadPositionFacts(database, { GameID: 1, RaceID: 2 })
 
-  assert.deepEqual({ ...facts.clock }, { gameTime: GAME_TIME, lastGrowthTime: BODY_TIME, orbitalMotion: 1, orbitalMotionAst: 0 })
-  assert.deepEqual(Object.keys(facts.fleets).map(Number).sort((a, b) => a - b), [5, 6, 7, 8, 9, 10, 11, 12], 'the race\'s fleets in the game, no other race\'s or game\'s')
-  assert.deepEqual({ ...facts.fleets[5] }, { lastMoveTime: 950000, following: false, group: null, orders: 0, anchor: 0 })
+  assert.deepEqual({ ...facts.clock }, { gameTime: GAME_TIME, lastGrowthTime: BODY_TIME, orbitalMotion: 1, orbitalMovementInSubPulse: 1, subPulseLength: 7200, incrementLength: 10000 }, 'the clock and the cadence of the orbit update: the latest increment of the game, not another game\'s, and no asteroid switch')
+  assert.ok(!('orbitalMotionAst' in facts.clock), 'the asteroid switch the save stores is read by nothing')
+  assert.deepEqual(Object.keys(facts.fleets).map(Number).sort((a, b) => a - b), [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 'the race\'s fleets in the game, no other race\'s or game\'s')
+  assert.deepEqual({ ...facts.fleets[5] }, { lastMoveTime: 950000, following: false, group: null, point: 0, mode: 'manual', orders: 0, anchor: 0 })
   assert.equal(facts.fleets[11].anchor, 5, 'the fleet a fleet is anchored to')
   assert.equal(facts.fleets[12].anchor, null, 'an anchor that is stored as null is unknown, not none')
-  assert.deepEqual(Object.keys(facts.waypoints).map(Number).sort((a, b) => a - b), [31, 32, 33, 34, 35], 'the race\'s waypoints in the game, no other race\'s or game\'s')
-  assert.deepEqual({ ...facts.waypoints[31] }, { orbit: 0, group: null }, 'a waypoint carried by no body')
-  assert.deepEqual({ ...facts.waypoints[32] }, { orbit: 3, group: 'planet' })
-  assert.deepEqual({ ...facts.waypoints[33] }, { orbit: 4, group: 'asteroid' })
-  assert.deepEqual({ ...facts.waypoints[34] }, { orbit: null, group: null }, 'an association stored as null is unknown, not none')
-  assert.deepEqual({ ...facts.waypoints[35] }, { orbit: 99, group: 'unknown' }, 'a body the read does not hold leaves its kind unknown')
+  assert.deepEqual(Object.keys(facts.waypoints).map(Number).sort((a, b) => a - b), [31, 32, 33, 34, 35, 38, 39, 40], 'the race\'s waypoints in the game, no other race\'s or game\'s')
+  assert.deepEqual({ ...facts.waypoints[31] }, { orbit: 0, point: 0, group: null }, 'a waypoint carried by no body')
+  assert.deepEqual({ ...facts.waypoints[32] }, { orbit: 3, point: 0, group: 'moving' })
+  assert.deepEqual({ ...facts.waypoints[33] }, { orbit: 4, point: 0, group: 'moving' }, 'an independent asteroid moves like any body')
+  assert.deepEqual({ ...facts.waypoints[34] }, { orbit: null, point: 0, group: null }, 'an association stored as null is unknown, not none')
+  assert.deepEqual({ ...facts.waypoints[35] }, { orbit: 99, point: 0, group: 'unknown' }, 'a body the read does not hold leaves its kind unknown')
+  assert.deepEqual({ ...facts.waypoints[38] }, { orbit: 0, point: 91, group: 'moving' }, 'a waypoint anchored to the Lagrange point of a planet')
+  assert.deepEqual({ ...facts.waypoints[39] }, { orbit: 0, point: 92, group: 'static' }, 'and one at a point of a body the game never moves a point for')
+  assert.deepEqual({ ...facts.waypoints[40] }, { orbit: 0, point: null, group: null }, 'a point stored as null is unknown, not none')
   assert.equal(facts.fleets[6].following, true, 'a fleet at its body\'s exact position follows it')
   assert.equal(facts.fleets[8].following, false, 'a fleet beside its body does not')
-  assert.equal(facts.fleets[6].group, 'planet', 'the group of the body a fleet orbits is read: a planet')
-  assert.equal(facts.fleets[10].group, 'asteroid', 'an independent asteroid')
+  assert.equal(facts.fleets[6].group, 'moving', 'the motion group of the body a fleet orbits is read: a planet')
+  assert.equal(facts.fleets[10].group, 'moving', 'an independent asteroid')
   assert.equal(facts.fleets[7].group, null, 'and a fleet that orbits no body has none')
   assert.equal(facts.fleets[9].following, null, 'a fleet with no position is not said to follow or not')
   assert.equal(facts.fleets[10].following, null, 'a fleet at a body whose position is not stored is not said to follow or not')
   assert.equal(facts.fleets[9].lastMoveTime, null)
   assert.equal(facts.fleets[7].orders, 2, 'queued orders are counted for the game')
   assert.equal(facts.fleets[5].orders, 0)
+  assert.deepEqual(Object.fromEntries([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((id) => [id, facts.fleets[id].mode])), { 5: 'manual', 6: 'dynamic', 7: 'plotted', 8: 'dynamic', 9: 'dynamic', 10: 'manual', 11: 'dynamic', 12: 'dynamic', 13: 'plotted', 14: 'manual', 15: 'dynamic', 16: 'dynamic' }, 'the mode of a fleet is its LagrangeStatus (0 Manual, 1 Plotted, 2 Dynamic) and never the AutoLP text every row stores')
+  assert.deepEqual({ ...facts.fleets[13] }, { lastMoveTime: 960000, following: true, group: 'moving', point: 91, mode: 'plotted', orders: 0, anchor: 0, riding: true }, 'a fleet at exactly its Lagrange point\'s position rides it, the point of a planet moving')
+  assert.deepEqual({ ...facts.fleets[14] }, { lastMoveTime: 960000, following: true, group: 'static', point: 92, mode: 'manual', orders: 0, anchor: 0, riding: true }, 'at a point the game never moves, it rides a point that stays')
+  assert.equal(facts.fleets[15].following, false, 'a fleet that has left its point does not ride it')
+  assert.equal(facts.fleets[15].point, 91, 'though the point it was anchored to is still read')
+  assert.equal(facts.fleets[16].following, null, 'a fleet at a point whose position is not stored is not said to ride or not')
   assert.deepEqual(facts.problems, [])
   assert.ok(Object.isFrozen(facts) && Object.isFrozen(facts.fleets) && Object.isFrozen(facts.waypoints))
   assert.equal(rp.routePositions([ANCHORED], { facts }).records[0].moves, null, 'an anchored fleet read from the save is not idle')
@@ -955,11 +1127,13 @@ check('loader-schema', 'the read gives the clock, the race\'s fleets and waypoin
 
   assert.equal(read.clock.gameTime, GAME_TIME)
   assert.equal(read.clock.orbitalMotion, null, 'a switch the save lacks is unknown, not off')
-  assert.equal(read.clock.orbitalMotionAst, null)
+  assert.deepEqual([read.clock.orbitalMovementInSubPulse, read.clock.subPulseLength, read.clock.incrementLength], [null, null, null], 'a cadence the save lacks is unknown, not 0')
   assert.equal(read.fleets[5].lastMoveTime, null, 'a missing last move is null, not 0')
   assert.equal(read.fleets[5].following, null, 'a missing orbit is unknown')
   assert.equal(read.fleets[5].orders, null, 'a missing orders table is unknown, not none')
   assert.equal(read.fleets[5].anchor, null, 'a missing anchor column is unknown, not none')
+  assert.equal(read.fleets[5].point, null, 'a missing Lagrange point column is unknown, not none')
+  assert.equal(read.fleets[5].mode, null, 'a missing mode column is unknown, not manual')
   assert.deepEqual(read.waypoints, {}, 'a missing waypoint table reads no waypoints')
   assert.ok(read.problems.some((problem) => problem.includes('waypoint')), 'and names what it lacks')
   assert.equal(rp.routePositions([WAYPOINTS[31]], { facts: read }).records[0].unknown, true, 'a waypoint of such a save is not said to stay')
@@ -974,6 +1148,74 @@ check('loader-schema', 'the read gives the clock, the race\'s fleets and waypoin
   assert.deepEqual(empty.waypoints, {})
   assert.ok(empty.problems.length >= 3, 'what the save lacks is named')
   bare.close()
+})
+
+// ---- The saves of the line ---------------------------------------------------------------------------------------------
+// The two saves of the 3.2 line the repository carries, read as they are and compared with queries written another way. The cadence each stores (a sub-pulse of 7200 seconds and an increment of 432000 on the interim fixture, 1800 and 63000 on the played save), the one mode every fleet has by `LagrangeStatus` (the interim fixture has Manual and Dynamic fleets, the played save only Dynamic, and `AutoLP` stores one value in all of them, so a mode taken from it would be one for every fleet), and the anchors to a Lagrange point (none) are what the facts must give.
+const SAVES = [[FIXTURE, { subPulseLength: 7200, incrementLength: 432000, modes: ['dynamic', 'manual'] }], [PLAYED, { subPulseLength: 1800, incrementLength: 63000, modes: ['dynamic'] }]]
+
+const rowsOf = (raw, sql, ...params) => new Promise((resolve, reject) => raw.all(sql, params, (error, found) => (error ? reject(error) : resolve(found))))
+
+check('real-saves', 'read from each save of the line the clock gives the cadence the save stores and no asteroid switch, every fleet has the mode LagrangeStatus stores and the Lagrange point it is anchored to, every waypoint its point, and an eccentric body of the save is advanced with the cadence stated, all against queries written another way', async (w) => {
+  const modules = await w.modules()
+  const rp = modules['route-position']
+  const orbit = modules['orbit-propagation']
+  const MODES = { 0: 'manual', 1: 'plotted', 2: 'dynamic' }
+
+  for (const [save, expected] of SAVES) {
+    const file = path.join(root, save.file)
+
+    if (!fs.existsSync(file)) {
+      console.log(`SKIP real-saves: ${save.file} is not there`)
+
+      continue
+    }
+
+    const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY)
+    const database = wrapped(raw)
+    const where = { GameID: save.gameId, RaceID: save.raceId }
+    const label = save.file
+    const [game] = await rowsOf(raw, 'select GameTime, LastGrowthTime, OrbitalMotion, OrbitalMovementInSubPulse, SubPulseLength from FCT_Game where GameID = ?', save.gameId)
+    const [last] = await rowsOf(raw, 'select Length from FCT_Increments where GameID = ? order by GameTime desc limit 1', save.gameId)
+    const read = await rp.loadPositionFacts(database, where)
+
+    assert.deepEqual({ ...read.clock }, { gameTime: game.GameTime, lastGrowthTime: game.LastGrowthTime, orbitalMotion: game.OrbitalMotion, orbitalMovementInSubPulse: game.OrbitalMovementInSubPulse, subPulseLength: game.SubPulseLength, incrementLength: last.Length }, label + ': the clock is what the save stores, the latest increment of the game giving the length')
+    assert.equal(read.clock.orbitalMovementInSubPulse, 1, label + ': the orbit update runs in each sub-pulse')
+    assert.equal(read.clock.subPulseLength, expected.subPulseLength, label + ': the sub-pulse')
+    assert.equal(read.clock.incrementLength, expected.incrementLength, label + ': the latest increment')
+    assert.equal(orbit.callLength(read.clock), expected.subPulseLength, label + ': a call of the update is a sub-pulse long')
+    assert.ok(!('orbitalMotionAst' in read.clock), label + ': the asteroid switch the save stores is not read')
+
+    const fleets = await rowsOf(raw, 'select FleetID, LagrangeStatus, OrbitLagrangeID, AutoLP from FCT_Fleet where GameID = ? and RaceID = ?', save.gameId, save.raceId)
+
+    assert.ok(fleets.length > 0, label + ': the race has fleets')
+    assert.equal(Object.keys(read.fleets).length, fleets.length, label + ': every fleet of the race is read')
+    fleets.forEach((fleet) => {
+      assert.equal(read.fleets[fleet.FleetID].mode, MODES[fleet.LagrangeStatus], label + ': fleet ' + fleet.FleetID + ' has the mode LagrangeStatus stores')
+      assert.equal(read.fleets[fleet.FleetID].point, fleet.OrbitLagrangeID, label + ': fleet ' + fleet.FleetID + ' has the point it is anchored to')
+    })
+    assert.deepEqual([...new Set(Object.values(read.fleets).map((fleet) => fleet.mode))].sort(), expected.modes, label + ': the modes the fleets have')
+    assert.equal(new Set(fleets.map((fleet) => String(fleet.AutoLP))).size, 1, label + ': AutoLP stores one value in every fleet, whatever the mode')
+    assert.equal(fleets.filter((fleet) => fleet.OrbitLagrangeID > 0).length, 0, label + ': no fleet of the save is anchored to a Lagrange point')
+
+    const waypoints = await rowsOf(raw, 'select WaypointID, OrbitBodyID, OrbitLagrangeID from FCT_Waypoint where GameID = ? and RaceID = ?', save.gameId, save.raceId)
+
+    assert.equal(Object.keys(read.waypoints).length, waypoints.length, label + ': every waypoint of the race is read')
+    waypoints.forEach((waypoint) => assert.deepEqual({ orbit: read.waypoints[waypoint.WaypointID].orbit, point: read.waypoints[waypoint.WaypointID].point }, { orbit: waypoint.OrbitBodyID, point: waypoint.OrbitLagrangeID }, label + ': waypoint ' + waypoint.WaypointID + ' has the body and the point it is carried by'))
+
+    const [body] = await rowsOf(raw, 'select SystemBodyID, SystemID, BodyClass, Xcor, Ycor from FCT_SystemBody where GameID = ? and BodyClass in (1, 5) and Eccentricity > 0.05 and Year > 0 and (FixedBody is null or FixedBody = 0) limit 1', save.gameId)
+
+    assert.ok(body, label + ': the save has an eccentric planet or comet')
+
+    const endpoint = { family: 'body', key: 'body:' + body.SystemBodyID, id: body.SystemBodyID, SystemID: body.SystemID, Xcor: body.Xcor, Ycor: body.Ycor, group: body.BodyClass === 5 ? 'comet' : 'planet' }
+    const orbits = await orbit.loadOrbitFacts(database, where, [endpoint])
+    const [record] = rp.routePositions([endpoint], { facts: { ...read, orbits }, adapters: rp.ADAPTERS, at: read.clock.gameTime + 30 * 86400 }).records
+
+    assert.equal(record.basis, 'propagated', label + ': the eccentric body is worked out')
+    assert.ok(record.conditions.includes('eccentric-cadence'), label + ': and its cadence is stated')
+    assert.notDeepEqual({ ...record.position }, { SystemID: body.SystemID, Xcor: body.Xcor, Ycor: body.Ycor }, label + ': a month on it is not where the save has it')
+    raw.close()
+  }
 })
 
 // ---- A save of every kind of body, read by the real loaders -----------------------------------------------------------
@@ -1054,72 +1296,71 @@ const ownerDatabase = (switches, without = null, pointOwners = POINT_OWNERS) => 
   const bodyRow = (owner) => `insert into FCT_SystemBody (${columns.join(', ')}) values (${columns.map((name) => sql(OWNER_ROWS[owner.id][name])).join(', ')});`
 
   return databaseOf(`
-    create table FCT_Game (GameID, GameTime, LastGrowthTime, OrbitalMotion, OrbitalMotionAst);
+    create table FCT_Game (GameID, GameTime, LastGrowthTime, OrbitalMotion, OrbitalMotionAst, OrbitalMovementInSubPulse, SubPulseLength);
     create table FCT_Fleet (FleetID, GameID, RaceID, LastMoveTime, OrbitBodyID, Xcor, Ycor, AnchorFleetID);
     create table FCT_MoveOrders (FleetID, GameID);
     create table FCT_SystemBody (${columns.join(', ')});
-    create table FCT_Star (StarID, GameID, Component, Xcor, Ycor);
+    create table FCT_Star (StarID, GameID, ComponentNumber, Xcor, Ycor);
     create table FCT_LagrangePoint (LagrangePointID, GameID, SystemID, PlanetID, Distance, Bearing, Xcor, Ycor);
     create table FCT_Population (PopulationID, GameID, SystemBodyID);
     create table FCT_RaceSysSurvey (GameID, RaceID, SystemID);
-    create table FCT_Waypoint (WaypointID, GameID, RaceID, OrbitBodyID);
+    create table FCT_Waypoint (WaypointID, GameID, RaceID, OrbitBodyID, OrbitLagrangeID);
   `, `
-    insert into FCT_Game values (1, 1000000, 900000, ${sql(switches[0])}, ${sql(switches[1])});
+    insert into FCT_Game values (1, 1000000, 900000, ${sql(switches[0])}, ${sql(switches[1])}, 1, 7200);
     insert into FCT_Star values (1, 1, 1, 0, 0);
     insert into FCT_RaceSysSurvey values (1, 2, 1);
     ${[...OWNERS, ...PARENT_ONLY].map(bodyRow).join('\n    ')}
-    ${OWNERS.map((owner) => `insert into FCT_Population values (${70 + owner.id}, 1, ${owner.id}); insert into FCT_Waypoint values (${100 + owner.id}, 1, 2, ${owner.id}); insert into FCT_Fleet values (${300 + owner.id}, 1, 2, 950000, ${owner.id}, ${OWNER_ROWS[owner.id].Xcor}, ${OWNER_ROWS[owner.id].Ycor}, 0);`).join('\n    ')}
+    ${OWNERS.map((owner) => `insert into FCT_Population values (${70 + owner.id}, 1, ${owner.id}); insert into FCT_Waypoint values (${100 + owner.id}, 1, 2, ${owner.id}, 0); insert into FCT_Fleet values (${300 + owner.id}, 1, 2, 950000, ${owner.id}, ${OWNER_ROWS[owner.id].Xcor}, ${OWNER_ROWS[owner.id].Ycor}, 0);`).join('\n    ')}
     ${pointOwners.map((owner) => `insert into FCT_LagrangePoint values (${90 + owner.id}, 1, 1, ${owner.id}, 0.1, 30, 1, 1);`).join('\n    ')}
-    insert into FCT_Waypoint values (201, 1, 2, 0), (202, 1, 2, 99);
+    insert into FCT_Waypoint values (201, 1, 2, 0, 0), (202, 1, 2, 99, 0);
   `)
 }
 
 // ---- The oracle: the game's own position update, transcribed ---------------------------------------------------------
-// Whether a body's saved position goes stale in one update of the game (UpdateOrbitalPositions), as the game orders the work, and the saved columns that answer reads. Nothing is updated with the planet and moon switch off. With it on, in this order: the primary list (planets and comets, and asteroids that are no trojan while the asteroid switch is on, none of them a fixed body) turns each body on its own orbit; every moon turns; every trojan takes its parent's bearing; every Lagrange point takes its planet's; every fixed body that has a fixed parent takes the parent's position; and the fleets and waypoints tied to a body take the body's. The game sets the fixed flag only on a class 3 body (the only writer is the creation of a deep-space population or location), so that flag is read for class 3 only.
-const gameUpdate = (rows, id, planets, rocks) => {
+// Whether a body's saved position goes stale in one orbital update of the game, as the game orders the work, and the saved columns that answer reads. Nothing is updated with the planet and moon switch off. With it on, in this order: the primary list (planets, comets and asteroids that are no trojan, none of them a fixed body) turns each body on its own orbit, whatever the asteroid switch stored says, which gates nothing; every moon turns; every trojan takes its parent's bearing; every Lagrange point takes its planet's; every fixed body that has a fixed parent takes the parent's position; and the fleets and waypoints tied to a body take the body's. The game sets the fixed flag only on a class 3 body (the only writer is the creation of a deep-space population or location), so that flag is read for class 3 only.
+const gameUpdate = (rows, id, planets) => {
   const reads = new Set()
   const read = (row, column) => {
     reads.add(column)
 
     return row[column]
   }
-  const moved = (target, asteroids) => {
+  const moved = (target) => {
     const row = rows[target]
     const bodyClass = read(row, 'BodyClass')
-    const fixed = bodyClass === 3 && read(row, 'FixedBody') > 0
+    const fixed = read(row, 'FixedBody') > 0
 
     if (fixed && read(row, 'FixedBodyParentID') > 0) {
-      return moved(row.FixedBodyParentID, asteroids)
+      return moved(row.FixedBodyParentID)
     } else if (bodyClass === 2) {
       return true
-    } else if (bodyClass === 3 && (read(row, 'TrojanAsteroid') || 0) !== 0) {
-      return moved(read(row, 'ParentBodyID'), asteroids)
+    } else if (bodyClass === 3 && read(row, 'TrojanAsteroid') === null) {
+      return null
+    } else if (bodyClass === 3 && row.TrojanAsteroid !== 0) {
+      return moved(read(row, 'ParentBodyID'))
     } else if (bodyClass === 1 || bodyClass === 5) {
-      return true
+      return !fixed
     }
 
-    return bodyClass === 3 && !fixed && asteroids === 1
+    return bodyClass === 3 && !fixed
   }
   const outcomes = new Set()
 
   ;(planets === null ? [0, 1] : [planets]).forEach((planetSwitch) => {
-    ;(rocks === null ? [0, 1] : [rocks]).forEach((rockSwitch) => {
-      outcomes.add(planetSwitch === 0 ? false : moved(id, rockSwitch))
-    })
+    outcomes.add(planetSwitch === 0 ? false : moved(id))
   })
 
   return { value: outcomes.size === 1 ? [...outcomes][0] : null, reads }
 }
 
 // What the update does to a Lagrange point: the coordinate update sets a position only for a planet or a moon, so a point owned by anything else is never moved, whatever the switches say, and reads nothing of its owner but the class.
-const pointUpdate = (rows, id, planets, rocks) => (LAGRANGE_OWNER_CLASSES.includes(rows[id].BodyClass) ? gameUpdate(rows, id, planets, rocks) : { value: false, reads: new Set(['BodyClass']) })
+const pointUpdate = (rows, id, planets) => (LAGRANGE_OWNER_CLASSES.includes(rows[id].BodyClass) ? gameUpdate(rows, id, planets) : { value: false, reads: new Set(['BodyClass']) })
 
 check('loader-motion-matrix', 'whether a place moves with the bodies follows the game\'s own position update for every place that derives a motion group from saved fields (a body, an order\'s destination of type 2 or, on a fixed body, type 15, a colony, a Lagrange point of a planet or a moon, a waypoint, a fleet orbiting a body) on every kind of body (planet, moon, comet, trojan, independent asteroid, a deep-space population at a gas giant, a deep-space location, fixed bodies of other parents), read by the real loaders from a save with every field and from saves lacking each of the fields the update reads, with each switch read on, read off or never read, against an oracle that transcribes the update', async (w) => {
   const m = await w.modules()
   const rp = m['route-position']
   const orbit = m['orbit-propagation']
   const at = { SystemID: 1, Xcor: 1, Ycor: 1 }
-  const both = (planets, rocks) => (planets === 0 ? false : planets === 1 && rocks === 1 ? true : null)
   const VARIANTS = [
     { name: 'a save with every field', without: null },
     { name: 'a save with no trojan field', without: 'TrojanAsteroid' },
@@ -1131,18 +1372,17 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
   const SWITCHES = [1, 0, null]
   let cells = 0
 
-  // What a place must read: the update's answer when every field it rests on was read, and what is not known (the planet switch off settling it) when one was not. A picked body with no orbit read has the picker's group alone, which names a planet, moon or comet and cannot tell an independent asteroid, a trojan and a fixed body apart.
-  const expectedOf = (variant, place, planets, rocks) => {
-    const update = (place.point ? pointUpdate : gameUpdate)(OWNER_ROWS, place.owner.id, planets, rocks)
+  // An unread field needed by classification leaves motion unknown, even with the switch on. Off always settles it as static.
+  const expectedOf = (variant, place, planets) => {
+    const update = (place.point ? pointUpdate : gameUpdate)(OWNER_ROWS, place.owner.id, planets)
     const orbitRead = !ORBIT_REQUIRED.includes(variant.without)
+    const unknown = planets === 0 ? false : null
 
-    if (place.source === 'picker' && !orbitRead) {
-      return place.owner.row.BodyClass === 3 ? both(planets, rocks) : update.value
-    } else if (place.source === 'orbit' && !orbitRead) {
-      return both(planets, rocks)
+    if ((place.source === 'picker' || place.source === 'orbit') && !orbitRead) {
+      return unknown
     }
 
-    return variant.without !== null && update.reads.has(variant.without) ? both(planets, rocks) : update.value
+    return variant.without !== null && update.reads.has(variant.without) ? unknown : update.value
   }
 
   for (const variant of VARIANTS) {
@@ -1164,23 +1404,31 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
         const orbits = await orbit.loadOrbitFacts(database, { GameID: 1, RaceID: 2 }, places.map((place) => place.endpoint))
         const facts = { ...read, orbits }
 
-        assert.deepEqual({ orbitalMotion: read.clock.orbitalMotion, orbitalMotionAst: read.clock.orbitalMotionAst }, { orbitalMotion: planets, orbitalMotionAst: rocks }, 'the loader read the switches the save stores')
+        assert.deepEqual({ orbitalMotion: read.clock.orbitalMotion }, { orbitalMotion: planets }, 'the loader read the switch the save stores')
+        assert.ok(!('orbitalMotionAst' in read.clock), 'and not the asteroid switch it also stores')
+        OWNERS.forEach((owner) => {
+          const update = gameUpdate(OWNER_ROWS, owner.id, 1)
+          const group = (variant.without !== null && update.reads.has(variant.without)) || update.value === null ? 'unknown' : update.value ? 'moving' : 'static'
+
+          assert.equal(read.waypoints[100 + owner.id].group, group, variant.name + ', the body of a waypoint on the ' + owner.name + ': the position read makes out its motion group as the update moves it, and not at all where a field it rests on was not read')
+        })
         places.forEach((place) => {
           const [record] = rp.routePositions([place.endpoint], { facts }).records
-          const expected = expectedOf(variant, place, planets, rocks)
-          const label = variant.name + ', ' + place.label + ', planets ' + planets + ', asteroids ' + rocks
+          const expected = expectedOf(variant, place, planets)
+          const label = variant.name + ', ' + place.label + ', planets ' + planets + ', asteroids ' + rocks + ' stored'
 
           cells += 1
           assert.equal(record.moves, expected, label + ': moves ' + expected)
           assert.equal(record.supported, true, label + ': the contract supports the place')
-          assert.equal(record.conditions.includes('motion-switch'), expected === null, label + ': names the switch only when it is unknown')
+          assert.equal(record.conditions.includes('motion-switch'), expected === null && planets === null, label + ': names an unread switch')
+          assert.equal(record.conditions.includes('motion-classification'), expected === null && planets === 1, label + ': names unread classification')
         })
 
         const none = rp.routePositions([rp.orderEndpoint({ DestinationType: 5, DestinationID: 201, SystemID: 1, X: 1, Y: 1 })], { facts }).records[0]
         const missing = rp.routePositions([rp.orderEndpoint({ DestinationType: 5, DestinationID: 202, SystemID: 1, X: 1, Y: 1 })], { facts }).records[0]
 
         assert.equal(none.moves, false, variant.name + ': a waypoint on no body stays')
-        assert.equal(missing.moves, both(planets, rocks), variant.name + ': a waypoint on a body the read does not hold is a kind not read')
+        assert.equal(missing.moves, planets === 0 ? false : null, variant.name + ': an unread owner classification cannot assert motion')
         database.close()
       }
     }
@@ -1194,7 +1442,8 @@ check('loader-motion-matrix', 'whether a place moves with the bodies follows the
   const orbits = await orbit.loadOrbitFacts(database, { GameID: 1, RaceID: 2 }, OWNERS.map((owner) => ({ family: 'body', id: owner.id })))
 
   OWNERS.forEach((owner) => {
-    const groupOfUpdate = gameUpdate(OWNER_ROWS, owner.id, 1, 1).value ? (gameUpdate(OWNER_ROWS, owner.id, 1, 0).value ? 'planet' : 'asteroid') : 'static'
+    const value = gameUpdate(OWNER_ROWS, owner.id, 1).value
+    const groupOfUpdate = value === null ? 'unknown' : value ? 'moving' : 'static'
 
     assert.equal(read.waypoints[100 + owner.id].group, groupOfUpdate, owner.name + ': the position read groups the owner of a waypoint as the update moves it')
     assert.equal(read.fleets[300 + owner.id].group, groupOfUpdate, owner.name + ': and the body a fleet orbits')
@@ -1225,7 +1474,7 @@ check('fixed-body-order', 'a type 15 order (a deep space population, reached as 
       const facts = { ...read, orbits }
 
       FIXED_OWNERS.forEach((owner, index) => {
-        const expected = gameUpdate(OWNER_ROWS, owner.id, planets, rocks).value
+        const expected = gameUpdate(OWNER_ROWS, owner.id, planets).value
 
         ;[['saved positions', rp.NO_ADAPTERS], ['propagation offered', rp.ADAPTERS]].forEach(([basis, adapters]) => {
           const positions = rp.routePositions([endpoints[index]], { facts, adapters })
@@ -1253,14 +1502,13 @@ check('fixed-body-order', 'a type 15 order (a deep space population, reached as 
 
   const location = FIXED_OWNERS.find((owner) => owner.row.FixedBodyParentID === undefined && !owner.row.TrojanAsteroid)
 
-  SWITCHES.forEach((planets) => SWITCHES.forEach((rocks) => assert.equal(gameUpdate(OWNER_ROWS, location.id, planets, rocks).value, false, 'the oracle: a fixed body with no parent never moves, whatever the switches say')))
+  SWITCHES.forEach((planets) => assert.equal(gameUpdate(OWNER_ROWS, location.id, planets).value, false, 'the oracle: a fixed body with no parent never moves, whatever the switch says'))
 })
 
 check('lagrange-owner-class', 'a Lagrange point whose owner is neither a planet nor a moon (a trojan, an independent asteroid, a comet, a fixed body) is never moved by the game\'s coordinate update, so read by the real loaders it stays where it is saved for every pair of switches, whatever its owner\'s other fields say, and is unknown only where the class itself was not read', async (w) => {
   const m = await w.modules()
   const rp = m['route-position']
   const orbit = m['orbit-propagation']
-  const both = (planets, rocks) => (planets === 0 ? false : planets === 1 && rocks === 1 ? true : null)
   const VARIANTS = [
     { name: 'a save with every field', without: null },
     { name: 'a save with no fixed parent field', without: 'FixedBodyParentID' },
@@ -1283,13 +1531,14 @@ check('lagrange-owner-class', 'a Lagrange point whose owner is neither a planet 
           const facts = { ...read, orbits }
           const [record] = rp.routePositions([endpoint], { facts }).records
           const [offered] = rp.routePositions([endpoint], { facts, adapters: rp.ADAPTERS }).records
-          const expected = ORBIT_REQUIRED.includes(variant.without) ? both(planets, rocks) : pointUpdate(OWNER_ROWS, owner.id, planets, rocks).value
-          const label = variant.name + ', a Lagrange point of the ' + owner.name + ', planets ' + planets + ', asteroids ' + rocks
+          const expected = ORBIT_REQUIRED.includes(variant.without) ? (planets === 0 ? false : null) : pointUpdate(OWNER_ROWS, owner.id, planets).value
+          const label = variant.name + ', a Lagrange point of the ' + owner.name + ', planets ' + planets + ', asteroids ' + rocks + ' stored'
           const saved = { SystemID: endpoint.SystemID, Xcor: endpoint.Xcor, Ycor: endpoint.Ycor }
 
           cells += 1
           assert.equal(record.moves, expected, label + ': moves ' + expected)
-          assert.equal(record.conditions.includes('motion-switch'), expected === null, label + ': names the switch only when it is unknown')
+          assert.equal(record.conditions.includes('motion-switch'), expected === null && planets === null, label + ': names an unread switch')
+          assert.equal(record.conditions.includes('motion-classification'), expected === null && planets === 1, label + ': names unread classification')
           ;[[record, 'on saved positions'], [offered, 'with propagation offered']].forEach(([one, basis]) => {
             assert.equal(one.supported, true, label + ', ' + basis + ': supported')
             assert.equal(one.basis, 'static', label + ', ' + basis + ': stands on the saved position')
@@ -1301,7 +1550,14 @@ check('lagrange-owner-class', 'a Lagrange point whose owner is neither a planet 
               assert.equal(one.assumption, 'fixed', label + ', ' + basis + ': and is held as fixed')
             }
           })
-          assert.deepEqual(rp.ADAPTERS['lagrange-point'](endpoint, { facts, at: read.clock.gameTime + 1 }).reasons, [ORBIT_REQUIRED.includes(variant.without) ? 'orbit-missing' : 'orbit-family'], label + ': the adapter refuses to propagate it, for its owner\'s family where the point is read and as not found where the save lacks the columns that read it')
+          const adapted = rp.ADAPTERS['lagrange-point'](endpoint, { facts, at: read.clock.gameTime + read.clock.subPulseLength })
+
+          if (ORBIT_REQUIRED.includes(variant.without) || planets === null) {
+            assert.deepEqual(adapted.reasons, [ORBIT_REQUIRED.includes(variant.without) ? 'orbit-missing' : 'motion-switch'], label + ': an unread point or update switch is explicitly refused')
+          } else {
+            assert.ok(adapted.position, label + ': a readable static point has a resolved position')
+            assert.deepEqual(asJson(adapted.position), { SystemID: endpoint.SystemID, Xcor: orbits.points[endpoint.id].xcor, Ycor: orbits.points[endpoint.id].ycor }, label + ': a static point uses its own readable saved coordinates, not its owner orbit')
+          }
         })
         database.close()
       }
@@ -1310,7 +1566,7 @@ check('lagrange-owner-class', 'a Lagrange point whose owner is neither a planet 
   assert.equal(cells, VARIANTS.length * SWITCHES.length * SWITCHES.length * MALFORMED_POINT_OWNERS.length)
 })
 
-check('fixed-proxy-results', 'a deep-space population at a gas giant (a fixed class 3 body that takes its parent\'s position whatever the asteroid switch says), its colony, a waypoint on it and a fleet orbiting it move with the planet switch: with planets on and asteroids off a saved distance to each is an estimate, the body and the colony are refused for the family they are with their reason, and a Route Finder plan from each to a propagated comet is mixed; a deep-space location and a fixed body of an independent asteroid stay where they are saved and state nothing', async (w) => {
+check('fixed-proxy-results', 'a deep-space population at a gas giant and a fixed body of an independent asteroid (fixed class 3 bodies that take their parent\'s position, whatever the asteroid switch the save stores says), their colonies, waypoints on them and fleets orbiting them move with the one planet switch: with it on a saved distance to each is an estimate, the body and the colony are refused for the family they are with their reason, and a Route Finder plan from each to a propagated comet is mixed; a deep-space location, with no parent, stays where it is saved and states nothing', async (w) => {
   const m = await w.modules()
   const rp = m['route-position']
   const orbit = m['orbit-propagation']
@@ -1339,7 +1595,7 @@ check('fixed-proxy-results', 'a deep-space population at a gas giant (a fixed cl
       return instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: read, orbitFacts: orbits, plannedStops: stops, stopKeys: stops.map((one) => one.key), placeByKey: Object.fromEntries(stops.map((one) => [one.key, one])), extra: {}, lazyState: {}, legNotes: {}, systemNameOf: (id) => 'System ' + id, pointName: () => 'a point', lagrangeName: () => 'a Lagrange point', jumpPoints: [], lagrangePoints: [], cycle: false, searchOptions, speedResult: { ...SPEED, value: 1500 }, origin: stops[0], routes: found, openRoutes: found, avoidDetails: {}, systems: [{ SystemID: 1, Name: 'One' }] } })
     }
     const planetsOn = switches[0] === 1
-    const exact = (id) => gameUpdate(OWNER_ROWS, id, switches[0], switches[1]).value
+    const exact = (id) => gameUpdate(OWNER_ROWS, id, switches[0]).value
 
     for (const [id, name] of [[10, 'a deep-space population at a gas giant'], [13, 'a deep-space location'], [14, 'a fixed body of an independent asteroid']]) {
       Object.values(stopsOf(id)).forEach((stop) => {
@@ -1349,16 +1605,16 @@ check('fixed-proxy-results', 'a deep-space population at a gas giant (a fixed cl
 
         assert.equal(record.moves, exact(id), label + ': moves ' + exact(id))
         assert.equal(km.status, exact(id) === false ? 'confirmed' : 'estimated', label + ': a saved distance to it is ' + (exact(id) === false ? 'confirmed' : 'an estimate'))
-        if (planetsOn && switches[1] === 0) {
+        if (planetsOn) {
           const vm = make(stop)
 
           const own = recordOf(vm.plan.positions, stop.key)
 
-          assert.equal(own.moves, id === 10, label + ': the plan states whether it moves')
+          assert.equal(own.moves, exact(id), label + ': the plan states whether it moves')
           assert.equal(own.basis, 'static', label + ': and stands on the saved position')
-          assert.equal(own.conditions.includes('orbit-family'), id === 10 && ['body', 'colony'].includes(stop.kind), label + ': the body and the colony of the one that moves are refused for the family they are in, never taken for stationary')
+          assert.equal(own.conditions.includes('orbit-family'), exact(id) === true && ['body', 'colony'].includes(stop.kind), label + ': the body and the colony of the one that moves are refused for the family they are in, never taken for stationary')
           assert.equal(recordOf(vm.plan.positions, 'body:5').basis, 'propagated', label + ': the comet is worked out')
-          assert.equal(vm.plan.positions.mode, id === 10 ? 'mixed' : 'propagated', label + ': a plan from it to the comet reads ' + (id === 10 ? 'mixed' : 'propagated'))
+          assert.equal(vm.plan.positions.mode, exact(id) ? 'mixed' : 'propagated', label + ': a plan from it to the comet reads ' + (exact(id) ? 'mixed' : 'propagated'))
         }
       })
     }
@@ -1366,7 +1622,7 @@ check('fixed-proxy-results', 'a deep-space population at a gas giant (a fixed cl
   }
 })
 
-check('waypoint-owner-results', 'a waypoint on a trojan of a moving planet stays an estimate with the asteroid switch off, as the waypoint on the planet is, and a Route Finder plan from it to a planet worked out is stated mixed, while the waypoint on an independent asteroid stays where it is saved and states nothing', async (w) => {
+check('waypoint-owner-results', 'a waypoint on a trojan of a moving planet and one on an independent asteroid or its trojan are each an estimate with the asteroid switch the save stores off, as the waypoint on the planet is, and a Route Finder plan from it to a planet worked out is stated mixed, while a waypoint on no body stays where it is saved and states nothing', async (w) => {
   const m = await w.modules()
   const rp = m['route-position']
   const orbit = m['orbit-propagation']
@@ -1381,11 +1637,11 @@ check('waypoint-owner-results', 'a waypoint on a trojan of a moving planet stays
   const facts = { ...read, orbits }
   const km = (stops) => plan.planResults(plan.planRoute(stops, { cycle: false, jumpPoints: LINKS, facts })).km
 
-  // The distance between two places that stay where they are saved is confirmed; one end that moves makes it an estimate.
-  assert.equal(km([waypointStop(201), waypointStop(104)]).status, 'confirmed', 'a waypoint on an independent asteroid, held with the asteroid switch off, and one on no body: both stay')
-  assert.equal(km([waypointStop(201), waypointStop(103)]).status, 'estimated', 'a waypoint on a trojan moves with its planet whatever the asteroid switch says')
+  // The distance between two places that stay where they are saved is confirmed; one end that moves makes it an estimate. The asteroid switch the save stores (0 here) gates nothing.
+  assert.equal(km([waypointStop(201), waypointStop(104)]).status, 'estimated', 'a waypoint on an independent asteroid moves with the one switch, the asteroid switch the save stores gating nothing')
+  assert.equal(km([waypointStop(201), waypointStop(103)]).status, 'estimated', 'a waypoint on a trojan moves with its planet')
   assert.equal(km([waypointStop(201), waypointStop(101)]).status, 'estimated', 'as the waypoint on the planet does')
-  assert.equal(km([waypointStop(201), waypointStop(107)]).status, 'confirmed', 'a waypoint on the trojan of an independent asteroid stays with it while the asteroid is held')
+  assert.equal(km([waypointStop(201), waypointStop(107)]).status, 'estimated', 'a waypoint on the trojan of an independent asteroid moves with it')
   assert.equal(km([waypointStop(201), waypointStop(109)]).status, 'estimated', 'a trojan held fixed is still moved with its parent, as the update does not leave it out')
   assert.equal(km([waypointStop(201), waypointStop(202)]).status, 'estimated', 'a waypoint on a body the read does not hold is not said to stay')
 
@@ -1398,11 +1654,11 @@ check('waypoint-owner-results', 'a waypoint on a trojan of a moving planet stays
   }
 
   // A plan from the planet, by a waypoint, to a comet worked out on its own: a waypoint that moves is a saved position beside it, so the plan is mixed; one that stays adds nothing to the mode.
-  ;[[101, 'mixed', 'a waypoint on the planet'], [103, 'mixed', 'a waypoint on the trojan of the planet'], [104, 'propagated', 'a waypoint on an independent asteroid'], [109, 'mixed', 'a waypoint on a trojan held fixed'], [201, 'propagated', 'a waypoint on no body']].forEach(([id, mode, name]) => {
+  ;[[101, 'mixed', 'a waypoint on the planet'], [103, 'mixed', 'a waypoint on the trojan of the planet'], [104, 'mixed', 'a waypoint on an independent asteroid'], [109, 'mixed', 'a waypoint on a trojan held fixed'], [201, 'propagated', 'a waypoint on no body']].forEach(([id, mode, name]) => {
     const vm = make(id)
 
     assert.equal(recordOf(vm.plan.positions, 'body:5').basis, 'propagated', name + ': the comet is worked out')
-    assert.equal(vm.plan.positions.mode, mode, name + ': the plan reads ' + mode + ' with the asteroid switch off')
+    assert.equal(vm.plan.positions.mode, mode, name + ': the plan reads ' + mode + ' with the asteroid switch the save stores off')
   })
   database.close()
 })
@@ -1424,8 +1680,8 @@ check('optional-read', 'each page tracks the position read under the key it labe
     await reads.runAsync('positionFacts')
     assert.equal(reads.loadErrors.positionFacts, null, `${name}: tracked under its label`)
     assert.equal(reads.positionFacts.clock.gameTime, GAME_TIME)
-    assert.deepEqual(Object.keys(reads.positionFacts.fleets).map(Number).sort((a, b) => a - b), [5, 6, 7, 8, 9, 10, 11, 12], `${name}: the race's fleets`)
-    assert.deepEqual(Object.keys(reads.positionFacts.waypoints).map(Number).sort((a, b) => a - b), [31, 32, 33, 34, 35], `${name}: the race's waypoints`)
+    assert.deepEqual(Object.keys(reads.positionFacts.fleets).map(Number).sort((a, b) => a - b), [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], `${name}: the race's fleets`)
+    assert.deepEqual(Object.keys(reads.positionFacts.waypoints).map(Number).sort((a, b) => a - b), [31, 32, 33, 34, 35, 38, 39, 40], `${name}: the race's waypoints`)
     assert.equal(reads.positionRead, reads.positionFacts, `${name}: the facts once the read succeeded`)
 
     const elsewhere = instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 3, data: { loadErrors: {} } })
@@ -1557,8 +1813,8 @@ check('strip-component', 'the strip says it is reading while the read is in flig
   const vmOf = (given, state) => instantiate(component, { $store: STORE, emit: (...args) => sent.push(args), data: { positions: given, state } })
   const ready = vmOf(positions, { loading: false, failed: '', error: '' })
 
-  assert.equal(ready.age.value, GAME_TIME - BODY_TIME, 'the age of the oldest saved position')
-  assert.equal(ready.ageValue, rp.ageText(GAME_TIME - BODY_TIME))
+  assert.equal(ready.age.value, GAME_TIME - 970000, 'the oldest moving position is the busy fleet')
+  assert.equal(ready.ageValue, rp.ageText(GAME_TIME - 970000))
   assert.equal(ready.groups.length, rp.describePositions(positions).length)
   assert.equal(ready.modeText.length > 0, true)
   assert.ok(ready.groups.some((group) => group.conditions.some((condition) => condition.code === 'fleet-orders')), 'a fleet with orders is listed with its condition')
@@ -1717,7 +1973,7 @@ check('pages-routes', 'Route Finder states every leg, total, running distance an
   assert.ok(shown.records.some((record) => record.identity.key === 'colony:7'), 'the strip still states the first stop\'s position')
   assert.equal(shown.caveat, true)
   assert.equal(shown.ageKnown, true)
-  assert.equal(shown.oldest, GAME_TIME - BODY_TIME, 'and its age')
+  assert.equal(shown.oldest, 0, 'saved body coordinates are current at GameTime')
   assert.ok(evaluated(attrOf(strip, 'positions'), scopeOf(vm)).records.some((record) => record.identity.key === 'contact:9'), 'with legs, the strip states every leg\'s positions as well')
 
   const [kmSlot] = slotsOf(nodes, 'item.kmSort')
@@ -1743,7 +1999,7 @@ check('pages-routes-mixed', 'Route Finder states what every leg states: a return
     const [first] = stops
     const found = graph.searchRoutes(links, [first], searchOptions)
 
-    return instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: factsOf(rocks), plannedStops: stops, stopKeys: stops.map((one) => one.key), placeByKey: Object.fromEntries(stops.map((one) => [one.key, one])), extra: {}, lazyState: {}, legNotes: {}, systemNameOf: (id) => 'System ' + id, pointName: () => 'a point', lagrangeName: () => 'a Lagrange point', jumpPoints: links, lagrangePoints: [], cycle, searchOptions, speedResult: { ...SPEED, value: 1500 }, origin: first, routes: found, openRoutes: found, avoidDetails: {}, systems: [{ SystemID: 1, Name: 'One' }, { SystemID: 2, Name: 'Two' }] } })
+    return instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: { ...FACTS, clock: { ...CLOCK, subPulseLength: 7200 } }, orbitFacts: factsOf(rocks), plannedStops: stops, stopKeys: stops.map((one) => one.key), placeByKey: Object.fromEntries(stops.map((one) => [one.key, one])), extra: {}, lazyState: {}, legNotes: {}, systemNameOf: (id) => 'System ' + id, pointName: () => 'a point', lagrangeName: () => 'a Lagrange point', jumpPoints: links, lagrangePoints: [], cycle, searchOptions, speedResult: { ...SPEED, value: 1500 }, origin: first, routes: found, openRoutes: found, avoidDetails: {}, systems: [{ SystemID: 1, Name: 'One' }, { SystemID: 2, Name: 'Two' }] } })
   }
 
   const eccentric = rock(1, 1, 90, 6000, { bodyClass: 1, eccentricity: 0.2, xcor: 1.2 * AU, ycor: 0 })
@@ -1860,19 +2116,19 @@ check('pages-routes-matrix', 'Every distance, time, caption and strip of Route F
   })
 })
 
-check('pages-disabled-asteroid', 'a stationary asteroid (its own switch read off) is held at its saved position without a propagated claim or an orbital-speed refusal, and a moving planet on the same round trip keeps its propagated year', async (w) => {
+check('pages-fixed-bodies', 'a fixed body with no parent (a deep-space location, which nothing moves) is held at its saved position without a propagated claim or an orbital-speed refusal, and a moving planet on the same round trip keeps its propagated year', async (w) => {
   const page = await w.transport()
   const modules = await w.modules()
   const graph = modules['jump-graph']
   const rp = modules['route-position']
   const AU = 149600000
-  const asteroid = Object.freeze({ id: 1, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance: 1.8, bearing: 38, year: 22000, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: 1.8 * AU * Math.cos(((38 - 90) * Math.PI) / 180), ycor: 1.8 * AU * Math.sin(((38 - 90) * Math.PI) / 180) })
+  const asteroid = Object.freeze({ id: 1, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance: 1.8, bearing: 38, year: 22000, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 1, fixedParentId: 0, xcor: 1.8 * AU * Math.cos(((38 - 90) * Math.PI) / 180), ycor: 1.8 * AU * Math.sin(((38 - 90) * Math.PI) / 180) })
   const planet = Object.freeze({ id: 2, systemId: 1, starId: 1, bodyClass: 1, trojan: 0, distance: 3.1, bearing: 90, year: 400000, eccentricity: 0.1, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: 3.1 * 1.1 * AU, ycor: 0 })
   const orbitsOf = (bodies) => ({ bodies: Object.fromEntries(bodies.map((one) => [one.id, one])), stars: { 1: { id: 1, component: 1, xcor: 0, ycor: 0 } }, points: {}, hidden: {}, hiddenPoints: {}, bodyOf: { 7: 1, 8: 2 }, problems: [] })
   const place = (id, body) => ({ kind: 'colony', key: 'colony:' + id, name: 'Colony ' + id, colony: COLONY({ PopulationID: id, Xcor: body.xcor, Ycor: body.ycor }), SystemID: 1, Xcor: body.xcor, Ycor: body.ycor })
-  const facts = { ...FACTS, clock: { ...CLOCK, orbitalMotion: 1, orbitalMotionAst: 0 } }
+  const facts = { ...FACTS, clock: { ...CLOCK, orbitalMotion: 1, subPulseLength: 360 } }
 
-  // Two stationary asteroids, flown fast and flown below the orbital speed: nothing is worked out and nothing is refused.
+  // Two fixed bodies with no parent, flown fast and flown below the orbital speed: nothing is worked out and nothing is refused.
   const other = Object.freeze({ ...asteroid, id: 2, distance: 3.1, bearing: 198, year: 40000, xcor: 3.1 * AU * Math.cos(((198 - 90) * Math.PI) / 180), ycor: 3.1 * AU * Math.sin(((198 - 90) * Math.PI) / 180) })
 
   ;[900, 10].forEach((speed) => {
@@ -1880,11 +2136,11 @@ check('pages-disabled-asteroid', 'a stationary asteroid (its own switch read off
     const destination = place(8, other)
     const reach = { route: graph.searchRoutes([], [origin]).toPlace(destination), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
     const ship = HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })
-    const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, other]), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
+    const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, other]), handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
 
     assert.equal(vm.fleetRuns.length, 1, speed + ' km/s: the fleet is timed')
     vm.fleetRuns.forEach((run) => {
-      assert.equal(run.simulation.annual.status, 'static', speed + ' km/s: the year of stationary asteroids is static')
+      assert.equal(run.simulation.annual.status, 'static', speed + ' km/s: the year of fixed bodies is static')
       assert.deepEqual(run.simulation.annual.reasons, [], speed + ' km/s: with no refusal')
       assert.equal(run.propagation, null, speed + ' km/s: and no comparison caption')
     })
@@ -1892,19 +2148,19 @@ check('pages-disabled-asteroid', 'a stationary asteroid (its own switch read off
     assert.ok(!vm.endpointPositions.conditions.some((one) => one.code === 'fleet-slower' || one.code === 'motion-switch'), speed + ' km/s: the strip names neither the speed nor the switch')
   })
 
-  // A round trip between a stationary asteroid and a moving planet slower than the planet's neighbours keeps the planet's propagation.
+  // A round trip between a fixed body and a moving planet slower than the planet's neighbours keeps the planet's propagation.
   const origin = place(7, asteroid)
   const destination = place(8, planet)
   const reach = { route: graph.searchRoutes([], [origin]).toPlace(destination), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
   const ship = HAULER({ MaxSpeed: 20, FleetSpeed: 20, EnginePower: 0.4, UndamagedEnginePower: 0.4, UseMaximumSpeed: 0 })
-  const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, planet]), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
+  const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts: orbitsOf([asteroid, planet]), handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin, destination, reachOf: () => reach, fleetShips: [ship] } })
   const moved = rp.positionRecord(rp.placeEndpoint(destination), { facts: { ...facts, orbits: orbitsOf([asteroid, planet]) }, adapters: rp.ADAPTERS, from: rp.placeEndpoint(origin), speed: 20 })
 
   assert.equal(moved.basis, 'propagated', 'the planet is worked out on its own')
   assert.equal(vm.fleetRuns.length, 1, 'the fleet is timed')
   vm.fleetRuns.forEach((run) => {
     assert.equal(run.simulation.annual.status, 'propagated', 'the year keeps the planet\'s arrival')
-    assert.ok(!run.simulation.annual.reasons.includes('fleet-slower') && !run.simulation.annual.reasons.includes('motion-switch'), 'the stationary asteroid refuses nothing')
+    assert.ok(!run.simulation.annual.reasons.includes('fleet-slower') && !run.simulation.annual.reasons.includes('motion-switch'), 'the fixed body refuses nothing')
     assert.ok(run.simulation.annual.meanKm !== run.simulation.static.km.reduce((sum, value) => sum + value, 0) / 2, 'and the mean is the propagated one, not the saved')
     assert.equal(run.simulation.first.positions.mode, 'propagated')
   })
@@ -1925,7 +2181,7 @@ check('pages-transport', 'Transport states a run\'s time and distance with the s
   const there = place('fleet', 7, { SystemID: 2, Xcor: 5, Ycor: 5 })
   const route = modules['jump-graph'].searchRoutes(LINKS, [{ SystemID: 1, Xcor: 10, Ycor: 5 }], { order: 'jumps', lagrangePoints: LAGRANGE }).toPlace(there)
   const reach = { route, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
-  const make = (facts, data = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
+  const make = (facts, data = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
   const group = { FleetID: 5, FleetName: 'Convoy', civilian: false }
   const shipClass = { ShipClassID: 1, ClassName: 'Freighter', ships: [HAULER()] }
   const ends = { origin: transport.colonyEndpoint(COLONY()), destination: transport.colonyEndpoint(COLONY({ PopulationID: 8, ShuttleCapacity: 0 })) }
@@ -2082,7 +2338,7 @@ check('pages-hauling-mixed', 'Hauling states what every independent simulation s
   const classOf = (name, speed) => HAULER({ Ships: 2, ClassName: name, ShipClassID: speed, MaxSpeed: speed })
   const FAST = 1500
   const SLOW = 10
-  const make = (classes, speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: speeds.map((speed, index) => fleetOf(5 + index, speed)), orders: speeds.flatMap((_speed, index) => [order(5 + index, 1), order(5 + index, 2, unload)]), fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: `Convoy ${5 + index}`, ShipID: 1 + index, MaxSpeed: speed, FleetSpeed: speed, UseMaximumSpeed: 0 })), formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: classes.map(([name, speed]) => classOf(name, speed)), shuttleTechnology: 1.5, mineralDeliveries: {} } })
+  const make = (classes, speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: speeds.map((speed, index) => fleetOf(5 + index, speed)), orders: speeds.flatMap((_speed, index) => [order(5 + index, 1), order(5 + index, 2, unload)]), fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: `Convoy ${5 + index}`, ShipID: 1 + index, MaxSpeed: speed, FleetSpeed: speed, UseMaximumSpeed: 0 })), formulaVersion: '3.2.x', plan: { hauls: [haul], unmet: [] }, freighters: classes.map(([name, speed]) => classOf(name, speed)), shuttleTechnology: 1.5, mineralDeliveries: {} } })
   const codesOf = (positions) => positions.conditions.map((one) => one.code)
 
   ;[[['Fast', FAST], ['Slow', SLOW]], [['Slow', SLOW], ['Fast', FAST]]].forEach((classes) => {
@@ -2128,7 +2384,7 @@ check('pages-transport-mixed', 'Transport states what every independent run stat
   const there = place(8, 1)
   const km = Math.hypot(rocks[0].xcor - rocks[1].xcor, rocks[0].ycor - rocks[1].ycor)
   const reach = { route: { km, jumps: 0, end: { kind: 'fly', at: there, previous: null, origin: { SystemID: 1, Xcor: here.Xcor, Ycor: here.Ycor }, legKm: km, via: null } }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
-  const make = (speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: 'Convoy ' + (5 + index), ShipID: 1 + index, FleetSpeed: speed, MaxSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })) } })
+  const make = (speeds) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin: here, destination: there, reachOf: () => reach, fleetShips: speeds.map((speed, index) => HAULER({ FleetID: 5 + index, FleetName: 'Convoy ' + (5 + index), ShipID: 1 + index, FleetSpeed: speed, MaxSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })) } })
 
   ;[[10, 100000], [100000, 10]].forEach((speeds) => {
     const order = speeds.join(' then ')
@@ -2164,7 +2420,7 @@ check('pages-saved-distance', 'Hauling and Transport state each figure with the 
   const unload = { ActionName: 'Unload', MoveActionID: 63, Description: 'Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: rocks[1].xcor, Y: rocks[1].ycor, ExitX: rocks[1].xcor, ExitY: rocks[1].ycor }
   const km = Math.hypot(rocks[0].xcor - rocks[1].xcor, rocks[0].ycor - rocks[1].ycor)
   const haul = { from: colony(7, 0), to: colony(8, 1), km, jumps: 0, tonnes: 1100, queue: 100, minerals: [], detour: null }
-  const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: SPEED_KM, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: SPEED_KM, FleetSpeed: SPEED_KM, UseMaximumSpeed: 0 })], formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Fast', ShipClassID: 1, MaxSpeed: SPEED_KM })], shuttleTechnology: 1.5, mineralDeliveries: {} } })
+  const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: SPEED_KM, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: SPEED_KM, FleetSpeed: SPEED_KM, UseMaximumSpeed: 0 })], formulaVersion: '3.2.x', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Fast', ShipClassID: 1, MaxSpeed: SPEED_KM })], shuttleTechnology: 1.5, mineralDeliveries: {} } })
   const [planned] = vm.planRows
   const flownClass = planned.estimates.find((estimate) => estimate.flown)
   const [fleet] = vm.routeRows
@@ -2195,7 +2451,7 @@ check('pages-saved-distance', 'Hauling and Transport state each figure with the 
   const there = place(8, 1)
   const reach = { route: { km, jumps: 0, end: { kind: 'fly', at: there, previous: null, origin: { SystemID: 1, Xcor: here.Xcor, Ycor: here.Ycor }, legKm: km, via: null } }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
   const ship = (extra) => HAULER({ MaxSpeed: SPEED_KM, FleetSpeed: SPEED_KM, EnginePower: SPEED_KM / 50, UndamagedEnginePower: SPEED_KM / 50, UseMaximumSpeed: 0, ...extra })
-  const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: [ship()] } })
+  const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin: here, destination: there, reachOf: () => reach, fleetShips: [ship()] } })
   const [flownFleet] = run.fleetRuns
   const ends = { origin: modules.transport.colonyEndpoint(COLONY()), destination: modules.transport.colonyEndpoint(COLONY({ PopulationID: 8, ShuttleCapacity: 0 })) }
   const classRun = { ...run.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship()] }, reach, ends), ...run.safeFields(reach) }
@@ -2217,11 +2473,11 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
   const AU = 149600000
   const rock = (id, distance, bearing, year, extra = {}) => Object.freeze({ id, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance, bearing, year, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: distance * AU * Math.cos(((bearing - 90) * Math.PI) / 180), ycor: distance * AU * Math.sin(((bearing - 90) * Math.PI) / 180), ...extra })
   const circular = [rock(1, 1, 90, 8760), rock(2, 2, 0, 17520)]
-  const eccentric = [rock(1, 1, 90, 6000, { bodyClass: 1, eccentricity: 0.2, xcor: 1.2 * AU, ycor: 0 }), rock(2, 2, 0, 17520)]
+  const eccentric = [rock(1, 0.01, 90, 24, { bodyClass: 1, eccentricity: 0.2, xcor: 0.012 * AU, ycor: 0 }), rock(2, 2, 0, 17520)]
   const orbitsOf = (rocks, bodyOf) => ({ bodies: Object.fromEntries(rocks.map((one) => [one.id, one])), stars: { 1: { id: 1, component: 1, xcor: 0, ycor: 0 } }, points: {}, hidden: {}, hiddenPoints: {}, bodyOf, problems: [] })
   const claims = (result) => Boolean(result) && result.assumptions.includes(rp.ASSUMPTIONS.propagated)
   const component = await w.component()
-  const groupsOf = (positions) => instantiate(component, { $store: STORE, data: { positions, state: { loading: false, failed: '', error: '' } } }).groups.map((group) => group.assumption).sort()
+  const groupsOf = (positions) => [...new Set(instantiate(component, { $store: STORE, data: { positions, state: { loading: false, failed: '', error: '' } } }).groups.map((group) => group.assumption))].sort()
   const codesOf = (positions) => positions.conditions.map((one) => one.code)
   const FUEL_TANK = { FuelCapacity: 1, Fuel: 1 }
 
@@ -2246,7 +2502,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
     const there = place(8, 1)
     const reach = { route: { km: distance, jumps: 0, end: { kind: 'fly', at: there, previous: null, origin: { SystemID: 1, Xcor: here.Xcor, Ycor: here.Ycor }, legKm: distance, via: null } }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
     const ship = speed === null ? null : HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0, ...(scenario.tank || {}) })
-    const vm = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: ship ? [ship] : [] } })
+    const vm = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin: here, destination: there, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: ship ? [ship] : [] } })
     const classRows = ship ? [{ ...vm.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship] }, reach, vm.endpoints), ...vm.safeFields(reach) }] : []
     const rows = [...classRows, ...vm.fleetRuns]
     const label = 'Transport, ' + scenario.name
@@ -2281,7 +2537,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
     const route = modules['jump-graph'].searchRoutes(LINKS, [{ SystemID: 1, Xcor: 10, Ycor: 5 }], { order: 'jumps', lagrangePoints: LAGRANGE }).toPlace(there)
     const reach = { route, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
 
-    return instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: UNSURE, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: here, destination: there, reachOf: () => reach, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })] } })
+    return instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: UNSURE, handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin: here, destination: there, reachOf: () => reach, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })] } })
   })()
 
   assert.ok(crossing.endpointPositions.records.some((record) => record.identity.family === 'lagrange-point'), 'the strip lists the Lagrange points the saved distance rests on')
@@ -2294,7 +2550,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
     const unload = { ActionName: 'Unload', MoveActionID: 63, Description: 'Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: rocks[1].xcor, Y: rocks[1].ycor, ExitX: rocks[1].xcor, ExitY: rocks[1].ycor }
     const haul = { from: colony(7, 0), to: colony(8, 1), km: km(rocks), jumps: 0, tonnes: 1100, queue: 100, minerals: [], detour: null }
     const some = speed !== null
-    const data = { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, fleets: some ? [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }] : [], orders: some ? [order(1), order(2, unload)] : [], fleetShips: some ? [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })] : [], formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: some ? [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed, ...(scenario.tank || {}) })] : [], shuttleTechnology: 1.5, mineralDeliveries: {} }
+    const data = { loadErrors: loadErrorsOf(null), positionFacts: FACTS, orbitFacts: orbitsOf(rocks, scenario.bodyOf || { 7: 1, 8: 2 }), handlingSupport: FULL_OFFICERS, fleets: some ? [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }] : [], orders: some ? [order(1), order(2, unload)] : [], fleetShips: some ? [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })] : [], formulaVersion: '3.2.x', plan: { hauls: [haul], unmet: [] }, freighters: some ? [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed, ...(scenario.tank || {}) })] : [], shuttleTechnology: 1.5, mineralDeliveries: {} }
     const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data })
     const label = 'Hauling, ' + scenario.name
     const [planned] = vm.planRows
@@ -2332,7 +2588,7 @@ check('pages-position-matrix', 'Every displayed time, distance, caption and stri
   })
 })
 
-check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route Finder, Transport and Hauling agrees with the positions its figures used whatever the endpoints are and the game\'s motion switches say: places that never move (system centres, jump points, waypoints held by no body, a fleet), a body no family serves, an asteroid, a colony, a Lagrange point and a body beside a fleet, with the planet and asteroid motion switches on or off, flown fast or refused', async (w) => {
+check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route Finder, Transport and Hauling agrees with the positions its figures used whatever the endpoints are and the game\'s motion switches say: places that never move (system centres, jump points, waypoints held by no body, a fleet), a body no family serves, an asteroid, a colony, a Lagrange point and a body beside a fleet, with the planet switch on or off and the asteroid switch the save stores on or off, which gates nothing, flown fast or refused', async (w) => {
   const transport = await w.transport()
   const hauling = await w.hauling()
   const routes = await w.routes()
@@ -2362,7 +2618,7 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
   const here = (rocks) => ({ SystemID: 1, Xcor: rocks[0].xcor, Ycor: rocks[0].ycor })
   const there = (rocks) => ({ SystemID: 1, Xcor: rocks[1].xcor, Ycor: rocks[1].ycor })
   const FLEETS = { ...FACTS.fleets, 8: { lastMoveTime: 960000, following: false, orders: 1, anchor: 0 } }
-  const WAYPOINTS = { ...FACTS.waypoints, 41: { orbit: 0, group: null } }
+  const WAYPOINTS = { ...FACTS.waypoints, 41: { orbit: 0, point: 0, group: null } }
 
   // The endpoint kinds. The expectation of a cell is told by the class of its kind: 'inert' never moves, is carried by no body or is a fixed body with no parent (nothing to compare), 'pinned' is a body that moves and no family serves (a refusal that is stated), 'moving' is served, and 'beside' is served beside a fleet whose motion is unknown.
   const KINDS = [
@@ -2372,21 +2628,21 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
     { name: 'fleets', inert: true, rocks: MOVING, facts: { fleets: FLEETS }, origin: place('fleet', 7, here(MOVING)), destination: place('fleet', 8, there(MOVING)) },
     { name: 'deep-space locations that never move', inert: true, rocks: PINNED, origin: place('body', 1, here(PINNED)), destination: place('body', 2, there(PINNED)) },
     { name: 'deep-space populations at a gas giant', pinned: true, rocks: PROXIES, origin: place('body', 1, here(PROXIES)), destination: place('body', 2, there(PROXIES)) },
-    { name: 'asteroids', moving: true, asteroid: true, rocks: MOVING, origin: place('body', 1, here(MOVING)), destination: place('body', 2, there(MOVING)) },
-    { name: 'colonies', moving: true, asteroid: true, rocks: MOVING, origin: place('colony', 7, here(MOVING)), destination: place('colony', 8, there(MOVING)) },
+    { name: 'asteroids', moving: true, rocks: MOVING, origin: place('body', 1, here(MOVING)), destination: place('body', 2, there(MOVING)) },
+    { name: 'colonies', moving: true, rocks: MOVING, origin: place('colony', 7, here(MOVING)), destination: place('colony', 8, there(MOVING)) },
     { name: 'Lagrange points of moons', moving: true, rocks: [...MOVING, ...MOONS], points: POINTS, origin: place('lagrange', 31, { SystemID: 1, Xcor: POINTS[31].xcor, Ycor: POINTS[31].ycor }), destination: place('lagrange', 32, { SystemID: 1, Xcor: POINTS[32].xcor, Ycor: POINTS[32].ycor }) },
-    { name: 'an asteroid beside a fleet', beside: true, asteroid: true, rocks: MOVING, facts: { fleets: FLEETS }, origin: place('body', 1, here(MOVING)), destination: place('fleet', 8, there(MOVING)) },
+    { name: 'an asteroid beside a fleet', beside: true, rocks: MOVING, facts: { fleets: FLEETS }, origin: place('body', 1, here(MOVING)), destination: place('fleet', 8, there(MOVING)) },
   ]
   const MOTIONS = [
     { name: 'motion on', clock: CLOCK },
     { name: 'planet motion off', clock: { ...CLOCK, orbitalMotion: 0 } },
-    { name: 'asteroid motion off', clock: { ...CLOCK, orbitalMotionAst: 0 } },
+    { name: 'asteroid motion off as the save stores it', clock: { ...CLOCK, orbitalMotionAst: 0 } },
   ]
 
   // What a cell must read, from what the cell is and nothing in the code: the Transport and Hauling strip (the saved distances sit beside what was flown), the caption of a row ('' none, 'Static' the reason the saved positions stand, 'Propagated' the comparison), whether the time claims positions worked out, and the Route Finder plan and page strip (a one-way plan arrives only at its last stop).
   const QUIET = { strip: 'static', caption: '', flown: false, plan: 'static', shown: 'static' }
   const expectOf = (kind, motion, speed) => {
-    if (kind.inert || motion.name === 'planet motion off' || (kind.asteroid && motion.name === 'asteroid motion off')) {
+    if (kind.inert || motion.name === 'planet motion off') {
       return QUIET
     } else if (kind.pinned || speed === SLOW) {
       return { ...QUIET, caption: 'Static' }
@@ -2410,7 +2666,7 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
 
     // Transport: the class row, the fleet row and the strip.
     const ship = HAULER({ MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })
-    const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '2.7.1', origin: kind.origin, destination: kind.destination, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship] } })
+    const run = instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: facts, orbitFacts, handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin: kind.origin, destination: kind.destination, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship] } })
     const classRow = { ...run.runOf({ FleetID: 5, FleetName: 'Convoy', civilian: false }, { ShipClassID: 1, ClassName: 'Freighter', ships: [ship] }, reach, run.endpoints), ...run.safeFields(reach) }
 
     ;[classRow, ...run.fleetRuns].forEach((row) => {
@@ -2459,7 +2715,7 @@ check('pages-endpoint-matrix', 'Every distance, time, caption and strip of Route
       const order = (id, extra) => ({ FleetID: 5, OrderDelay: 0, ActionName: 'Load', Jumps: 0, ExitSystemID: 1, SystemID: 1, DestinationType: 2, DestinationID: id, MoveActionID: 62, Description: 'Load', PopName: 'Mars', PopulationID: 7, ShuttleCapacity: 1, ServiceNames: 'Spaceport', X: rocks[0].xcor, Y: rocks[0].ycor, ExitX: rocks[0].xcor, ExitY: rocks[0].ycor, ...extra, MoveOrder: id })
       const unload = { ActionName: 'Unload', MoveActionID: 63, Description: 'Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: rocks[1].xcor, Y: rocks[1].ycor, ExitX: rocks[1].xcor, ExitY: rocks[1].ycor }
       const haul = { from: colony(7, 0), to: colony(8, 1), km: Math.hypot(rocks[0].xcor - rocks[1].xcor, rocks[0].ycor - rocks[1].ycor), jumps: 0, tonnes: 1100, queue: 100, minerals: [], detour: null }
-      const data = { loadErrors: loadErrorsOf(null), positionFacts: factsOf(colonies, motion), orbitFacts: orbitsOf(rocks), handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })], formulaVersion: '2.7.1', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed })], shuttleTechnology: 1.5, mineralDeliveries: {} }
+      const data = { loadErrors: loadErrorsOf(null), positionFacts: factsOf(colonies, motion), orbitFacts: orbitsOf(rocks), handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Convoy 5', Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: 1.5, Speed: speed, FuelPerHour: 99 }], orders: [order(1), order(2, unload)], fleetShips: [HAULER({ FleetID: 5, FleetName: 'Convoy 5', MaxSpeed: speed, FleetSpeed: speed, EnginePower: speed / 50, UndamagedEnginePower: speed / 50, UseMaximumSpeed: 0 })], formulaVersion: '3.2.x', plan: { hauls: [haul], unmet: [] }, freighters: [HAULER({ Ships: 2, ClassName: 'Class', ShipClassID: 1, MaxSpeed: speed })], shuttleTechnology: 1.5, mineralDeliveries: {} }
       const vm = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data })
       const [planned] = vm.planRows
       const [fleet] = vm.routeRows
@@ -2489,7 +2745,7 @@ check('pages-hauling', 'Hauling states a repeating route and a planned haul with
   const haul = (from, to) => ({ from: COLONY({ PopulationID: from, PopName: `Colony ${from}` }), to: COLONY({ PopulationID: to, PopName: `Colony ${to}`, Xcor: 3 * KM }), km: 3 * KM, jumps: 1, tonnes: 1100, queue: 100, minerals: [], detour: null })
   const hauls = [haul(7, 8), haul(7, 9)]
 
-  const make = (facts, extra = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, fleets: [fleet(5), fleet(6)], orders, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], formulaVersion: '2.7.1', plan: { hauls, unmet: [] }, freighters: [HAULER({ Ships: 2 })], shuttleTechnology: 1.5, mineralDeliveries: {}, ...extra } })
+  const make = (facts, extra = {}, database = null) => instantiate(page, { $store: STORE, database, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(facts ? null : undefined), positionFacts: facts, handlingSupport: FULL_OFFICERS, fleets: [fleet(5), fleet(6)], orders, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], formulaVersion: '3.2.x', plan: { hauls, unmet: [] }, freighters: [HAULER({ Ships: 2 })], shuttleTechnology: 1.5, mineralDeliveries: {}, ...extra } })
   const vm = make(UNSURE)
 
   // A route simulation is kept under the delay of its orders and a haul simulation under the path it flies: the same again is the one kept, a change of either is worked out afresh and equals what it is with nothing kept.
@@ -2612,6 +2868,7 @@ check('pages-hauling', 'Hauling states a repeating route and a planned haul with
   assert.ok(row.legResults[1].inputs.missing.includes(rp.CONDITIONS['contact-motion']), 'a leg to the contact does')
   assert.ok(row.legResults[row.legResults.length - 1].inputs.missing.includes(rp.CONDITIONS['contact-motion']), 'and the one back from it')
   statesPositions(planned.best.result, ends(hauls[0].from, hauls[0].to), 'the best class\'s days')
+  assert.equal(planned.jumpsResult.value, hauls[0].jumps, 'the jump count result is the haul\'s own figure')
   assert.equal(planned.jumpsResult.rule.id, 'route.jumps', 'the jump count carries its own mark')
   assert.equal(planned.jumpsResult.status, 'confirmed', 'and it does not rest on a position')
 
@@ -2685,31 +2942,487 @@ check('pages-hauling', 'Hauling states a repeating route and a planned haul with
   }))
 })
 
+// ---- Objects a Lagrange point carries ---------------------------------------------------------------------------------
+// No save of the line holds an object anchored to a Lagrange point (neither the fixture nor the played save has a fleet, waypoint, wreck, life pod or salvo whose point is above 0), so each witness plants them on a copy of each save, made in the temporary directory and removed after, and reads the copy with the real loaders, the real utilities and the real pages. The saves themselves are never written.
+const onCopy = async (save, body) => {
+  const file = path.join(root, save.file)
+
+  if (!fs.existsSync(file)) {
+    console.log(`SKIP anchor-planted-saves: ${save.file} is not there`)
+
+    return null
+  }
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-302-05-'))
+  const copy = path.join(directory, path.basename(save.file))
+
+  fs.copyFileSync(file, copy)
+
+  const raw = new sqlite3.Database(copy)
+
+  try {
+    return await body(raw)
+  } finally {
+    await new Promise((resolve) => raw.close(resolve))
+    fs.unlinkSync(copy)
+    fs.rmdirSync(directory)
+  }
+}
+
+const runOn = (raw, sql, params = []) => new Promise((resolve, reject) => raw.run(sql, params, (error) => (error ? reject(error) : resolve())))
+
+// How far a fleet that references a point stands from it, in kilometres, where it is planted not to ride it.
+const OFF_POINT_KM = 5000
+
+// What is planted on the copy of a save: a Lagrange point of a planet that the game moves (the first, in a system the race has surveyed with two other bodies, whose orbit is rebuilt by the contract), a fleet parked at it, a fleet at it with two move orders to the bodies of its system, a fleet that references it but stands apart, and a waypoint, a wreck, a life pod and a missile salvo at it, with a wreck that stands apart and a salvo of another race. `where` names the save's game and race.
+const plantOn = async (raw, save, modules) => {
+  const rp = modules['route-position']
+  const orbit = modules['orbit-propagation']
+  const g = save.gameId
+  const r = save.raceId
+  const where = { GameID: g, RaceID: r }
+  const before = wrapped(raw)
+  const clock = (await rp.loadPositionFacts(before, where)).clock
+  const candidates = await rowsOf(raw, 'select lp.LagrangePointID as id, lp.SystemID, lp.PlanetID, lp.Xcor, lp.Ycor from FCT_LagrangePoint lp join FCT_SystemBody b on b.SystemBodyID = lp.PlanetID and b.GameID = lp.GameID where lp.GameID = ? and lp.Xcor is not null and lp.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ? and RaceID = ?) and b.BodyClass = 1 and b.Eccentricity > 0.05 and b.Year > 0 and (b.FixedBody is null or b.FixedBody = 0) and (select count(*) from FCT_SystemBody o where o.GameID = lp.GameID and o.SystemID = lp.SystemID and o.SystemBodyID != lp.PlanetID and o.BodyClass in (1, 2, 3, 5) and o.Xcor is not null) >= 2 order by lp.LagrangePointID limit 12', g, g, r)
+  let point = null
+
+  for (const candidate of candidates) {
+    const endpoint = { family: 'lagrange-point', key: `lagrange:${candidate.id}`, id: candidate.id, name: null, SystemID: candidate.SystemID, Xcor: candidate.Xcor, Ycor: candidate.Ycor }
+    const orbits = await orbit.loadOrbitFacts(before, where, [endpoint])
+
+    if (!point && rp.positionRecord(endpoint, { facts: { clock, fleets: {}, waypoints: {}, orbits }, adapters: rp.ADAPTERS, at: clock.gameTime + 24 * clock.subPulseLength }).basis === 'propagated') {
+      point = candidate
+    }
+  }
+
+  assert.ok(point, `${save.file}: a point of a planet the contract moves, in a surveyed system`)
+
+  const bodies = await rowsOf(raw, 'select SystemBodyID as id, BodyClass, Xcor, Ycor from FCT_SystemBody where GameID = ? and SystemID = ? and SystemBodyID != ? and BodyClass in (1, 2, 3, 5) and Xcor is not null order by (Xcor - ?) * (Xcor - ?) + (Ycor - ?) * (Ycor - ?) limit 2', g, point.SystemID, point.PlanetID, point.Xcor, point.Xcor, point.Ycor, point.Ycor)
+  const [park, ordered, apart] = (await rowsOf(raw, 'select FleetID from FCT_Fleet where GameID = ? and RaceID = ? order by FleetID limit 3', g, r)).map((row) => row.FleetID)
+  const nextOf = async (table, key) => (await rowsOf(raw, `select coalesce(max(${key}), 0) + 1 as id from ${table}`))[0].id
+  const ids = { waypoint: await nextOf('FCT_Waypoint', 'WaypointID'), wreck: await nextOf('FCT_Wrecks', 'WreckID'), lifepod: await nextOf('FCT_Lifepods', 'LifepodID'), salvo: await nextOf('FCT_MissileSalvo', 'MissileSalvoID'), order: await nextOf('FCT_MoveOrders', 'MoveOrderID') }
+  const at = { Xcor: point.Xcor, Ycor: point.Ycor }
+  const off = { Xcor: point.Xcor + OFF_POINT_KM, Ycor: point.Ycor }
+
+  for (const [fleet, standing] of [[park, at], [ordered, at], [apart, off]]) {
+    await runOn(raw, 'update FCT_Fleet set SystemID = ?, Xcor = ?, Ycor = ?, OrbitBodyID = 0, OrbitLagrangeID = ?, AnchorFleetID = 0 where FleetID = ? and GameID = ?', [point.SystemID, standing.Xcor, standing.Ycor, point.id, fleet, g])
+  }
+
+  await runOn(raw, 'delete from FCT_MoveOrders where GameID = ? and FleetID in (?, ?, ?)', [g, park, ordered, apart])
+
+  for (const [index, body] of bodies.entries()) {
+    await runOn(raw, "insert into FCT_MoveOrders (MoveOrderID, GameID, RaceID, FleetID, MoveActionID, MoveOrder, StartSystemID, DestinationType, DestinationID, PopulationID, DestinationItemType, DestinationItemID, MaxItems, OrderDelay, OrbDistance, MinDistance, NewSystemID, NewWarpPointID, Description, Arrived) values (?, ?, ?, ?, 2, ?, ?, 2, ?, 0, 0, 0, 0, 0, 0, 0, ?, 0, 'planted', 0)", [ids.order + index, g, r, ordered, index + 1, point.SystemID, body.id, point.SystemID])
+  }
+
+  await runOn(raw, 'insert into FCT_Waypoint (WaypointID, GameID, RaceID, SystemID, OrbitBodyID, OrbitLagrangeID, Xcor, Ycor) values (?, ?, ?, ?, 0, ?, ?, ?)', [ids.waypoint, g, r, point.SystemID, point.id, at.Xcor, at.Ycor])
+  await runOn(raw, 'insert into FCT_Wrecks (WreckID, GameID, SystemID, OrbitLagrangeID, Xcor, Ycor) values (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)', [ids.wreck, g, point.SystemID, point.id, at.Xcor, at.Ycor, ids.wreck + 1, g, point.SystemID, point.id, off.Xcor, off.Ycor])
+  await runOn(raw, 'insert into FCT_Lifepods (LifepodID, GameID, SystemID, OrbitLagrangeID, Xcor, Ycor) values (?, ?, ?, ?, ?, ?)', [ids.lifepod, g, point.SystemID, point.id, at.Xcor, at.Ycor])
+  await runOn(raw, 'insert into FCT_MissileSalvo (MissileSalvoID, GameID, RaceID, SystemID, OrbitLagrangeID, Xcor, Ycor) values (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)', [ids.salvo, g, r, point.SystemID, point.id, at.Xcor, at.Ycor, ids.salvo + 1, g, r + 1, point.SystemID, point.id, at.Xcor, at.Ycor])
+
+  return { point, bodies, fleets: { park, ordered, apart }, ids, at, off, where }
+}
+
+// The game's total distance of the move orders to bodies of the fleet's system with no minimum distance, no new warp point and no jump inside the system: the distance from where the fleet is to the destination of the first order and on from each to the next, each destination being where the save has the body, read by queries of its own.
+const orderDistanceOf = async (raw, save, fleet, start) => {
+  const orders = await rowsOf(raw, 'select DestinationID from FCT_MoveOrders where FleetID = ? and GameID = ? order by MoveOrder', fleet, save.gameId)
+  let position = start
+  let total = 0
+
+  for (const { DestinationID } of orders) {
+    const [body] = await rowsOf(raw, 'select Xcor, Ycor from FCT_SystemBody where SystemBodyID = ? and GameID = ?', DestinationID, save.gameId)
+
+    total += Math.hypot(position.Xcor - body.Xcor, position.Ycor - body.Ycor)
+    position = body
+  }
+
+  return total
+}
+
+const sameXY = (position) => ({ Xcor: position.Xcor, Ycor: position.Ycor })
+
+// Independent transcription of the game's orbit update, restricted to the planted eccentric planet and its point. Inputs are queried from the copy, not taken from the app's orbit/arrival adapters. A snapshot applies whole calls then one final update call for the remainder; movement arrivals explicitly request their phase's whole-call time.
+const sourceOrbitOf = async (raw, save, point) => {
+  const [body] = await rowsOf(raw, 'select b.OrbitalDistance as a, b.Bearing as bearing, b.Year as year, b.Eccentricity as e, b.EccentricityDirection as direction, s.Xcor as x, s.Ycor as y from FCT_SystemBody b join FCT_Star s on s.StarID = b.StarID where b.GameID = ? and b.SystemBodyID = ?', save.gameId, point.PlanetID)
+  const [lp] = await rowsOf(raw, 'select Distance as a from FCT_LagrangePoint where GameID = ? and LagrangePointID = ?', save.gameId, point.id)
+  const au = 149600000
+  const xy = (a, bearing) => {
+    const theta = (450 - bearing) * Math.PI / 180
+    const b = a * Math.sqrt(1 - body.e ** 2)
+    const radius = a * b / Math.sqrt((b * Math.cos(theta)) ** 2 + (a * Math.sin(theta)) ** 2)
+    const direction = body.direction * Math.PI / 180
+    const angle = (bearing - 90) * Math.PI / 180 + direction
+
+    return { Xcor: body.x + (a * body.e * Math.cos(direction) + radius * Math.cos(angle)) * au, Ycor: body.y + (a * body.e * Math.sin(direction) + radius * Math.sin(angle)) * au }
+  }
+
+  return (elapsed, length, atPoint = true) => {
+    let bearing = body.bearing
+
+    for (let remaining = elapsed; remaining > 0; remaining -= Math.min(length, remaining)) {
+      const position = xy(body.a, bearing)
+      const radius = Math.hypot(position.Xcor - body.x, position.Ycor - body.y) / au
+      const ratio = Math.sqrt(2 / radius - 1 / body.a) / Math.sqrt(1 / body.a)
+
+      bearing = ((bearing - 360 * Math.min(length, remaining) / (body.year * 3600) * ratio) % 360 + 360) % 360
+    }
+    return xy(atPoint ? lp.a : body.a, atPoint ? (bearing + 60) % 360 : bearing)
+  }
+}
+
+check('anchor-planted-saves', 'on a copy of each save of the line with objects planted at one of its Lagrange points, read by the real loaders: a fleet parked there is placed at the point\'s position at the save\'s time and stays with it after every whole call, its route\'s distance and time are the sum the game makes of its move orders, a waypoint, a wreck, a life pod and a missile salvo at the point ride it, and what stands apart, or is another race\'s, does not; and Route Finder, Transport and Hauling take the anchored positions as they take the point\'s', async (w) => {
+  const modules = await w.modules()
+  const rp = modules['route-position']
+  const orbit = modules['orbit-propagation']
+  const planner = modules['route-plan']
+  const graph = modules['jump-graph']
+  const routes = await w.routes()
+  const transport = await w.transport()
+  const hauling = await w.hauling()
+
+  for (const save of [FIXTURE, PLAYED]) {
+    await onCopy(save, async (raw) => {
+      const label = save.file
+      const plant = await plantOn(raw, save, modules)
+      const { point, bodies, fleets, ids, at, off, where } = plant
+      const database = wrapped(raw)
+      const read = await rp.loadPositionFacts(database, where)
+      const standing = (family, id, place = at) => ({ family, key: `${family}:${id}`, id, name: `${family} ${id}`, SystemID: point.SystemID, Xcor: place.Xcor, Ycor: place.Ycor })
+      const rides = [standing('fleet', fleets.park), standing('waypoint', ids.waypoint), standing('wreck', ids.wreck), standing('lifepod', ids.lifepod), standing('salvo', ids.salvo)]
+      const apart = [standing('fleet', fleets.apart, off), standing('salvo', ids.salvo + 1)]
+      const ordered = standing('fleet', fleets.ordered)
+      const places = bodies.map((body) => ({ family: 'body', key: `body:${body.id}`, id: body.id, name: `body ${body.id}`, SystemID: point.SystemID, Xcor: body.Xcor, Ycor: body.Ycor, group: PICKER_GROUPS[body.BodyClass] }))
+      const orbits = await orbit.loadOrbitFacts(database, where, [...rides, ...apart, ordered, ...places])
+      const facts = { ...read, orbits }
+      const call = read.clock.subPulseLength
+      const pointPlace = { family: 'lagrange-point', key: `lagrange:${point.id}`, id: point.id, name: null, SystemID: point.SystemID, Xcor: point.Xcor, Ycor: point.Ycor }
+
+      assert.deepEqual(asJson(read.problems), [], `${label}: the planted save reads whole`)
+      assert.deepEqual(asJson(orbits.problems), [], `${label}: and so do its orbits`)
+
+      // What carries what, by the one rule.
+      assert.deepEqual([read.fleets[fleets.park], read.fleets[fleets.ordered]].map((one) => [one.riding === true, one.point]), [[true, point.id], [true, point.id]], `${label}: the fleets at the point ride it`)
+      assert.ok(!read.fleets[fleets.apart].riding && !read.fleets[fleets.apart].pointInconsistent, `${label}: the fleet that references it and stands apart does not`)
+      assert.deepEqual([read.waypoints[ids.waypoint], read.wrecks[ids.wreck], read.lifepods[ids.lifepod], read.salvos[ids.salvo]].map((one) => [one.riding, one.point]), [[true, point.id], [true, point.id], [true, point.id], [true, point.id]], `${label}: a waypoint, a wreck, a life pod and a salvo at the point ride it`)
+      assert.equal(read.wrecks[ids.wreck + 1].riding, true, `${label}: a displaced wreck is selected by its point reference`)
+      assert.equal(read.salvos[ids.salvo + 1], undefined, `${label}: a salvo of another race is not read`)
+      assert.deepEqual(Object.keys(orbits.points).map(Number), [point.id], `${label}: the orbit of the point is read, though no page asked for it`)
+
+      // At the save's time the object is where the point is; after each whole call it is where the point's own record puts the point.
+      rides.forEach((object) => {
+        const record = rp.positionRecord(object, { facts, adapters: rp.ADAPTERS, at: read.clock.gameTime })
+
+        assert.deepEqual({ ...record.position }, { SystemID: point.SystemID, ...at }, `${label}, ${object.key}: placed at the point's position at the save's time`)
+        assert.deepEqual({ ...record.anchor }, { point: point.id }, `${label}, ${object.key}: states the point it rides`)
+        assert.ok(record.supported && !record.conditions.includes('wreck-orbit-tie') && !record.conditions.includes('drift-unobserved') && !record.conditions.includes('salvo-unanchored'), `${label}, ${object.key}: held for none of the reasons an unanchored object is`)
+
+        ;[1, 24, 100].forEach((calls) => {
+          const time = read.clock.gameTime + calls * call
+          const found = rp.positionRecord(object, { facts, adapters: rp.ADAPTERS, at: time })
+          const own = rp.positionRecord(pointPlace, { facts, adapters: rp.ADAPTERS, at: time })
+
+          assert.equal(own.basis, 'propagated', `${label}: the point is moved on after ${calls} calls`)
+          assert.equal(found.basis, 'propagated', `${label}, ${object.key}: so is the object after ${calls} calls`)
+          assert.deepEqual(sameXY(found.position), sameXY(own.position), `${label}, ${object.key}: at the point's own position after ${calls} calls`)
+          assert.ok(Math.hypot(found.position.Xcor - at.Xcor, found.position.Ycor - at.Ycor) > 1000, `${label}, ${object.key}: and not at the saved one`)
+        })
+      })
+
+      const leaving = rp.positionRecord(ordered, { facts, adapters: rp.ADAPTERS, at: read.clock.gameTime + 24 * call })
+
+      assert.equal(leaving.basis, 'static', `${label}: a fleet with queued orders may leave the point, so it is held where it is`)
+      assert.equal(leaving.anchor, undefined)
+      assert.ok(leaving.conditions.includes('fleet-orders'))
+
+      apart.forEach((object) => {
+        const found = rp.positionRecord(object, { facts, adapters: rp.ADAPTERS, at: read.clock.gameTime + 24 * call })
+
+        assert.equal(found.basis, 'static', `${label}, ${object.key}: stays at its saved position`)
+        assert.equal(found.anchor, undefined)
+        assert.ok(!found.conditions.includes('propagation-unavailable'), `${label}, ${object.key}: and no motion is refused for it`)
+      })
+
+      // The route of the fleet with orders, and of the one parked at the same point, from there: the distance and the time are the game's sum over the orders.
+      const expected = await orderDistanceOf(raw, save, fleets.ordered, at)
+      const speed = 1000
+      const stopOf = (object) => stop(object.family, object.id, { SystemID: object.SystemID, Xcor: object.Xcor, Ycor: object.Ycor })
+      const bodyStops = places.map((one) => stop('body', one.id, { SystemID: one.SystemID, Xcor: one.Xcor, Ycor: one.Ycor }))
+      const options = { cycle: false, jumpPoints: [], facts }
+
+      assert.ok(expected > 0, `${label}: the planted orders are a flight`)
+      ;[ordered, rides[0]].forEach((fleet) => {
+        const stops = [stopOf(fleet), ...bodyStops]
+        const held = planner.planRoute(stops, options)
+        const flown = planner.planRoute(stops, { ...options, adapters: rp.ADAPTERS, speed })
+
+        assert.ok(Math.abs(held.km - expected) <= 1e-9 * expected, `${label}, ${fleet.key}: the distance of the route is the sum of its orders (${held.km} against ${expected})`)
+        assert.ok(Math.abs(flown.static.km - expected) <= 1e-9 * expected, `${label}, ${fleet.key}: and so is its figure on the saved positions beside the flown one`)
+        assert.deepEqual(sameXY(flown.legs[0].start), at, `${label}, ${fleet.key}: it starts at the point's position at the save's time`)
+        assert.deepEqual(sameXY(flown.legs[0].positions.records.find((record) => record.identity.key === fleet.key).position), at, `${label}, ${fleet.key}: and is placed there`)
+      })
+
+      // Q7 acceptance substitution: there is no stored order distance. The game computes it live and divides by Speed. With orbital movement explicitly off, this saved-order oracle, written from the game's rules, also predicts the actual returned per-leg seconds, not another expression of plan.km.
+      for (const fleet of [ordered, rides[0]]) {
+        const controlled = planner.planRoute([stopOf(fleet), ...bodyStops], { ...options, facts: { ...facts, clock: { ...facts.clock, orbitalMotion: 0 } }, adapters: rp.ADAPTERS, speed })
+        let previous = at
+        let expectedSeconds = 0
+
+        controlled.legs.forEach((leg, index) => {
+          const body = bodies[index]
+          const seconds = Math.hypot(previous.Xcor - body.Xcor, previous.Ycor - body.Ycor) / speed
+
+          assert.ok(Math.abs(leg.seconds - seconds) <= seconds * 1e-9, `${label}, ${fleet.key}: actual leg ${index} seconds match the order/time oracle`)
+          expectedSeconds += seconds
+          previous = body
+        })
+        assert.ok(Math.abs(controlled.legs.reduce((sum, leg) => sum + leg.seconds, 0) - expectedSeconds) <= expectedSeconds * 1e-9, `${label}: actual ETA is the sum of the timed orders`)
+      }
+
+      // Route Finder takes a leg to an anchored fleet as the leg to its point.
+      const searchOptions = { order: 'jumps', lagrangePoints: [] }
+      const route = (stops, extra = {}) => instantiate(routes, { $store: STORE, database: null, GameID: save.gameId, RaceID: save.raceId, data: { loadErrors: loadErrorsOf(null), positionFacts: read, orbitFacts: orbits, plannedStops: stops, stopKeys: stops.map((one) => one.key), placeByKey: Object.fromEntries(stops.map((one) => [one.key, one])), extra: {}, lazyState: {}, legNotes: {}, systemNameOf: (id) => `System ${id}`, pointName: () => 'a point', lagrangeName: () => 'a Lagrange point', jumpPoints: [], lagrangePoints: [], cycle: false, searchOptions, speedResult: SPEED, origin: stops[0], routes: graph.searchRoutes([], [stops[0]], searchOptions), openRoutes: graph.searchRoutes([], [stops[0]], searchOptions), avoidDetails: {}, systems: [{ SystemID: point.SystemID, Name: 'One' }], ...extra } })
+      const pointStop = stop('lagrange', point.id, { SystemID: point.SystemID, Xcor: point.Xcor, Ycor: point.Ycor })
+
+      ;[rides[0], rides[1], rides[2], rides[3]].forEach((object) => {
+        const toObject = route([bodyStops[0], stopOf(object)]).plan
+        const toPoint = route([bodyStops[0], pointStop]).plan
+
+        assert.equal(toObject.legs[0].route.km, toPoint.legs[0].route.km, `${label}, Route Finder, ${object.key}: the leg to it is the leg to its point`)
+        assert.notEqual(toObject.legs[0].route.km, toObject.legs[0].staticKm, `${label}, Route Finder, ${object.key}: not the leg to where it was saved`)
+      })
+
+      // Transport flies a run to an anchored fleet as the run to its point.
+      const trip = { handlingSeconds: 0, stops: [], service: { origin: 0, destination: 0 } }
+      const placeOf = (kind, id, extra) => ({ kind, key: `${kind}:${id}`, name: `${kind} ${id}`, colony: COLONY(), SystemID: point.SystemID, ...extra })
+      const run = (destination) => {
+        const origin = placeOf('body', places[0].id, { Xcor: places[0].Xcor, Ycor: places[0].Ycor })
+        const reach = { route: graph.searchRoutes([], [{ SystemID: point.SystemID, Xcor: origin.Xcor, Ycor: origin.Ycor }], { order: 'jumps' }).toPlace(destination), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
+        const vm = instantiate(transport, { $store: STORE, database: null, GameID: save.gameId, RaceID: save.raceId, data: { loadErrors: loadErrorsOf(null), positionFacts: read, orbitFacts: orbits, handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin, destination, reachOf: () => reach, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })] } })
+
+        return { vm, reach, simulated: vm.simulate(reach, speed, trip) }
+      }
+      const toFleet = run(placeOf('fleet', fleets.park, { Xcor: at.Xcor, Ycor: at.Ycor }))
+      const toLagrange = run(placeOf('lagrange', point.id, { Xcor: point.Xcor, Ycor: point.Ycor }))
+
+      assert.deepEqual(toFleet.vm.orbitEndpoints.map((one) => one.family).sort(), ['body', 'fleet'], `${label}, Transport: the orbit read is asked for an anchored fleet`)
+      assert.ok(toFleet.simulated && toLagrange.simulated, `${label}, Transport: the runs are simulated`)
+      assert.deepEqual(asJson(toFleet.simulated.annual.flights), asJson(toLagrange.simulated.annual.flights), `${label}, Transport: the flights to a fleet at a point are the flights to the point`)
+      assert.ok(toFleet.simulated.first.km.every(Number.isFinite) && toFleet.simulated.first.km[0] !== toFleet.reach.route.km, `${label}, Transport: and not the flights to where it was saved`)
+      assert.deepEqual(asJson(toFleet.simulated.first.km), asJson(toLagrange.simulated.first.km), `${label}, Transport: the first cycle is the first cycle to the point`)
+
+      // Hauling flies a repeating route whose orders go to an anchored object as one whose orders go to its point.
+      const order = (index, kind, destination) => ({ FleetID: 5, OrderDelay: 0, ActionName: 'Move', Jumps: 0, X: destination.Xcor, Y: destination.Ycor, ExitX: destination.Xcor, ExitY: destination.Ycor, ExitSystemID: point.SystemID, SystemID: point.SystemID, DestinationType: kind.type, DestinationID: kind.id, MoveActionID: 2, Description: kind.name, PopName: null, PopulationID: 0, ShuttleCapacity: 0, ServiceNames: null, MoveOrder: index })
+      const sailing = { Speed: 1000 }
+      const handling = { stops: [{ seconds: 0 }, { seconds: 0 }] }
+      const cycleOf = (kind) => instantiate(hauling, { $store: STORE, database: null, GameID: save.gameId, RaceID: save.raceId, data: { loadErrors: loadErrorsOf(null), positionFacts: read, orbitFacts: orbits, handlingSupport: FULL_OFFICERS, fleets: [], orders: [], fleetShips: [HAULER({ FleetSpeed: 300, UseMaximumSpeed: 0 })], formulaVersion: '3.2.x', plan: { hauls: [], unmet: [] }, freighters: [HAULER({ Ships: 2 })], shuttleTechnology: 1.5, mineralDeliveries: {} } }).simulateRoute([order(1, kind, kind.at), order(2, { type: 2, id: places[0].id, name: 'body' }, places[0])], sailing, handling, {})
+      const pointCycle = cycleOf({ type: 12, id: point.id, name: 'point', at })
+
+      assert.ok(pointCycle && pointCycle.first.km.every(Number.isFinite), `${label}, Hauling: the route to the point is flown`)
+
+      const staticKm = Math.hypot(at.Xcor - places[0].Xcor, at.Ycor - places[0].Ycor)
+
+      assert.ok(pointCycle.first.km.some((km) => Math.abs(km - staticKm) > 1), `${label}, Hauling: a flight to where the point is by then is not the flight to where it was saved`)
+      ;[['waypoint', 5, ids.waypoint], ['wreck', 8, ids.wreck], ['lifepod', 7, ids.lifepod], ['fleet', 10, fleets.park]].forEach(([family, type, id]) => {
+        const cycle = cycleOf({ type, id, name: family, at })
+
+        assert.deepEqual(asJson(cycle.first.km), asJson(pointCycle.first.km), `${label}, Hauling: a route whose order goes to a ${family} at the point flies as the route to the point`)
+        assert.deepEqual(asJson(cycle.annual.flights), asJson(pointCycle.annual.flights), `${label}, Hauling: and so does its year`)
+      })
+    })
+  }
+})
+
+check('anchor-waited-visitors', 'real Hauling cycles on both planted copies leave a point-only waypoint visitor at arrival through nonzero waits and delays across orbital calls in both modes; a body arrival assigns an orbit and carries its visitor', async (w) => {
+  const modules = await w.modules()
+  const rp = modules['route-position']
+  const orbit = modules['orbit-propagation']
+  const hauling = await w.hauling()
+
+  for (const save of [FIXTURE, PLAYED]) {
+    await onCopy(save, async (raw) => {
+      const { point, ids, fleets, where, at } = await plantOn(raw, save, modules)
+      const sourceAt = await sourceOrbitOf(raw, save, point)
+      const database = w.caches.hauling().cacheQueries(wrapped(raw))
+      const read = await rp.loadPositionFacts(database, where)
+      const fixed = { family: 'waypoint', id: ids.waypoint + 10, key: `waypoint:${ids.waypoint + 10}`, SystemID: point.SystemID, Xcor: at.Xcor + 1e6, Ycor: at.Ycor }
+      const waypoint = { family: 'waypoint', id: ids.waypoint, key: `waypoint:${ids.waypoint}`, SystemID: point.SystemID, ...at }
+      const wreck = { family: 'wreck', id: ids.wreck, key: `wreck:${ids.wreck}`, SystemID: point.SystemID, ...at }
+      const fleet = { family: 'fleet', id: fleets.park, key: `fleet:${fleets.park}`, SystemID: point.SystemID, ...at }
+      const orbits = await orbit.loadOrbitFacts(database, where, [waypoint])
+      const owner = orbits.bodies[point.PlanetID]
+      const body = { family: 'body', id: point.PlanetID, key: `body:${point.PlanetID}`, SystemID: point.SystemID, Xcor: owner.xcor, Ycor: owner.ycor }
+      const speed = 1e8
+      const orderOf = (index, endpoint, delay, action = 2) => ({ FleetID: 5, OrderDelay: delay, ActionName: 'Move', Jumps: 0, X: endpoint.Xcor, Y: endpoint.Ycor, ExitX: endpoint.Xcor, ExitY: endpoint.Ycor, ExitSystemID: point.SystemID, SystemID: point.SystemID, DestinationType: { body: 2, waypoint: 5, wreck: 8, fleet: 10 }[endpoint.family], DestinationID: endpoint.id, MoveActionID: action, Description: endpoint.key, PopName: null, PopulationID: 0, ShuttleCapacity: 0, ServiceNames: null, MoveOrder: index })
+
+      for (const mode of [1, 0]) {
+        const length = 1800
+        const clock = { ...read.clock, orbitalMotion: 1, orbitalMovementInSubPulse: mode, subPulseLength: length, incrementLength: length }
+        const positionFacts = { ...read, clock, waypoints: { ...read.waypoints, [fixed.id]: { orbit: 0, point: 0 } } }
+        const vm = instantiate(hauling, { $store: STORE, database, GameID: save.gameId, RaceID: save.raceId, data: { loadErrors: loadErrorsOf(null), positionFacts, orbitFacts: orbits, handlingSupport: FULL_OFFICERS, fleets: [], orders: [], fleetShips: [HAULER()], formulaVersion: '3.2.x', plan: { hauls: [], unmet: [] }, freighters: [HAULER()], shuttleTechnology: 1.5, mineralDeliveries: {} } })
+
+        // The harness reevaluates computed getters on every read; retain the same position-read identity that Vue caches until its inputs change.
+        const positionRead = vm.positionRead
+
+        vm.positionRead = positionRead
+
+        for (const [wait, delay] of [[length * 2.5, 0], [0, length * 2.5], [length, length * 2]]) {
+          // Nonzero-time Salvage (107) copies wreck associations. The game copies stationary fleet associations for all nine listed actions, including the three ordnance-hub actions.
+          for (const [destination, action, carries] of [[waypoint, 2, false], [body, 2, true], [wreck, 107, wait > 0], [wreck, 151, false], [fleet, 2, false], ...[191, 192, 194, 210, 224, 230, 231, 233, 234].map((action) => [fleet, action, true])]) {
+            const sourceArrival = mode ? sourceAt(length, length, destination !== body) : destination
+            const firstKm = Math.hypot(sourceArrival.Xcor - fixed.Xcor, sourceArrival.Ycor - fixed.Ycor)
+            const arrivalTime = firstKm / speed
+            const leaveTime = arrivalTime + wait + delay
+            const sourceDeparture = carries ? sourceAt(leaveTime, length, destination !== body) : sourceArrival
+            const returnKm = Math.hypot(sourceDeparture.Xcor - fixed.Xcor, sourceDeparture.Ycor - fixed.Ycor)
+            const result = vm.simulateRoute([orderOf(1, fixed, delay), orderOf(2, destination, 0, action)], { Speed: speed }, { stops: [{ seconds: 0 }, { seconds: wait }] }, {})
+            const label = `${save.file}, mode ${mode}, ${destination.family}, action ${action}, wait ${wait}, delay ${delay}`
+
+            assert.ok(result, `${label}: real page returns a cycle`)
+            assert.ok(Math.abs(result.first.km[0] - firstKm) < 1e-4, `${label}: arrival uses the game's movement phase`)
+            assert.ok(Math.abs(result.first.km[1] - returnKm) < 1e-4, `${label}: departure follows the visitor association, not the destination's motion`)
+            assert.ok(Math.abs(result.first.seconds - (firstKm / speed + wait + delay + returnKm / speed)) < 1e-4, `${label}: actual cycle seconds include the departure in the game's order`)
+            if (!carries) {
+              const wronglyCarried = sourceAt(leaveTime, length)
+
+              assert.ok(Math.abs(returnKm - Math.hypot(wronglyCarried.Xcor - fixed.Xcor, wronglyCarried.Ycor - fixed.Ycor)) > 1, `${label}: carrying the visitor would change its departure`)
+            }
+          }
+        }
+        for (const destination of [wreck, fleet]) {
+          const unread = vm.simulateRoute([orderOf(1, fixed, 0), orderOf(2, destination, 0, null)], { Speed: speed }, { stops: [{ seconds: 0 }, { seconds: length * 2.5 }] }, {})
+
+          assert.ok(unread.annual.reasons.includes('visitor-association-unread'), `${save.file}, mode ${mode}, ${destination.family}: unread arrival action is disclosed, not assumed`)
+          assert.ok(unread.first.positions.conditions.some((condition) => condition.code === 'visitor-association-unread'), 'the first cycle also discloses the unknown visitor association')
+        }
+      }
+    })
+  }
+})
+
+check('anchor-pages', 'each page asks for the orbit of what a Lagrange point may carry: Route Finder, Transport and Hauling list the fleets, waypoints, wrecks, life pods and salvos of their stops and orders with the bodies and points, and not a contact', async (w) => {
+  const modules = await w.modules()
+  const rp = modules['route-position']
+  const graph = modules['jump-graph']
+  const families = ['body', 'colony', 'fleet', 'lagrange-point', 'lifepod', 'salvo', 'waypoint', 'wreck']
+
+  assert.deepEqual([...rp.ORBIT_FAMILIES].sort(), families, 'the families whose orbits are read')
+
+  // Route Finder
+  const routes = await w.routes()
+  const stops = [stop('colony', 7), stop('fleet', 13), stop('waypoint', 38), stop('wreck', 61), stop('lifepod', 62), stop('contact', 9), stop('body', 3), stop('jump', 11)]
+  const searchOptions = { order: 'jumps', lagrangePoints: LAGRANGE }
+  const finder = instantiate(routes, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, plannedStops: stops, stopKeys: stops.map((one) => one.key), placeByKey: Object.fromEntries(stops.map((one) => [one.key, one])), extra: {}, lazyState: {}, legNotes: {}, systemNameOf: (id) => `System ${id}`, pointName: () => 'a point', lagrangeName: () => 'a Lagrange point', jumpPoints: LINKS, lagrangePoints: LAGRANGE, cycle: false, searchOptions, speedResult: SPEED, origin: stops[0], routes: graph.searchRoutes(LINKS, [stops[0]], searchOptions), openRoutes: graph.searchRoutes(LINKS, [stops[0]], searchOptions), avoidDetails: {}, systems: [{ SystemID: 1, Name: 'One' }, { SystemID: 2, Name: 'Two' }] } })
+
+  assert.deepEqual(finder.orbitEndpoints.filter((one) => one.family !== 'lagrange-point').map((one) => one.key).sort(), ['body:3', 'colony:7', 'fleet:13', 'lifepod:62', 'waypoint:38', 'wreck:61'], 'Route Finder asks for its anchorable stops, and not a contact or a jump point')
+
+  // Transport
+  const transport = await w.transport()
+  const place = (kind, id) => ({ kind, key: `${kind}:${id}`, name: `${kind} ${id}`, colony: COLONY(), SystemID: 1, Xcor: 10, Ycor: 5 })
+  const viewOf = (origin, destination) => instantiate(transport, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, handlingSupport: FULL_OFFICERS, formulaVersion: '3.2.x', origin, destination, reachOf: () => ({ route: null }), fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [HAULER()] } })
+
+  ;['fleet', 'waypoint', 'wreck', 'lifepod'].forEach((kind) => {
+    assert.deepEqual(viewOf(place('colony', 7), place(kind, 13)).orbitEndpoints.map((one) => one.family).sort(), ['colony', kind].sort(), `Transport asks for the orbit of a ${kind} destination`)
+  })
+  assert.deepEqual(viewOf(place('colony', 7), place('contact', 9)).orbitEndpoints.map((one) => one.family), ['colony'], 'and not of a contact')
+
+  // Hauling
+  const hauling = await w.hauling()
+  const order = (type, id, extra = {}) => ({ FleetID: 5, OrderDelay: 0, ActionName: 'Move', Jumps: 0, X: 1, Y: 1, ExitX: 1, ExitY: 1, ExitSystemID: 1, SystemID: 1, DestinationType: type, DestinationID: id, MoveActionID: 2, Description: `order ${type}`, PopName: null, PopulationID: 0, ShuttleCapacity: 0, ServiceNames: null, MoveOrder: id, ...extra })
+  const hauler = instantiate(hauling, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionFacts: FACTS, handlingSupport: FULL_OFFICERS, fleets: [], orders: [order(5, 38), order(8, 61), order(7, 62), order(10, 13), order(6, 9)], fleetShips: [HAULER()], formulaVersion: '3.2.x', plan: { hauls: [], unmet: [] }, freighters: [HAULER()], shuttleTechnology: 1.5, mineralDeliveries: {} } })
+
+  assert.deepEqual([...new Set(hauler.orbitEndpoints.map((one) => one.key))].sort(), ['fleet:13', 'lifepod:62', 'waypoint:38', 'wreck:61'], 'Hauling asks for the orbit of an order\'s destination that a point may carry, and not of a contact')
+})
+
+check('anchor-lagrange-mode', 'Route Finder shows the Lagrange mode of the route\'s fleet beside its route options, the game\'s own name for it (Manual, Plotted or Dynamic) with what it does to the route\'s orders and whether the fleet rides a point, and shows nothing for a route with no fleet, with the facts not read or for a fleet the facts lack', async (w) => {
+  const modules = await w.modules()
+  const rp = modules['route-position']
+  const graph = modules['jump-graph']
+  const routes = await w.routes()
+  const searchOptions = { order: 'jumps', lagrangePoints: LAGRANGE }
+  const facts = { ...FACTS, fleets: { ...FACTS.fleets, 13: { ...FACTS.fleets[13], riding: true }, 5: { ...FACTS.fleets[5], mode: 'manual', point: 0 }, 7: { ...FACTS.fleets[7], mode: 'dynamic', point: 0 }, 9: { lastMoveTime: 960000, following: false, orders: 0, anchor: 0, mode: 'dynamic', point: 0 }, 10: { ...FACTS.fleets[5], mode: null, point: 0 } } }
+  const fleetStop = (id, name) => stop('fleet', id, { name: `${name} (place)`, fleet: { FleetID: id, FleetName: name } })
+  const mars = stop('colony', 7, { name: 'Mars' })
+  const view = (routeFleet, positionFacts, stops) => instantiate(routes, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(positionFacts ? null : undefined), positionFacts, routeFleet, plannedStops: [mars], stopKeys: [mars.key], placeByKey: Object.fromEntries(stops.map((one) => [one.key, one])), extra: {}, lazyState: {}, legNotes: {}, systemNameOf: (id) => `System ${id}`, pointName: () => 'a point', lagrangeName: () => 'a Lagrange point', jumpPoints: LINKS, lagrangePoints: LAGRANGE, cycle: false, searchOptions, speedResult: SPEED, origin: mars, routes: graph.searchRoutes(LINKS, [mars], searchOptions), openRoutes: graph.searchRoutes(LINKS, [mars], searchOptions), avoidDetails: {}, systems: [{ SystemID: 1, Name: 'One' }, { SystemID: 2, Name: 'Two' }] } })
+  const places = [fleetStop(13, 'Rider'), fleetStop(5, 'Idle'), fleetStop(7, 'Busy'), fleetStop(15, 'Left')]
+
+  // The words, from the record of the fleet.
+  const words = (id) => rp.lagrangeWords(rp.positionRecord({ family: 'fleet', key: `fleet:${id}`, id, name: 'f', SystemID: 1, Xcor: 1, Ycor: 1 }, { facts }))
+  const rider = words(13)
+  const manual = words(5)
+  const dynamic = words(7)
+  const free = words(9)
+
+  assert.equal(rider.mode, 'Plotted', 'the mode is the game\'s LagrangeStatus')
+  assert.equal(rider.riding, true)
+  assert.ok(/take Lagrange jumps/.test(rider.text) && /rides a Lagrange point/.test(rider.text), 'a Plotted fleet\'s orders take Lagrange jumps, and the fleet rides a point')
+  assert.equal(manual.mode, 'Manual')
+  assert.ok(/take no Lagrange jumps/.test(manual.text) && !manual.riding && !/rides a Lagrange point/.test(manual.text), 'a Manual fleet\'s orders take none, and it rides nothing')
+  assert.equal(dynamic.mode, 'Dynamic')
+  assert.ok(/only while none is queued/.test(dynamic.text) && /some are/.test(dynamic.text), 'a Dynamic fleet with queued orders takes none, and says some are queued')
+  assert.equal(rp.lagrangeWords(null), null)
+  assert.ok(/and none is\./.test(free.text), 'a Dynamic fleet with nothing queued takes them, and says none is')
+  assert.equal(rp.lagrangeWords({}), null, 'a record with no Lagrange facts has none to show')
+  assert.equal(words(10).mode, null, 'a mode the save does not record is not guessed')
+  assert.ok(/does not record/.test(words(10).text))
+
+  // The page, in the Options panel's own element.
+  const nodes = elementsOf(templateOf(w.text.routesPage, 'routes.vue'))
+  const [block] = nodes.filter((node) => node.attrsList.some((attr) => attr.name === 'data-fleet-lagrange'))
+  const [note] = nodes.filter((node) => node.attrsList.some((attr) => attr.name === 'data-fleet-lagrange-text'))
+  const shown = (vm) => {
+    const scope = new Proxy({}, { has: (_target, key) => key === '_s' || (typeof key === 'string' && key in vm), get: (_target, key) => (key === '_s' ? (value) => (value === null || value === undefined ? '' : String(value)) : typeof key === 'symbol' ? undefined : vm[key]) })
+
+    const on = Boolean(evaluated(block.if, scope))
+    const words = (node) => node.children.map((child) => (child.type === 2 ? evaluated(child.expression, scope) : child.text)).join('')
+
+    return { block: on, line: on ? words(block.children[0]) : null, note: on ? words(note) : null }
+  }
+
+  assert.ok(block && note, 'the panel has the block and its text')
+  assert.ok(block.parent && elementsOf(block.parent).some((node) => node.tag === 'v-checkbox'), 'beside the route options the panel holds')
+
+  const riderView = view('fleet:13', facts, places)
+  const shownRider = shown(riderView)
+
+  assert.deepEqual({ ...riderView.routeFleetLagrange }, { name: 'Rider', mode: 'Plotted', text: rider.text, riding: true })
+  assert.equal(shownRider.block, true)
+  assert.equal(shownRider.line, 'Lagrange mode of Rider: Plotted')
+  assert.equal(shownRider.note, rider.text)
+  assert.equal(shown(view('fleet:5', facts, places)).line, 'Lagrange mode of Idle: Manual', 'the fleet the route is for, not another')
+  assert.equal(shown(view('fleet:7', facts, places)).note, dynamic.text)
+  assert.equal(view(null, facts, places).routeFleetLagrange, null, 'no fleet, nothing shown')
+  assert.equal(shown(view(null, facts, places)).block, false)
+  assert.equal(view('fleet:13', undefined, places).routeFleetLagrange, null, 'the facts not in, nothing shown')
+  assert.equal(shown(view('fleet:13', undefined, places)).block, false)
+  assert.equal(shown(view('fleet:10', facts, [...places, fleetStop(10, 'Unread')])).line, 'Lagrange mode of Unread: not recorded', 'a mode the save does not record is said so')
+  assert.equal(view('fleet:13', { ...facts, fleets: {} }, places).routeFleetLagrange, null, 'a fleet the facts lack has nothing to show')
+  assert.equal(view('fleet:13', facts, places.map((one) => ({ ...one, fleet: undefined }))).routeFleetLagrange, null, 'a place that is not a fleet row, nothing')
+})
+
 // ---- Faults ----------------------------------------------------------------------------------------------------------
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const AGE = 'let age = gameClock && isTime(state.observedAt) ? gameClock.gameTime - state.observedAt : null'
 
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
-  ['an age is not worked out', 'position', AGE, 'let age = gameClock && isTime(state.observedAt) ? 0 : null', ['static-baseline', 'legs-own-age']],
+  ['an age is not worked out', 'position', AGE, 'let age = gameClock && isTime(state.observedAt) ? 0 : null', ['legs-own-age']],
   ['an age that is not read is 0', 'position', AGE, 'let age = gameClock && isTime(state.observedAt) ? gameClock.gameTime - state.observedAt : 0', ['clock-unread']],
   ['a position dated after the game time still has an age', 'position', 'if (age !== null && age < 0) {', 'if (false) {', ['clock-unread']],
   ['queued orders are not said', 'position', 'if (found.orders > 0) {', 'if (false) {', ['legs-own-age']],
   ['a fleet with orders is taken as idle', 'position', 'moves: mayMove ? null : isTime(found.lastMoveTime) ? false : null', 'moves: false', ['legs-own-age']],
   ['a contact is not dated by its last update', 'position', 'observedAt: isTime(endpoint.lastUpdate) ? endpoint.lastUpdate : null, moves: null, assumption: \'contact-held\'', 'observedAt: null, moves: null, assumption: \'contact-held\'', ['legs-own-age']],
   ['a contact seen earlier is supported', 'position', ' && !conditions.includes(\'stale-contact\')', '', ['legs-own-age']],
-  ['a fleet at its body\'s position takes the fleet clock', 'position', 'return { clock: \'body\', observedAt: bodyClockOf(facts) ? facts.clock.lastGrowthTime : null, moves: mayMove', 'return { clock: \'fleet\', observedAt: bodyClockOf(facts) ? facts.clock.lastGrowthTime : null, moves: mayMove', ['legs-own-age']],
+  ['a fleet at its body\'s position takes the fleet clock', 'position', 'return { clock: \'body\', observedAt: bodyClockOf(facts) ? facts.clock.gameTime : null, moves: mayMove', 'return { clock: \'fleet\', observedAt: bodyClockOf(facts) ? facts.clock.gameTime : null, moves: mayMove', ['legs-own-age']],
   ['an unrecorded motion switch is taken as moving', 'position', 'if (moves === null && clock) {', 'if (false) {', ['motion-switch']],
   ['a switch that is off is taken as moving', 'position', 'const planets = switchOf(clock && clock.orbitalMotion)', 'const planets = switchOf(clock && clock.orbitalMotion) === false ? true : switchOf(clock && clock.orbitalMotion)', ['motion-switch']],
   ['a life pod is supported', 'position', 'spec.supported !== false', 'true', ['motion-switch']],
   ['the gate ignores the adapters', 'position', 'typeof adapters[family] === \'function\' ? POSITION_BASIS.PROPAGATED : POSITION_BASIS.STATIC', 'POSITION_BASIS.STATIC', ['gate-adapter']],
   ['a failing adapter is not said', 'position', 'const kept = [...new Set([...base.conditions, \'propagation-unavailable\', ...(found && Array.isArray(found.reasons) ? found.reasons : [])])]', 'const kept = base.conditions', ['gate-adapter']],
-  ['a failing adapter leaves the record propagated', 'position', 'return Object.freeze({ ...base, conditions: kept, unknown: true })', 'return Object.freeze({ ...base, basis: POSITION_BASIS.PROPAGATED, conditions: kept, unknown: true })', ['gate-adapter']],
+  ['a failing adapter leaves the record propagated', 'position', 'return Object.freeze({ ...base, conditions: kept, ...(found && found.details ? { details: found.details } : {}), unknown: true })', 'return Object.freeze({ ...base, basis: POSITION_BASIS.PROPAGATED, conditions: kept, unknown: true })', ['gate-adapter']],
   ['an adapter lifts what is not supported', 'position', 'supported: supported && found.supported !== false', 'supported: found.supported !== false', ['gate-adapter']],
   ['the mode is always static', 'position', 'return propagated === 0 ? ROUTE_MODE.STATIC : propagated === subjects.length ? ROUTE_MODE.PROPAGATED : ROUTE_MODE.MIXED', 'return ROUTE_MODE.STATIC', ['gate-adapter']],
   ['a place that never moves takes part in the mode whatever an adapter did for it', 'position', 'const subjects = records.filter((record) => record.moves !== false && !record.departure)', 'const subjects = records.filter((record) => (record.moves !== false || record.basis === POSITION_BASIS.PROPAGATED) && !record.departure)', ['gate-adapter']],
-  ['a switch that is off leaves an asteroid undecided', 'position', 'const moves = planets === false || group === \'static\' ? false : group', 'const moves = group === \'static\' ? false : group', ['motion-switch']],
-  ['an adapter that throws takes the route down', 'position', '} catch (error) {\n      found = null\n    }', '} catch (error) {\n      throw error\n    }', ['gate-adapter']],
+  ['a switch that is off leaves a body undecided', 'position', 'const moves = planets === false || group === \'static\' ? false : kindGroup(group) === \'unknown\' ? null : planets', 'const moves = group === \'static\' ? false : planets === false ? null : kindGroup(group) === \'unknown\' ? null : planets', ['motion-switch']],
+  ['a throwing adapter is reported propagated', 'position', '} catch (error) {\n      found = null\n    }', '} catch (error) {\n      found = { position: base.position, observedAt: base.observedAt, conditions: [] }\n    }', ['gate-adapter']],
   ['a position ahead of the game reads as its size', 'position', 'return seconds < 0 ? `${durationText(-seconds)} ahead` : durationText(seconds)', 'return durationText(Math.abs(seconds))', ['gate-adapter']],
   ['a position ahead of the game reads as current', 'position', '} else if (seconds === 0) {', '} else if (seconds <= 0) {', ['gate-adapter']],
   ['a fleet orbiting a body with no position follows it by default', 'position', 'when FCT_Fleet.OrbitBodyID > 0 and exists (select 1 from FCT_SystemBody where FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID and (FCT_SystemBody.Xcor is null or FCT_SystemBody.Ycor is null)) then null ', '', ['loader-schema']],
@@ -2719,7 +3432,7 @@ const FAULTS = [
   ['a Lagrange point is not keyed', 'position', 'key: point.LagrangePointID ? place.lagrange(point.LagrangePointID) : `lagrange:${point.SystemID}:${point.Xcor}:${point.Ycor}`', 'key: `lagrange:${point.SystemID}`', ['same-gate']],
   ['a caveat is stated with nothing to caveat', 'position', 'if (!result || !positions || !positions.caveat) {', 'if (!result || !positions) {', ['result-caveat']],
   ['an unavailable result is raised to an estimate', 'position', 'if (result.status === \'unavailable\') {', 'if (false) {', ['result-caveat']],
-  ['a result keeps its status', 'position', 'status: weakestStatus([result.status, \'estimated\'])', 'status: result.status', ['result-caveat', 'same-gate']],
+  ['a result is only assumed on uncertain positions', 'position', 'status: weakestStatus([result.status, \'estimated\'])', "status: 'assumed'", ['result-caveat', 'same-gate']],
   ['what is missing is not named', 'position', 'inputs: { present: result.inputs.present, missing: [...result.inputs.missing, ...positions.missing] }', 'inputs: { present: result.inputs.present, missing: result.inputs.missing }', ['result-caveat', 'same-gate']],
   ['a fleet is found by the wrong key', 'position', 'facts.fleets ? facts.fleets[endpoint.id] : null', 'facts.fleets ? facts.fleets[endpoint.key] : null', ['legs-own-age']],
   ['a fleet beside its body follows it', 'position', ' and FCT_SystemBody.Ycor = FCT_Fleet.Ycor', '', ['loader-schema']],
@@ -2732,7 +3445,7 @@ const FAULTS = [
   ['the plan caveats its jumps', 'plan', 'jumps: made(\'route.jumps\', plan.jumps)', 'jumps: withPositions(made(\'route.jumps\', plan.jumps), plan.positions)', ['result-caveat', 'pages-routes']],
   ['a leg leaves out the Lagrange points it jumps between', 'plan', ', ...viaEndpoints(route)], { facts, adapters: NO_ADAPTERS })', '], { facts, adapters: NO_ADAPTERS })', ['same-gate']],
   ['a leg is not given the facts', 'plan', ', ...viaEndpoints(route)], { facts, adapters: NO_ADAPTERS })', ', ...viaEndpoints(route)], { adapters: NO_ADAPTERS })', ['same-gate']],
-  ['a leg is given the adapters the plan was handed', 'plan', '{ facts, adapters: NO_ADAPTERS })', '{ facts, adapters })', ['same-gate']],
+  ['a leg is given the adapters the plan was handed', 'plan', 'const held = walkPlan(stops, { cycle, jumpPoints, facts, options, timing, flight: null })', 'const held = walkPlan(stops, { cycle, jumpPoints, facts, options, timing, flight: flightOf({ facts, adapters, speed }) })', ['same-gate']],
   ['the plan states only its first leg', 'plan', 'summarisePositions(legs.flatMap((leg) => (leg.positions ? leg.positions.records : [])), { merge: true })', 'summarisePositions(legs.slice(0, 1).flatMap((leg) => (leg.positions ? leg.positions.records : [])), { merge: true })', ['same-gate']],
   ['a running distance leaves out the positions', 'plan', 'value: total, inputs: { present: ROUTE_INPUTS } }), positions)', 'value: total, inputs: { present: ROUTE_INPUTS } }))', ['same-gate', 'result-caveat']],
   ['a distance leaves out the positions', 'plan', ': unavailable({ rule: \'route.distanceKm\', missing: [missing] }), positions)', ': unavailable({ rule: \'route.distanceKm\', missing: [missing] }))', ['same-gate', 'result-caveat']],
@@ -2745,7 +3458,7 @@ const FAULTS = [
   ['Transport does not label the read', 'transportPage', '  ...POSITION_LABELS,\n', '', ['optional-read']],
   ['Transport waits for the read', 'transportPage', '...POSITION_INPUTS', '', ['optional-read']],
   ['Hauling spends an order\'s delay after the arrival', 'haulingPage', 'delay: order.OrderDelay || 0, wait: handling.stops[index].seconds }', 'wait: handling.stops[index].seconds + (order.OrderDelay || 0) }', ['pages-hauling']],
-  ['Hauling keeps a route simulation without the delay', 'haulingPage', 'hop.leave.key, hop.delay, hop.wait', 'hop.leave.key, hop.wait', ['pages-hauling']],
+  ['Hauling keeps a route simulation without the delay', 'haulingPage', 'hop.leave.key, hop.action, hop.delay, hop.wait', 'hop.leave.key, hop.action, hop.wait', ['pages-hauling']],
   ['Hauling keeps a haul simulation without its path', 'haulingPage', 'route.km, pathKey(steps), wait(\'origin\')', 'route.km, wait(\'origin\')', ['pages-hauling']],
   ['Transport keeps a run simulation without its path', 'transportPage', 'reach.route.km, path, this.useLagrange', 'reach.route.km, this.useLagrange', ['pages-transport']],
   ['Hauling\'s delivery total keeps the first fleet\'s record of a stop', 'haulingPage', 'summarisePositions(records, { merge: true })', 'summarisePositions(records)', ['pages-hauling-mixed']],
@@ -2774,36 +3487,36 @@ const FAULTS = [
   ['a year in which nothing moves has a comparison', 'plan', 'compared: status === \'propagated\' || unmoved,', 'compared: true,', ['pages-endpoint-matrix']],
   ['a year of places that never move is capped', 'plan', 'const capped = everything.some((record) => record.moves !== false) && cycles.length', 'const capped = cycles.length', ['pages-endpoint-matrix']],
   ['a refusal at a place that never moves counts', 'plan', 'record.basis !== POSITION_BASIS.PROPAGATED && !record.departure && record.moves !== false', 'record.basis !== POSITION_BASIS.PROPAGATED && !record.departure', ['pages-endpoint-matrix']],
-  ['a place that never moves states a refusal', 'position', '    if (base.moves === false) {\n      return Object.freeze({ ...base, unknown: base.conditions.length > 0 })\n    }\n\n', '', ['pages-endpoint-matrix']],
+  ['a place that never moves states a refusal', 'position', '    if (base.moves === false && !base.anchor) {\n      return Object.freeze({ ...base, unknown: base.conditions.length > 0 })\n    }\n\n', '', ['pages-endpoint-matrix']],
   ['a place that never moves is a propagated group', 'position', 'supported: supported && found.supported !== false, conditions: lasting, unknown: lasting.length > 0, assumption: base.moves === false ? base.assumption : \'propagated\' })', 'supported: supported && found.supported !== false, conditions: lasting, unknown: lasting.length > 0, assumption: \'propagated\' })', ['pages-endpoint-matrix']],
   ['a place that never moves is a departure group', 'position', 'assumption: base.moves === false ? base.assumption : \'departure\', departure: true })', 'assumption: \'departure\', departure: true })', ['pages-endpoint-matrix']],
   ['Transport states a comparison for a year in which nothing moves (class row)', 'transportPage', '}))), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ?', '}))), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation ?', ['pages-endpoint-matrix']],
   ['Transport states a comparison for a year in which nothing moves (fleet row)', 'transportPage', 'participantRows(profile, known ? trip : null), statusSort: works ? 0 : 1, simulation, propagation: timed && known && simulation && simulation.annual.compared ?', 'participantRows(profile, known ? trip : null), statusSort: works ? 0 : 1, simulation, propagation: timed && known && simulation ?', ['pages-endpoint-matrix']],
   ['Hauling states a comparison for a haul in which nothing moves', 'haulingPage', 'if (!positionRead || !timed || (flown && !flown.annual.compared)) {', 'if (!positionRead || !timed) {', ['pages-endpoint-matrix']],
   ['Hauling states a comparison for a route in which nothing moves', 'haulingPage', '    routeNote(simulation, year, held) {\n      if (!simulation.annual.compared) {\n        return \'\'\n      } else if (simulation.annual.status !== \'propagated\') {', '    routeNote(simulation, year, held) {\n      if (simulation.annual.status !== \'propagated\') {', ['pages-endpoint-matrix']],
-  ['an asteroid with its own switch off is unknown', 'position', 'group === \'asteroid\' ? (rocks === false ? false : both)', 'group === \'asteroid\' ? both', ['motion-matrix', 'motion-switch', 'pages-disabled-asteroid', 'pages-endpoint-matrix']],
-  ['a switch that was never read settles an asteroid', 'position', 'group === \'asteroid\' ? (rocks === false ? false : both)', 'group === \'asteroid\' ? (rocks !== true ? false : both)', ['motion-matrix', 'motion-switch']],
+  ['the asteroid switch the save stores gates a body', 'position', 'const planets = switchOf(clock && clock.orbitalMotion)', 'const planets = switchOf(clock && clock.orbitalMotionAst) === false ? false : switchOf(clock && clock.orbitalMotion)', ['motion-matrix', 'motion-switch', 'waypoint-carried', 'lagrange-anchor', 'pages-endpoint-matrix']],
+  ['a body is unknown while the asteroid switch the save stores was never read', 'position', 'const planets = switchOf(clock && clock.orbitalMotion)', 'const planets = switchOf(clock && clock.orbitalMotionAst) === null ? null : switchOf(clock && clock.orbitalMotion)', ['motion-matrix', 'motion-switch']],
   ['a Lagrange point ignores the body it rides', 'orbit', 'endpoint.family === \'lagrange-point\' ? ((orbits.points || {})[endpoint.id] || {}).planetId : endpoint.id', 'endpoint.id', ['motion-matrix']],
-  ['a body of unread orbits is a planet when the picker calls it an asteroid or names no group', 'position', "!NON_ASTEROID_GROUPS.includes(endpoint.group) ? 'unknown' : endpoint.group", "endpoint.group === 'asteroid' ? 'asteroid' : endpoint.group", ['motion-matrix', 'motion-switch', 'loader-motion-matrix']],
-  ['a fleet orbiting a body takes the body for a planet', 'position', 'orbitMotion({ group: kindGroup(found.group) }, facts, conditions), assumption: mayMove', 'orbitMotion(endpoint, facts, conditions), assumption: mayMove', ['loader-motion-matrix']],
-  ['a waypoint of unread kind follows the asteroid switch alone', 'position', '[\'planet\', \'asteroid\', \'static\'].includes(group) ? group : \'unknown\'', '[\'planet\', \'asteroid\', \'static\'].includes(group) ? group : \'asteroid\'', ['motion-matrix', 'waypoint-carried', 'loader-motion-matrix']],
-  ['a colony on an asteroid is picked as a planet', 'orbit', 'return body ? motionOf(orbits.bodies, id) : null', 'return body ? \'planet\' : null', ['motion-matrix', 'loader-motion-matrix']],
-  ['a trojan is the group of a class 3 body, whatever its parent moves by', 'orbit', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', '  } else if (false) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', ['loader-motion-matrix', 'motion-matrix', 'waypoint-owner-results']],
-  ['a trojan of an asteroid is a planet', 'orbit', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return \'planet\'\n  }', ['loader-motion-matrix']],
+  ['a body of unread orbits is taken for one that stays', 'position', 'const group = groupOf(facts && facts.orbits, endpoint) || endpoint.group', 'const group = groupOf(facts && facts.orbits, endpoint) || \'static\'', ['motion-matrix', 'motion-switch', 'loader-motion-matrix']],
+  ['a fleet orbiting a body is not given the group of its body', 'position', 'orbitMotion({ group: kindGroup(found.group) }, facts, conditions), assumption: mayMove', 'orbitMotion(endpoint, facts, conditions), assumption: mayMove', ['loader-motion-matrix', 'lagrange-anchor']],
+  ['a group the read did not make out is taken for one that stays', 'position', '(group === \'moving\' || group === \'static\' ? group : \'unknown\')', '(group === \'moving\' || group === \'static\' ? group : \'static\')', ['motion-matrix', 'waypoint-carried', 'loader-motion-matrix']],
+  ['a body of the orbit read is taken for one that stays', 'orbit', 'return body ? motionOf(orbits.bodies, id) : null', 'return body ? \'static\' : null', ['motion-matrix', 'loader-motion-matrix']],
+  ['a trojan is the group of a class 3 body, whatever its parent moves by', 'orbit', '  } else if (body.trojan !== 0 && body.parentId > 0) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', '  } else if (false) {\n    return motionOf(bodies, body.parentId, depth + 1)\n  }', ['loader-motion-matrix', 'waypoint-owner-results']],
+  ['a moon is taken for one that stays', 'orbit', '  } else if (body.bodyClass === 2) {\n    return \'moving\'', '  } else if (body.bodyClass === 2) {\n    return \'static\'', ['motion-matrix', 'loader-motion-matrix']],
   ['a fixed body with a fixed parent is taken for one that stays', 'orbit', 'return motionOf(bodies, body.fixedParentId, depth + 1)', 'return \'static\'', ['loader-motion-matrix', 'fixed-proxy-results', 'motion-matrix']],
   ['a fixed body whose parent was not read is taken for one that stays', 'orbit', 'if (fixed && !isNumber(body.fixedParentId)) {\n    return \'unknown\'', 'if (fixed && !isNumber(body.fixedParentId)) {\n    return \'static\'', ['loader-motion-matrix', 'motion-matrix']],
-  ['every fixed body stays', 'orbit', 'return fixed ? \'static\' : \'asteroid\'\n}', 'return \'asteroid\'\n}', ['loader-motion-matrix', 'fixed-proxy-results']],
-  ['a fixed class 3 body with no parent moves as an asteroid does', 'orbit', '  return fixed ? \'static\' : \'asteroid\'\n}', '  return fixed ? \'asteroid\' : \'asteroid\'\n}', ['loader-motion-matrix', 'motion-matrix', 'fixed-proxy-results']],
-  ['a class 3 body whose fixed flag was not read is taken for one that is not fixed', 'orbit', 'body.bodyClass !== 3 || !isNumber(body.trojan) || !isNumber(body.fixed)', 'body.bodyClass !== 3 || !isNumber(body.trojan)', ['loader-motion-matrix']],
-  ['a class 3 body whose trojan angle was not read is taken for no trojan', 'orbit', 'body.bodyClass !== 3 || !isNumber(body.trojan) || !isNumber(body.fixed)', 'body.bodyClass !== 3 || !isNumber(body.fixed)', ['loader-motion-matrix']],
-  ['a trojan whose parent was not read is an independent asteroid', 'orbit', '} else if (body.trojan !== 0 && !isNumber(body.parentId)) {\n    return \'unknown\'', '} else if (body.trojan !== 0 && !isNumber(body.parentId)) {\n    return \'asteroid\'', ['loader-motion-matrix']],
+  ['a fixed body with no parent moves', 'orbit', '  return fixed ? \'static\' : \'moving\'\n}', '  return \'moving\'\n}', ['loader-motion-matrix', 'motion-matrix', 'fixed-proxy-results', 'pages-fixed-bodies']],
+  ['a comet is taken for one that stays', 'orbit', '  } else if (body.bodyClass === 1 || body.bodyClass === 5) {\n    return fixed ? \'static\' : \'moving\'', '  } else if (body.bodyClass === 1 || body.bodyClass === 5) {\n    return \'static\'', ['motion-matrix', 'loader-motion-matrix']],
+  ['a body whose fixed flag was not read is taken for one that is not fixed', 'orbit', ' || !isNumber(body.fixed)', '', ['loader-motion-matrix']],
+  ['a class 3 body whose trojan angle was not read is taken for no trojan', 'orbit', 'body.bodyClass !== 3 || !isNumber(body.trojan)', 'body.bodyClass !== 3', ['loader-motion-matrix']],
+  ['a trojan whose parent was not read is taken for a body that moves', 'orbit', '} else if (body.trojan !== 0 && !isNumber(body.parentId)) {\n    return \'unknown\'', '} else if (body.trojan !== 0 && !isNumber(body.parentId)) {\n    return \'moving\'', ['loader-motion-matrix']],
   ['the orbit read leaves out the fixed parent of a body', 'orbit', 'fixedParentId: numberOrNull(row.FixedBodyParentID)', 'fixedParentId: 0', ['loader-motion-matrix', 'fixed-proxy-results']],
-  ['the orbit read does not follow the fixed parent of a body', 'orbit', ';[row.ParentBodyID, row.FixedBodyParentID].filter', ';[row.ParentBodyID].filter', ['loader-motion-matrix', 'fixed-proxy-results']],
+  ['the orbit read does not follow the fixed parent of a body', 'orbit', ';[row.ParentBodyID, row.FixedBodyParentID].filter', ';[row.ParentBodyID].filter', ['loader-motion-matrix']],
   ['the position read does not follow the fixed parent of a body', 'position', 'pending.push(...[known[row.SystemBodyID].parentId, known[row.SystemBodyID].fixedParentId])', 'pending.push(...[known[row.SystemBodyID].parentId])', ['loader-motion-matrix']],
   ['the position read leaves out the fixed parent column', 'position', '${body.has(\'FixedBodyParentID\') ? \'FCT_SystemBody.FixedBodyParentID\' : \'null\'} as FixedParent', 'null as FixedParent', ['loader-motion-matrix', 'fixed-proxy-results']],
-  ['a column the save lacks reads as 0 in the position read', 'position', 'const stored = (name, value) => (body.has(name) ? Number(value || 0) : null)', 'const stored = (name, value) => (body.has(name) ? Number(value || 0) : 0)', ['loader-motion-matrix']],
-  ['a body that stays moves with the planet switch', 'position', 'planets === false || group === \'static\' ? false', 'planets === false ? false', ['loader-motion-matrix', 'motion-matrix', 'fixed-proxy-results']],
-  ['a waypoint carried by an asteroid ignores its switch', 'position', 'const moves = orbitMotion({ group: kindGroup(found.group) }', 'const moves = orbitMotion({ group: \'planet\' }', ['waypoint-carried', 'loader-motion-matrix']],
+  ['a column the save lacks reads as 0 in the position read', 'position', 'const stored = (name, value) => (body.has(name) && value !== null && value !== undefined ? Number(value) : null)', 'const stored = (name, value) => (body.has(name) ? Number(value || 0) : 0)', ['loader-motion-matrix']],
+  ['a body that stays moves with the planet switch', 'position', 'planets === false || group === \'static\' ? false', 'planets === false ? false', ['loader-motion-matrix', 'motion-matrix', 'fixed-proxy-results', 'pages-fixed-bodies']],
+  ['a waypoint on a body that stays is taken for one that moves', 'position', "const moves = orbitMotion({ group: point !== null && found.group === 'static' ? 'moving' : kindGroup(found.group) }, facts, conditions)", "const moves = orbitMotion({ group: 'moving' }, facts, conditions)", ['waypoint-carried', 'loader-motion-matrix']],
   ['Hauling does not label the read', 'haulingPage', '  ...POSITION_LABELS,\n', '', ['optional-read']],
   ['Hauling waits for the read', 'haulingPage', '...POSITION_INPUTS', '', ['optional-read']],
   ['Route Finder plans without the facts', 'routesPage', 'facts: this.positionRead, ', '', ['pages-routes']],
@@ -2874,7 +3587,7 @@ const FAULTS = [
   ['Hauling does not mark the distance of a leg', 'haulingPage', '<provenance-mark v-if="item.legResults[index].status !== \'confirmed\'" :result="item.legResults[index]" />', '', ['pages-hauling']],
   ['Hauling does not mark a delivery total', 'haulingPage', '<provenance-mark :result="item.result" />', '', ['pages-hauling']],
   ['Hauling marks the jump count with the distance\'s result', 'haulingPage', '<provenance-mark :result="item.jumpsResult" />', '<provenance-mark v-if="item.pathResult" :result="item.pathResult" />', ['pages-hauling']],
-  ['Hauling gives the jump count no result', 'haulingPage', 'jumpsResult: routeFigures({ jumps: haul.jumps, km: haul.km }).jumps,', 'jumpsResult: null,', ['pages-hauling']],
+  ['Hauling gives the jump count a zero result', 'haulingPage', 'jumpsResult: routeFigures({ jumps: haul.jumps, km: haul.km }).jumps,', 'jumpsResult: routeFigures({ jumps: 0, km: haul.km }).jumps,', ['pages-hauling']],
   ['Hauling leaves a leg\'s distance as it was', 'haulingPage', 'withPositions(distanceResult(leg.km), legPositions[index])', 'distanceResult(leg.km)', ['pages-hauling']],
   ['Hauling states a leg with the positions of its own start', 'haulingPage', 'orders[(index + 1) % orders.length]', 'orders[index]', ['pages-hauling']],
   ['Hauling\'s delivery totals leave out the positions of the fleets', 'haulingPage', 'total.records.push(...row.positions.records)', 'total.records.push()', ['pages-hauling']],
@@ -2889,9 +3602,9 @@ const FAULTS = [
   ['an identity that is not read is keyed by the number of the destination', 'position', 'id === null ? `${kind}:unread:${order.SystemID}:${order.DestinationID}`', 'id === null ? `${kind}:${order.DestinationID}`', ['order-identity']],
   ['an order is keyed by the name of its family', 'position', ': place[kind](id)', ': `${family}:${id}`', ['order-identity', 'pages-hauling']],
   ['a waypoint is taken as fixed', 'position', 'waypoint: { clock: \'body\', motion: \'carried\' }', 'waypoint: { clock: \'none\', motion: \'fixed\' }', ['waypoint-carried']],
-  ['a waypoint whose association is not read is taken as fixed', 'position', 'if (!found || !Number.isInteger(found.orbit)) {', 'if (!found) {', ['waypoint-carried']],
-  ['a waypoint the read does not hold is taken as fixed', 'position', 'facts && facts.waypoints ? facts.waypoints[endpoint.id] : null', 'facts && facts.waypoints ? facts.waypoints[endpoint.id] : { orbit: 0, asteroid: null }', ['waypoint-carried']],
-  ['a waypoint carried by a body always moves', 'position', 'const moves = orbitMotion({ group: kindGroup(found.group) }, facts, conditions)', 'const moves = true', ['waypoint-carried']],
+  ['a waypoint whose association is not read is taken as fixed', 'position', 'if (!found || !Number.isInteger(found.orbit) || (found.orbit <= 0 && !Number.isInteger(found.point))) {', 'if (!found) {', ['waypoint-carried']],
+  ['a waypoint the read does not hold is taken as fixed', 'position', 'facts && facts.waypoints ? facts.waypoints[endpoint.id] : null', 'facts && facts.waypoints ? facts.waypoints[endpoint.id] : { orbit: 0, point: 0, group: null }', ['waypoint-carried']],
+  ['a waypoint carried by a body always moves', 'position', "const moves = orbitMotion({ group: point !== null && found.group === 'static' ? 'moving' : kindGroup(found.group) }, facts, conditions)", 'const moves = true', ['waypoint-carried']],
   ['the read leaves out the orbit of a waypoint', 'position', 'FCT_Waypoint.OrbitBodyID as Orbit', '0 as Orbit', ['loader-schema']],
   ['the read of waypoints takes every race\'s', 'position', ' from FCT_Waypoint where FCT_Waypoint.GameID = :GameID and FCT_Waypoint.RaceID = :RaceID', ' from FCT_Waypoint where FCT_Waypoint.GameID = :GameID', ['loader-schema']],
   ['an association stored as null reads as none', 'position', 'orbit: row.Orbit === null || row.Orbit === undefined ? null : Number(row.Orbit)', 'orbit: Number(row.Orbit)', ['loader-schema']],
@@ -2899,7 +3612,7 @@ const FAULTS = [
   ['an anchor is not said', 'position', 'if (found.anchor > 0) {', 'if (false) {', ['fleet-anchored']],
   ['an anchor that is not read is taken as none', 'position', ' || found.anchor === null || found.anchor === undefined) {', ') {', ['fleet-anchored']],
   ['a save with no anchor column reads as no anchors', 'position', 'fleet.has(\'AnchorFleetID\') ? \'FCT_Fleet.AnchorFleetID\' : \'null\'', 'fleet.has(\'AnchorFleetID\') ? \'FCT_Fleet.AnchorFleetID\' : \'0\'', ['loader-schema']],
-  ['an anchor stored as null reads as none', 'position', 'anchor: row.Anchor === null || row.Anchor === undefined ? null : Number(row.Anchor)', 'anchor: Number(row.Anchor)', ['loader-schema']],
+  ['an anchor stored as null reads as none', 'position', 'anchor: unread(row.Anchor) ? null : Number(row.Anchor)', 'anchor: Number(row.Anchor)', ['loader-schema']],
   ['an unread position is not said', 'position', 'if (!isPosition(endpoint)) {', 'if (false) {', ['unread-position']],
   ['an unread position is said only of a place that moves', 'position', 'if (!isPosition(endpoint)) {', 'if (!isPosition(endpoint) && state.moves !== false) {', ['unread-position']],
   ['an endpoint with no position holds its saved position', 'position', 'state = { ...state, assumption: \'unplaced\' }', 'state = { ...state }', ['unread-position']],
@@ -2929,10 +3642,10 @@ const FAULTS = [
   ['a deep space population order names a family the contract does not keep', 'position', '\'aether-gate\', 15: \'body\' })', '\'aether-gate\', 15: \'deep-space-population\' })', ['fixed-body-order']],
   ['a deep space population order is a life pod', 'position', '\'aether-gate\', 15: \'body\' })', '\'aether-gate\', 15: \'lifepod\' })', ['fixed-body-order']],
   ['a family is kept for a deep space population no order reaches', 'position', '  lifepod: { clock: \'none\', motion: \'drift\', supported: false },\n', '  lifepod: { clock: \'none\', motion: \'drift\', supported: false },\n  \'deep-space-population\': { clock: \'none\', motion: \'drift\', supported: false },\n', ['fixed-body-order']],
-  ['a place that never moves is not supported', 'position', 'spec.supported !== false && !conditions.includes(\'stale-contact\')', 'spec.supported !== false && state.moves !== false && !conditions.includes(\'stale-contact\')', ['fixed-body-order', 'motion-matrix']],
+  ['a place that never moves is not supported', 'position', '(spec.supported !== false || Boolean(state.anchor)) && !conditions.includes(\'stale-contact\')', '(spec.supported !== false || Boolean(state.anchor)) && state.moves !== false && !conditions.includes(\'stale-contact\')', ['fixed-body-order', 'motion-matrix']],
   ['a Lagrange point moves with an owner that is no planet or moon', 'orbit', 'if (body && endpoint.family === \'lagrange-point\' && ', 'if (false && body && endpoint.family === \'lagrange-point\' && ', ['lagrange-owner-class', 'motion-matrix']],
   ['a Lagrange point stays only with an asteroid owner', 'orbit', 'isNumber(body.bodyClass) && !POINT_OWNER_CLASSES.includes(body.bodyClass)', 'body.bodyClass === 3', ['lagrange-owner-class']],
-  ['a Lagrange point of a body that is no planet or moon is propagated', 'orbit', 'if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {', 'if (false && !POINT_OWNER_CLASSES.includes(body.bodyClass)) {', ['lagrange-owner-class']],
+  ['a Lagrange point of a body that is no planet or moon is propagated', 'orbit', '} else if (!POINT_OWNER_CLASSES.includes(body.bodyClass)) {', '} else if (false && !POINT_OWNER_CLASSES.includes(body.bodyClass)) {', ['lagrange-owner-class']],
   ['the strip shows its groups when folded', 'component', '<ul v-if="!collapsed" class="route-positions__groups">', '<ul class="route-positions__groups">', ['strip-collapse']],
   ['the strip hides its groups when not folded', 'component', '<ul v-if="!collapsed" class="route-positions__groups">', '<ul v-if="collapsed === null" class="route-positions__groups">', ['strip-collapse']],
   ['the toggle hands back the choice it has', 'component', '@click="$emit(\'update:collapsed\', !collapsed)"', '@click="$emit(\'update:collapsed\', collapsed)"', ['strip-collapse']],
@@ -2940,6 +3653,61 @@ const FAULTS = [
   ['Hauling does not keep the choice of the plan strip', 'haulingPage', /(<route-positions(?=[^>]*:positions="planPositions")[^>]*?) :collapsed\.sync="positionsCollapsed"/, (m) => m[1], ['strip-collapse']],
   ['Hauling does not keep the choice of the routes strip', 'haulingPage', /(<route-positions(?=[^>]*:positions="fleetPositions")[^>]*?) :collapsed\.sync="positionsCollapsed"/, (m) => m[1], ['strip-collapse']],
   ['Hauling starts with its groups showing', 'haulingPage', "positionsCollapsed: { key: 'haulingPositionsCollapsed', default: true,", "positionsCollapsed: { key: 'haulingPositionsCollapsed', default: false,", ['strip-collapse']],
+  ['the mode of a fleet is read from AutoLP', 'position', '${fleet.has(\'LagrangeStatus\') ? \'FCT_Fleet.LagrangeStatus\' : \'null\'} as LagrangeStatus', '${fleet.has(\'AutoLP\') ? \'FCT_Fleet.AutoLP\' : \'null\'} as LagrangeStatus', ['loader-schema', 'real-saves']],
+  ['a mode the save lacks reads as manual', 'position', 'mode: lagrangeModeOf(row.LagrangeStatus)', 'mode: lagrangeModeOf(row.LagrangeStatus || 0)', ['loader-schema']],
+  ['the Lagrange point of a fleet is not read', 'position', '${fleet.has(\'OrbitLagrangeID\') ? \'FCT_Fleet.OrbitLagrangeID\' : \'null\'} as OrbitPoint', '0 as OrbitPoint', ['loader-schema']],
+  ['a fleet whose point moved on without it still rides it', 'position', ' and FCT_LagrangePoint.Xcor = FCT_Fleet.Xcor and FCT_LagrangePoint.Ycor = FCT_Fleet.Ycor) then 1', ') then 1', ['loader-schema']],
+  ['a fleet at a Lagrange point is not said to ride it', 'position', 'const followingPoint = anchored ? ', 'const followingPoint = false ? ', ['loader-schema']],
+  ['a point of a body that is no planet or moon is taken to move', 'position', 'points[row.LagrangePointID] = Number.isFinite(classes[owner]) && !POINT_OWNER_CLASSES.includes(classes[owner]) ? \'static\' : groups[owner] || \'unknown\'', 'points[row.LagrangePointID] = groups[owner] || \'unknown\'', ['loader-schema']],
+  ['a Dynamic fleet takes Lagrange jumps with an order queued', 'jumpGraph', 'mode === \'dynamic\' && Number.isInteger(queued) ? queued === 0 : null', 'mode === \'dynamic\' ? true : null', ['lagrange-anchor']],
+  ['a Manual fleet takes Lagrange jumps', 'jumpGraph', 'mode === \'manual\' ? false :', 'mode === \'manual\' ? true :', ['lagrange-anchor']],
+  ['the mode of a fleet is not handed on', 'position', 'mode: found.mode === undefined ? null : found.mode,', 'mode: null,', ['lagrange-anchor']],
+  ['a waypoint at a Lagrange point does not say the point', 'position', ', ...(found.point > 0 ? { lagrange: { point: found.point } } : {})', '', ['waypoint-carried']],
+  ['the sub-pulse option is ignored', 'orbit', 'perPulse === null ? null : perPulse ? clock.subPulseLength : clock.incrementLength', 'perPulse === null ? null : clock.incrementLength', ['real-saves']],
+  ['the length of the oldest increment is read', 'position', 'order by FCT_Increments.GameTime desc limit 1', 'order by FCT_Increments.GameTime asc limit 1', ['loader-schema', 'real-saves']],
+  ['the latest increment of any game is read', 'position', ' where FCT_Increments.GameID = FCT_Game.GameID order by', ' order by', ['loader-schema']],
+  ['the sub-pulse option is not read', 'position', 'orbitalMovementInSubPulse: row.OrbitalMovementInSubPulse === undefined ? null : row.OrbitalMovementInSubPulse,', 'orbitalMovementInSubPulse: null,', ['loader-schema', 'real-saves']],
+  ['the asteroid switch is read into the clock', 'position', 'orbitalMotion: row.OrbitalMotion === undefined ? null : row.OrbitalMotion, ', 'orbitalMotion: row.OrbitalMotion === undefined ? null : row.OrbitalMotion, orbitalMotionAst: row.OrbitalMotionAst, ', ['loader-schema', 'loader-motion-matrix', 'real-saves']],
+  ['an eccentric position does not state its cadence', 'orbit', 'conditions: state.advanced ? [\'eccentric-cadence\'] : [] }', 'conditions: [] }', ['real-saves']],
+  ['unread classification is asserted to move', 'position', "kindGroup(group) === 'unknown' ? null : planets", 'planets', ['unread-classification', 'loader-motion-matrix']],
+  ['unread classification is not disclosed', 'position', "planets === null ? 'motion-switch' : 'motion-classification'", "'motion-switch'", ['unread-classification']],
+  ['point identity ignores the fleet system', 'position', ' and FCT_LagrangePoint.SystemID = FCT_Fleet.SystemID', '', ['point-identity']],
+  ['point identity ignores the fleet game', 'position', ' and FCT_LagrangePoint.GameID = FCT_Fleet.GameID', '', ['point-identity']],
+  ['inconsistent point references are not disclosed', 'position', "if (found && found.pointInconsistent) {\n    conditions.push('fleet-point-inconsistent')", "if (false) {\n    conditions.push('fleet-point-inconsistent')", ['point-identity']],
+  ['an anchored object is held at the saved position', 'orbit', 'position: { ...found.position, SystemID: endpoint.SystemID }', 'position: { SystemID: endpoint.SystemID, Xcor: endpoint.Xcor, Ycor: endpoint.Ycor }', ['anchor-planted-saves']],
+  ['an anchored object takes the point of its own ID', 'orbit', 'key: `lagrange:${anchor.point}`, id: anchor.point,', 'key: `lagrange:${anchor.point}`, id: endpoint.id,', ['anchor-planted-saves']],
+  ['the anchor adapter serves every object', 'orbit', 'anchorAdapter.serves = (state) => Boolean(state && state.anchor)', 'anchorAdapter.serves = () => true', ['anchor-planted-saves']],
+  ['the orbit read leaves out the points of anchored objects', 'orbit', ', ...anchored.flatMap((entry) => entry.points)', '', ['anchor-planted-saves']],
+  ['non-fleet followers again require coincidence', 'position', 'FCT_LagrangePoint.Xcor is not null and FCT_LagrangePoint.Ycor is not null', 'FCT_LagrangePoint.Xcor = ${table}.Xcor and FCT_LagrangePoint.Ycor = ${table}.Ycor', ['anchor-planted-saves']],
+  ['no object is taken to ride a point', 'position', 'found.riding === true && Number.isInteger(found.point) && found.point > 0', 'found.riding === false && Number.isInteger(found.point) && found.point > 0', ['anchor-planted-saves']],
+  ['a wreck, life pod or salvo does not state its point', 'position', "assumption: moves === false ? 'fixed' : 'anchor-held', anchor: { point } }", "assumption: moves === false ? 'fixed' : 'anchor-held' }", ['anchor-planted-saves']],
+  ['a waypoint a point carries does not state its point', 'position', '...(point !== null ? { anchor: { point } } : {})', '', ['anchor-planted-saves']],
+  ['a fleet with orders is taken to ride its point', 'position', '...(!mayMove && ridingPoint(found) !== null ?', '...(ridingPoint(found) !== null ?', ['anchor-planted-saves']],
+  ['a record asks the adapter for every object', 'position', ' && servesState(adapters[endpoint.family], () => state)', '', ['anchor-planted-saves']],
+  ['the salvos and wrecks of anyone are read', 'position', '${table}.OrbitLagrangeID > 0 and ${scope}`', '${table}.OrbitLagrangeID > 0`', ['anchor-planted-saves']],
+  ['a fleet a point carries is not propagated', 'position', ' fleet: anchorAdapter,', '', ['anchor-planted-saves']],
+  ['a missile salvo a point carries is not propagated', 'position', ', salvo: anchorAdapter })', ' })', ['anchor-planted-saves']],
+  ['a life pod a point carries is not propagated', 'position', ' lifepod: anchorAdapter,', '', ['anchor-planted-saves']],
+  ['the orbit is not read for what a point may carry', 'position', "Object.freeze(['body', 'colony', 'lagrange-point', ...ANCHOR_FAMILIES])", "Object.freeze(['body', 'colony', 'lagrange-point'])", ['anchor-pages', 'anchor-planted-saves']],
+  ['Route Finder does not ask for the orbit of an anchorable stop', 'routesPage', 'const stops = this.routeStops.map(placeEndpoint).filter((endpoint) => ORBIT_FAMILIES.includes(endpoint.family))', "const stops = this.routeStops.map(placeEndpoint).filter((endpoint) => ['body', 'colony'].includes(endpoint.family))", ['anchor-pages']],
+  ['Transport does not ask for the orbit of an anchorable destination', 'transportPage', '.map(placeEndpoint).filter((endpoint) => ORBIT_FAMILIES.includes(endpoint.family))', ".map(placeEndpoint).filter((endpoint) => ['body', 'colony'].includes(endpoint.family))", ['anchor-pages', 'anchor-planted-saves']],
+  ['Hauling does not ask for the orbit of an anchorable destination', 'haulingPage', 'return [...colonies, ...orders].filter((endpoint) => ORBIT_FAMILIES.includes(endpoint.family))', "return [...colonies, ...orders].filter((endpoint) => ['body', 'colony'].includes(endpoint.family))", ['anchor-pages']],
+  ['a Manual fleet takes Lagrange jumps', 'position', "manual: ['Manual', 'orders placed for the fleet take no Lagrange jumps.']", "manual: ['Manual', 'orders placed for the fleet take Lagrange jumps.']", ['anchor-lagrange-mode']],
+  ['a fleet that rides a point is not said to', 'position', 'const riding = Boolean(record.anchor)', 'const riding = false', ['anchor-lagrange-mode']],
+  ['a Dynamic fleet with orders queued is said to have none', 'position', "lagrange.shortcuts === true ? ', and none is'", "lagrange.shortcuts === false ? ', and none is'", ['anchor-lagrange-mode']],
+  ['Route Finder names the stop, not the fleet', 'routesPage', 'return words ? { name: fleet.FleetName, ...words } : null', 'return words ? { name: place.name, ...words } : null', ['anchor-lagrange-mode']],
+  ['Route Finder hides the Lagrange mode of the fleet', 'routesPage', 'v-if="routeFleetLagrange" class="mt-3" data-fleet-lagrange>', 'v-if="false" class="mt-3" data-fleet-lagrange>', ['anchor-lagrange-mode']],
+  ['Route Finder shows no mode the save does not record', 'routesPage', "{{ routeFleetLagrange.mode || 'not recorded' }}", '{{ routeFleetLagrange.mode }}', ['anchor-lagrange-mode']],
+  ['saved body positions use the construction epoch', 'position', 'observedAt: clock ? clock.gameTime : null, moves, assumption: spec.motion', 'observedAt: clock ? clock.lastGrowthTime : null, moves, assumption: spec.motion', ['static-baseline']],
+  ['ETA reporting changes conversion without changing distance', 'plan', 'seconds: flight.speed ? route.km / flight.speed : null', 'seconds: flight.speed ? route.km / flight.speed / 3600 : null', ['anchor-planted-saves']],
+  ['a point-only waypoint carries its visitor through a wait', 'plan', 'hop.wait > 0 && carries(target, hop.action, hop.wait)', 'hop.wait > 0', ['anchor-waited-visitors']],
+  ['a point-only waypoint carries its visitor through a delay', 'plan', 'carries(hop.from, previous.action, previous.wait) && endpointOf(hop.from)', 'endpointOf(hop.from)', ['anchor-waited-visitors']],
+  ['an assigned body orbit does not carry its visitor', 'plan', "return endpoint && (endpoint.family === 'body'", "return false && (endpoint.family === 'body'", ['anchor-waited-visitors']],
+  ['action assigned wreck and fleet visitors never follow', 'plan', 'return assigns\n', 'return false\n', ['anchor-waited-visitors']],
+  ['an unlisted arrival action carries its visitor', 'plan', 'return assigns\n', 'return true\n', ['anchor-waited-visitors']],
+  ['an unread arrival action is silently assumed', 'plan', "'propagation-unavailable', 'visitor-association-unread'", "'propagation-unavailable'", ['anchor-waited-visitors']],
+  ['Hauling loses the arrival action', 'haulingPage', 'action: order.MoveActionID, delay:', 'action: 2, delay:', ['anchor-waited-visitors']],
+  ['Hauling reuses a cycle across different arrival actions', 'haulingPage', 'hop.leave.key, hop.action, hop.delay', 'hop.leave.key, hop.delay', ['anchor-waited-visitors']],
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -2962,7 +3730,7 @@ const BENIGN = [
   { label: 'the label of a position that is current reworded', target: 'position', at: /(\} else if \(seconds === 0\) \{\n {4}return )'[^'\n]*'/, to: (m) => `${m[1]}'at the save time'` },
   { label: 'the label of an age that is not read reworded', target: 'position', at: /(if \(!isTime\(seconds\)\) \{\n {4}return )'[^'\n]*'/, to: (m) => `${m[1]}'not recorded'` },
   { label: 'the label of an age the strip does not read reworded', target: 'component', at: /(this\.age && this\.age\.status !== 'unavailable' \? ageText\(this\.age\.value\) : )'[^'\n]*'/, to: (m) => `${m[1]}'not recorded'` },
-  { label: 'the comment on a group that needs both switches reworded', target: 'position', at: /(and an 'unknown' one needs )both\./, to: (m) => `${m[1]}both switches on.` },
+  { label: 'the comment on unread classification reworded', target: 'position', at: /A picker label alone does not read a fixed flag or a parent association\./, to: () => 'A picker label does not establish the fixed flag or the parent association.' },
   { label: 'the fixed-parent condition parenthesised with its conjuncts reordered', target: 'orbit', at: /\} else if \(fixed && body\.fixedParentId > 0\) \{/, to: () => '} else if ((body.fixedParentId > 0) && fixed) {' },
   { label: 'the timed test of a plan written as its negation', target: 'plan', at: /const flight = (?:timed \|\| !flightClock\(held, speed\) \? null : (flightOf\(\{ facts, adapters, speed \}\))|!timed && flightClock\(held, speed\) \? (flightOf\(\{ facts, adapters, speed \}\)) : null)/, to: (m) => `const flight = !timed && flightClock(held, speed) ? ${m[1] || m[2]} : null` },
   { label: 'the condition of a life pod reworded', target: 'position', at: new RegExp(`(\\n {2}'drift-unobserved': )${STRING}`), to: (m) => `${m[1]}'no motion of a life pod is recorded by the save'` },
@@ -2971,6 +3739,8 @@ const BENIGN = [
   { label: 'the retry of the strip written as an arrow function', alone: true, target: 'component', at: /@click="(\$emit\('retry'\))"/, to: (m) => `@click="() => ${m[1]}"` },
   { label: 'the retry of the strip written with the click event forwarded', alone: true, target: 'component', at: /@click="(\$emit\('retry'\))"/, to: (m) => `@click="$event && ${m[1]}"` },
   { label: 'the retry of the strip written as a named function', alone: true, target: 'component', at: /@click="(\$emit\('retry'\))"/, to: (m) => `@click="function retry () { ${m[1]} }"` },
+  { label: 'the condition of an unread cadence reworded', target: 'position', at: new RegExp(`(\\n {2}'cadence-unread': )${STRING}`), to: (m) => `${m[1]}'the length of a call of the orbit update is not recorded'` },
+  { label: 'the condition of a waypoint at an unread point reworded', target: 'position', at: new RegExp(`(\\n {2}'waypoint-orbit-unread': )${STRING}`), to: (m) => `${m[1]}'the body or Lagrange point that carries the waypoint is not recorded'` },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
 
 // The edits that rewrite what a planted fault anchors on are run alone, never composed with the faults or with the other edits.
@@ -3031,6 +3801,8 @@ const COMPOSED = new Set([
   106,
   107,
   108,
+  101,
+  111,
   112,
   113,
   116,
@@ -3096,6 +3868,50 @@ const COMPOSED = new Set([
   248,
   251,
   254,
+  258,
+  264,
+  267,
+  268,
+  272,
+  274,
+  275,
+  276,
+  277,
+  278,
+  279,
+  280,
+  281,
+  282,
+  283,
+  284,
+  285,
+  286,
+  287,
+  288,
+  289,
+  290,
+  291,
+  292,
+  293,
+  294,
+  295,
+  296,
+  297,
+  298,
+  299,
+  300,
+  301,
+  302,
+  303,
+  304,
+  305,
+  306,
+  307,
+  308,
+  309,
+  310,
+  311,
+  312,
 ])
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------
@@ -3114,12 +3930,11 @@ const run = async (checks, world) => {
 }
 
 // The checks a fault is credited to only when they fail on a value, not on the code under test throwing.
-const BY_VALUE = new Set(['timed-basis', 'timed-clock', 'fixed-body-order', 'lagrange-owner-class'])
 
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 
 const main = async () => {
-  const mutate = !process.argv.includes('--no-mutations')
+  const mutate = mutating()
   const only = process.argv.find((argument) => argument.startsWith('--only='))
   const selected = only ? only.slice('--only='.length).split('|').filter(Boolean) : []
   const keep = (key, label) => !only || selected.some((text) => key === text || label.includes(text))
@@ -3184,6 +3999,7 @@ const main = async () => {
       ]
     })
     const outcomes = await inParallel(attempts, async ([label, edits, fails]) => {
+      refusePlanting(label)
       const began = performance.now()
       const world = worldOf(edits)
       const missed = []
@@ -3191,7 +4007,7 @@ const main = async () => {
       for (const name of fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed || (BY_VALUE.has(name) && !(failed.error instanceof assert.AssertionError))) {
+        if (!failed || kindOf(failed.error) !== 'assertion' || isSubjectThrow(failed.error)) {
           missed.push(name)
         }
 

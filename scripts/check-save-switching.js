@@ -1,29 +1,35 @@
 /*
   Checks that the app moves between saves as one step: the real store, the real database module over real SQLite saves, the real recorder plugin, the real watcher and the real save service of the main process, with only the Electron pieces stood in for (the IPC calls are answered by the real service over a window registry, the file dialog and the file-watching library are fakes, or the real chokidar for the watcher checks).
 
-  Each case builds a fresh app over two saves that share a game and race number (GameID 140, race 784) but are different campaigns: a copy of AuroraDB.db, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
+  Each case builds a fresh app over two saves that share a game and race number (the game and the race of scripts/lib/fixtures.js, 141 and 784) but are different campaigns: a copy of the fixture, a save of the 3.2 line, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
 
-  A copy that is refused as a save of another Aurora line (the schema answered with the fourteen columns of the line left out) is held by the recorder: its pass ends as held, no campaign is settled and nothing is recorded (one case, and a mutation that leaves the hold out).
+  A copy that is refused as a save of another Aurora line (the schema answered with the seven columns Aurora 3.0 added left out) is held by the recorder: its pass ends as held, no campaign is settled and nothing is recorded (one case, and a mutation that leaves the hold out).
 
-  Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and the parts and the mutations all run side by side (CHECK_JOBS at a time), each in a process of its own with its own fixtures. Run: node scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs ./AuroraDB.db.
+  The 57 head cases run in six parts. With 77 mutation descriptors, a full run has 83 isolated variants and 134 checks; --no-mutations has six variants and 57 checks. Existing mutation indexes stay in place when a descriptor is appended.
+
+  Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and at most four parts or mutations run side by side, each in a process of its own with its own fixtures. CHECK_JOBS budgets scripts, not this suite's isolated variants. Run: bun scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs the fixture of scripts/lib/fixtures.js.
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { createRequire } = require('module')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow, judged, caughtBy } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { plantedPatch } = require('./lib/mutant-source')
 
 const { loadUtilities } = require('./lib/utilities')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { FIXTURE, fixturePath } = require('./lib/fixtures')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
 const requireHere = createRequire(`${repo}/`)
 
-const GAME = 140
-const RACE = 784
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const FLAG = 'probe-flag.png'
-const SAVE = path.join(repo, 'AuroraDB.db')
+// The fixture of scripts/lib/fixtures.js: a save of the line, so the app reads it (a save from before 3.0 is refused, and the recorder holds it).
+const SAVE = fixturePath()
 
 // The packages the sources import. The real sequelize and sqlite3 open the real files; the others are as small as the cases allow. electron-store keeps its stores in `globalThis.__stores`, except while a case sets `globalThis.__SettingsClient`: every store opened then is that class's, the window's own store client (src/preload/store-client.js) built by the case.
 const STUBS = {
@@ -975,7 +981,7 @@ const defineSuite = (m, fixtures, base) => {
 
     return file
   }
-  const SECOND_GAME = `create temp table g as select * from FCT_Game where GameID = ${GAME}; update g set GameID = 141, GameName = 'Second Game'; insert into FCT_Game select * from g; create temp table r as select * from FCT_Race where GameID = ${GAME} and RaceID = ${RACE}; update r set GameID = 141, RaceID = 9001, RaceTitle = 'Second Game Empire'; insert into FCT_Race select * from r;`
+  const SECOND_GAME = `create temp table g as select * from FCT_Game where GameID = ${GAME}; update g set GameID = ${GAME + 1}, GameName = 'Second Game'; insert into FCT_Game select * from g; create temp table r as select * from FCT_Race where GameID = ${GAME} and RaceID = ${RACE}; update r set GameID = ${GAME + 1}, RaceID = 9001, RaceTitle = 'Second Game Empire'; insert into FCT_Race select * from r;`
   const SECOND_RACE = `create temp table r as select * from FCT_Race where GameID = ${GAME} and RaceID = ${RACE}; update r set RaceID = 9002, RaceTitle = 'Second Empire'; insert into FCT_Race select * from r;`
   const REMOVE_GAME = `delete from FCT_Race where GameID = ${GAME}; delete from FCT_Game where GameID = ${GAME};`
   const REMOVE_RACE = `delete from FCT_Race where GameID = ${GAME} and RaceID = ${RACE};`
@@ -1044,7 +1050,10 @@ const defineSuite = (m, fixtures, base) => {
 
       // A manual retry looks once and goes on waiting: the file is still not there.
       w.store.commit('freshness/retryRequested')
-      await until(() => generationOf(w) === generation + 1 && recoveryOf(w).state === 'missing' && recoveryOf(w).message, 'the retry to find the file still missing')
+      assert.equal(generationOf(w), generation + 1, 'the manual retry did not open the missing save')
+      await until(() => w.store.state.freshness.refresh.outcome === 'failed', 'the missing copy to finish its read')
+      assert.equal(recoveryOf(w).state, 'missing', 'the missing save was reported as an automatic retry')
+      assert.ok(recoveryOf(w).message, 'the missing save has no reported reason')
       await sleep(500)
       assert.equal(generationOf(w), generation + 1, 'a save that is gone was retried on its own')
 
@@ -1102,7 +1111,9 @@ const defineSuite = (m, fixtures, base) => {
       const lock = await lockOf(file)
 
       watcher.emit('change', {})
-      await until(() => recoveryOf(w).state === 'unreadable' && recoveryOf(w).attempt >= 1, 'the locked save to be reported unreadable', 30000)
+      await until(() => w.store.state.freshness.refresh.outcome === 'failed', 'the locked copy to finish its read', 30000)
+      assert.equal(recoveryOf(w).state, 'unreadable')
+      assert.notEqual(recoveryOf(w).attempt, 0, 'the locked save was reported without a retry')
 
       assert.ok(recoveryOf(w).message, 'no reason was given')
       assert.equal(w.store.state.freshness.refresh.outcome === 'ok', false, 'a read that failed was reported as fresh')
@@ -1137,7 +1148,11 @@ const defineSuite = (m, fixtures, base) => {
       await retireDatabase(w.store.state.database)
       fs.writeFileSync(file, Buffer.alloc(8192, 'not a save '))
       watcher.emit('change', {})
-      await until(() => recoveryOf(w).state === 'unreadable' && recoveryOf(w).nextAt === null, 'the retries to run out', 20000)
+      await until(() => w.store.state.freshness.refresh.outcome === 'failed', 'the unreadable copy to finish its first read', 20000)
+      assert.notEqual(recoveryOf(w).attempt, 0, 'the failed read was reported without a retry')
+      await until(() => recoveryOf(w).attempt >= FAST.retryMs.length && w.store.state.freshness.refresh.outcome === 'failed', 'the announced retries to reach their bound', 20000)
+      // Keep the real-clock stability window: an unbounded controller reports a larger generation/count here, not a timeout.
+      await sleep(600)
 
       const spent = generationOf(w)
 
@@ -1154,6 +1169,7 @@ const defineSuite = (m, fixtures, base) => {
       await sleep(600)
       assert.equal(generationOf(w), spent, 'the retries went on past their bound')
       assert.equal(recoveryOf(w).nextAt, null)
+      assert.equal(recoveryOf(w).state, 'unreadable', 'the exhausted retries did not leave the save unreadable')
 
       // Still unreadable: the manual retry opens the save at once and the bound starts over.
       w.store.commit('freshness/retryRequested')
@@ -1194,11 +1210,16 @@ const defineSuite = (m, fixtures, base) => {
           }
         },
       })
+      await until(() => recoveryOf(w).state === 'ok' && w.store.state.freshness.refresh.outcome === 'ok', 'the initial copy to finish its probe')
       const [watcher] = w.live()
       const generation = generationOf(w)
 
       for (let count = 0; count < 25; count++) {
         watcher.emit(count % 5 === 4 ? 'add' : 'change', {})
+        if (count === 0) {
+          assert.equal(typeof recoveryOf(w).nextAt, 'number', 'the burst was reported without its settling deadline')
+          assert.equal(generationOf(w), generation, 'the first notification opened a copy instead of announcing its wait')
+        }
         await sleep(8)
       }
 
@@ -1259,18 +1280,18 @@ const defineSuite = (m, fixtures, base) => {
       await until(() => w.store.state.empires.dropped, 'the removed game to be dropped', 20000)
 
       assert.equal(w.store.state.empires.dropped.kind, 'game')
-      assert.equal(w.store.state.empires.dropped.name, 'Aurelian Empire')
+      assert.equal(w.store.state.empires.dropped.name, 'Galactic Shogunate')
       assert.equal(w.store.state.GameID, null, 'the selection of a removed game was kept or given to another game')
       assert.equal(w.store.state.RaceID, null)
-      assert.deepEqual(w.store.state.empires.games.map((game) => game.GameID), [141])
+      assert.deepEqual(w.store.state.empires.games.map((game) => game.GameID), [GAME + 1])
       assert.deepEqual(w.store.state.peeks.lines, {}, 'what was derived from the removed game was kept')
       assert.deepEqual(w.store.state.navigation.entries.map((entry) => entry.path), ['/'], 'the pages visited for the removed game were kept')
       assert.equal(w.store.$router.currentRoute.path, '/', 'the page of the removed game stayed open')
 
       // Picking again is the person's choice, and takes the notice away.
-      await pick(w, 141, 9001)
+      await pick(w, GAME + 1, 9001)
       assert.equal(w.store.state.empires.dropped, null)
-      assert.equal(w.store.state.GameID, 141)
+      assert.equal(w.store.state.GameID, GAME + 1)
     })
   })
 
@@ -1310,9 +1331,45 @@ const defineSuite = (m, fixtures, base) => {
       const [watcher] = w.live()
       const { GameTime } = w.store.state
 
-      await sqliteRun(file, `update FCT_Game set GameTime = GameTime + 3600 where GameID = ${GAME};`)
-      watcher.emit('change', {})
-      await until(() => w.store.state.GameTime === GameTime + 3600, 'the new clock to be taken', 20000)
+      const database = w.store.state.database
+      const generation = generationOf(w) + 1
+      let reading = null
+      let completed = false
+      let completedClock
+      let failure = null
+      // Vuex retains the action object through its before/after subscribers. The read commits its list before reconciliation ends, so neither that list nor the clock being checked is a completion witness.
+      const unsubscribe = w.store.subscribeAction({
+        before (action, state) {
+          if (action.type === 'empires/reconcile' && action.payload.database !== database && action.payload.database === state.database && state.freshness.generation === generation) {
+            reading = action
+          }
+        },
+        after (action, state) {
+          if (action === reading && action.payload.database === state.database && state.freshness.generation === generation) {
+            completedClock = state.GameTime
+            completed = true
+          }
+        },
+        error (action, _state, error) {
+          if (action === reading) {
+            failure = error
+          }
+        },
+      })
+
+      try {
+        await sqliteRun(file, `update FCT_Game set GameTime = GameTime + 3600 where GameID = ${GAME};`)
+        watcher.emit('change', {})
+        await until(() => completed || failure, 'the selection reconciliation of the new copy to finish', 20000)
+
+        if (failure) {
+          throw failure
+        }
+
+        assert.equal(completedClock, GameTime + 3600, 'the completed read did not take the new clock')
+      } finally {
+        unsubscribe()
+      }
 
       assert.equal(w.store.state.GameID, GAME)
       assert.equal(w.store.state.RaceID, RACE)
@@ -1335,6 +1392,8 @@ const defineSuite = (m, fixtures, base) => {
       assert.equal(w.store.state.freshness.file.kind, 'error')
       assert.equal(recoveryOf(w).state, 'unreadable')
       assert.match(recoveryOf(w).message, /EPERM/)
+      assert.notEqual(recoveryOf(w).nextAt, null, 'the watcher error was reported without a retry')
+      assert.equal(recoveryOf(w).attempt, 1)
       await until(() => recoveryOf(w).state === 'ok' && generationOf(w) === generation + 1 && w.store.state.freshness.refresh.outcome === 'ok', 'the save to be read after the error', 20000)
       assert.ok(seen.some((entry) => entry.state === 'unreadable' && entry.nextAt !== null), 'no retry was announced')
     })
@@ -1444,7 +1503,8 @@ const defineSuite = (m, fixtures, base) => {
       w.store.subscribe((mutation) => mutation.type === 'freshness/recovery' && seen.push({ ...w.store.state.freshness.recovery, generation: w.store.state.freshness.generation }))
       assert.equal((await w.store.dispatch('saves/select', other)).action, 'switched')
       await until(() => w.store.state.savePath === other && w.store.state.databasePath === other, 'the locked save to be opened')
-      await until(() => seen.some((entry) => entry.state === 'unreadable'), 'the save that was locked at the switch to be reported unreadable', 30000)
+      await until(() => w.store.state.freshness.refresh.outcome === 'failed', 'the switched-to locked copy to finish its read', 30000)
+      assert.equal(recoveryOf(w).state, 'unreadable', 'the failed copy opened by the switch was not taken up by its watcher')
 
       const first = seen.find((entry) => entry.state === 'unreadable')
 
@@ -1571,6 +1631,7 @@ const defineSuite = (m, fixtures, base) => {
 
       await until(() => recoveryOf(w).state === 'ok' && generationOf(w) === 2 && w.store.state.freshness.refresh.outcome === 'ok', 'the burst to be read', 30000)
       w.store.commit('freshness/retryRequested')
+      assert.equal(generationOf(w), 3, 'the manual retry did not open the save at once')
       await until(() => generationOf(w) === 3 && recoveryOf(w).state === 'ok' && w.store.state.freshness.refresh.outcome === 'ok', 'the manual retry to be read', 30000)
       await m['renderer/utilities/database'].retireDatabase(w.store.state.database)
 
@@ -1739,8 +1800,8 @@ const defineSuite = (m, fixtures, base) => {
     assert.equal(w.store.getters['capabilities/status'], 'failed')
   })
 
-  const LINE_COLUMNS = ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics', 'FCT_DesignPhilosophy.MaintenanceModules', 'FCT_Fleet.AutoLP', 'FCT_Population.AcademyNameThemeID', 'FCT_Population.BuildReplacements', 'FCT_Population.ReplacementCapacity', 'FCT_Population.UseAcademyNameTheme', 'FCT_Race.RandomClassName', 'FCT_Race.chkCometNames', 'FCT_Race.chkComets', 'FCT_Ship.MaxActiveResolution', 'FCT_Ship.SLRetire', 'FCT_ShipClassTemplate.CrewDesignEfficiency']
-  // The schema of a copy as a save of another Aurora line answers it: with the fourteen columns of the line left out.
+  const LINE_COLUMNS = ['FCT_Game.LostColonies', 'FCT_Game.GenerateNonOxygenRaces', 'FCT_Game.NoShieldTechnology', 'FCT_Game.OrbitalMovementInSubPulse', 'FCT_Ship.ShipSeniorCO', 'FCT_Race.NoResearchProjects', 'FCT_Population.AlienArtifacts']
+  // The schema of a copy as a save of another Aurora line answers it: with the seven columns Aurora 3.0 added left out.
   const withoutLine = (answer) => [answer[0].filter((row) => !LINE_COLUMNS.includes(`${row.tbl}.${row.name}`)), ...answer.slice(1)]
 
   test('a recording pass whose copy was replaced while its capability check was pending claims no recording lock, though the copy that replaced it is refused', async () => {
@@ -1783,7 +1844,7 @@ const defineSuite = (m, fixtures, base) => {
 
   test('a recording pass of a copy that is refused as a save of another Aurora line records nothing, claims no recording lock and settles no campaign', async () => {
     const held = installLocks()
-    // The schema the copy answers for is the save's with the fourteen columns of the line left out: the check of the capabilities refuses it, as it does a real older save.
+    // The schema the copy answers for is the save's with the seven columns Aurora 3.0 added left out: the check of the capabilities refuses it, as it does a real older save.
     const w = await world({
       recording: true,
       onDatabase: (database) => {
@@ -1985,43 +2046,56 @@ const defineSuite = (m, fixtures, base) => {
       const [rows] = await database.query(`select SystemID, Xcor, Ycor from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 2`)
       const ids = rows.map((row) => row.SystemID)
       const positions = Object.fromEntries(ids.map((id) => [id, { x: 123456.4, y: 654321.6 }]))
-      const query = database.query
+      const destinations = []
       let reached = null
       let release = null
       const second = new Promise((resolve) => { reached = resolve })
       const gate = new Promise((resolve) => { release = resolve })
-      let updates = 0
+
+      // Gate the actual destination, including a wrong one, so the verdict reads the routed statements rather than waiting for a callback on a database the plant bypassed.
+      for (const [destination, connection] of [['original', database], ['replacement', replacement]]) {
+        const query = connection.query
+
+        connection.query = async (sql, options) => {
+          if (/^update/i.test(sql)) {
+            destinations.push(destination)
+
+            if (destinations.length === 2) {
+              reached()
+              await gate
+            }
+          }
+
+          return query(sql, options)
+        }
+      }
 
       // The page's own database is replaced while the map is open: what the page would read as `this.database` becomes the replacement.
       globalThis.__positionsDatabase = replacement
-      database.query = async (sql, options) => {
-        if (/^update/i.test(sql) && ++updates === 2) {
-          reached()
-          await gate
-        }
 
-        return query(sql, options)
+      try {
+        const saving = m['renderer/utilities/map-positions'].savePositions(database, { GameID: GAME, RaceID: RACE, ids, positions }).then(() => null, (error) => error)
+
+        await second
+
+        const retiring = retireDatabase(database)
+
+        release()
+
+        const error = await saving
+
+        await retiring
+        assert.deepEqual(destinations, ['original', 'original'], 'map statements were sent through the database that replaced their owner')
+        assert.ok(error && isRetired(error), `the save was answered as ${error ? error.name + ': ' + error.message : 'a success'}`)
+
+        const [after] = await replacement.query(`select SystemID, Xcor, Ycor from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 2`)
+
+        assert.deepEqual(after, rows, 'a position of a save that was reported as failed was kept')
+      } finally {
+        release()
+        await Promise.all([retireDatabase(database), retireDatabase(replacement)])
+        delete globalThis.__positionsDatabase
       }
-
-      const saving = m['renderer/utilities/map-positions'].savePositions(database, { GameID: GAME, RaceID: RACE, ids, positions }).then(() => null, (error) => error)
-
-      await second
-
-      const retiring = retireDatabase(database)
-
-      release()
-
-      const error = await saving
-
-      await retiring
-      assert.ok(error && isRetired(error), `the save was answered as ${error ? error.name + ': ' + error.message : 'a success'}`)
-
-      const [after] = await replacement.query(`select SystemID, Xcor, Ycor from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 2`)
-
-      assert.deepEqual(after, rows, 'a position of a save that was reported as failed was kept')
-      await retireDatabase(replacement)
-      delete globalThis.__positionsDatabase
-      fs.rmSync(file)
     })
   })
 
@@ -2032,6 +2106,7 @@ const defineSuite = (m, fixtures, base) => {
     const { generation } = w.store.state.freshness
 
     lost(old)
+    assert.equal(w.store.state.freshness.generation, generation + 1, 'the reported loss did not request a fresh copy')
     await until(() => w.store.state.freshness.generation === generation + 1 && w.store.state.database !== old, 'the save to be opened again')
     assert.equal(w.store.state.freshness.file.kind, 'error', 'the loss is not said')
     await sleep(200)
@@ -2166,25 +2241,45 @@ const defineSuite = (m, fixtures, base) => {
         const source = fs.readFileSync(path.join(base, 'scripts', 'web', 'shims', 'chokidar.js'), 'utf8').replace("from './database-request'", `from '${request}'`)
         const shim = await import(dataUrl(source))
         const events = []
+        const polls = []
+        let reported = 'unknown'
 
-        globalThis.__webRequest = (route) => server.raw(route.replace(/^\//, ''))
+        globalThis.__webRequest = async (route) => {
+          const response = await server.raw(route.replace(/^\//, ''))
+
+          return {
+            ok: response.ok,
+            json: async () => {
+              const body = await response.json()
+
+              polls.push(body)
+
+              return body
+            },
+          }
+        }
 
         const watcher = shim.watch(file)
 
-        ;['add', 'change', 'unlink', 'error'].forEach((event) => watcher.on(event, () => events.push(event)))
+        ;['add', 'change', 'unlink', 'error'].forEach((event) => watcher.on(event, () => {
+          events.push(event)
+          reported = event === 'unlink' ? 'missing' : event === 'error' ? 'unreadable' : 'available'
+        }))
 
         try {
           await until(() => events.includes('add'), 'the first add', 10000)
           assert.deepEqual(events, ['add'])
 
           fs.rmSync(file)
-          await until(() => events.includes('unlink'), 'the unlink of the deleted save', 10000)
-          assert.deepEqual(events, ['add', 'unlink'], 'a deleted save was not reported once as removed')
 
           const gone = await server.get(`stat?path=${encodeURIComponent(file)}`)
 
           assert.deepEqual(gone.body, { missing: true })
           assert.equal(gone.status, 200)
+          // Wait for an actual missing-file response to be consumed, not for the notification whose reported state is the verdict.
+          await until(() => polls.some((body) => body.missing), 'the watcher to read the missing-file response', 10000)
+          assert.equal(reported, 'missing', 'the watcher still reports the deleted save as available')
+          assert.deepEqual(events, ['add', 'unlink'], 'a deleted save was not reported once as removed')
 
           fs.copyFileSync(a, file)
           await until(() => events.length === 3, 'the add of the recreated save', 10000)
@@ -2204,6 +2299,8 @@ const defineSuite = (m, fixtures, base) => {
       }
     })
   })
+
+  validateCoverage(cases.map(({ name }) => name))
 
   return cases
 }
@@ -2225,10 +2322,10 @@ const runSuite = async (modules, fixtures, only = null, base = repo, positions =
         timer = setTimeout(() => reject(new Error(`The case took more than ${CASE_TIMEOUT_MS / 1000} s`)), CASE_TIMEOUT_MS)
       })
 
-      await Promise.race([run(), late]).finally(() => clearTimeout(timer))
-      results.push({ name, error: null })
+      await Promise.race([Promise.resolve().then(run), late]).finally(() => clearTimeout(timer))
+      results.push({ name, error: null, kind: null, threw: false, detail: '' })
     } catch (error) {
-      results.push({ name, error })
+      results.push({ name, error, kind: kindOf(error), threw: isSubjectThrow(error), detail: String(error && error.message).slice(0, 1500) })
     }
 
     await closeWorlds(modules)
@@ -2322,34 +2419,37 @@ const MUTATIONS = [
   { name: 'a watcher that counts an error during a read twice', file: 'renderer/utilities/save-watcher.js', find: '      if (!reading) {\n        failed(', replace: '      if (true) {\n        failed(', fails: ['an error of the watcher while a copy is being read'] },
   { name: 'a watcher that goes on after it was stopped', file: 'renderer/utilities/save-watcher.js', find: ['const alive = () => mine.live && current === mine && store.state.savePath === path', '    clearTimeout(watcher.timer)\n    watcher.unwatch()\n'], replace: ['const alive = () => store.state.savePath === path', ''], fails: ['a world that is closed stops its recovery'] },
   { name: 'a store that does not refuse a second request', file: 'renderer/store/saves.js', find: '  if (state.busy) {\n    return { ok: true, action: \'busy\' }\n  }\n', replace: '', fails: ['a second request while one is out'] },
+  { name: 'a canceled dialog reported as an unchanged save', file: 'main/saves.js', find: "return { ok: true, action: 'canceled', path: null, active: windows.has(id) ? windows.databaseOf(id) : null }", replace: "return { ok: true, action: 'unchanged', path: null, active: windows.has(id) ? windows.databaseOf(id) : null }", fails: ['closing the dialog changes nothing'] },
+  { name: 'a chosen save reported without its success notice', file: 'renderer/store/saves.js', find: "return { tone: 'success', text:", replace: "return { tone: 'info', text:", fails: ['a file chosen in the dialog is opened'] },
+  { name: 'an active save reported available while its file is missing', file: 'main/saves.js', find: "active: { path: active, state: now.ok ? 'available' : 'unavailable', reason: now.ok ? null : now.reason }", replace: "active: { path: active, state: 'available', reason: now.ok ? null : now.reason }", fails: ['a save that cannot be reached is the active one'] },
+  { name: 'race settings shared between different campaigns', file: 'renderer/store/index.js', find: 'raceKeyPrefix(getters.campaignId, state.RaceID)', replace: "raceKeyPrefix('shared', state.RaceID)", fails: ['two saves with the same game and race numbers'] },
+  { name: 'a watcher that drops the selection when a save is replaced', file: 'renderer/utilities/save-watcher.js', find: "      mine.removed = true\n      store.commit('freshness/watched', { kind: 'unlink'", replace: "      mine.removed = true\n      store.commit('clearSelection')\n      store.commit('freshness/watched', { kind: 'unlink'", fails: ['a save replaced by renaming another file'] },
+  // The exhausted count and cleared timer do not by themselves establish the terminal recovery state.
+  { name: 'a watcher that reports a spent unreadable save as ok', file: 'renderer/utilities/save-watcher.js', find: "      recovery({ state: 'unreadable', attempt: mine.attempt, limit: retryMs.length, nextAt: null, message })", replace: "      recovery({ state: 'ok', attempt: mine.attempt, limit: retryMs.length, nextAt: null, message })", fails: ['a file that stays unreadable'] },
 ]
+
+// Every named head must have a declared fault, and every declared case prefix must name a head. This is catalog validation only: quick runs still plant nothing, and native results must separately prove each edge by an own wrong value.
+const validateCoverage = (names) => {
+  const missing = names.filter((name) => !MUTATIONS.some((mutation) => mutation.fails.some((prefix) => name.startsWith(prefix))))
+  const unknown = MUTATIONS.flatMap((mutation) => mutation.fails.filter((prefix) => !names.some((name) => name.startsWith(prefix))).map((prefix) => `${mutation.name}: ${prefix}`))
+
+  if (new Set(names).size !== names.length || missing.length || unknown.length) {
+    throw new Error(`The save-switching fault catalog is incomplete: unassigned heads ${missing.join('; ') || 'none'}; unresolved prefixes ${unknown.join('; ') || 'none'}; duplicate heads ${new Set(names).size !== names.length}`)
+  }
+}
 
 // `--mutant=<start of a name>` (repeatable) runs only those mutants, and not the suite itself.
 const MUTANTS = process.argv.filter((argument) => argument.startsWith('--mutant=')).map((argument) => argument.slice(9))
 
 // The mutation at `index` of MUTATIONS, broken, with the cases it names run against it; one result, as the report prints it. The sources of the app are loaded from their folder with the broken text of the one mutated given in its place, so nothing is copied; the scripts of the dev server are read by the cases from `base`, so a mutation of one breaks a copy of them.
 const applyMutation = async (fixtures, mutation) => {
+  refusePlanting(mutation.name)
   const script = mutation.file.startsWith('scripts/')
   const original = fs.readFileSync(path.join(script ? repo : src, mutation.file), 'utf8')
-  // `find` and `replace` are each one text, or lists of texts of the same length that are applied in turn.
+  // Every anchor must be unique and every intermediate source must parse.
   const finds = [].concat(mutation.find)
   const replaces = [].concat(mutation.replace)
-  let broken = original
-  let missing = null
-
-  finds.forEach((text, index) => {
-    const parts = broken.split(text)
-
-    if (parts.length !== 2) {
-      missing = missing || `The text to break is not in ${mutation.file} exactly once (${parts.length - 1} found)`
-    }
-
-    broken = parts.join(replaces[index])
-  })
-
-  if (missing) {
-    return { name: `mutation: ${mutation.name}`, error: new Error(missing) }
-  }
+  const broken = finds.reduce((text, find, index) => plantedPatch(mutation.file, text, find, replaces[index]), original)
 
   const copy = script ? fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-switching-src-')) : null
 
@@ -2361,10 +2461,20 @@ const applyMutation = async (fixtures, mutation) => {
 
     const modules = await loadModules(script ? {} : { [mutation.file.replace(/\.js$/, '')]: broken })
     const outcome = await runSuite(modules, fixtures, mutation.fails, script ? copy : repo)
-    const failed = outcome.filter((entry) => entry.error)
-    const missed = mutation.fails.filter((start) => !failed.some((entry) => entry.name.startsWith(start)))
+    const crashed = outcome.filter((entry) => entry.threw)
 
-    return { name: `mutation: ${mutation.name} is caught by ${mutation.fails.join(', ')}`, error: missed.length ? new Error(`Not caught by: ${missed.join(', ')}`) : null }
+    if (crashed.length) {
+      throw new Error(`The subject threw while ${mutation.name} was judged: ${crashed.map((entry) => `${entry.name}: ${entry.detail}`).join('; ')}`)
+    }
+
+    const failed = judged(outcome.map((entry) => ({ ...entry, id: entry.name, ok: entry.error === null })), mutation.name)
+    const missed = mutation.fails.filter((start) => {
+      const named = outcome.filter((entry) => entry.name.startsWith(start)).map((entry) => entry.name)
+
+      return !named.length || !caughtBy(failed, named, mutation)
+    })
+
+    return { name: `mutation: ${mutation.name} is caught by ${mutation.fails.join(', ')}`, error: missed.length ? new Error(`Not caught by: ${missed.join(', ')}`) : null, credit: failed.map(({ id, kind, threw, detail }) => ({ id, kind, threw, detail })) }
   } catch (error) {
     return { name: `mutation: ${mutation.name}`, error }
   } finally {
@@ -2384,9 +2494,9 @@ const CHILD = CHILD_MUTATION !== undefined || CHILD_CASES !== undefined
 const failureOf = (error) => (error === null ? null : Object.assign(new Error(error.split('\n')[0]), { stack: error }))
 
 const mutationInChild = async (index) => {
-  const { name, error } = lastJson(await runChild(__filename, [`--mutation=${index}`]), MUTATION_PREFIX)
+  const { name, error, credit } = lastJson(await runChild(__filename, [`--mutation=${index}`]), MUTATION_PREFIX)
 
-  return { name, error: failureOf(error) }
+  return { name, error: failureOf(error), credit }
 }
 
 // The suite is cut into this many parts, the cases at every this-many-th position of it, each run in a child of its own: its cases wait on timers and watchers for most of their time, so the parts overlap, and the heavy waits are spread over them.
@@ -2409,8 +2519,12 @@ const removeTemporary = (folder) => {
 }
 
 const main = async () => {
+  if (CHILD_MUTATION !== undefined) {
+    refusePlanting(`direct mutation ${CHILD_MUTATION}`)
+  }
+
   if (!fs.existsSync(SAVE)) {
-    console.log(`AuroraDB.db is not here (${SAVE}); the check needs it.`)
+    console.log(`${FIXTURE.file} is not here (${SAVE}); the check needs it.`)
     process.exit(1)
   }
 
@@ -2454,11 +2568,11 @@ const main = async () => {
       results = await runSuite(await loadModules(), fixtures, only)
     } else {
       const names = defineSuite(await loadModules(), { a: '', b: '' }, repo).map(({ name }) => name)
-      const withMutations = !process.argv.includes('--no-mutations')
+      const withMutations = mutating()
       const chosen = withMutations ? [...MUTATIONS.keys()].filter((index) => !MUTANTS.length || MUTANTS.some((start) => MUTATIONS[index].name.startsWith(start))) : []
-      const parts = MUTANTS.length ? [] : Array.from({ length: SUITE_PARTS }, (_, part) => names.map((_name, position) => position).filter((position) => position % SUITE_PARTS === part)).filter((positions) => positions.length)
-      // The parts of the suite and the mutations are all children, run side by side with the parts first (they are the longest); the results keep the order of the report: the suite, then the mutations as listed.
-      const done = await inParallel([...parts, ...chosen], (item) => (Array.isArray(item) ? casesInChild(item) : mutationInChild(item)))
+      const parts = withMutations && MUTANTS.length ? [] : Array.from({ length: SUITE_PARTS }, (_, part) => names.map((_name, position) => position).filter((position) => position % SUITE_PARTS === part)).filter((positions) => positions.length)
+      // The suite owns a fixed four-child pool; CHECK_JOBS divides the budget between scripts, not these isolated variants. Results retain suite/catalog order.
+      const done = await inParallel([...parts, ...chosen], (item) => (Array.isArray(item) ? casesInChild(item) : mutationInChild(item)), 4)
       const suite = names.map((name) => ({ name, error: null }))
 
       parts.forEach((positions, part) => positions.forEach((position, index) => {
@@ -2467,7 +2581,7 @@ const main = async () => {
 
       const mutants = done.slice(parts.length)
 
-      results = [...(MUTANTS.length ? [] : suite), ...mutants.map((part, position) => (part instanceof Error ? { name: `mutation: ${MUTATIONS[chosen[position]].name}`, error: part } : part))]
+      results = [...(withMutations && MUTANTS.length ? [] : suite), ...mutants.map((part, position) => (part instanceof Error ? { name: `mutation: ${MUTATIONS[chosen[position]].name}`, error: part } : part))]
     }
   } finally {
     loud()
@@ -2475,7 +2589,7 @@ const main = async () => {
   }
 
   if (CHILD) {
-    const print = ({ name, error: failure }) => ({ name, error: failure ? String(failure.stack || failure) : null })
+    const print = ({ name, error: failure, credit }) => ({ name, error: failure ? String(failure.stack || failure) : null, credit })
 
     process.stdout.write(CHILD_CASES !== undefined ? `${CASES_PREFIX}${JSON.stringify(results.map(print))}\n` : `${MUTATION_PREFIX}${JSON.stringify(print(results[0]))}\n`, () => process.exit(0))
 
@@ -2485,6 +2599,10 @@ const main = async () => {
   const failed = results.filter((entry) => entry.error)
 
   results.forEach(({ name, error }) => console.log(`${error ? '  FAIL ' : '  ok   '} ${name}${error ? `\n         ${String(error.stack || error).split('\n').slice(0, 4).join('\n         ')}` : ''}`))
+  if (process.env.CHECK_VERBOSE) {
+    results.filter((entry) => entry.credit).forEach(({ name, credit }) => console.log(`${name}: ${JSON.stringify(credit)}`))
+  }
+
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
   process.exit(failed.length ? 1 : 0)
 }

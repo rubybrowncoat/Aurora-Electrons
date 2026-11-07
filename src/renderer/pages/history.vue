@@ -514,7 +514,7 @@ import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
 import { COLONY_BYTES, chosenNow, colonyEstimate, colonyWish } from '../utilities/colony-series'
 import { csvCell } from '../utilities/csv-cell'
-import { EVENT_BYTES, EVENT_CAP, EVENT_CAPS, archiveOn, capRecord, eventEstimate, eventFileProblem, gapsOf, recordEvents } from '../utilities/event-archive'
+import { EVENT_BYTES, EVENT_CAP, EVENT_CAPS, archiveOn, capRecord, eventEstimate, eventFileProblem, gapsOf, recordDepth, recordEvents } from '../utilities/event-archive'
 import { CAPTURES_KEPT, CAPTURE_BYTES, OBJECT_BYTES, OBSERVED_KINDS, observationEstimate, observationEverChosen, observationFileProblem, observedKinds, raceObservations } from '../utilities/observations'
 import { CLEAR_WORDS, DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, SPAN_YEARS, branchStore, bytesText, campaignStorage, changeResult, clearPlan, clearRaceHistory, colonyStore, durationText, eventStore, installationResult, measuredBytes, mineralResult, observationStore, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
@@ -1192,9 +1192,9 @@ export default {
         const file = this.eventRecord.file
         const record = file ? file.races[this.RaceID] || null : null
 
-        return { on: archiveOn(io.settings.store, this.resolved.campaignId, this.RaceID), player: !(this.record && this.record.npr), cap, events: record ? recordEvents(record) : null, measured: record ? measuredBytes(record) : null, predicted: eventEstimate(cap), gaps: record ? gapsOf(record).filter((gap) => gap.from !== null).length : null, cut: record && isKnownNumber(record.cut) ? record.cut : null, error: '' }
+        return { on: archiveOn(io.settings.store, this.resolved.campaignId, this.RaceID), player: !(this.record && this.record.npr), cap, events: record ? recordEvents(record) : null, measured: record ? measuredBytes(record) : null, predicted: eventEstimate(cap), gaps: record ? gapsOf(record).filter((gap) => gap.from !== null).length : null, cut: record && isKnownNumber(record.cut) ? record.cut : null, depth: record ? recordDepth(record) : null, error: '' }
       } catch (error) {
-        return { on: false, player: true, cap, events: null, measured: null, predicted: null, gaps: null, cut: null, error: error.message }
+        return { on: false, player: true, cap, events: null, measured: null, predicted: null, gaps: null, cut: null, depth: null, error: error.message }
       }
     },
 
@@ -1219,8 +1219,9 @@ export default {
       const measured = budget.measured === null ? 'none recorded yet' : `${this.size(budget.measured)} measured as compact JSON`
       const gaps = budget.gaps === null ? '' : ` ${this.count(budget.gaps, 0)} ${budget.gaps === 1 ? 'stretch' : 'stretches'} between captures ${budget.gaps === 1 ? 'was' : 'were'} not observed, as was the time before the first capture.`
       const cut = budget.cut === null ? '' : ` The oldest events are no longer kept: the record is complete from ${this.date(budget.cut)}.`
+      const depth = budget.depth && budget.depth.from !== null ? (budget.depth.from === budget.depth.to ? ` Its events all lie on ${this.date(budget.depth.from)}.` : ` It runs from ${this.date(budget.depth.from)} to ${this.date(budget.depth.to)}.`) : ''
 
-      return `${state}; ${kept}; ${measured}; about ${this.size(budget.predicted)} predicted at the cap, at about ${EVENT_BYTES} bytes an event.${gaps}${cut}`
+      return `${state}; ${kept}; ${measured}; about ${this.size(budget.predicted)} predicted at the cap, at about ${EVENT_BYTES} bytes an event.${gaps}${cut}${depth}`
     },
 
     // The shown branch's observation file as stored, or why it could not be read: { file, error }. The file is null when the branch has none; the error is '' when the read worked and names the problem of a file this version cannot read, never a count of 0.

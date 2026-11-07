@@ -461,19 +461,20 @@ const defineCases = (modules) => {
   })
 
   // ---- Terraforming boundaries ---------------------------------------------------------------------------------
-  const species = habitability.speciesLimits({ IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: 2, BreatheName: 'Oxygen', PopulationDensityModifier: 1 })
-  const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, FrozenOut: 0 })
-  const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 288, BaseTemp: 255, Albedo: 0.3, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
+  const species = habitability.speciesLimits({ IdealTemperature: 288, TemperatureDeviation: 30, IdealBreathePressure: 0.2, BreathePressureDeviation: 0.1, IdealGravity: 1, GravityDeviation: 0.5, MaximumPressure: 4, BreatheID: 10, BreatheName: 'Oxygen', PopulationDensityModifier: 1 })
+  const DANGER = { DangerousOxygen: 0, DangerousPPMOxygen: 0, DangerousMethane: 0, DangerousPPMMethane: 0, DangerousSulphur: 0, DangerousPPMSulphur: 0, DangerousAmmonia: 0, DangerousPPMAmmonia: 0 }
+  const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasPercentage, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, FrozenOut: 0 })
+  const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 288, BaseTemp: 255, Albedo: 0.3, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Atmosphere: [gas(10, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
   const airless = (extra = {}) => earthlike({ SurfaceTemp: 255, HydroExt: 0, HydroID: 1, AtmosPress: 0, Atmosphere: [], ...extra })
   // The DIM_Gases rows the plan needs: Aestusium warms, Frigusium cools, the rest are neutral. Every row holds all the figures a plan prices a gas with; a row without them makes the plan unknown (see the cases below).
-  const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, ...extra })
-  const GASES = { 2: gasRow('Oxygen'), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
+  const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0, ...DANGER, ...extra })
+  const GASES = { 10: gasRow('Oxygen'), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
   const assess = (body) => terraforming.assessTerraforming(deepFreeze(body), species, 1, (id) => GASES[id])
   const BOUNDARY_BODIES = {
     'an airless body': airless(),
     'a body with a zero-pressure atmosphere entry': airless({ Atmosphere: [gas(7, 'Nitrogen', 0, 0)] }),
-    'a body at the species\' maximum pressure': earthlike({ AtmosPress: 4, Atmosphere: [gas(2, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.8, 95)] }),
-    'a body just over the species\' maximum pressure': earthlike({ AtmosPress: 4.001, Atmosphere: [gas(2, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.801, 95)] }),
+    'a body at the species\' maximum pressure': earthlike({ AtmosPress: 4, Atmosphere: [gas(10, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.8, 95)] }),
+    'a body just over the species\' maximum pressure': earthlike({ AtmosPress: 4.001, Atmosphere: [gas(10, 'Oxygen', 0.2, 5), gas(7, 'Nitrogen', 3.801, 95)] }),
     'a body with a very thin atmosphere': airless({ AtmosPress: 0.01, Atmosphere: [gas(7, 'Nitrogen', 0.01, 100)] }),
     'a liveable body that is too warm for a plan to help': earthlike({ SurfaceTemp: 400 }),
     'a body at the minimum gravity terraforming can hold an atmosphere at': airless({ Gravity: 0.1 }),
@@ -572,10 +573,17 @@ const defineCases = (modules) => {
     assert.deepEqual(assessment.missing, ['the properties of gas 20'])
   })
 
+  invariant('terraforming', 'a plan needs the danger pair of the species\' breathing gas for a gas it adds, and no other breather\'s', () => {
+    const dropped = (column) => (id) => (id === 20 ? { ...GASES[20], [column]: undefined } : GASES[id])
+
+    assert.deepEqual(assessWith(airless(), dropped('DangerousPPMOxygen')).missing, ['the properties of gas 20'], 'the pair of an oxygen breather')
+    assert.equal(assessWith(airless(), dropped('DangerousPPMMethane')).missing, undefined, 'the pair of a methane breather is not asked of an oxygen breather')
+  })
+
   invariant('terraforming', 'a plan the full table rejects as making things worse is unknown, not worse, when it adds a gas the table lacks', () => {
     const body = earthlike({ SurfaceTemp: 200, BaseTemp: 180 })
 
-    assert.equal(assessWith(body, (id) => GASES[id]).reason, 'Terraforming would make it worse', 'control: the complete table rejects this plan')
+    assert.equal(assessWith(body, (id) => GASES[id]).reason, 'The found plan would make it worse', 'control: the complete table rejects this plan')
     assert.deepEqual(assessWith(body, withoutGas(20)).missing, ['the properties of gas 20'])
   })
 
@@ -753,7 +761,7 @@ const defineCases = (modules) => {
   const commanders = modules.commanders
   const admin = (id, bonuses, extra = {}) => ({ CommanderID: id, Name: `Admin ${id}`, CommanderType: 2, CommandType: 0, bonuses, ...extra })
   const colonyRow = (extra = {}) => ({ PopulationID: 1, PopName: 'Mars', GovernorID: 0, Population: 5, BonusOne: 25, BonusTwo: 0, BonusThree: 0, ...extra })
-  const shipRow = (extra = {}) => ({ ShipID: 1, ShipName: 'Digger', ClassName: 'Miner', CaptainID: 0, ScienceOfficerID: 0, RankRequired: 2, Terraformers: 0, MiningModules: 3, Harvesters: 0, SciencePosts: 0, GeoSurvey: 0, GravSurvey: 0, ...extra })
+  const shipRow = (extra = {}) => ({ ShipID: 1, ShipName: 'Digger', ClassName: 'Miner', CaptainID: 0, ScienceOfficerID: 0, RankRequired: 2, ShipSeniorCO: 0, MainFunction: 2, Terraformers: 0, MiningModules: 3, Harvesters: 0, SciencePosts: 0, GeoSurvey: 0, GravSurvey: 0, ...extra })
   const officer = (id, bonuses, extra = {}) => ({ CommanderID: id, Name: `Officer ${id}`, CommanderType: 0, CommandType: 0, RankLevel: 2, bonuses, ...extra })
   const scientist = (id, bonuses, extra = {}) => ({ CommanderID: id, Name: `Scientist ${id}`, CommanderType: 3, CommandType: 0, ResSpecID: 1, bonuses, ...extra })
   const projectRow = (extra = {}) => ({ ProjectID: 1, ProjectName: 'Lasers', ScientistID: 0, ResSpecID: 1, Facilities: 2, ...extra })
@@ -961,9 +969,10 @@ const defineCases = (modules) => {
   // ---- Designed tech and technologies ----
   const research = modules.research
   const designedTech = modules['designed-tech']
+  const designRules = modules['design-rules']
   const provenance = modules.provenance
   const counter = { count: (value) => (value === null || value === undefined ? '—' : String(value)) }
-  const labProject = (extra = {}) => ({ ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, OutputPerLab: 10, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null, ...extra })
+  const labProject = (extra = {}) => ({ ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, ResearchBase: 10, ResearchRateModifier: 1, EconomicProdModifier: 1, Efficiency: 1, RadiationLevel: 0, UnrestPoints: 0, ProductionMod: 1, ResearchSpeed: 100, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null, ...extra })
   const techRow = (id, extra = {}) => ({ TechSystemID: id, Name: `Tech ${id}`, DevelopCost: 100, FieldID: 1, TechTypeID: 1, TypeName: 'Type', RaceID: 0, Prerequisite1: 0, Prerequisite2: 0, ...extra })
   const componentRow = (extra = {}) => ({ SDComponentID: 1, Name: 'Armour', CategoryID: 1, ComponentTypeID: 1, ComponentValue: 10, Size: 2, Cost: 4, Obsolete: 0, MilitarySystem: 1, ShippingLineSystem: 0, Baseline: 0, ...extra })
 
@@ -981,7 +990,7 @@ const defineCases = (modules) => {
 
   invariant('research', 'a paused project makes a known 0; every project unrated leaves the output unavailable and no projects at all a known 0', () => {
     const paused = research.outputResult(research.scheduleProjects([labProject({ Pause: 1 })], [], new Map()))
-    const unrated = research.outputResult(research.scheduleProjects([labProject({ CommanderID: 0 }), labProject({ ProjectID: 2, OutputPerLab: null })], [], new Map()))
+    const unrated = research.outputResult(research.scheduleProjects([labProject({ CommanderID: 0 }), labProject({ ProjectID: 2, ResearchBase: null })], [], new Map()))
     const none = research.outputResult([])
 
     assert.equal(paused.result.value, 0)
@@ -991,7 +1000,7 @@ const defineCases = (modules) => {
   })
 
   invariant('research', 'a project missing its labs, output per lab, scientist bonus or field has an unavailable rate that names the input', () => {
-    ;[['Facilities', 'labs'], ['OutputPerLab', 'output per lab'], ['ResearchBonus', 'Research bonus'], ['FieldID', 'field']].forEach(([field, word]) => {
+    ;[['Facilities', 'labs'], ['ResearchBase', 'output per lab'], ['ResearchRateModifier', 'output per lab'], ['EconomicProdModifier', 'output per lab'], ['Efficiency', 'output per lab'], ['RadiationLevel', 'output per lab'], ['UnrestPoints', 'output per lab'], ['ProductionMod', 'output per lab'], ['ResearchSpeed', 'output per lab'], ['ResearchBonus', 'Research bonus'], ['FieldID', 'field']].forEach(([field, word]) => {
       const [project] = research.scheduleProjects([labProject({ [field]: null })], [], new Map())
 
       assert.equal(project.rateResult.status, 'unavailable', field)
@@ -1080,7 +1089,7 @@ const defineCases = (modules) => {
 
     const clock = { StartYear: 2000, GameTime: 0 }
     const known = labProject()
-    const unrated = labProject({ ProjectID: 2, Name: 'Shields', OutputPerLab: null })
+    const unrated = labProject({ ProjectID: 2, Name: 'Shields', ResearchBase: null })
     const unflagged = labProject({ ProjectID: 3, Name: 'Engines', Pause: null })
     const paused = labProject({ ProjectID: 4, Name: 'Armour', Pause: 1 })
     const mixed = research.nextLandingResult(research.scheduleProjects([known, unrated, unflagged, paused], [], new Map()), clock)
@@ -1130,6 +1139,32 @@ const defineCases = (modules) => {
     assert.equal(noCost.MeasurePerCost, null)
     assert.equal(noCost.MeasurePerHS, 5)
     assert.ok(designedTech.figureResult(noCost, 'MeasurePerCost').inputs.missing.some((name) => name.includes('build cost')))
+  })
+
+  invariant('designed tech', 'two otherwise identical designs of the current rule, one with electronic hardening and one without, show the same stored cost and strength per BP in the designs table, while a design stored under the earlier rule shows the cost it stored', () => {
+    const designed = (hardeningRating) => designRules.activeSensorDesign({ sizeHS: 1, resolution: 100, strengthTech: 21, emTech: 1, hardeningRating, eccmRating: 3, eccmCost: 1.3, mode: designRules.SENSOR_MODES.missileFireControl })
+    const rowOf = (id, figures) => designedTech.augmentComponent({ SDComponentID: id, Name: `Design ${id}`, CategoryID: 24, ComponentTypeID: 25, Size: figures.sizeHS, Cost: figures.cost, Crew: figures.crew, HTK: figures.htk, ComponentValue: figures.strength, MaxSensorRange: figures.rangeKm, Resolution: 100, ECCM: figures.eccm, ElectronicCTD: figures.ctd, Uridium: figures.uridium, Corbomite: figures.corbomite, Obsolete: 0, MilitarySystem: 1, ShippingLineSystem: 0, Baseline: 0 })
+    const columns = designedTech.columnsFor(24)
+    const cost = columns.find((entry) => entry.value === 'Cost')
+    const perCost = columns.find((entry) => entry.value === 'MeasurePerCost')
+    const cell = (column, item) => designedTech.cellOf(column, item, counter)
+    const hardened = rowOf(1, designed(70))
+    const plain = rowOf(2, designed(0))
+
+    // The two rows are the same design but for the hardening tech, whose rating is the CTD; the cost reads the ECCM factor alone.
+    assert.equal(hardened.ElectronicCTD, 70)
+    assert.equal(plain.ElectronicCTD, 0)
+    assert.equal(hardened.Cost, plain.Cost)
+    assert.equal(cell(cost, hardened).text, cell(cost, plain).text)
+    assert.equal(hardened.MeasurePerCost, plain.MeasurePerCost)
+    assert.equal(cell(perCost, hardened).text, cell(perCost, plain).text)
+
+    // The 1973 save's 154931 (a missile fire control of size 1 and strength 21, ECCM 3, CTD 70) was designed under the earlier rule, which multiplied its 1.15 hardening cost factor into the stored 31.46 BP; this rule gives 27.3. The table shows the figure the save stores.
+    const stored = rowOf(154931, { sizeHS: 1, cost: 31.46, crew: 2, htk: 1, strength: 21, rangeKm: 79602591.77778593, eccm: 3, ctd: 70, uridium: 24.2, corbomite: 7.26 })
+
+    assert.equal(cell(cost, stored).text, '31.46')
+    assert.equal(stored.MeasurePerCost, 21 / 31.46)
+    assert.equal(designed(70).cost, 27.3)
   })
 
   invariant('designed tech', 'a beam weapon with no stored damage, shots or capacitor figure has no damage, interval or damage per second; it never works out as 0 or NaN', () => {
@@ -1283,7 +1318,7 @@ const defineCases = (modules) => {
   const colonyOf = (extra = {}) => ({ installations: 0, radius: 6000, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, ships: [], ...extra })
   const shipOf = (extra = {}) => ({ ShipID: 1, PopulationID: 1, ParentCommandID: 0, FleetSystemID: 1, crew: 1, captain: 1, captained: true, modules: 100, ...extra })
   const rateOf = (source, { raceRate = 0.001, speed = 100 } = {}) => terraform.terraformBreakdown({ raceRate, speed, source, admins: {} }).rate
-  const researchRow = (extra = {}) => ({ Facilities: 4, ActualCommanderResearchBonus: 1.5, ActualAnomalyBonus: 1, CommanderField: 3, ...extra })
+  const researchRow = (extra = {}) => ({ ResearchBase: 2, ResearchRateModifier: 1, EconomicProdModifier: 1, Efficiency: 1, RadiationLevel: 0, UnrestPoints: 0, ProductionMod: 1, ResearchSpeed: 100, Facilities: 4, ProjectField: 3, ScientistCommandID: 1, ActualCommanderResearchBonus: 1.5, ActualAnomalyBonus: 1, CommanderField: 3, ...extra })
   const industryRow = (id, extra = {}) => ({ ID: id, ProductionType: 0, Percentage: 50, Amount: 10, ProdPerUnit: 100, Queue: 0, Paused: 0, ...extra })
   const capacityResult = (value) => (value === null ? provenance.unavailable({ rule: 'production.industryRate', missing: ['the colony\'s production modifiers'] }) : provenance.ofRule({ rule: 'production.industryRate', value, inputs: { present: ['capacity'] } }))
 
@@ -1296,16 +1331,18 @@ const defineCases = (modules) => {
     ;['refineryOutput', 'soriumLasts', 'mspProduction', 'mspOutput', 'maintenanceLocation'].forEach((key) => assert.ok(provenance.getRule(`logistics.${key}`), key))
   })
 
-  invariant('production', 'a research rate with no scientist takes no bonus and says so, and a missing modifier row or facility count leaves it unavailable, never 0', () => {
-    const alone = production.researchRate(colonyModifiers, researchRow({ CommanderField: null, ActualCommanderResearchBonus: 1 }))
+  invariant('production', 'a research rate with no scientist takes no bonus and says so, and a missing output or facility count leaves it unavailable, never 0', () => {
+    const alone = production.researchRate(researchRow({ ScientistCommandID: null, CommanderField: null, ActualCommanderResearchBonus: 1 }))
 
     assert.equal(alone.value, 8)
     assert.ok(alone.assumptions.some((text) => text.includes('No scientist')))
-    assert.equal(production.researchRate(colonyModifiers, researchRow()).value, 12)
-    assert.equal(production.researchRate(undefined, researchRow()).status, 'unavailable')
-    assert.ok(production.researchRate(undefined, researchRow()).inputs.missing.includes('the colony\'s production modifiers'))
-    assert.equal(production.researchRate(colonyModifiers, researchRow({ Facilities: null })).status, 'unavailable')
-    assert.equal(production.researchRate(colonyModifiers, researchRow({ Facilities: 0 })).value, 0)
+    assert.equal(production.researchRate(researchRow()).value, 12)
+    ;['ResearchBase', 'ResearchRateModifier', 'EconomicProdModifier', 'Efficiency', 'RadiationLevel', 'UnrestPoints', 'ProductionMod', 'ResearchSpeed'].forEach((field) => {
+      assert.equal(production.researchRate(researchRow({ [field]: null })).status, 'unavailable')
+      assert.ok(production.researchRate(researchRow({ [field]: null })).inputs.missing.includes('the colony\'s research output per lab'))
+    })
+    assert.equal(production.researchRate(researchRow({ Facilities: null })).status, 'unavailable')
+    assert.equal(production.researchRate(researchRow({ Facilities: 0 })).value, 0)
   })
 
   invariant('production', 'an industrial project with an unknown capacity has no rate and no finish and is not idle, while a real 0 capacity is a rate of 0 and an idle job', () => {
@@ -1642,22 +1679,22 @@ const defineCases = (modules) => {
 
   invariant('production', 'a terraforming finish with no rate says why, and one with a rate of 0 is idle', () => {
     const rate = rateOf(colonyOf({ installations: 10 }))
-    const job = { TerraformStatus: 1, MaxAtm: 1, GasAtm: 0.5, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
+    const job = { Gravity: 1, TerraformStatus: 1, MaxAtm: 1, GasAtm: 0.5, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
     const finish = production.terraformFinish(colonyModifiers, job, rate)
 
     assert.equal(finish.result.status, 'estimated')
-    assert.ok(Math.abs(finish.result.value - (0.5 / (rate.value / 365))) < 1e-9)
+    assert.ok(finish.result.value > 0.5 / (rate.value / 365) && finish.result.value <= 0.5 / (rate.value / 365) + colonyModifiers.MinConstructionPeriod / 86400)
     assert.equal(production.terraformFinish(colonyModifiers, job, rateOf(colonyOf(), { speed: null })).result.status, 'unavailable')
     assert.equal(production.terraformFinish(colonyModifiers, job, rateOf(colonyOf({ installations: 0 }))).idle, true)
     assert.equal(production.terraformFinish(colonyModifiers, { ...job, TerraformStatus: null }, rate).result.status, 'unavailable')
   })
 
-  invariant('production', 'a gas with no row in the body\'s atmosphere is 0 atm and a row with a null pressure is unavailable, naming the pressure, never a finish of 0 days', () => {
+  invariant('production', 'an eligible selected removal with no gas row still needs the next increment; a row with a null pressure is unavailable, naming the pressure', () => {
     const rate = rateOf(colonyOf({ installations: 10 }))
-    const removing = { TerraformStatus: 0, MaxAtm: 0, GasAtm: null, GasAtmUnknown: 0, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
+    const removing = { Gravity: 1, TerraformStatus: 0, MaxAtm: 0, GasAtm: null, GasAtmUnknown: 0, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
     const absent = production.terraformFinish(colonyModifiers, removing, rate)
 
-    assert.equal(absent.result.value, 0)
+    assert.equal(absent.result.value, colonyModifiers.MinConstructionPeriod / 86400)
     assert.ok(absent.result.assumptions.some((text) => text.includes('0 atm')))
 
     const unknown = production.terraformFinish(colonyModifiers, { ...removing, GasAtmUnknown: 1 }, rate)
@@ -1667,7 +1704,7 @@ const defineCases = (modules) => {
     assert.equal(production.terraformFinish(colonyModifiers, { ...removing, GasAtmUnknown: undefined }, rate).result.status, 'unavailable')
     assert.equal(production.terraformFinish(colonyModifiers, { ...removing, GasAtm: 0.5, GasAtmUnknown: 0 }, rate).result.status, 'estimated')
 
-    const vapour = { ...removing, MaxAtm: 0.1, GasName: 'Water Vapour', HydroID: 3, HydroExt: 20, AtmosPress: 1 }
+    const vapour = { ...removing, MaxAtm: 0.1, GasName: 'Water Vapour', HydroID: 3, HydroExt: 20, AtmosPress: 1, SurfaceTemp: 300, BaseTemp: 300, Albedo: 1, DustLevel: 0, BodyClass: 1, BodyTypeID: 2, Eccentricity: 0, Atmosphere: [{ AtmosGasID: 7, GasAtm: 1, FrozenOut: 0, FreezingPoint: 63, GHGas: 0, AntiGHGas: 0 }] }
 
     assert.equal(production.terraformFinish(colonyModifiers, { ...vapour, GasAtmUnknown: 1 }, rate).result.status, 'unavailable')
     assert.notEqual(production.terraformFinish(colonyModifiers, { ...vapour, GasAtmUnknown: 0 }, rate).result.status, 'unavailable')
@@ -1728,7 +1765,7 @@ const defineCases = (modules) => {
   })
 
   invariant('logistics', 'a refinery or maintenance facility makes 0 where it has no installations or is off, and has no figure rather than 0 where its modifier or rate is not in the save', () => {
-    const colony = { FuelProdStatus: 1, Refineries: 4, FuelProduction: 1000, MaintenanceFacilities: 5, MSPProduction: 10, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6 }
+    const colony = { NPR: 0, MspPopulated: modules.provenance.ofRule({ rule: 'logistics.mspPopulation', value: true }), FuelProdStatus: 1, Refineries: 4, FuelProduction: 1000, MaintenanceFacilities: 5, MSPProduction: 10, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6 }
 
     assert.equal(logistics.refineryOutput(colony, 1.5).value, 6000)
     assert.equal(logistics.refineryOutput(colony, null).status, 'unavailable')
@@ -1764,7 +1801,7 @@ const defineCases = (modules) => {
     assert.equal(logistics.soriumLasts(colony, logistics.refineryOutput(colony, null)).status, 'unavailable')
     assert.equal(logistics.soriumLasts({ ...colony, FuelProdStatus: 0 }, logistics.refineryOutput({ ...colony, FuelProdStatus: 0 }, 1)).status, 'unavailable')
 
-    const make = (id) => ({ PopulationID: id, SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 1 })
+    const make = (id) => ({ PopulationID: id, NPR: 0, MspPopulated: modules.provenance.ofRule({ rule: 'logistics.mspPopulation', value: true }), SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 1 })
     const ships = [rawShip({ Size: 2, Cost: 40 })]
     const place = (colonies, modifierOf) => logistics.maintenanceLocations({ colonies, ships, modifierOf, maintenanceCapacity: 1, economicModifier: 1 })[0]
     const mixed = place([make(1), make(2)], (id) => (id === 1 ? 1 : null))
@@ -2030,16 +2067,16 @@ const defineCases = (modules) => {
     assert.ok(searchable.text.includes('30%') && searchable.text.includes('10% possible'))
   })
 
-  invariant('warnings', 'an ancient construct with no known colony of 10 million is not evaluated while a population or its state is missing, and one that is known to be dormant or short of people warns', async () => {
-    const construct = (AncientConstructID, Active, PopulationID, Population) => ({ AncientConstructID, Active, ResearchBonus: 1.25, FieldName: 'Sensors', SystemBodyID: AncientConstructID, PlanetNumber: 1, OrbitNumber: 0, BodyClass: 1, SystemBodyName: `Body ${AncientConstructID}`, Component: 1, SystemName: 'Sol', PopulationID, Population })
-    const rows = await readCheck('known-unexploited-constructs', (sql) => (sql.includes('FCT_AncientConstruct') ? [construct(1, 1, 11, null), construct(2, null, 12, 25), construct(3, 0, null, null), construct(4, 1, 13, 25), construct(5, 1, 14, 5)] : []))
+  invariant('warnings', 'an ancient construct with no known colony of 1 million is not evaluated while a population or its state is missing, and one that is known to be dormant or short of people warns', async () => {
+    const construct = (AncientConstructID, Active, PopulationID, Population) => ({ AncientConstructID, Active, ResearchBonus: 1.25, FieldName: 'Sensors', SystemBodyID: AncientConstructID, PlanetNumber: 1, OrbitNumber: 0, BodyClass: 1, SystemBodyName: `Body ${AncientConstructID}`, ComponentNumber: 1, SystemName: 'Sol', PopulationID, Population })
+    const rows = await readCheck('known-unexploited-constructs', (sql) => (sql.includes('FCT_AncientConstruct') ? [construct(1, 1, 11, null), construct(2, null, 12, 25), construct(3, 0, null, null), construct(4, 1, 13, 25), construct(5, 1, 14, 0.5)] : sql.includes('FCT_Population.*') ? [[11, null], [12, 25], [13, 25], [14, 0.5]].map(([PopulationID, Population]) => ({ CensusRowID: PopulationID, PopulationID, Population, RaceID: 1, GameID: 1, SystemBodyID: PopulationID })) : []))
     const byId = Object.fromEntries(rows.map((row) => [row.id, row]))
 
     assert.deepEqual(Object.keys(byId), ['construct:1', 'construct:2', 'construct:3', 'construct:5'])
-    assert.deepEqual(byId['construct:1'].unevaluated.inputs.missing, ['the population of a colony on the construct\'s body'])
+    assert.deepEqual(byId['construct:1'].unevaluated.inputs.missing, ['surface population'])
     assert.deepEqual(byId['construct:2'].unevaluated.inputs.missing, ['whether the ancient construct is active'])
     assert.equal(byId['construct:3'].cells.bonus, 'Dormant')
-    assert.equal(byId['construct:5'].cells.blocker, 'Lacking 10 million population on the body')
+    assert.equal(byId['construct:5'].cells.blocker, 'Lacking 1 million population at any colony on the body')
   })
 
   invariant('warnings', 'a colony whose factory amounts are all unstored is not evaluated and names the amount, one known positive amount still proves free capacity, a real 0 amount has none, and an unstored installation type is named', async () => {
@@ -2057,7 +2094,7 @@ const defineCases = (modules) => {
       create table FCT_SystemBody (SystemBodyID integer, PlanetNumber integer, OrbitNumber integer, BodyClass integer, StarID integer);
       create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);
       create table FCT_RaceSysSurvey (SystemID integer, RaceID integer, Name text);
-      create table FCT_Star (StarID integer, Component integer);
+      create table FCT_Star (StarID integer, ComponentNumber integer);
       insert into DIM_PlanetaryInstallation values (1, 1, 0, 0), (2, 2, 0, 0), (3, 0, 0, 0), (4, 0, 1, 0);
       insert into FCT_Population values (1, 1, 1, 'One', 1, 1), (2, 1, 1, 'Two', 1, 1), (3, 1, 1, 'Three', 1, 1), (4, 1, 1, 'Four', 1, 1), (5, 1, 1, 'Five', 1, 1), (6, 1, 1, 'Six', 1, 1), (7, 1, 1, 'Seven', 1, 1);
       ${installation(1, 1, 'null')}
@@ -2105,7 +2142,7 @@ const defineCases = (modules) => {
       create table FCT_SystemBody (SystemBodyID integer, PlanetNumber integer, OrbitNumber integer, BodyClass integer, StarID integer);
       create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);
       create table FCT_RaceSysSurvey (SystemID integer, RaceID integer, Name text);
-      create table FCT_Star (StarID integer, Component integer);
+      create table FCT_Star (StarID integer, ComponentNumber integer);
       insert into FCT_Population values (1, 1, 1, 'Governed', 5, 1, 1), (2, 1, 1, 'Academy', 4, 1, 1), (3, 1, 1, 'Garrison', 3, 1, 1), (4, 1, 1, 'Elsewhere', 2, 1, 1), (5, 1, 1, 'Empty', 0, 1, 1);
       insert into FCT_NavalAdminCommand values (10, 1, 1, 'Commanded', 1), (11, 1, 1, 'Shared', 1), (12, 1, 1, 'Vacant', 1);
       insert into FCT_SectorCommand values (20, 1, 1, 'Commanded', 1), (21, 1, 1, 'Shared', 1), (22, 1, 1, 'Admiralty', 1);
@@ -2140,6 +2177,7 @@ const main = async () => {
     'commanders',
     'research',
     'designed-tech',
+    'design-rules',
     'production',
     'terraform-capacity',
     'logistics',

@@ -95,8 +95,6 @@ const supplyGaps = (ship) => [
   ...(!(ship.SupplyShip === 1 && ship.MinimumSupplies > 0) && !isKnownNumber(ship.MaintSupplies) ? ['the maintenance supplies the ship class carries'] : []),
 ]
 
-const CAPACITY_LABELS = [['CargoCapacity', 'tons'], ['ColonistCapacity', 'colonists'], ['TroopCapacity', 'tons of troops']]
-
 export const checks = checksOf([
   {
     key: 'undermanned-ships',
@@ -108,6 +106,7 @@ export const checks = checksOf([
     rule: 'A ship has fewer crew aboard than its class needs, so its holds and its survey, harvester, orbital mining, maintenance, salvage, terraforming and stabilisation modules work at the share aboard (estimates read from the game\'s rules; over-crewing adds nothing). Morale and crew grade are separate, and a class with no morale check still loses this throughput; replacement crew joins at a colony of over a million people.',
     evidence: {
       verification: 'estimated',
+      versions: ['2.7.x'],
       structure: ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_ClassComponent', 'FCT_DamagedComponent'],
       note: 'The crew aboard and the class crew are stored values; what a shortfall slows is read from the game\'s rules, with no saved game showing a short-crewed ship doing it, so the effects are not checked against stored data. A ship whose crew aboard or class crew is not stored is listed apart, as not evaluated.',
       assumptions: ['A shortfall slows a ship\'s holds and modules at the share of the class crew aboard.'],
@@ -143,7 +142,7 @@ export const checks = checksOf([
         build: (ship) => {
           const level = crewFraction(ship)
           const effects = crewEffects(ship, { modules: ship.ClassLines > 0 ? modulesOf(linesByShip[ship.ShipID] || []) : null, holds: holdsOf(ship), version })
-          const stopped = effects.some((effect) => effect.state === 'blocked' || effect.state === 'stopped' || effect.state === 'unsupported')
+          const stopped = effects.some((effect) => effect.state === 'blocked' || effect.state === 'stopped')
 
           return shipRow(ship, {
             crew: level === null ? unknownCell(ctx, lacking(ship, { CurrentCrew: CREW_ABOARD, ClassCrew: CLASS_CREW })) : { text: percent(level), tone: levelTone(level) },
@@ -166,6 +165,7 @@ export const checks = checksOf([
     rule: 'A ship has one or more damaged components; the cost is the maintenance supplies a repair takes.',
     evidence: {
       verification: 'confirmed',
+      versions: ['2.7.x'],
       structure: ['FCT_DamagedComponent', 'FCT_ShipDesignComponents.Cost', 'FCT_Ship.ShippingLineID'],
       note: 'A presence check on stored rows: a ship with a damaged component row. The repair cost is twice the stored component cost; a cost not stored shows a dash. A ship whose shipping line is not stored is listed apart, as not evaluated.',
     },
@@ -532,45 +532,6 @@ export const checks = checksOf([
           link: linkTo.logistics('fuel'),
           signature: signatureOf('no-minimum-fuel'),
         }),
-      })
-    },
-  },
-  {
-    key: 'transport-classes-without-shuttles',
-    group: group.key,
-    severity: 'info',
-    title: (count) => amount(count, 'transport ship class', 'transport ship classes') + ' without cargo shuttles',
-    rule: 'A current class of more than 10 size that carries cargo or colonists has no cargo shuttle, so it can\'t load or unload without a colony\'s help.',
-    evidence: {
-      verification: 'estimated',
-      structure: ['FCT_ShipClass.Size, CargoCapacity, ColonistCapacity, TroopCapacity, CargoShuttleStrength, Obsolete'],
-      note: 'The capacities and the shuttle strength are stored class values; that a class of more than 10 size needs shuttles is a threshold of this page, not one the game states. A class with one of the values not stored is listed apart, as not evaluated.',
-      assumptions: ['A class of more than 10 size that carries cargo or colonists needs a cargo shuttle.'],
-    },
-    columns: [
-      { key: 'class', text: 'Class' },
-      { key: 'capacity', text: 'Capacity' },
-    ],
-    async read(ctx) {
-      const { GameID, RaceID } = ctx
-      const TRANSPORT = '(FCT_ShipClass.Size > 10 and (FCT_ShipClass.CargoCapacity > 0 or FCT_ShipClass.ColonistCapacity > 0) and FCT_ShipClass.CargoShuttleStrength = 0 and FCT_ShipClass.Obsolete != 1)'
-
-      const classes = await rowsOf(ctx, `select FCT_ShipClass.ShipClassID, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.TroopCapacity, FCT_ShipClass.CargoShuttleStrength, FCT_ShipClass.Obsolete, ${TRANSPORT} as Verdict from FCT_ShipClass where ${TRANSPORT} is not 0 and FCT_ShipClass.RaceID = ${RaceID} and FCT_ShipClass.GameID = ${GameID} ORDER BY FCT_ShipClass.ClassName ASC`)
-
-      return verdictRows(ctx, classes, {
-        missing: (shipClass) => lacking(shipClass, { Size: 'the size of the ship class', CargoCapacity: 'the cargo capacity of the ship class', ColonistCapacity: 'the colonist capacity of the ship class', CargoShuttleStrength: 'the cargo shuttle strength of the ship class', Obsolete: 'the obsolete flag of the ship class' }),
-        build: (shipClass) => {
-          const gaps = CAPACITY_LABELS.filter(([column]) => !isKnownNumber(shipClass[column]))
-          const parts = CAPACITY_LABELS.map(([column, unit]) => (isKnownNumber(shipClass[column]) ? (shipClass[column] ? `${ctx.count(shipClass[column])} ${unit}` : null) : `${unit} not stored`)).filter(Boolean).join(', ')
-
-          return {
-            id: `class:${shipClass.ShipClassID}`,
-            cells: {
-              class: classText(shipClass),
-              capacity: gaps.length ? { text: parts, result: ctx.unknown(gaps.map(([, unit]) => `the ${unit} capacity of the ship class`)) } : parts,
-            },
-          }
-        },
       })
     },
   },

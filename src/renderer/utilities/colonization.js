@@ -3,7 +3,7 @@
 // What makes a body worth settling next, in the order the ranking weighs it (sources in docs/DATABASE.md, "Colonization Planner ranking"):
 //   - the prize: the people it holds (surface area and the species' density, the game's capacity rule) and/or what its deposits are worth (the game's own deposit value, scaled by how short the race is of each mineral);
 //   - the colony cost it takes to live there, on the game's own scale (the cost before the colonisation tech);
-//   - the years of terraforming, when it needs them;
+//   - the years of terraforming, when it needs them (a minimum, the terraformers' time, for a plan that drains surface water: `yearsBasis` of an evaluation says which);
 //   - the distance to the nearest sizeable colony, which is how far a freighter flies to supply it.
 // A body only gets a rank when it is a place to settle at all and worth the trip: it holds the smallest colony worth planning for, or its deposits are worth mining, or it is a civilian mining complex site.
 
@@ -12,7 +12,7 @@ import { routeFacts, stateOf } from './colonization-states'
 import { KM_PER_AU } from './jump-graph'
 import { CMC_MINERAL_IDS, DEPOSIT_MINIMUM_AMOUNT, MINERALS, RICH_DEPOSIT_VALUE, WORTH_MINING_VALUE, depositValueResult, qualifiesForCmc, scarcityResult } from './minerals'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
-import { assessTerraforming, planYears, terraformCapacity } from './terraforming'
+import { assessTerraforming, planYears, terraformCapacity, TIME_BASIS } from './terraforming'
 import { infrastructurePerMillion, infrastructurePerMillionResult, limitingFactor, missingBodyInputs, missingSpeciesInputs, speciesLimits } from './habitability'
 
 export const GOALS = [
@@ -47,7 +47,7 @@ export const NO_OUTLOOK = { known: false, minerals: {} }
 // A mineral the outlook says nothing of (no outlook read yet) counts once, as holding; `rankBodies` reports that as an assumption while the outlook is not known.
 const HOLDING = scarcityResult(Infinity)
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 // The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The colony cost and the infrastructure per million are in habitability.js, the species' population in colonization-data.js.
 registerRule({
@@ -56,13 +56,13 @@ registerRule({
   units: 'atm of an Earth-sized body a year',
   verification: 'estimated',
   structure: ['FCT_Race.TerraformingRate', 'FCT_Game.TerraformingSpeed'],
-  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered: the capacity of colonies with no modifier on their output. The save stores no capacity to compare with. A colony of the race on a body is broken down apart (the terraforming capacity rule: governor, sector commander, efficiency, radiation, stability, political status, orbital modules with their crews, captains and naval admin chain), and the ranking and the years of a plan use the terraformers entered.',
+  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered: the capacity of colonies with no modifier on their output. The save stores no capacity to compare with. A colony of the race on a body is broken down apart (the terraforming capacity rule: governor, sector commander, efficiency, radiation, stability, political status, orbital modules with their crews, captains and naval admin chain), and the ranking and the years of a plan use the terraformers entered. The years of a plan are its work over this capacity; for a plan that drains surface water they are a minimum, since the evaporation of that water, which is not modelled, can make the drain longer however large the capacity.',
   assumptions: ['no output modifier on the terraformers entered'],
 })
 
 registerRule({
   id: 'habitability.bodyCapacity',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Radius, HydroExt, TidalLock, BodyClass', 'FCT_Species.PopulationDensityModifier'],
@@ -90,11 +90,11 @@ registerRule({
 
 registerRule({
   id: 'habitability.score',
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: '% of the best target',
   verification: 'assumed',
   structure: ['FCT_SystemBody', 'FCT_Species', 'FCT_MineralDeposit', 'FCT_Population', 'FCT_RaceJumpPointSurvey'],
-  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read; none of it is compared with a game value.',
+  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. A plan that drains surface water counts its minimum years, so its discount is the most that plan can earn. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read; none of it is compared with a game value.',
   assumptions: ['mineral weights, discount scales and thresholds as set in Ranking'],
 })
 
@@ -114,7 +114,7 @@ const SKILL_ASSUMPTION = 'a colonisation skill of 1, the race row has none'
 const NOTHING = Object.freeze([])
 
 // What a pair of a body and a species is when the save lacks a figure of either that the cost reads: not colonisable on paper, but the entry's `missing` names the figures, so it reads as unknown, not as N/A.
-const UNKNOWN_ASSESSMENT = Object.freeze({ cost: Object.freeze({ colonisable: false, reason: 'Figures missing' }), lowGravity: false, plan: null, work: 0, after: null, outcome: 'no', reason: null })
+const UNKNOWN_ASSESSMENT = Object.freeze({ cost: Object.freeze({ colonisable: false, reason: 'Figures missing' }), lowGravity: false, gravityClass: null, plan: null, work: 0, timeBasis: TIME_BASIS.CAPACITY, after: null, outcome: 'no', reason: null })
 
 // The plan state of a body whose best route cannot be told: the figures it needs are missing. It stands apart from the table of states (colonization-states.js) and is listed beside it.
 export const UNKNOWN_STATE = Object.freeze({
@@ -220,7 +220,7 @@ export const cmcBodyInReach = (body) => {
 
 // Whether the game lets a body of this star host a civilian mining complex. The primary star always does. A companion does when it, or for a companion of a companion the star it circles, keeps under 80 AU from what it orbits, or else when the primary has a Lagrange point on a planet within 80 AU and so does the companion (or the star it circles). `stars` are the system's stars, `lagrangePoints` its Lagrange points with their star's OrbitingComponent and their planet's apoapsis.
 export const cmcStarInReach = (star, stars, lagrangePoints) => {
-  if (star.Component === 1) {
+  if (star.ComponentNumber === 1) {
     return true
   }
 
@@ -232,7 +232,7 @@ export const cmcStarInReach = (star, stars, lagrangePoints) => {
     return star.Apoapsis < CMC_REACH_AU || linked([star.StarID])
   }
 
-  const circled = stars.find((other) => other.Component === star.OrbitingComponent)
+  const circled = stars.find((other) => other.ComponentNumber === star.OrbitingComponent)
 
   return !!circled && (circled.Apoapsis < CMC_REACH_AU || linked([star.StarID, circled.StarID]))
 }
@@ -240,8 +240,53 @@ export const cmcStarInReach = (star, stars, lagrangePoints) => {
 // Before the race's rules load, no body is a ready site.
 export const NO_CMC_RULES = { allowed: false, shipyard: false, settledColonies: 0, largestColony: {} }
 
-// What the game also wants for a civilian mining complex, beyond the deposit. Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it.
-// A colony of the race that has no people, no automated mines or complexes and orbital miners at work doesn't count (`BlocksCmc`); the game counts every race's colonies, and the race knows the alien ones it has intelligence on.
+const CMC_VERSIONS = ['3.2.x']
+
+registerRule({
+  id: 'cmcSite.excluded',
+  versions: CMC_VERSIONS,
+  units: 'colonies',
+  verification: 'estimated',
+  structure: ['FCT_Population.Population, SystemBodyID', 'FCT_PopulationInstallations.PlanetaryInstallationID', 'FCT_Fleet.Xcor, Ycor, OrbitBodyID, AssignedPopulationID', 'FCT_SystemBody.Xcor, Ycor', 'FCT_ClassComponent and FCT_DamagedComponent (the undamaged orbital mining modules)', 'FCT_AlienPopulation'],
+  note: 'Whether a colony keeps the game from founding a civilian mining complex on its body: its record holds people, an automated mine, a civilian or ex-civilian mining complex or a mass driver (the installation counts whatever its amount), or the orbital mining modules at work there output something. An otherwise empty colony does not keep it off. The output is the undamaged orbital mining modules of the fleets that count for the colony: a fleet of the colony\'s race within one unit of the colony\'s body on both axes, assigned to the colony or to none (a fleet with no saved position, or a body with none, is matched by the body the fleet orbits instead). A fleet whose modules are all damaged has no output; a ship whose damage or module count the save does not record is counted at the full modules of its class. The race\'s own colonies and the alien colonies it knows are read: an alien colony it has no record of cannot be read, so its installations and orbital miners are not seen and its body can show as free.',
+  assumptions: ['the race\'s mine production and the commanders\' mining bonuses are above 0, so an undamaged module has output', 'a fleet assigned to a colony that no longer exists counts as assigned to none'],
+})
+
+// The installations whose presence on a colony's record keeps a civilian mining complex off its body: Automated Mine (12), Mass Driver (24), Civilian Mining Complex (39) and Ex-Civilian Mining Complex (52). The game tests the key, not the amount: a record loaded from the save holds one for every stored row.
+export const CMC_BLOCKING_INSTALLATIONS = Object.freeze([12, 24, 39, 52])
+
+const withinOneUnit = (a, b) => Math.abs(a - b) < 1
+
+// Whether the fleet and the colony's body both have a saved position.
+const bothPositioned = (fleet, colony) => [fleet.Xcor, fleet.Ycor, colony.Xcor, colony.Ycor].every(Number.isFinite)
+
+// Whether the game counts the fleet at the colony: the fleet and the colony's body lie within one unit on both axes. Where the fleet or the body has no saved position, the body the fleet orbits stands in.
+const fleetAt = (fleet, colony) => {
+  if (bothPositioned(fleet, colony)) {
+    return withinOneUnit(fleet.Xcor, colony.Xcor) && withinOneUnit(fleet.Ycor, colony.Ycor)
+  }
+
+  return fleet.OrbitBodyID === colony.SystemBodyID
+}
+
+// Whether the save settles where the fleet is against the colony: both have a saved position, or the fleet orbits a body to stand in. A fleet with neither is not at the colony here, but a read that must not guess its place asks first.
+export const fleetPlaced = (fleet, colony) => bothPositioned(fleet, colony) || fleet.OrbitBodyID > 0
+
+// Whether the colony may count the fleet: the fleet is assigned to the colony or to none, and a colony that no longer exists is none. The game gives a fleet with no colony to the first colony that asks, which a save never records.
+export const fleetClaimable = (fleet, colony) => !(fleet.AssignedPopulationID > 0) || !fleet.AssignedExists || fleet.AssignedPopulationID === colony.PopulationID
+
+// Whether the game counts the fleet for the colony: a fleet of the colony's race at the colony that the colony may count. `colony` is { PopulationID, RaceID, SystemBodyID, Xcor, Ycor }, `fleet` { RaceID, OrbitBodyID, AssignedPopulationID, AssignedExists, Xcor, Ycor }. The one rule the colony exclusion of a civilian mining complex and the orbital term of a colony's ordnance capacity share.
+export const fleetCountsForColony = (fleet, colony) => fleet.RaceID === colony.RaceID && fleetAt(fleet, colony) && fleetClaimable(fleet, colony)
+
+// The colonies the game's exclusion reads (the race's own and the alien colonies it knows), each with whether it keeps a civilian mining complex off its body (`BlocksCmc`), the one rule the Minerals page and the Colonization Planner share. `colonies` are { PopulationID, RaceID, SystemBodyID, Population, Installations, Xcor, Ycor }, `Installations` the stored rows of the installations in CMC_BLOCKING_INSTALLATIONS; `fleets` the fleets with orbital mining modules, { FleetID, RaceID, OrbitBodyID, AssignedPopulationID, AssignedExists, Xcor, Ycor, Modules }, `Modules` the undamaged modules.
+export const cmcBlocks = (colonies, fleets) => colonies.map((colony) => {
+  const working = fleets.filter((fleet) => fleetCountsForColony(fleet, colony))
+  const modules = working.reduce((total, fleet) => total + fleet.Modules, 0)
+
+  return { ...colony, Modules: modules, BlocksCmc: colony.Population > 0 || colony.Installations > 0 || modules > 0 }
+})
+
+// What the game also wants for a civilian mining complex, beyond the deposit. Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it that `cmcBlocks` says keeps the complex off (`body.CmcBlockers`, set by colonization-data.js `loadBodies`).
 export const cmcSite = (body, rules) => ({
   allowed: rules.allowed,
   shipyard: rules.shipyard,
@@ -250,7 +295,7 @@ export const cmcSite = (body, rules) => ({
   nearStar: cmcBodyInReach(body),
   starInReach: !!body.CmcStarInReach,
   notBanned: !body.Banned,
-  uncolonised: !body.AlienPopulations.length && body.OwnPopulations.every((population) => !population.BlocksCmc),
+  uncolonised: body.CmcBlockers.length === 0,
 })
 
 const CMC_NEEDS = {
@@ -261,7 +306,7 @@ const CMC_NEEDS = {
   nearStar: 'a body under 80 AU from its star at its farthest (a moon: its planet\'s orbit), and not a gas giant',
   starInReach: 'a star the game counts as in reach (a companion within 80 AU of what it orbits, or linked by Lagrange points within 80 AU)',
   notBanned: 'a body that is not banned',
-  uncolonised: 'a body with no colony on it (a colony with only orbital miners is fine)',
+  uncolonised: 'a body with no colony on it that has people, an automated mine, a civilian or ex-civilian mining complex, a mass driver or orbital miners at work',
 }
 
 // The site's unmet conditions as one sentence.
@@ -335,22 +380,22 @@ const worth = (goal, ranking, { capacity, raw, years, distanceAU, minerals, cmcR
   return { people, mining, prize, cost, time, distance, value: prize * cost * time * distance }
 }
 
-// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming, or null when that is unknown (no terraforming option is weighed then). `strategy` is whether the worth is highest settling as the body is, or waiting for terraforming. An unknown entry (`missing`) is worth nothing and has no strategy. With a goal that counts the deposits and a deposit value that is unknown (`mineralsUnknown`), the mining part and the prize are null and the value only orders the species: the row is unknown (`rankBodies`).
+// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming, or null when that is unknown (no terraforming option is weighed then). `strategy` is whether the worth is highest settling as the body is, or waiting for terraforming; `years` is the years of that route and `yearsBasis` what they are (`TIME_BASIS`; null without terraforming): the worth of a plan that drains surface water counts its minimum years, so it is the most that plan can earn. An unknown entry (`missing`) is worth nothing and has no strategy. With a goal that counts the deposits and a deposit value that is unknown (`mineralsUnknown`), the mining part and the prize are null and the value only orders the species: the row is unknown (`rankBodies`).
 export const evaluate = ({ species, assessment, capacityNow, capacityAfter, missing = NOTHING }, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }) => {
   const mineralsUnknown = goal !== 'people' && minerals.surveyed && minerals.value === null
   const base = { species, assessment, capacityNow, capacityAfter, missing, mineralsUnknown }
 
   if (!assessment.cost.colonisable) {
-    return { ...base, value: 0, parts: null, strategy: 'none', years: null, cost: null, raw: null, capacity: 0, infrastructure: null, nowInfrastructure: null, afterInfrastructure: null }
+    return { ...base, value: 0, parts: null, strategy: 'none', years: null, yearsBasis: null, cost: null, raw: null, capacity: 0, infrastructure: null, nowInfrastructure: null, afterInfrastructure: null }
   }
 
   const nowInfrastructure = infrastructurePerMillion(assessment.cost.worst, species, assessment.cost.lowGravity)
-  const options = [{ strategy: 'now', years: 0, cost: assessment.cost.worst, raw: assessment.cost.raw, capacity: capacityNow, lowGravity: assessment.cost.lowGravity, infrastructure: nowInfrastructure }]
+  const options = [{ strategy: 'now', years: 0, yearsBasis: null, cost: assessment.cost.worst, raw: assessment.cost.raw, capacity: capacityNow, lowGravity: assessment.cost.lowGravity, gravityClass: assessment.cost.gravityClass, infrastructure: nowInfrastructure }]
   let afterInfrastructure = null
 
   if (assessment.plan && assessment.after && terraformCapacityPerYear !== null) {
     afterInfrastructure = infrastructurePerMillion(assessment.after.worst, species, assessment.lowGravity)
-    options.push({ strategy: 'terraform', years: planYears(assessment.work, terraformCapacityPerYear), cost: assessment.after.worst, raw: assessment.after.raw, capacity: capacityAfter, lowGravity: assessment.lowGravity, infrastructure: afterInfrastructure })
+    options.push({ strategy: 'terraform', years: planYears(assessment.work, terraformCapacityPerYear), yearsBasis: assessment.timeBasis, cost: assessment.after.worst, raw: assessment.after.raw, capacity: capacityAfter, lowGravity: assessment.lowGravity, gravityClass: assessment.gravityClass, infrastructure: afterInfrastructure })
   }
 
   const best = options.map((option) => {
@@ -446,6 +491,8 @@ export const costDriver = (assessmentCost) => (assessmentCost.colonisable ? limi
 
 const COST_INPUTS = ['body environment', 'species ranges', 'colonisation skill']
 const CAPACITY_INPUTS = ['body size and water', 'species density']
+// What a score says of a plan that drains surface water: its years are a minimum.
+const MINIMUM_YEARS_ASSUMPTION = 'the plan drains surface water, so its years are a minimum and the worth the most that plan can earn: the evaporation of that water is not modelled'
 
 // Whether a deposit value that is unknown could change a row: its state (a rich deposit makes a mining target), whether it is worth the trip, or the score of a goal that counts the deposits. A people-only goal on a body that holds the smallest colony whatever its deposits is not affected, and neither is a body that is no target either way.
 const mineralsDecide = (facts, state, goal, room, ranking) => {
@@ -465,7 +512,7 @@ export const rowProvenance = (row) => {
   const colonisable = best.strategy !== 'none'
   const skill = basis.skillAssumed ? [SKILL_ASSUMPTION] : []
   const lacking = best.missing.length ? best.missing : null
-  const assumptions = [...(!row.distance && row.score !== null ? [`a body with no charted route keeps ${Math.round(NO_ROUTE_FACTOR * 100)}% of its worth`] : []), ...(!basis.outlookKnown && basis.goal !== 'people' ? ['no mineral ledger in the save: every mineral counts once'] : []), ...(row.unknownSpecies.length ? [`species left out for missing figures: ${row.unknownSpecies.join(', ')}`] : [])]
+  const assumptions = [...(!row.distance && row.score !== null ? [`a body with no charted route keeps ${Math.round(NO_ROUTE_FACTOR * 100)}% of its worth`] : []), ...(!basis.outlookKnown && basis.goal !== 'people' ? ['no mineral ledger in the save: every mineral counts once'] : []), ...(row.unknownSpecies.length ? [`species left out for missing figures: ${row.unknownSpecies.join(', ')}`] : []), ...(best.strategy === 'terraform' && best.yearsBasis === TIME_BASIS.MINIMUM ? [MINIMUM_YEARS_ASSUMPTION] : [])]
   const scored = row.score === null ? null : best.assessment.plan && best.assessment.after ? combine({ rule: 'habitability.score', parts: { capacity: basis.capacity }, compute: () => row.score, assumptions }) : ofRule({ rule: 'habitability.score', value: row.score, assumptions })
 
   return {

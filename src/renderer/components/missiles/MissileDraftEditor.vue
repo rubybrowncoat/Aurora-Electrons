@@ -58,6 +58,7 @@ const OPTIONS = [
   { id: 'eccm', label: 'ECCM' },
   { id: 'terminal', label: 'Terminal guidance' },
   { id: 'retarget', label: 'Retargeting' },
+  { id: 'lurker', label: 'Lurker' },
   { id: 'laser', label: 'Laser warhead' },
 ]
 
@@ -92,7 +93,7 @@ export default {
     carried() {
       const { carried } = this.draft
 
-      return [carried.stages > 0 ? `a second stage (design ${carried.stageId || 'unnamed'})` : '', carried.shipDecoy ? 'a ship decoy warhead' : '', carried.groundPod ? 'a ground attack pod' : '', carried.enhancedRadiation ? 'an enhanced radiation warhead' : ''].filter(Boolean)
+      return [carried.stages > 0 ? `a second stage (design ${carried.stageId || 'unnamed'})` : '', carried.shipDecoy ? 'a ship decoy warhead' : '', carried.enhancedRadiation ? 'an enhanced radiation warhead' : ''].filter(Boolean)
     },
   },
   methods: {

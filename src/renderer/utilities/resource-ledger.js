@@ -34,7 +34,7 @@ export const resourceOf = (key) => RESOURCES.find((resource) => resource.key ===
 export const resourcesOf = (group) => RESOURCES.filter((resource) => resource.group === group).map((resource) => resource.key)
 
 const EPSILON = 1e-9
-const LEDGER_VERSIONS = ['2.7.x']
+const LEDGER_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'reserveLedger.shortfall',
@@ -42,7 +42,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Population stockpiles of fuel, maintenance supplies and the minerals', 'FCT_MassDriverPackets.Speed, Xcor, Ycor', 'the Hauling Planner\'s plan', 'the player\'s own reserve records'],
-  note: 'The day a planned withdrawal cannot be filled from what its source holds above the player\'s reserve, with the resource and the withdrawal. The stock is taken day by day from its present level: the deliveries of the day arrive first, the withdrawals due that day draw in the order listed and each on what the ones before it left, and what the source makes is added at the end of the day. A delivery or a withdrawal counts on the day that ends on or after its own, as the maintenance supply ledger counts a delivery.',
+  note: 'The day a planned withdrawal cannot be filled from what its source holds above the player\'s reserve, with the resource and the withdrawal. The stock is taken day by day from its present level: the deliveries of the day arrive first, the withdrawals due that day draw in the order listed and each on what the ones before it left, and what the source makes is added at the end of the day. A delivery or a withdrawal counts on the day that ends on or after its own, as the maintenance supply ledger counts a delivery. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['The source keeps making what it makes now for the whole period', 'A haul or a packet delivers when its time is over, whole', 'A withdrawal that cannot be filled on its day is not tried again', 'The order of the withdrawals on one day is the ledger\'s choice, not a game rule', 'Nothing here is an order to the game'],
 })
 

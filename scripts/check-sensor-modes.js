@@ -16,6 +16,7 @@
   - save: the stock save's active sensors and beam fire controls, sized for its own tech.
 
   Mutants: each deliberate fault in a copy of a page's script must fail the checks it names.
+  The manual voice fault opens the real app in Chromium through page-server/browser-observe, chooses Passive mode and hovers the SectionNav tick. Its own marked assertion compares the summary the player actually sees, through the opacity-aware reader, with the independently specified impersonal sentence. Healthy and warm-restored controls must pass; a subject error, timeout or absent save is never credit. Source-only prose/style diagnostics remain unmarked.
 
   Prints `N of N checks passed`; any failed check sets exit code 1. A check whose save is not there is reported as skipped, never as passed.
 */
@@ -24,8 +25,12 @@ const path = require('path')
 const nodeVm = require('vm')
 const Vue = require('vue')
 const { compileTemplate } = require('vue/compiler-sfc')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { observe, validate, HarnessError, installScreen, settled } = require('./lib/browser-observe')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -69,11 +74,15 @@ const check = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `  [${typeof result === 'string' ? result : 'false'}]`}`)
 }
 
-const settle = async (test) => {
+const settle = async (test, valueOnly = false) => {
   try {
     return await test()
   } catch (error) {
-    return `threw ${error.message}`
+    if (valueOnly && (kindOf(error) !== 'assertion' || isSubjectThrow(error))) {
+      throw error
+    }
+
+    return valueOnly ? error.message : `threw ${error.message}`
   }
 }
 
@@ -196,6 +205,12 @@ const wordsOf = (template) => {
   const text = template.replace(/\{\{[^}]*\}\}/g, ' ').replace(/<[^>]*>/g, ' ')
 
   return `${text} ${summaries}`
+}
+
+const impersonal = (texts) => {
+  const found = texts.flatMap((template) => wordsOf(template).match(new RegExp(PRONOUNS.source, 'g')) || [])
+
+  return found.length ? `the panel prose contains first or second person: ${found.join(', ')}` : true
 }
 
 const FIGURE = /\{\{ *(shown|count|percent)\(/g
@@ -335,6 +350,8 @@ const pageStatements = async (mutates, stock) => {
       const missing = (vm, declared) => Object.keys(declared).filter((name) => vm[name] === undefined)
       const sensorsVm = open(realSensors)
       const found = { sensors: missing(sensorsVm, fields), missile: missing(open(realMissile), missileFields), designed: missing(open(realDesigned), designedFields) }
+
+      assert.deepEqual(sensorsVm.techChoice, { [STRENGTH]: 2001 }, 'the tech choice is restored for this race')
 
       return Object.values(found).every((names) => names.length === 0) && sensorsVm.mode === 'beam' && short(sensorsVm.techChoice) === `{"${STRENGTH}":2001}` && sensorsVm.curveView === 'table' && sensorsVm.hideObsolete === false && Object.keys(fields).length > 20 ? true : short(found)
     }],
@@ -645,6 +662,8 @@ const pageStatements = async (mutates, stock) => {
       const blank = views(page().sizingScenarios)
       const bare = views([{ key: 'bare', label: 'Bare', sizing: { problems: [], rows: [] } }])
 
+      assert.equal(bare[0].empty, '', 'a sizing with no request keeps its own empty summary')
+
       return own.length === 1 && own[0].rows.length > 20 && own[0].empty === '' && vm.pairChecks[0].alternative[0].sizing.request !== undefined && alternative.length === 1 && alternative[0].rows.length === 1 && alternative[0].empty === '' && embed.length === 1 && embed[0].rows.length > 20 && embed[0].empty === '' && blank[0].empty === 'Type the target size and the wanted range to size a pair.' && bare[0].empty === '' && bare[0].rows.length === 0 ? true : short([own[0].empty, alternative.map((view) => [view.rows.length, view.empty]), embed[0].empty, blank[0].empty, bare[0].empty])
     }],
     ['active: the proposed pair is a search sensor and a fire control, so the fire control is read against the missile fire control signature', () => {
@@ -736,9 +755,7 @@ const pageStatements = async (mutates, stock) => {
       const missile = fs.readFileSync(missilePagePath, 'utf8')
       const embed = templateOf(missile).split('data-designer="sensor-sizing"')[1].split('</v-card>')[0]
       const texts = [TEMPLATE(), templateOf(fs.readFileSync(componentPath('ActiveSizingPanel'), 'utf8')), templateOf(fs.readFileSync(componentPath('SensorTechLevels'), 'utf8')), embed]
-      const found = texts.flatMap((template) => wordsOf(template).match(new RegExp(PRONOUNS.source, 'g')) || [])
-
-      return found.length === 0 ? true : `first or second person: ${found.join(', ')}`
+      return impersonal(texts)
     }],
     ['template: the mode switch lists the three modes and each mode has its own panels', () => {
       const template = TEMPLATE()
@@ -869,11 +886,11 @@ const MUTATIONS = [
   { name: 'a typed jammer that is no number is a problem against a missile', page: 'sensors', find: "this.jammerIdle ? '' : this.figureProblem(this.jammer, 'Jammer', true)", replace: "this.figureProblem(this.jammer, 'Jammer', true)", fails: ['active: against a missile target the jammer is marked'] },
   { name: 'the saved designs are listed under the jammer against a missile', page: 'sensors', find: 'existingDesigns({ sensors: this.visibleActive, target: this.target, jammer: this.jammer })', replace: 'existingDesigns({ sensors: this.visibleActive, target: { ...this.target, results: this.target.results.map((entry) => ({ ...entry, searchJammer: true })) }, jammer: this.jammer })', fails: ['active: against a missile target the page sizes'] },
   { name: 'the saved pair\'s alternative drops its request', page: 'sensors', find: 'request: check.alternative.sizing.request, ', replace: '', fails: ['active: the shared sizing panel'] },
-  { name: 'the sizing panel reads the request of a sizing that has none', page: 'panel', find: 'empty: sizingEmpty(sizing.request)', replace: "empty: sizing.request.signature ? '' : ''", fails: ['active: the shared sizing panel'] },
+  { name: 'a sizing with no request asks for a target and range', page: 'panel', find: 'empty: sizingEmpty(sizing.request)', replace: "empty: sizing.request ? sizingEmpty(sizing.request) : 'Type the target size and the wanted range to size a pair.'", fails: ['active: the shared sizing panel'] },
   { name: 'the proposed pair loses the provenance of its design', page: 'sensors', find: 'source: design ? member.design : null', replace: 'source: null', fails: ['active: every reach of the proposed pair'] },
   { name: 'the proposed passive sensor loses the provenance of its sensitivity', page: 'sensors', find: 'sensitivity, source: entry.proposal.sensitivity }]', replace: 'sensitivity }]', fails: ['passive: every range of a proposed sensor'] },
   { name: 'a beam control above the cap is not marked', page: 'sensors', find: 'aboveCap: entry.range.aboveCap,', replace: 'aboveCap: false,', fails: ['beam: a stored range above the cap'] },
-  { name: 'a second persisted view takes the tech choice', page: 'sensors', find: "    persistedView({\n      techChoice: techChoiceField('sensorsTech'),", replace: "    persistedView({ techChoice: techChoiceField('sensorsTech') }),\n    persistedView({", fails: ['view: each page restores every field'] },
+  { name: 'the tech choice is restored from the app instead of the race', page: 'sensors', find: "techChoice: techChoiceField('sensorsTech'),", replace: "techChoice: { ...techChoiceField('sensorsTech'), scope: 'app' },", fails: ['view: each page restores every field'] },
   { name: 'the tech choice is read and declared nowhere', page: 'sensors', find: "      techChoice: techChoiceField('sensorsTech'),\n", replace: '', fails: ['view: each page restores every field'] },
   { name: 'the tech choice is kept under the key of another page', page: 'sensors', find: "techChoiceField('sensorsTech')", replace: "techChoiceField('propulsionTech')", fails: ['view: each page restores every field', 'view: the new typed figures'] },
   { name: 'the mode is kept for the app', page: 'sensors', find: "mode: { key: 'sensorsMode', default: 'active', scope: 'race', valid", replace: "mode: { key: 'sensorsMode', default: 'active', valid", fails: ['mode: the mode is kept', 'view: the new typed figures'] },
@@ -921,6 +938,8 @@ const MUTATIONS = [
 const MUTATION_PAGES = { sensors: 'sensors', missile: 'missile', designed: 'designed', panel: 'panel', template: 'template' }
 
 const runMutations = async (stock) => {
+  refusePlanting('the page faults')
+
   for (const { name, page, find, replace, fails } of MUTATIONS) {
     let outcome
 
@@ -935,7 +954,7 @@ const runMutations = async (stock) => {
         const results = []
 
         for (const [statement, test] of named) {
-          results.push([statement, await settle(test)])
+          results.push([statement, await settle(test, true)])
         }
 
         const held = results.filter(([, result]) => result === true).map(([statement]) => statement)
@@ -950,21 +969,140 @@ const runMutations = async (stock) => {
   }
 }
 
-// The template faults: each must be found by the checks of the templates.
-const templateFaults = () => {
+const VOICE_SUMMARY = 'Compare passive thermal and EM detection ranges for the entered target signatures.'
+const FIRST_PERSON_SUMMARY = 'I compare passive thermal and EM detection ranges for the entered target signatures.'
+const VOICE_PAGE = 'src/renderer/pages/sensors.vue'
+const VOICE_TIMEOUT = 60000
+
+// The summary is read from the real SectionNav card after hovering its tick,
+// not from the template or the panel's data-summary attribute.
+const observeVoice = (browser, url, GameID, RaceID) => observe(browser, async ({ page, step }) => {
+  step('opening Sensor Planner for the rendered voice observation')
+  await page.goto(url, { timeout: VOICE_TIMEOUT })
+  await installScreen(page)
+  await page.waitForFunction(() => Boolean(window.$app && window.$app.$store && window.$app.$store.getters.database) && window.$app.$store.state.empires.games.length > 0, null, { timeout: VOICE_TIMEOUT })
+  await page.evaluate(({ gameId, raceId }) => {
+    const store = window.$app.$store
+    const game = store.state.empires.games.find((entry) => entry.GameID === gameId)
+    const race = game && game.Races.find((entry) => entry.RaceID === raceId)
+
+    if (!race) throw new Error('The rendered voice fixture has no requested game/race')
+
+    return store.dispatch('changeGame', { game, race })
+  }, { gameId: GameID, raceId: RaceID })
+  await page.waitForFunction(() => Boolean(window.$app.$store.getters.racePrefix), null, { timeout: VOICE_TIMEOUT })
+  await page.evaluate(() => window.$app.$router.push('/sensors', () => {}, () => {}))
+  await page.waitForFunction(() => window.$app.$route.path === '/sensors', null, { timeout: VOICE_TIMEOUT })
+
+  const ready = () => settled(page, {
+    limit: VOICE_TIMEOUT,
+    loading: () => {
+      const match = window.$app.$route.matched[0]
+      const vm = match && match.instances.default
+
+      return !vm || vm.ready === false || Object.values(vm.$asyncComputed || {}).some((state) => state.updating)
+    },
+  })
+
+  await ready()
+  step('choosing Passive mode and hovering its real section tick')
+  await page.locator('[data-sensors-mode="passive"]').click()
+  await ready()
+  await page.locator('nav[aria-label="Sections"]').getByRole('button', { name: 'Passive range', exact: true }).hover({ timeout: VOICE_TIMEOUT })
+  await page.waitForFunction(() => {
+    const summary = document.querySelector('.section-nav__card .section-nav__summary')
+
+    return summary && window.__screen.visible(summary)
+  }, null, { timeout: VOICE_TIMEOUT })
+  step('reading the visible Passive range summary')
+
+  return page.evaluate(() => ({ summary: window.__screen.visibleText(document.querySelector('.section-nav__card .section-nav__summary')) }))
+}, { viewport: { width: 1280, height: 720 } })
+
+const assertRenderedVoice = (seen) => {
+  validate(seen, 'the rendered Passive range summary')
+
+  if (seen.error) throw new HarnessError(`${seen.phase}: ${seen.error}\n${seen.scene || ''}`)
+
+  assert.equal(seen.value.summary, VOICE_SUMMARY, 'the player-visible Passive range summary keeps its impersonal prose')
+
+  return true
+}
+
+const renderedVoiceFault = async ([file, GameID, RaceID]) => {
+  const save = path.resolve(root, file)
+
+  if (!fs.existsSync(save)) throw new HarnessError(`Required rendered voice fixture is absent: ${file}`)
+
+  const source = fs.readFileSync(pagePath, 'utf8')
+  const planted = replacing(VOICE_SUMMARY, FIRST_PERSON_SUMMARY)(source)
+  const { startPageServer } = require('./lib/page-server')
+  const { chromium } = require('playwright')
+  let server = null
+  let browser = null
+
+  try {
+    server = await startPageServer({ save })
+    browser = await chromium.launch({ headless: true })
+    await server.warm(browser, { routes: ['/sensors'] })
+
+    const healthy = await observeVoice(browser, server.url, GameID, RaceID)
+
+    assertRenderedVoice(healthy)
+    server.replace(VOICE_PAGE, planted)
+
+    let fault
+    let caught = false
+
+    try {
+      fault = await observeVoice(browser, server.url, GameID, RaceID)
+
+      try {
+        assertRenderedVoice(fault)
+      } catch (error) {
+        if (kindOf(error) !== 'assertion' || isSubjectThrow(error)) throw error
+        caught = true
+      }
+    } finally {
+      server.replace(VOICE_PAGE, null)
+    }
+
+    await server.reset()
+
+    const restored = await observeVoice(browser, server.url, GameID, RaceID)
+
+    assertRenderedVoice(restored)
+
+    return { caught, healthy: healthy.value.summary, planted: fault.value.summary, restored: restored.value.summary }
+  } finally {
+    try {
+      if (browser) await browser.close()
+    } finally {
+      if (server) await server.stop()
+    }
+  }
+}
+
+// The other template guards remain uncredited structural diagnostics. The voice
+// fault alone is judged by its rendered summary, with healthy/warm-reset controls.
+const templateFaults = async (stock) => {
+  refusePlanting('the template faults')
+
   const template = TEMPLATE()
   const withoutMark = (mark) => unmarked(template.replace(mark, '')).length
 
   check('template mutation caught: a mark left off the multiplier table', withoutMark('<provenance-mark :result="row.crew" />') === 1 ? true : 'the missing mark was not found')
   check('template mutation caught: a mark left off the requirement table', withoutMark('<provenance-mark :result="row.multiplier" />') === 1 ? true : 'the missing mark was not found')
   check('template mutation caught: a mark left off the existing designs', withoutMark('<provenance-mark :result="item.range" />') === 1 ? true : 'the missing mark was not found')
-  check('template mutation caught: the voice slips into the first person', PRONOUNS.test(wordsOf(template.replace('A sensor sees a target to its range', 'I see a target to its range'))) ? true : 'the pronoun was not found')
+  const voice = await renderedVoiceFault(stock)
+
+  check('template mutation caught: the voice slips into the first person', voice.caught ? true : 'the rendered first-person prose was not rejected')
   check('template mutation caught: the tracking table of the curve is dropped', chartProblems(template.replace('data-sensors="curve-table"', '')).length === 1 ? true : 'the missing table was not found')
   check('template mutation caught: the proposed sensor size loses its input', unboundTyped(template.replace('v-model="passiveSize"', ''), ['passiveSize']).length === 1 ? true : 'the missing input was not found')
 }
 
 const parseArguments = (argv) => {
-  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { stock: fixtureTriple(), mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock') {
@@ -1023,7 +1161,7 @@ const run = async () => {
   if (options.mutations) {
     console.log('\nMutations: each fault in a copy of a page must fail the statements it names')
     await runMutations(stock)
-    templateFaults()
+    await templateFaults(options.stock)
   }
 
   if (stock) {

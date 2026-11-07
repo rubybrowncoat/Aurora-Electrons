@@ -19,7 +19,7 @@ const capitalised = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
 // The persisted-view fields of a page's avoid preferences, kept per race under `<prefix>AvoidDanger` and the like: all off until chosen.
 export const avoidFields = (prefix) => Object.fromEntries(AVOID_OPTIONS.map((option) => [option.key, { key: `${prefix}${capitalised(option.key)}`, default: false, scope: 'race', valid: (value) => typeof value === 'boolean' }]))
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'safeRoutes.path',

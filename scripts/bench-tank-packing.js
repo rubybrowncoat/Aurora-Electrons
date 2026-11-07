@@ -18,6 +18,7 @@ const path = require('path')
 const v8 = require('v8')
 const vm = require('vm')
 const { loadUtilities } = require('./lib/utilities')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const SLICE_MS = 12
@@ -75,7 +76,7 @@ let failures = 0
 let checks = 0
 
 const options = (() => {
-  const parsed = { quick: false, skipSearch: false, budgetMs: 20000, stock: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 }, modded: { file: 'AuroraDB.db', game: 140, race: 784 } }
+  const parsed = { quick: false, skipSearch: false, budgetMs: 20000, stock: null, modded: fixtureSave() }
   const argv = process.argv.slice(2)
 
   for (let index = 0; index < argv.length; index++) {
@@ -782,7 +783,7 @@ const designTechOf = (tech, raceTech) => {
 const loadRealCatalogues = async (utilities) => {
   const found = []
 
-  for (const [name, save] of [['stock', options.stock], ['modded', options.modded]]) {
+  for (const [name, save] of [['stock', options.stock], ['modded', options.modded]].filter(([, named]) => named)) {
     const database = await openSave(save.file)
 
     if (!database) {

@@ -2,11 +2,14 @@
 
 import { heldShare, requirements } from './component-calc'
 import { MINERALS } from './minerals'
+import { creditedCost } from './production'
 import { ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { refitRate, retoolCost, retoolTime, yardEligibility } from './refits'
 import { yardWorkers } from './workforce-demand'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
+// The versions the rules hold for: the components a station project takes from the colony's stock for the whole batch, and the floor of a platform's cost.
+const LINE_VERSIONS = ['3.2.x']
 const DAYS_PER_YEAR = 365
 const EPSILON = 1e-9
 // The share of a colony's construction capacity, as a percentage, that a project may take at most.
@@ -28,7 +31,7 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_ShipClass.NoArmour, Obsolete', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.Prototype'],
-  note: 'Whether a colony\'s industry can build a class as a Space station project: the class is on the race\'s own list (the class read is scoped to the race, and a class copied or captured from another race is the race\'s own once copied), not obsolete, has no armour (the class\'s No Armour setting) and mounts no prototype component. Creating the project also needs one hull\'s alien components (components the race has not researched) in the colony\'s own stock, which it does not use up or credit. The game states no size limit, no hull type and no shipyard for it. Read from the game\'s rules and seen in the stock sample\'s stored Space station projects, all of armourless classes; a refused class is not tried in a played game.',
+  note: 'Whether a colony\'s industry can build a class as a Space station project: the class is on the race\'s own list (the class read is scoped to the race, and a class copied or captured from another race is the race\'s own once copied), not obsolete, has no armour (the class\'s No Armour setting) and mounts no prototype component. The game states no size limit, no hull type and no shipyard for it; what the project takes from the colony\'s stock is the industry rule\'s. Read from the game\'s rules and seen in the Space station projects stored in the saves examined, all of armourless classes; a refused class is not tried in a played game.',
   assumptions: ['The component called a structural shell is part of an armourless class and is no armour.', 'A component with no research row of the race is not researched.'],
 })
 
@@ -52,14 +55,15 @@ registerRule({
   assumptions: ['The tasks start at once, one platform each, and the colony\'s rates do not change while they run.', 'The stored components credit the first tasks made and are used up in turn.', 'The retool\'s own mineral draw is not counted.'],
 })
 
+// A Space station or Light Naval project is created by the game's project creation, which takes the stored components as it is made: for each component the class mounts it sums the colony's stored rows of that component against the whole batch (`NumComponent * Amount`) and takes them only where that sum covers the batch. A component of technology the race has not researched must be there or the project is refused, and one it has researched is taken only where the Industry tab's Use Components box is ticked, which no project row stores. Each component taken lowers the cost a unit and the minerals a unit by its own, the whole batch leaves the colony's stock, and the cost a unit is held at 1 BP.
 registerRule({
   id: 'platformPaths.industry',
-  versions: VERSIONS,
+  versions: LINE_VERSIONS,
   units: 'days',
   verification: 'estimated',
-  structure: ['production.populationCapacity', 'FCT_IndustrialProjects.Queue, Percentage, ProductionType', 'platformPaths.stationClass', 'platformPaths.spaceport'],
-  note: 'The days a colony\'s industry takes to build the platforms as one Space station project: the platforms\' build points over the construction capacity at the share the colony\'s projects out of the queue (running or paused) leave free. The project takes no stored components and no shipyard slipway; its minerals are charged as it progresses and each platform is made when its share is complete. Capacity uses the colony\'s production modifiers, which the save may not hold.',
-  assumptions: ['The project takes the whole free share from the start and the shares and rates do not change while it runs.', 'The colony\'s minerals are not held up by its other projects.'],
+  structure: ['production.populationCapacity', 'FCT_IndustrialProjects.Queue, Percentage, ProductionType', 'platformPaths.stationClass', 'platformPaths.spaceport', 'FCT_PopComponent.Amount, ComponentID', 'FCT_RaceTech.TechID', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.Cost and the mineral columns', 'the game\'s project creation (the whole batch)'],
+  note: 'The days a colony\'s industry takes to build the platforms as one Space station project: the platforms\' build points over the construction capacity at the share the colony\'s projects out of the queue (running or paused) leave free. Making the project takes the stored components the whole batch needs from the colony\'s stock, each only where the colony holds the whole batch of it: a component of technology the race has not researched must be there or the project is refused, and one it has researched is taken only where the Use Components box is ticked, which a project stores nowhere, so the forecast takes it. Each component taken lowers the build points and the minerals of a platform by its own, and a platform costs at least 1 BP. The project takes no shipyard slipway; its minerals are charged as it progresses and each platform is made when its share is complete. Capacity uses the colony\'s production modifiers, which the save may not hold.',
+  assumptions: ['The project takes the whole free share from the start and the shares and rates do not change while it runs.', 'The Use Components box is ticked for the components of researched technology the colony\'s stock covers the whole batch of.', 'The colony\'s minerals are not held up by its other projects.'],
 })
 
 registerRule({
@@ -68,7 +72,7 @@ registerRule({
   units: 'M workers',
   verification: 'confirmed',
   structure: ['FCT_Shipyard.Slipways, Capacity, SYType', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.Workers, ConstructionValue'],
-  note: 'The workers the capacity a path draws on already holds, in millions: a yard\'s slipways times its capacity, a quarter-thousandth of a worker per ton at a naval yard and a tenth of that at a commercial or repair yard, and a colony\'s construction factories times the workers each needs. They are held whether or not the capacity is building, so a platform adds none; a colony short of workers lowers the output of both paths through its efficiency.',
+  note: 'The workers the capacity a path draws on already holds, in millions: a yard\'s slipways times its capacity, a quarter-thousandth of a worker per ton at a naval or light yard and a tenth of that at a commercial or repair yard, and a colony\'s construction factories times the workers each needs. They are held whether or not the capacity is building, so a platform adds none; a colony short of workers lowers the output of both paths through its efficiency.',
 })
 
 // What a class is as a station: { state ('capable' or 'ineligible' or 'unknown'), blockers, missing }. `shipClass`: a class record of utilities/refits.js (obsolete, prototype); `noArmour`: true, false or null when the save has no such setting. The class list is already the race's own, so where a class came from (`otherRace`) decides nothing here.
@@ -122,6 +126,66 @@ const admissionOf = ({ shipClass, components, researched, stock, hulls, wording 
   })
 
   return { blockers, missing }
+}
+
+// What a station or Light Naval project takes from the colony's stock for the whole batch, as the game's project creation takes it: a component the class mounts is taken only where the colony holds the whole batch of it (`NumComponent * Amount`), an alien one being mandatory (admissionOf refuses the project without it) and one of researched technology taken only where the Use Components box is ticked, which no project row stores, so the forecast takes it. Returns { credit ({ bp, minerals } one platform's worth of the components taken, null while unknown), missing }. `researched` and `stock` as loadPlatformSources reads them; `quantity` the platforms of the batch, the project's amount.
+const batchCreditOf = ({ shipClass, components, researched, stock, quantity }) => {
+  const missing = []
+  const minerals = Object.fromEntries(MINERALS.map(({ name }) => [name, 0]))
+  let bp = 0
+  let known = true
+  const gap = (text) => {
+    missing.push(text)
+    known = false
+  }
+
+  Object.entries(shipClass.counts).forEach(([id, count]) => {
+    const state = researched ? researched[id] : null
+    const component = components[id] || {}
+    const name = component.name || `component #${id}`
+    const held = stock === null || stock === undefined ? null : id in stock ? stock[id] : 0
+
+    if (state !== 0 && state !== 1) {
+      gap(`whether the race has researched ${name}`)
+
+      return
+    }
+
+    if (!Number.isFinite(count)) {
+      gap(`how many ${name} the class mounts`)
+
+      return
+    }
+
+    if (!Number.isFinite(held)) {
+      gap(`the colony's stock of ${name}`)
+
+      return
+    }
+
+    if (held < count * quantity) {
+      return
+    }
+
+    if (!isNumber(component.cost)) {
+      gap(`the cost of ${name}`)
+
+      return
+    }
+
+    bp += component.cost * count
+    MINERALS.forEach(({ name: mineral }) => {
+      if (isNumber((component.minerals || {})[mineral])) {
+        minerals[mineral] += component.minerals[mineral] * count
+      } else {
+        gap(`the ${mineral} of ${name}`)
+      }
+    })
+  })
+
+  const gaps = [...new Set(missing)]
+
+  return { credit: known ? { bp, minerals } : null, missing: gaps }
 }
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
@@ -339,14 +403,14 @@ export const yardPath = ({ shipClass, components, researched = null, recipe, qua
   return { ...detail, days, firstDays: retoolDays + first * DAYS_PER_YEAR, retoolDays, startsLater: false, timeResult: daysResult(rule, days, ['the colony\'s shipbuilding rate', 'the yard\'s free slipways', 'the class recipe', 'the colony\'s stored components'], []) }
 }
 
-// One colony's industry as a path for `quantity` platforms, a Space station project: { path: 'industry', state ('capable', 'busy' when the colony's projects hold the whole capacity, 'ineligible' or 'unknown'), reasons, missing, notes, bp, minerals, short, days, firstDays, share (the share taken, %), capacity (BP a year at the whole share), labour, timeResult }. `colony`: { populationId, name, capacity (a 'production.populationCapacity' result), projects, spaceports (a number, null when not read), factories ({ workers } in millions, null when not read), minerals }.
+// One colony's industry as a path for `quantity` platforms, a Space station project: { path: 'industry', state ('capable', 'busy' when the colony's projects hold the whole capacity, 'ineligible' or 'unknown'), reasons, missing, notes, bp (the platforms' build points after the stored components), minerals, short, credit ({ bp, minerals } the whole batch's stored components are worth, before the 1 BP a platform floor, null while unknown), days, firstDays, share (the share taken, %), capacity (BP a year at the whole share), labour, timeResult }. `colony`: { populationId, name, capacity (a 'production.populationCapacity' result), projects, stock, spaceports (a number, null when not read), factories ({ workers } in millions, null when not read), minerals }.
 export const industryPath = ({ shipClass, components, researched = null, recipe, quantity, colony, station }) => {
   const rule = 'platformPaths.industry'
   const labour = labourOf(colony.factories && isNumber(colony.factories.workers) ? colony.factories.workers : null, 'the colony\'s construction factories and their workers')
-  const base = { path: 'industry', key: `industry-${colony.populationId}`, yardId: null, where: 'Construction factories', populationId: colony.populationId, colony: colony.name, reasons: [], missing: [], notes: ['Takes no stored components and no shipyard slipway.'], labour, credit: null, share: null, capacity: null, timeResult: unavailable({ rule, missing: ['a colony that can make the class'], units: 'days' }) }
+  const base = { path: 'industry', key: `industry-${colony.populationId}`, yardId: null, where: 'Construction factories', populationId: colony.populationId, colony: colony.name, reasons: [], missing: [], notes: ['Takes no shipyard slipway.'], labour, credit: null, share: null, capacity: null, timeResult: unavailable({ rule, missing: ['a colony that can make the class'], units: 'days' }) }
   const blockers = [...station.blockers]
   const missing = [...station.missing]
-  const admission = admissionOf({ shipClass, components, researched, stock: colony.stock, hulls: 1, wording: (name, held, needed) => `the race has not researched ${name}, and the colony holds ${held} of the ${needed} that one hull needs: a station project checks the colony's stock for one hull and neither uses it up nor credits it` })
+  const admission = admissionOf({ shipClass, components, researched, stock: colony.stock, hulls: quantity, wording: (name, held, needed) => `the race has not researched ${name}, and the colony holds ${held} of the ${needed} that ${quantity} platforms need: a station project takes the whole batch's alien components from the colony's stock` })
 
   blockers.push(...admission.blockers)
   missing.push(...admission.missing)
@@ -361,12 +425,16 @@ export const industryPath = ({ shipClass, components, researched = null, recipe,
     return empty({ ...base, reasons: blockers }, 'ineligible')
   }
 
+  const batch = batchCreditOf({ shipClass, components, researched, stock: colony.stock, quantity })
   const capacity = valueOrNull(colony.capacity)
   const held = colony.projects === null ? { held: 0, missing: ['the colony\'s industrial projects'] } : heldShare(colony.projects)
-  const gaps = [...missing, ...(capacity === null ? ['the colony\'s construction capacity'] : []), ...held.missing, ...(isNumber(recipe.bp) && recipe.bp > 0 ? [] : ['the class\'s cost, above 0'])]
+  const gaps = [...new Set([...missing, ...batch.missing, ...(capacity === null ? ['the colony\'s construction capacity'] : []), ...held.missing, ...(isNumber(recipe.bp) && recipe.bp > 0 ? [] : ['the class\'s cost, above 0'])])]
   const free = WHOLE_CAPACITY - held.held
-  const minerals = recipe.minerals === null ? null : Object.fromEntries(MINERALS.map(({ name }) => [name, recipe.minerals[name] * quantity]))
-  const detail = { ...base, bp: isNumber(recipe.bp) ? recipe.bp * quantity : null, minerals, short: shortOf(minerals, colony.minerals), capacity }
+  const perHull = batch.credit === null || !(isNumber(recipe.bp) && recipe.bp > 0) ? null : creditedCost(recipe.bp, batch.credit.bp)
+  const bp = perHull === null ? null : perHull * quantity
+  const minerals = batch.credit === null || recipe.minerals === null ? null : Object.fromEntries(MINERALS.map(({ name }) => [name, (recipe.minerals[name] - batch.credit.minerals[name]) * quantity]))
+  const credit = batch.credit === null ? null : { bp: batch.credit.bp * quantity, minerals: Object.fromEntries(MINERALS.map(({ name }) => [name, batch.credit.minerals[name] * quantity])) }
+  const detail = { ...base, bp, minerals, short: shortOf(minerals, colony.minerals), credit, capacity }
 
   if (gaps.length) {
     return { ...detail, state: 'unknown', reasons: [], missing: gaps, days: null, firstDays: null, retoolDays: null, startsLater: false, timeResult: unavailable({ rule, missing: gaps, units: 'days' }) }
@@ -382,9 +450,9 @@ export const industryPath = ({ shipClass, components, researched = null, recipe,
     return { ...detail, state: 'ineligible', reasons: ['the colony has no construction capacity to take a share of'], days: null, firstDays: null, retoolDays: null, startsLater: false, share: free, timeResult: unavailable({ rule, missing: ['a construction capacity above 0'], units: 'days' }) }
   }
 
-  const days = (detail.bp / perYear) * DAYS_PER_YEAR
+  const days = (bp / perYear) * DAYS_PER_YEAR
 
-  return { ...detail, state: 'capable', days, firstDays: (recipe.bp / perYear) * DAYS_PER_YEAR, retoolDays: null, startsLater: false, share: free, timeResult: daysResult(rule, days, ['the colony\'s construction capacity', 'the share its projects leave free', 'the class recipe'], []) }
+  return { ...detail, state: 'capable', days, firstDays: (perHull / perYear) * DAYS_PER_YEAR, retoolDays: null, startsLater: false, share: free, timeResult: daysResult(rule, days, ['the colony\'s construction capacity', 'the share its projects leave free', 'the class recipe', 'the colony\'s stored components'], []) }
 }
 
 const hasShortfall = (short) => short !== null && Object.keys(short).length > 0

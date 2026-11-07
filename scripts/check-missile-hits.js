@@ -5,7 +5,7 @@
 
   The synthetic checks need no save. They prove: a 50,000 km/s missile with terminal guidance 1.4 and a tactical modifier of 1 against a 10,000 km/s target has 70% without jamming; a target jammer of 4 against an ECCM of 3 multiplies it by 0.75 to the whole jammer strength of 4 (not to the surplus of 1), an ECCM of 4 or more leaves it at 70, and a jammer of 0 needs no ECCM; a stationary target is hit at a capped 100 whatever the other factors; moving cases above 100 stay raw above 100 and cap at 100; the raw, capped and whole-number roll chances are separate figures; a zero, missing or invalid missile speed, a missing or negative target speed and a missing or non-positive modifier leave no value (never 0); terminal guidance under 1 counts as 1; the expected hits of a missile are its warheads times the chance of one warhead, with no survival probability, and are unavailable for a warhead count that is not a whole number of 1 or more; the curves, the scenario table and the target speed for a chance agree with the rule; every result names its registered rule, is never confirmed, and carries its assumptions. A table of random inputs is compared with a plain re-statement of the formula. Then every mutation of the module (a changed exponent, threshold, cap, factor, clamp, rounding or survival term) must fail at least one check.
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also reads the race's missile designs as the Designed Tech page does and compares the scenario table of each, at a grid of target speeds, jammers and modifiers, with the plain formula; a design with no speed, a ship decoy or a second stage must have no chance (the synthetic checks cover a staged design, which neither save has). Exit code 1 when a check fails.
+  With a save (by default the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141 race 784, whose player race owns no missile design, so the designs of the race of the game that owns the most are read and the run says so; a save named by --stock or --modded is run as given, and one that is not there is reported as not run) it also reads the race's missile designs as the Designed Tech page does and compares the scenario table of each, at a grid of target speeds, jammers and modifiers, with the plain formula; a design with no speed, a ship decoy or a second stage must have no chance (the synthetic checks cover a staged design, which the fixture does not hold). Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const os = require('os')
@@ -14,6 +14,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -190,11 +191,11 @@ const synthetic = ({ hit, provenance }) => {
     return unknown.secondStageId === null && noValue(scene.raw) && scene.raw.inputs.missing.some((text) => /whether the missile has a second stage/.test(text)) && noValue(hitScenario({ missile: { ...unknown, secondStageId: undefined }, targetSpeed: 10000 }).raw) && close(valueOrNull(hitScenario({ missile: none, targetSpeed: 10000 }).raw), 70) && none.secondStageId === 0
   })
   add('a proposed missile has a single stage, and its chance is available', () => proposedMissile({ speed: '50000', atg: '1.4', eccm: '3', warheads: '1' }).secondStageId === 0 && close(valueOrNull(hitScenario({ missile: proposedMissile({ speed: '50000', atg: '1.4', eccm: '3', warheads: '1' }), targetSpeed: 10000 }).raw), 70))
-  add('the version limit is stated for a save that does not state its game rules and not for a 2.7.1 save, in the words every result carries', () => {
+  add('the version limit is stated for a save that does not state its game rules and not for a save of the line the rules are checked on, in the words every result carries', () => {
     const limit = versionLimit(null)
     const carried = scenario({ version: null }).capped.assumptions.includes(limit)
 
-    return /does not state which game rules/.test(limit) && carried && versionLimit('2.7.1') === '' && versionLimit('2.7') === '' && versionLimit('2.6') !== ''
+    return /does not state which game rules/.test(limit) && carried && versionLimit('3.2.x') === '' && versionLimit('3.2') === '' && versionLimit('3.0.0') !== '' && versionLimit('3.0') !== ''
   })
   add('multi-warhead: 4 warheads at 70% expect 2.8 hits, each warhead rolling alone', () => {
     const scene = scenario({}, { ...arrow, warheads: 4 })
@@ -286,17 +287,17 @@ const synthetic = ({ hit, provenance }) => {
   add('the raw rule states the tactical modifier default among its standing assumptions', () => getRule(HIT_RULES.raw).assumptions.some((text) => /modifier/.test(text) && /1/.test(text)))
   add('the roll rule states the whole-number die assumption and that the game\'s rounding is not settled', () => getRule(HIT_RULES.roll).assumptions.some((text) => /whole number from 1 to 100/.test(text)) && /not settled/.test(getRule(HIT_RULES.roll).note))
   add('the expected hits rule is a planner assumption, not a game rule, and says it is not penetration or survival', () => getRule(HIT_RULES.hits).verification === 'assumed' && /not a count of penetrating damage/.test(getRule(HIT_RULES.hits).note) && /point defence/.test(getRule(HIT_RULES.hits).note))
-  add('the rules hold for 2.7; a save of no known version adds the unverified assumption, a 2.7.1 save does not', () => {
+  add('the rules hold for the line of the migrated fixture; a save of no known version adds the unverified assumption, a save of that line does not', () => {
     const unknown = raw({ version: null })
-    const stock = raw({ version: '2.7.1' })
-    const other = raw({ version: '2.6.0' })
+    const stock = raw({ version: '3.2.x' })
+    const other = raw({ version: '3.0.0' })
     const text = (result) => result.assumptions.join(' | ')
 
     return /does not state which game rules/.test(text(unknown)) && !/does not state which game rules/.test(text(stock)) && /does not state which game rules/.test(text(other)) && close(unknown.value, stock.value) ? true : `${text(unknown)} / ${text(stock)}`
   })
   add('the version note reaches the capped and expected hit results', () => {
     const scene = scenario({ version: null }, { ...arrow, warheads: 2 })
-    const stock = scenario({ version: '2.7.1' }, { ...arrow, warheads: 2 })
+    const stock = scenario({ version: '3.2.x' }, { ...arrow, warheads: 2 })
 
     return [scene.capped, scene.roll, scene.hitsCapped].every((result) => result.assumptions.some((text) => /does not state which game rules/.test(text))) && [stock.capped, stock.roll, stock.hitsCapped].every((result) => !result.assumptions.some((text) => /does not state which game rules/.test(text)))
   })
@@ -413,11 +414,14 @@ const MUTATIONS = [
 ]
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { part: null }
+  const specified = []
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
-      options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
+      const label = argv[index].slice(2)
+      options[label] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
+      specified.push(label)
       index += 3
     } else if (argv[index] === '--no-mutations') {
       continue
@@ -427,6 +431,16 @@ const parseArguments = (argv) => {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
     }
+  }
+
+  options.saveLabels = specified.length ? [...new Set(specified)] : ['fixture']
+
+  if (!specified.length) {
+    options.fixture = fixtureTriple()
+  }
+
+  if (options.part === null && !mutating() && !fs.existsSync(path.resolve(root, options[options.saveLabels[0]][0]))) {
+    throw new Error(`quick representative save is missing: ${options[options.saveLabels[0]][0]}`)
   }
 
   return options
@@ -479,13 +493,26 @@ const compareSave = async (label, [file, GameID, RaceID], { hit, provenance }) =
     return
   }
 
-  const rows = await database.query(MISSILE_SQL, [GameID, RaceID])
+  let race = RaceID
+  let rows = await database.query(MISSILE_SQL, [GameID, race])
+
+  // The race of the fixture owns no missile design. The chance of a design is the same formula for any race's designs, so the comparison reads those of the race of the game that owns the most (the fixture's non-player races hold them) and says so.
+  if (label === 'fixture' && !rows.length) {
+    const [owner] = await database.query('select FCT_RaceTech.RaceID as RaceID, count(*) as n from FCT_RaceTech inner join FCT_MissileType on FCT_MissileType.MissileID = FCT_RaceTech.TechID and FCT_MissileType.GameID = FCT_RaceTech.GameID where FCT_RaceTech.GameID = ? group by FCT_RaceTech.RaceID order by n desc, FCT_RaceTech.RaceID limit 1', [GameID])
+
+    if (owner) {
+      race = owner.RaceID
+      rows = await database.query(MISSILE_SQL, [GameID, race])
+      console.log(`INFO  race ${RaceID} owns no missile design; the ${rows.length} designs of race ${race}, the race of the game that owns the most, are compared`)
+    }
+  }
+
   const { valueOrNull } = provenance
   const noChance = rows.filter(hasNoChance)
   let compared = 0
   let wrong = ''
 
-  check(`${label}: the race has missile designs to read`, rows.length > 0, `${rows.length} designs`)
+  check(`${label}: the race has missile designs to read`, rows.length > 0, `${rows.length} designs of race ${race}`)
 
   for (const row of rows) {
     for (const target of GRID.targets) {
@@ -627,7 +654,7 @@ const checkPageMutation = async ([label, from, to]) => {
   check(`page mutation caught: ${label}`, failed.length > 0 ? true : 'every page check still passes', `${failed.length} checks fail`)
 }
 
-const SAVE_LABELS = ['modded', 'stock']
+const SAVE_LABELS = ['fixture', 'modded', 'stock']
 
 // One part, in this process: `synthetic`, a mutation by its index (`mutation:3`), `page`, a page mutation by its index (`pagemutation:1`) or a save by its label.
 const runPart = async (part, options) => {
@@ -653,7 +680,7 @@ const runPart = async (part, options) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
@@ -671,7 +698,7 @@ const run = async () => {
     ...(planting ? MUTATIONS : []).map((_mutation, index) => ({ part: `mutation:${index}`, weight: 3 })),
     { part: 'page', weight: 5 },
     ...(planting ? PAGE_MUTATIONS : []).map((_mutation, index) => ({ part: `pagemutation:${index}`, weight: 5 })),
-    ...SAVE_LABELS.map((label) => ({ part: label, weight: 10 })),
+    ...options.saveLabels.map((label) => ({ part: label, weight: 10 })),
   ]
 
   const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
@@ -698,7 +725,7 @@ const run = async () => {
     PAGE_MUTATIONS.forEach(printed)
   }
 
-  SAVE_LABELS.forEach(printed)
+  options.saveLabels.forEach(printed)
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)

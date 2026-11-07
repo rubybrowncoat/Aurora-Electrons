@@ -4,7 +4,7 @@
 
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const COLONIST_CARGO = 1
 const COLONIST_MODULE = 17
 const STANDARD_BERTHS = 7
@@ -46,7 +46,7 @@ registerRule({
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentValue, ComponentTypeID 17, SpecialFunction 7', 'FCT_DamagedComponent.Number'],
-  note: 'Millions of colonists the ship\'s standard berths hold: the standard-berth modules of its class times their capacity, less the damaged ones. The sum without damage matched the stored class colonist capacity of every Ark class in the modded save and the stock sample save; no save has a damaged Ark module, so the damage rule is read from the game, not observed. Cryogenic berths on the same ship are not counted: people in them are not orbital population.',
+  note: 'Millions of colonists the ship\'s standard berths hold: the standard-berth modules of its class times their capacity, less the damaged ones. The sum without damage matched the stored class colonist capacity of every Ark class in the saves it was checked on; no save has a damaged Ark module, so the damage rule is read from the game, not observed. Cryogenic berths on the same ship are not counted: people in them are not orbital population.',
 })
 
 registerRule({
@@ -60,7 +60,7 @@ registerRule({
 
 registerRule({
   id: ORBIT,
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: '',
   verification: 'estimated',
   structure: ['FCT_Fleet.AssignedPopulationID, Xcor, Ycor, SystemID, CivilianFunction, OrbitBodyID', 'FCT_MoveOrders.FleetID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Xcor, Ycor'],
@@ -80,7 +80,7 @@ registerRule({
 
 registerRule({
   id: EMPTY,
-  versions: VERSIONS,
+  versions: ['x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the colonists aboard and standard berths rules'],
@@ -89,7 +89,7 @@ registerRule({
 
 registerRule({
   id: TOTALS,
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: 'M people',
   verification: 'estimated',
   structure: ['the Ark ships\' own results'],
@@ -99,7 +99,7 @@ registerRule({
 
 registerRule({
   id: BODY_SPECIES,
-  versions: VERSIONS,
+  versions: ['2.7.x'],
   units: '',
   verification: 'estimated',
   structure: ['the colonists aboard, species and standard berths rules'],
@@ -117,7 +117,7 @@ export const loadArks = async (database, { GameID, RaceID }) => {
   const [ships, cargo, colonies] = await Promise.all([
     rows(database, `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.ShipClassID, FCT_ShipClass.ClassName, FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.AssignedPopulationID, FCT_Fleet.OrbitBodyID, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.CivilianFunction, (select count(*) from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID and FCT_MoveOrders.GameID = ${GameID}) as MoveOrders, (select sum((FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0)) * FCT_ShipDesignComponents.ComponentValue) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID left join FCT_DamagedComponent as VIR_Damage on VIR_Damage.rowid = (select min(VIR_First.rowid) from FCT_DamagedComponent as VIR_First where VIR_First.ShipID = FCT_Ship.ShipID and VIR_First.ComponentID = FCT_ClassComponent.ComponentID) where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID = ${COLONIST_MODULE} and FCT_ShipDesignComponents.SpecialFunction = ${STANDARD_BERTHS}) as Berths from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipClass.ArkShip = 1`),
     rows(database, `select FCT_ShipCargo.ShipID, FCT_ShipCargo.SpeciesID, FCT_Species.SpeciesName, sum(FCT_ShipCargo.Amount) as Amount, count(*) as Rows, count(FCT_ShipCargo.Amount) as Amounts from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join FCT_Species on FCT_Species.SpeciesID = FCT_ShipCargo.SpeciesID and FCT_Species.GameID = FCT_ShipCargo.GameID where FCT_ShipCargo.GameID = ${GameID} and FCT_ShipCargo.CargoTypeID = ${COLONIST_CARGO} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipClass.ArkShip = 1 group by FCT_ShipCargo.ShipID, FCT_ShipCargo.SpeciesID, FCT_Species.SpeciesName`),
-    rows(database, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
+    rows(database, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.ComponentNumber, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
   ])
 
   return { ships, cargo, colonies }
@@ -133,12 +133,15 @@ const aboardResult = (cargoRows) => {
 
 const berthsResult = (ship) => (finite(ship.Berths) ? ofRule({ rule: BERTHS, value: ship.Berths / MILLION, inputs: { present: ['standard berths of the class'] } }) : unavailable({ rule: BERTHS, missing: ['the class\'s standard berths'] }))
 
+// The species aboard: a colonist cargo row of 0 people holds no species, so it is not listed (the game no longer keeps such a row, and a copy that holds one reads as one that does not). A row of an amount not known stays, and makes the figure unavailable when its species is missing.
 const speciesResult = (cargoRows) => {
-  if (cargoRows.some((row) => !row.SpeciesName)) {
+  const held = cargoRows.filter((row) => row.Amount !== 0)
+
+  if (held.some((row) => !row.SpeciesName)) {
     return unavailable({ rule: SPECIES, missing: ['species of the colonists aboard'] })
   }
 
-  return ofRule({ rule: SPECIES, value: cargoRows.map((row) => ({ SpeciesID: row.SpeciesID, name: row.SpeciesName, amount: row.Amount / MILLION })), inputs: { present: ['species of the colonists aboard'] } })
+  return ofRule({ rule: SPECIES, value: held.map((row) => ({ SpeciesID: row.SpeciesID, name: row.SpeciesName, amount: row.Amount / MILLION })), inputs: { present: ['species of the colonists aboard'] } })
 }
 
 const notCounted = (reason, present) => ofRule({ rule: ORBIT, value: { counted: false, reason }, inputs: { present } })

@@ -8,7 +8,7 @@ import { categoryOfType } from './event-triage'
 import { isKnownNumber } from './math'
 import { envelope, failureWords, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 // The event types the checklist watches, all of the Combat category of utilities/event-triage.js (scripts/check-event-triage.js holds each to the export of DIM_EventType), with the icon the log shows for the type. `group` is 'fire' or 'boarding'. None of them says why an interval stalls.
 export const WATCHED = Object.freeze([
@@ -98,7 +98,7 @@ registerRule({
 
 registerRule({
   id: 'logDiagnostic.fleet',
-  versions: VERSIONS,
+  versions: ['x'],
   units: '',
   verification: 'confirmed',
   structure: [],
@@ -122,6 +122,17 @@ export const readHiddenTypes = async (database, GameID, RaceID) => {
 export const readListedTypes = async (database) => {
   try {
     const [rows] = await database.query(`select DIM_EventType.EventTypeID from DIM_EventType where DIM_EventType.EventTypeID in (${WATCHED.map((entry) => entry.type).join(', ')})`)
+
+    return new Set(rows.map((row) => Number(row.EventTypeID)))
+  } catch (error) {
+    return null
+  }
+}
+
+// The event types the open save flags as interrupting the player (`DIM_EventType.PlayerInterrupt`), as a Set, or null when the table could not be read (unknown, never none). The flags are the save's own, so the save that carries a changed flag marks by it, and nothing is kept from a save the app has replaced.
+export const readInterruptTypes = async (database) => {
+  try {
+    const [rows] = await database.query('select DIM_EventType.EventTypeID from DIM_EventType where coalesce(DIM_EventType.PlayerInterrupt, 0) = 1')
 
     return new Set(rows.map((row) => Number(row.EventTypeID)))
   } catch (error) {

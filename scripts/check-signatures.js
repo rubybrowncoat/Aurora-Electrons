@@ -10,15 +10,19 @@
   - cross-section: the effective and the uncloaked cross-section stay distinct for a cloaked class, the floor of 0.3 HS, the cloak that covers the class, the last such cloak, and the active reach with the floor and the square of the cross-section over the resolution;
   - reduction: the engines rebuilt at each researched thermal reduction level, the cost factor read from the tech row;
   - em: shields × 30, an active sensor max(1, trunc(strength) × trunc(resolution)), each sensor on its own and never summed, 0 and not unknown for no shields or no active sensor;
-  - saves: ClassThermal, ClassCrossSection and SensorReduction rebuilt for every class of every save in saves/ from the loader and the rules (read-only), with the two modded classes whose stored thermal signature the rule does not reproduce pinned; a save that is not there is reported as skipped, never as passed.
+  - saves: ClassThermal, ClassCrossSection and SensorReduction rebuilt for every class of the registered saves of the line in saves/ (the fixture of scripts/lib/fixtures.js and the played saves) from the loader and the rules (read-only); a save that is not there is reported as skipped, never as passed.
 
   Mutations: each deliberate fault planted in the source of a module (the module is loaded from its text, scripts/lib/utilities.js, with a registry of provenance rules of its own, so no fault reaches another) runs the checks it names and must fail them. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { PINNED_ENGINES } = require('./lib/pinned-engines')
+const { PINNED_SAVES, pinnedSaveOfGame } = require('./lib/pinned-saves')
+const { LINE_SAVE_FILES } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -35,6 +39,7 @@ const loadAll = async (mutation = null) => {
   const sources = {}
 
   if (mutation) {
+    refusePlanting(mutation.name || mutation.file)
     sources[mutation.file.replace(/\.js$/, '')] = patched(mutation.file, fs.readFileSync(path.join(utilitiesDirectory, mutation.file), 'utf8'), mutation.find, mutation.replace)
     sources.provenance = `${fs.readFileSync(path.join(utilitiesDirectory, 'provenance.js'), 'utf8')}\n// planted fault ${++planted}\n`
   }
@@ -73,7 +78,7 @@ const sizes = (m, cls) => {
 
 // ---------- the saves ----------
 
-// The saves of saves/ the checks read, each { file, database }, opened by `run`.
+// The registered saves of the line in saves/ the checks read, each { file, database }, opened by `run`.
 const SAVES = []
 
 const skipped = (reason) => ({ skipped: reason })
@@ -102,18 +107,10 @@ const openSave = (file) => new Promise((resolve, reject) => {
 })
 
 const openSaves = async () => {
-  const files = fs.existsSync(savesDirectory) ? fs.readdirSync(savesDirectory).filter((name) => name.endsWith('.db')).sort() : []
-
-  for (const file of files) {
+  for (const file of LINE_SAVE_FILES.filter((name) => fs.existsSync(path.join(savesDirectory, name)))) {
     SAVES.push(await openSave(file))
   }
 }
-
-// The two modded classes of one save whose stored thermal signature is 12.5 times what the rule gives.
-const PINNED = Object.freeze([
-  { file: 'AuroraDB_270_unknown.db', game: 140, race: 784, classId: 62932, name: 'Owl', field: 'ClassThermal', stored: 15000, computed: 1200 },
-  { file: 'AuroraDB_270_unknown.db', game: 140, race: 784, classId: 62946, name: 'Akita', field: 'ClassThermal', stored: 30000, computed: 2400 },
-])
 
 const racesOf = async (save) => {
   const [rows] = await save.database.query('select distinct GameID, RaceID from FCT_ShipClass order by GameID, RaceID')
@@ -122,6 +119,12 @@ const racesOf = async (save) => {
 }
 
 const sameFigure = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b))
+
+// The pinned save a game of a save read here is (scripts/lib/pinned-saves.js: told by the id, name, start year and game time its FCT_Game row stores, never by the file name), or null: a pinned engine is of a saved state, and another save that reuses its game and component ids is not it.
+const savedAs = (save, game) => pinnedSaveOfGame(async (sql, parameters) => (await save.database.query(sql, { replacements: Object.fromEntries(Object.entries(parameters).map(([name, value]) => [name.slice(1), value])) }))[0], game)
+
+// Whether a pinned engine of the saved state `saved` and its game explains an engine of component `id` whose stored power differs from the rebuilt one: the pin names the saved state, the game, the component, the field and both figures.
+const explainsPower = (saved, game, id, stored, computed) => PINNED_ENGINES.some((pin) => pin.save === saved && pin.game === game && pin.id === id && pin.field === 'power' && sameFigure(pin.stored, stored) && sameFigure(pin.computed, computed))
 
 // Every class of a save rebuilt from the loader and the rules and set beside what the save stores: the tallies and the mismatches of the three figures.
 const reconcileSave = async (m, save) => {
@@ -157,8 +160,6 @@ const reconcileSave = async (m, save) => {
 
   return { tally, mismatches }
 }
-
-const explains = (pin, mismatch) => pin.file === mismatch.file && pin.game === mismatch.game && pin.race === mismatch.race && pin.classId === mismatch.classId && pin.field === mismatch.field && sameFigure(pin.stored, mismatch.stored) && sameFigure(pin.computed, mismatch.computed)
 
 const describeMismatch = (mismatch) => `${mismatch.file} game ${mismatch.game} race ${mismatch.race} class ${mismatch.classId} ${mismatch.name} ${mismatch.field}: stored ${mismatch.stored}, rebuilt ${mismatch.computed}`
 
@@ -729,19 +730,22 @@ check('capability: /sensors is unsupported on a save without a column a loader c
   }
 })
 
-check('reduction (save): an engine rebuilt at its own tech levels reproduces its stored power', async (m) => {
+check('reduction (save): an engine rebuilt at its own tech levels reproduces its stored power, but for the pinned engines', async (m) => {
   if (!SAVES.length) {
     return skipped('no save in saves/')
   }
 
   const lines = []
+  const unexplained = []
   let total = 0
 
   for (const save of SAVES) {
     let rebuilt = 0
+    let pinned = 0
     let ratings = 0
 
     for (const { GameID, RaceID } of await racesOf(save)) {
+      const saved = await savedAs(save, GameID)
       const { techs } = await m.dd.loadThermalReduction(save.database, { GameID, RaceID })
       const classes = await m.dd.loadSignatureClasses(save.database, { GameID, RaceID })
 
@@ -753,7 +757,14 @@ check('reduction (save): an engine rebuilt at its own tech levels reproduces its
 
           const design = m.dr.engineDesign({ sizeHS: part.sizeHS, thrust: part.thrust, engineTech: engineTech.info, fuelTech: fuelTech.info, thermalTech: thermalTech.info, thermalCost: thermalTech.info2 })
 
-          assert.ok(m.dr.agrees(part.power, design.power), `${save.file} ${cls.name}: ${part.name} stores ${part.power} EP, the rule gives ${design.power}`)
+          if (!m.dr.agrees(part.power, design.power)) {
+            if (explainsPower(saved, GameID, part.id, part.power, design.power)) {
+              pinned++
+            } else {
+              unexplained.push(`${save.file} game ${GameID} ${cls.name}: ${part.name} (${part.id}) stores ${part.power} EP, the rule gives ${design.power}`)
+            }
+          }
+
           rebuilt++
           ratings += sameFigure(part.thermalRating, thermalTech.info) ? 0 : 1
         }
@@ -761,12 +772,80 @@ check('reduction (save): an engine rebuilt at its own tech levels reproduces its
     }
 
     total += rebuilt
-    lines.push(`${save.file}: ${rebuilt} engine mounts rebuilt, 0 differing in power${ratings ? `, ${ratings} storing a thermal rating other than their thermal tech's (a modded save; not a figure of the three reconciled)` : ''}`)
+    lines.push(`${save.file}: ${rebuilt} engine mounts rebuilt, ${pinned} differing in power and pinned${ratings ? `, ${ratings} storing a thermal rating other than their thermal tech's (a modded save; not a figure of the three reconciled)` : ''}`)
   }
 
   assert.ok(total > 0, 'no engine was rebuilt')
 
+  try {
+    assert.deepEqual(unexplained, [], 'engine mounts whose stored power the rule does not give and no pinned engine explains')
+  } catch (error) {
+    error.lines = lines
+    throw error
+  }
+
   return { lines }
+})
+
+check('reduction (save): the pinned engines store the pinned power and the rule gives the pinned figure at their own tech rows', async (m) => {
+  const powers = PINNED_ENGINES.filter((pin) => pin.field === 'power')
+  const holders = new Map()
+
+  for (const pin of powers) {
+    for (const save of SAVES) {
+      if (!holders.has(pin) && await savedAs(save, pin.game) === pin.save) {
+        holders.set(pin, save)
+      }
+    }
+  }
+
+  const present = powers.filter((pin) => holders.has(pin))
+
+  if (!present.length) {
+    return skipped(`no save in saves/ is the pinned save ${[...new Set(powers.map((pin) => pin.save))].join(' or ')}`)
+  }
+
+  const lines = []
+
+  for (const pin of present) {
+    const save = holders.get(pin)
+    const [[row]] = await save.database.query('select Name, Size, EnginePowerMod, ComponentValue, BGTech1, BGTech2, BGTech3 from FCT_ShipDesignComponents where GameID = :game and SDComponentID = :id', { replacements: { game: pin.game, id: pin.id } })
+
+    assert.ok(row, `engine ${pin.id} of ${save.file}`)
+    assert.equal(row.ComponentValue, pin.stored, `${row.Name}: stored`)
+
+    const [tech] = await save.database.query('select TechSystemID, AdditionalInfo, AdditionalInfo2 from FCT_TechSystem where TechSystemID in (:engine, :fuel, :thermal)', { replacements: { engine: row.BGTech1, fuel: row.BGTech2, thermal: row.BGTech3 } })
+    const at = (id) => tech.find((item) => item.TechSystemID === id)
+    const design = m.dr.engineDesign({ sizeHS: row.Size, thrust: row.EnginePowerMod, engineTech: at(row.BGTech1).AdditionalInfo, fuelTech: at(row.BGTech2).AdditionalInfo, thermalTech: at(row.BGTech3).AdditionalInfo, thermalCost: at(row.BGTech3).AdditionalInfo2 })
+
+    close(design.power, pin.computed, `${row.Name}: rebuilt`)
+    assert.equal(m.dr.agrees(row.ComponentValue, design.power), false, `${row.Name}: the disagreement is shown, not hidden`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, row.ComponentValue, design.power), true, `${row.Name}: the stored and rebuilt power of its own saved state are the pinned engine`)
+    lines.push(`${save.file}: game ${pin.game} engine ${pin.id} ${row.Name}: power stored ${pin.stored}, rebuilt ${pin.computed}`)
+  }
+
+  return { lines }
+})
+
+check('reduction: a pinned engine explains a difference only at its saved state, game, component and figures', () => {
+  const powers = PINNED_ENGINES.filter((pin) => pin.field === 'power')
+
+  assert.ok(powers.length > 0, 'the engines are pinned')
+  assert.ok(Object.keys(PINNED_SAVES).length > 1, 'there is a save other than the pinned one to read the pin on')
+
+  for (const pin of powers) {
+    const elsewhere = Object.keys(PINNED_SAVES).find((key) => !PINNED_ENGINES.some((other) => other.save === key && other.id === pin.id))
+
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, pin.stored, pin.computed), true, `${pin.id}: its own saved state, game, stored and rebuilt power`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, pin.stored + 1, pin.computed), false, `${pin.id}: a changed stored power is no pinned engine`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id, pin.stored, pin.computed + 1), false, `${pin.id}: a changed rebuilt power is no pinned engine`)
+    assert.equal(explainsPower(pin.save, pin.game + 1, pin.id, pin.stored, pin.computed), false, `${pin.id}: the same engine of another game is no pinned engine`)
+    assert.equal(explainsPower(pin.save, pin.game, pin.id + 1, pin.stored, pin.computed), false, `${pin.id}: another component is no pinned engine`)
+    assert.equal(explainsPower(elsewhere, pin.game, pin.id, pin.stored, pin.computed), false, `${pin.id}: the same game, component and figures of ${elsewhere} are no pinned engine`)
+    assert.equal(explainsPower(null, pin.game, pin.id, pin.stored, pin.computed), false, `${pin.id}: a save that is none of the pinned saves has no pinned engine`)
+  }
+
+  assert.equal(new Set(PINNED_ENGINES.map((pin) => pin.save)).size > 1, true, 'the engines are pinned in more than one saved state')
 })
 
 // ----- em
@@ -816,59 +895,29 @@ check('em: no shields or no active sensor gives 0, not unknown', (m) => {
 
 // ----- saves
 
-check('saves: ClassThermal, ClassCrossSection and SensorReduction are rebuilt for every class, but for the pinned rows', async (m) => {
+check('saves: ClassThermal, ClassCrossSection and SensorReduction are rebuilt for every class', async (m) => {
   if (!SAVES.length) {
-    return skipped('no save in saves/')
+    return skipped('no save of the line in saves/')
   }
 
   const lines = []
-  const unexplained = []
-  const seen = new Set()
+  const mismatched = []
   let classes = 0
-  let explained = 0
 
   for (const save of SAVES) {
     const { tally, mismatches } = await reconcileSave(m, save)
-    const own = mismatches.filter((mismatch) => PINNED.some((pin, index) => explains(pin, mismatch) && seen.add(index)))
 
-    unexplained.push(...mismatches.filter((mismatch) => !own.includes(mismatch)))
+    mismatched.push(...mismatches)
     classes += tally.classes
-    explained += own.length
 
     const count = (field) => mismatches.filter((mismatch) => mismatch.field === field).length
 
-    lines.push(`${save.file}: ${tally.classes} classes in ${tally.races} races, ${tally.withEngines} with engines, ${tally.cloaked} cloaked, ${tally.several} with several engine designs; mismatches: ClassThermal ${count('ClassThermal')}, ClassCrossSection ${count('ClassCrossSection')}, SensorReduction ${count('SensorReduction')}, of which ${own.length} explained`)
+    lines.push(`${save.file}: ${tally.classes} classes in ${tally.races} races, ${tally.withEngines} with engines, ${tally.cloaked} cloaked, ${tally.several} with several engine designs; mismatches: ClassThermal ${count('ClassThermal')}, ClassCrossSection ${count('ClassCrossSection')}, SensorReduction ${count('SensorReduction')}`)
   }
 
   assert.ok(classes > 0, 'the saves hold no class')
-  assert.deepEqual(unexplained.map(describeMismatch), [], 'mismatches no pinned row explains')
-  assert.equal(seen.size, PINNED.filter((pin) => SAVES.some((save) => save.file === pin.file)).length, 'every pinned row of a save read is still a mismatch')
-  lines.push(`${classes} classes over ${SAVES.length} saves, ${unexplained.length} unexplained mismatches, ${explained} explained by the pinned rows`)
-
-  return { lines }
-})
-
-check('saves: the pinned modded classes store what is pinned and the rule gives the pinned figure', async (m) => {
-  const present = SAVES.filter((save) => PINNED.some((pin) => pin.file === save.file))
-
-  if (!present.length) {
-    return skipped(`${[...new Set(PINNED.map((pin) => pin.file))].join(', ')} is not in saves/`)
-  }
-
-  const lines = []
-
-  for (const pin of PINNED) {
-    const save = present.find((item) => item.file === pin.file)
-    const classes = await m.dd.loadSignatureClasses(save.database, { GameID: pin.game, RaceID: pin.race })
-    const cls = classes.find((item) => item.id === pin.classId)
-
-    assert.ok(cls, `class ${pin.classId} of ${pin.file}`)
-    assert.equal(cls.name, pin.name)
-    assert.equal(cls.stored.thermal, pin.stored, `${pin.name}: stored`)
-    close(m.dr.classThermal({ engines: cls.engines }), pin.computed, `${pin.name}: rebuilt`)
-    assert.equal(m.sig.classSignatures(cls).thermal.agrees, false, `${pin.name}: the disagreement is shown, not hidden`)
-    lines.push(`game ${pin.game} race ${pin.race} class ${pin.classId} ${pin.name}: ${pin.field} stored ${pin.stored}, rebuilt ${pin.computed}`)
-  }
+  assert.deepEqual(mismatched.map(describeMismatch), [], 'a class whose stored figure the rule does not give')
+  lines.push(`${classes} classes over ${SAVES.length} saves, ${mismatched.length} mismatches`)
 
   return { lines }
 })
@@ -920,6 +969,7 @@ const MUTATIONS = [
   { name: 'a hard-coded cost factor of 1.25', file: 'signatures.js', find: 'thermalCost: level.costFactor', replace: 'thermalCost: 1.25', fails: ['reduction: the cost factor'] },
   { name: 'the multiplier of the level ignored', file: 'signatures.js', find: 'thermalTech: level.multiplier, thermalCost', replace: 'thermalTech: 1, thermalCost', fails: ['reduction: each level', 'reduction: the cost factor'] },
   { name: 'the engine and fuel techs swapped', file: 'signatures.js', find: 'engineTech, fuelTech, thermalTech: level.multiplier', replace: 'engineTech: fuelTech, fuelTech: engineTech, thermalTech: level.multiplier', fails: ['reduction: each level', 'reduction: the cost factor'] },
+  { name: 'the engine power one over the rule', file: 'design-rules.js', find: 'const power = roundHalfEven(engineTech * sizeHS * thrust, 2)\n  const fuelPerEph = fuelTech * thrust ** THRUST_EXPONENT * Math.sqrt(10 / sizeHS)', replace: 'const power = roundHalfEven(engineTech * sizeHS * thrust, 2) + 1\n  const fuelPerEph = fuelTech * thrust ** THRUST_EXPONENT * Math.sqrt(10 / sizeHS)', fails: ['reduction (save): the pinned engines', 'reduction (save): an engine'] },
   { name: 'the current level never marked', file: 'signatures.js', find: 'const current = cls.engines.every((engine) => engine.techIds.thermal === level.id)', replace: 'const current = false', fails: ['reduction: each level'] },
   { name: 'the class engine cost without the engine count', file: 'signatures.js', find: 'value: costs[index].value * entry.engine.count', replace: 'value: costs[index].value', fails: ['reduction: the cost factor', 'reduction: the class cost'] },
   { name: 'the thermal of a level without the engine count', file: 'signatures.js', find: 'value: entry.design.thermal * entry.engine.count', replace: 'value: entry.design.thermal', fails: ['reduction: each level', 'reduction: the class cost'] },
@@ -931,19 +981,20 @@ const MUTATIONS = [
   { name: 'the largest ship of a cloak read from its size', file: 'design-data.js', find: 'maxShipHS: part.ComponentValue', replace: 'maxShipHS: part.Size', fails: ['saves: ClassThermal'] },
   { name: 'the classes of every race read', file: 'design-data.js', find: 'where sc.GameID = :GameID and sc.RaceID = :RaceID order by sc.ClassName', replace: 'where sc.GameID = :GameID order by sc.ClassName', fails: ['saves: ClassThermal'] },
   { name: 'the engine and fuel tech types swapped', file: 'design-data.js', find: 'engine: techIdOfType(part, techTypes, ENGINE_TECH_TYPE), fuel: techIdOfType(part, techTypes, FUEL_TECH_TYPE)', replace: 'engine: techIdOfType(part, techTypes, FUEL_TECH_TYPE), fuel: techIdOfType(part, techTypes, ENGINE_TECH_TYPE)', fails: ['reduction (save): an engine'] },
-  { name: 'the levels ordered by the development cost column of the table', file: 'design-data.js', find: 'order by DevelopCost, t.TechSystemID', replace: 'order by t.DevelopCost, t.TechSystemID', fails: ['reduction (missing column): a save without'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the missing development cost of a level becomes 0', file: 'design-data.js', find: "${selectedColumns('t', levelColumns, ['Name', 'AdditionalInfo', 'AdditionalInfo2', 'DevelopCost'])}", replace: "${selectedColumns('t', levelColumns, ['Name', 'AdditionalInfo', 'AdditionalInfo2', 'DevelopCost']).replace('null as DevelopCost', '0 as DevelopCost')}", fails: ['reduction (missing column): a save without'] },
   { name: 'the levels not ordered by id on a tie', file: 'design-data.js', find: 'order by DevelopCost, t.TechSystemID', replace: 'order by DevelopCost', fails: ['reduction (missing column): the levels come'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the obsolete flag of a level read by its table column', file: 'design-data.js', find: "${selectedColumns('r', raceTechColumns, ['Obsolete'])}", replace: 'r.Obsolete as Obsolete', fails: ['reduction (missing column): a save without'] },
+  { name: 'the absent obsolete flag of a level is set', file: 'design-data.js', find: "${selectedColumns('r', raceTechColumns, ['Obsolete'])}", replace: "${selectedColumns('r', raceTechColumns, ['Obsolete']).replace('null as Obsolete', '1 as Obsolete')}", fails: ['reduction (missing column): a save without'] },
   { name: 'the obsolete flag listed as a read of /sensors', file: 'capability-reads.js', find: "tech: { label: 'the tech', reads: 'DIM_TechType(Description FieldID TechTypeID) FCT_EligibleProjects(GameID RaceID TechSystemID) FCT_PausedResearch(GameID PointsAccumulated RaceID TechSystemID) FCT_Population(PopulationID RaceID) FCT_RaceTech(GameID RaceID TechID)", replace: "tech: { label: 'the tech', reads: 'DIM_TechType(Description FieldID TechTypeID) FCT_EligibleProjects(GameID RaceID TechSystemID) FCT_PausedResearch(GameID PointsAccumulated RaceID TechSystemID) FCT_Population(PopulationID RaceID) FCT_RaceTech(GameID Obsolete RaceID TechID)", fails: ['capability: /sensors is supported'] },
   { name: 'the class name not listed as a read of /sensors', file: 'capability-reads.js', find: 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_ShipClass(ClassName GameID RaceID ShipClassID)', replace: 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_ShipClass(GameID RaceID ShipClassID)', fails: ['capability: /sensors is unsupported'] },
-  { name: 'the passive sensors read with a fire control column the page does not use', file: 'design-data.js', find: 'FCT_ShipDesignComponents.ComponentValue from FCT_ShipDesignComponents inner join', replace: 'FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.FCRangeModifier from FCT_ShipDesignComponents inner join', fails: ['loaders: the three reads'] },
+  { name: 'the passive sensors\' figure is discarded without a fire control column', file: 'design-data.js', find: 'FCT_ShipDesignComponents.ComponentValue from FCT_ShipDesignComponents inner join', replace: "case when exists (select 1 from pragma_table_info('FCT_ShipDesignComponents') where name = 'FCRangeModifier') then FCT_ShipDesignComponents.ComponentValue else 0 end as ComponentValue from FCT_ShipDesignComponents inner join", fails: ['loaders: the three reads'] },
   { name: 'the passive sensors read with the active sensors', file: 'design-data.js', find: 'const PASSIVE_SENSOR_TYPE_IDS = Object.freeze([SENSOR_COMPONENT_TYPES.thermal, SENSOR_COMPONENT_TYPES.em])', replace: 'const PASSIVE_SENSOR_TYPE_IDS = Object.freeze([SENSOR_COMPONENT_TYPES.thermal, SENSOR_COMPONENT_TYPES.em, SENSOR_COMPONENT_TYPES.active])', fails: ['loaders: the three reads'] },
   { name: 'the passive sensors of every race read', file: 'design-data.js', find: 'and FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race order by FCT_ShipDesignComponents.SDComponentID`, { replacements: { game, race } })\n\n  return rows\n}\n\nconst wholeIds', replace: 'and FCT_RaceTech.GameID = :game order by FCT_ShipDesignComponents.SDComponentID`, { replacements: { game } })\n\n  return rows\n}\n\nconst wholeIds', fails: ['loaders: the three reads'] },
 ]
 
 const parseArguments = (argv) => {
-  const options = { mutations: true }
+  const options = { mutations: mutating() }
 
   for (const argument of argv) {
     if (argument === '--no-mutations') {
@@ -966,7 +1017,7 @@ const attempt = async (entry, m) => {
 
     return isSkip(result) ? { state: 'skip', reason: result.skipped } : { state: 'pass', lines: (result && result.lines) || [] }
   } catch (error) {
-    return { state: 'fail', reason: String(error.message).split('\n').join(' | ') }
+    return { state: 'fail', reason: String(error.message).split('\n').join(' | '), valueFailure: kindOf(error) === 'assertion' && !isSubjectThrow(error) }
   }
 }
 
@@ -991,8 +1042,10 @@ const report = (state, name, detail = '') => {
   console.log(`${state === 'pass' ? 'PASS' : 'FAIL'}  ${name}${state === 'pass' ? '' : `  [${detail}]`}`)
 }
 
-// A planted fault: the checks it names run on the faulty copy, and each name must have a check that fails (or only skipped ones, which skip the fault as well).
+// A planted fault: every name must have a check that fails by an own value assertion; no missing fixture drops a mapping.
 const runMutation = async (mutation) => {
+  refusePlanting(mutation.name)
+
   let m
 
   try {
@@ -1017,9 +1070,21 @@ const runMutation = async (mutation) => {
       outcomes.push(await attempt(entry, m))
     }
 
-    if (outcomes.some((outcome) => outcome.state === 'fail')) {
+    const absentFixture = outcomes.find((outcome) => outcome.state === 'skip')
+
+    if (absentFixture) {
+      return { state: 'fail', reason: `a named check has no fixture: ${start}: ${absentFixture.reason}` }
+    }
+
+    const invalid = outcomes.find((outcome) => outcome.state === 'fail' && !outcome.valueFailure)
+
+    if (invalid) {
+      return { state: 'fail', reason: `a named check failed without an own value assertion: ${invalid.reason}` }
+    }
+
+    if (outcomes.some((outcome) => outcome.state === 'fail' && outcome.valueFailure)) {
       caught++
-    } else if (!outcomes.every((outcome) => outcome.state === 'skip')) {
+    } else {
       missed.push(start)
     }
   }
@@ -1028,7 +1093,7 @@ const runMutation = async (mutation) => {
     return { state: 'fail', reason: `these checks did not fail: ${missed.join('; ')}` }
   }
 
-  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'skip', reason: 'the checks it names read a save that is not there' }
+  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'fail', reason: 'no named check failed by an own value assertion' }
 }
 
 const run = async () => {

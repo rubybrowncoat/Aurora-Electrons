@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-warning-wrecks.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The saved game is Skoormit (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785), read only: the race has 12 wrecks in its surveyed systems, 10 its own and 2 of another race (wreck 180 with an alias for its class and wreck 169 with none). The expected names come from SQL over the save, never from the module.
+  The saved game is the migrated Galactic Shogunate save (the fixture of scripts/lib/fixtures.js), read only: the race has 11 wrecks in its surveyed systems, 1 its own and 10 of other races. Foreign wrecks with an alias for the class that differs from the real class and foreign wrecks with no alias are both there, and the check takes the first of each from SQL over the save. The expected names come from SQL over the save, never from the module.
 
   Every planted fault must fail the check it names by a wrong value, never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing. The word for a class that is not known is a text policy: the owner of the rule names it Unknown, and a rewrite that says Unknown class passes.
 
@@ -17,14 +17,12 @@ const { patched } = require('./lib/mutant-source')
 const { HarnessError, GROUPINGS } = require('./lib/browser-observe')
 const { assert, through, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const GAME = 138
-const RACE = 785
-const ALIASED_WRECK = 180
-const ALIASED_NAME = 'LÉ Niamh'
-const UNALIASED_WRECK = 169
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const DETAIL = process.argv.includes('--detail')
 const SPACE = path.join(root, 'src', 'renderer', 'utilities', 'warnings', 'space.js')
 const SEPARATOR = GROUPINGS.Tick
@@ -65,6 +63,35 @@ const closeSave = () => {
     SAVED.close()
     SAVED = null
   }
+
+  if (PLANTED) {
+    PLANTED.copy.close()
+    PLANTED = null
+  }
+}
+
+// The save held in memory with a wreck and two life pods of the race added, of which one wreck and one pod are tied to a Lagrange point (`OrbitLagrangeID`), as the save holds none: the planted rows the captions of the warnings must state. The pod of the race is the only kind the life pod warning lists.
+let PLANTED = null
+
+const planted = () => {
+  if (!PLANTED) {
+    saved()
+
+    const copy = new Database(fs.readFileSync(path.join(root, SAVE)))
+    const [wreck] = copy.query(`select WreckID from FCT_Wrecks where GameID = ${GAME} and coalesce(OrbitBodyID, 0) = 0 and SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE}) order by WreckID limit 1`).all()
+    const [system] = copy.query(`select SystemID from FCT_RaceSysSurvey where GameID = ${GAME} and RaceID = ${RACE} order by SystemID limit 1`).all()
+    const [{ GameTime }] = copy.query(`select GameTime from FCT_Game where GameID = ${GAME}`).all()
+
+    if (!wreck || !system) {
+      throw new HarnessError('the save must hold a wreck tied to no body and a system the race has surveyed')
+    }
+
+    copy.run(`update FCT_Wrecks set OrbitLagrangeID = 1 where WreckID = ${wreck.WreckID}`)
+    copy.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SystemID, OrbitLagrangeID, ShipName, Crew, CreationTime) values (900000001, ${GAME}, ${RACE}, ${system.SystemID}, 1, 'Tied pod', 4, ${GameTime - 3600}), (900000002, ${GAME}, ${RACE}, ${system.SystemID}, 0, 'Free pod', 2, ${GameTime - 7200})`)
+    PLANTED = { copy, wreck: wreck.WreckID, GameTime }
+  }
+
+  return PLANTED
 }
 
 const adapter = (db) => ({ query: async (sql) => [db.query(sql).all()] })
@@ -81,17 +108,17 @@ const namesChecks = {
     const wrecks = wrecksOf(db)
     const own = wrecks.filter((wreck) => wreck.RaceID === RACE)
     const foreign = wrecks.filter((wreck) => wreck.RaceID !== RACE)
-    const aliased = foreign.find((wreck) => wreck.WreckID === ALIASED_WRECK)
-    const unaliased = foreign.find((wreck) => wreck.WreckID === UNALIASED_WRECK)
+    const aliased = foreign.find((wreck) => wreck.Alias && wreck.Alias !== wreck.RealClass)
+    const unaliased = foreign.find((wreck) => !wreck.Alias)
 
-    if (!aliased || aliased.Alias !== ALIASED_NAME || !unaliased || unaliased.Alias || !unaliased.RealClass || !aliased.RealClass) {
-      throw new HarnessError('the save must hold foreign wreck 180 with an alias for its class and foreign wreck 169 with none, both of a class with a real name')
+    if (!aliased || !unaliased || !unaliased.RealClass || !aliased.RealClass) {
+      throw new HarnessError('the save must hold a foreign wreck with an alias for its class that differs from its real class and a foreign wreck with none, both of a class with a real name')
     }
 
     const shown = await rows()
 
     assert.deepEqual(shown.map((row) => row.id).sort(), wrecks.map((wreck) => `wreck:${wreck.WreckID}`).sort(), 'the warning lists the wrecks of the surveyed systems, each once')
-    assert.deepEqual([own.length, foreign.length], [10, 2], 'the save holds 10 wrecks of the race and 2 of another race')
+    assert.ok(own.length > 0 && foreign.length > 0, `the save holds wrecks of the race (${own.length}) and of other races (${foreign.length})`)
 
     const rowOf = (wreck) => shown.find((row) => row.id === `wreck:${wreck.WreckID}`)
 
@@ -104,15 +131,33 @@ const namesChecks = {
     foreign.forEach((wreck) => {
       const row = rowOf(wreck)
 
-      assert.notEqual(row.cells.wreck, wreck.RealClass, `the wreck ${wreck.WreckID} of another race is named by its real class ${wreck.RealClass}`)
+      assert.ok(wreck.Alias === wreck.RealClass || row.cells.wreck !== wreck.RealClass, `the wreck ${wreck.WreckID} of another race is named by its real class ${wreck.RealClass}`)
       assert.equal(row.cells.design, '', `the wreck ${wreck.WreckID} of another race is not marked as the race's`)
     })
-    assert.equal(rowOf(aliased).cells.wreck, aliased.Alias, 'wreck 180 is named by the alias of the race')
-    assert.match(rowOf(unaliased).cells.wreck, /^Unknown( class)?$/, 'wreck 169 has no alias and is named as unknown')
+    assert.equal(rowOf(aliased).cells.wreck, aliased.Alias, `wreck ${aliased.WreckID} is named by the alias of the race`)
+    assert.match(rowOf(unaliased).cells.wreck, /^Unknown( class)?$/, `wreck ${unaliased.WreckID} has no alias and is named as unknown`)
   },
 }
 
-const CHECKS = [namesChecks]
+// A wreck and a life pod tied to a Lagrange point are captioned as lying at one, and the wreck and the pod that are tied to none are not.
+const anchoredChecks = {
+  id: 'anchored',
+  name: 'a wreck or a life pod tied to a Lagrange point is captioned as lying at one, and the save, which holds none, as lying at none',
+  run: async ({ rows, wrecks, pods, planted: plantOf }) => {
+    const shownWrecks = await wrecks()
+    const shownPods = await pods()
+    const plant = plantOf()
+    const tied = shownWrecks.find((row) => row.id === `wreck:${plant.wreck}`)
+
+    assert.ok(tied && / — at a Lagrange point$/.test(tied.caption), `the wreck tied to a point is captioned as at one: ${tied && tied.caption}`)
+    assert.deepEqual(shownWrecks.filter((row) => /Lagrange/.test(row.caption || '')).map((row) => row.id), [`wreck:${plant.wreck}`], 'and no other wreck is')
+    assert.ok(/ — at a Lagrange point$/.test(shownPods.find((row) => row.id === 'lifepod:900000001').caption), 'the pod tied to a point is captioned as at one')
+    assert.deepEqual(shownPods.filter((row) => /Lagrange/.test(row.caption || '')).map((row) => row.id), ['lifepod:900000001'], 'and the pod tied to none is not')
+    assert.ok((await rows()).every((row) => !/Lagrange/.test(row.caption || '')), 'no wreck of the save itself, tied to no point, is captioned as at one')
+  },
+}
+
+const CHECKS = [namesChecks, anchoredChecks]
 
 // ---------- the faults and the rewrites ----------
 
@@ -131,6 +176,12 @@ const FAULTS = [
   { name: 'the alias is read from the intelligence of another race', change: swap('FCT_AlienClass.ViewRaceID = ${RaceID}', 'FCT_AlienClass.ViewRaceID != ${RaceID}'), fails: ['names'] },
   { name: 'a wreck of another race is marked as the race\'s', change: swap("(wreck.Owned ? 'Owned' : '')", "'Owned'"), fails: ['names'] },
   { name: 'a wreck of the race is not marked as the race\'s', change: swap("(wreck.Owned ? 'Owned' : '')", "''"), fails: ['names'] },
+  { name: 'a wreck tied to a Lagrange point is captioned as in its system', change: swap('wreck.OrbitLagrangeID > 0 ? `${systemText(wreck)} — at a Lagrange point` : systemText(wreck)', 'systemText(wreck)'), fails: ['anchored'] },
+  { name: 'every wreck is captioned as at a Lagrange point', change: swap('wreck.OrbitLagrangeID > 0 ?', 'wreck.OrbitLagrangeID >= 0 ?'), fails: ['anchored'] },
+  { name: 'the wrecks leave out the Lagrange point they are tied to', change: swap('FCT_Wrecks.SystemID, FCT_Wrecks.OrbitLagrangeID, FCT_Wrecks.Size', 'FCT_Wrecks.SystemID, FCT_Wrecks.Size'), fails: ['anchored'] },
+  { name: 'a life pod tied to a Lagrange point is captioned as in its system', change: swap("lifepod.OrbitLagrangeID > 0 ? [lifepod.SystemName, 'at a Lagrange point'].filter(Boolean).join(' — ') : lifepod.SystemName || undefined", 'lifepod.SystemName || undefined'), fails: ['anchored'] },
+  { name: 'every life pod is captioned as at a Lagrange point', change: swap('lifepod.OrbitLagrangeID > 0 ?', 'lifepod.OrbitLagrangeID >= 0 ?'), fails: ['anchored'] },
+  { name: 'the life pods leave out the Lagrange point they are tied to', change: swap('FCT_Lifepods.SystemID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.ShipName', 'FCT_Lifepods.SystemID, FCT_Lifepods.ShipName'), fails: ['anchored'] },
 ]
 
 // Rewrites that say the same thing: the owner test in parentheses and another word for a class that is not known.
@@ -148,9 +199,10 @@ const results = async (variant, ids) => {
   const source = variant ? variant.change(text) : text
   const modules = await loadUtilities(['warnings/common', 'warnings/space'], { stubs: STUBS, sources: { 'warnings/space': source } })
   const check = modules['warnings/space'].checks.find((item) => item.key === 'known-wrecks')
+  const podCheck = modules['warnings/space'].checks.find((item) => item.key === 'active-lifepods')
 
-  if (!check) {
-    throw new HarnessError('the module has no check keyed known-wrecks')
+  if (!check || !podCheck) {
+    throw new HarnessError('the module has no check keyed known-wrecks and none keyed active-lifepods')
   }
 
   const db = saved()
@@ -161,8 +213,18 @@ const results = async (variant, ids) => {
 
     return held
   }
+  const readOnPlanted = (which, label) => {
+    const plant = planted()
 
-  return await runChecks(CHECKS.filter(({ id }) => !ids || ids.includes(id)), { rows, db })
+    return through(label, () => which.read({ ...ctx, database: adapter(plant.copy), GameTime: plant.GameTime }))
+  }
+  const memo = (make) => {
+    let made = null
+
+    return () => made || (made = make())
+  }
+
+  return await runChecks(CHECKS.filter(({ id }) => !ids || ids.includes(id)), { rows, db, wrecks: memo(() => readOnPlanted(check, 'the read of the known-wrecks check over the planted rows')), pods: memo(() => readOnPlanted(podCheck, 'the read of the active-lifepods check over the planted rows')), planted })
 }
 
 let checks = 0
@@ -207,7 +269,7 @@ const checkRewrite = async (rewrite) => {
 const DEADLINE = 120
 
 const variantsOf = (mutating) => [
-  { key: 'head', name: 'the head: the known-wrecks warning over the Skoormit save', head: true, heading: 'The known-wrecks warning (utilities/warnings/space.js)', deadline: DEADLINE, run: checkHead },
+  { key: 'head', name: 'the head: the known-wrecks warning over the fixture save', head: true, heading: 'The known-wrecks warning (utilities/warnings/space.js)', deadline: DEADLINE, run: checkHead },
   ...(mutating ? FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults', deadline: DEADLINE, run: () => checkFault(fault) })) : []),
   ...(mutating ? BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites that say the same thing', deadline: DEADLINE, run: () => checkRewrite(rewrite) })) : []),
 ]

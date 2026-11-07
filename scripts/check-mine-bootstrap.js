@@ -8,7 +8,7 @@
 
   The reads run on a small in-memory database of their own: which installation types the race can build, the colonies' places, stock and cargo handling, the projects, the freighters and troop ships, and the formations with their commanders; the reads that meet a column the save lacks or a null value say unknown, never 0. The page is run as a pseudo instance on rows given as data, with its real load state, and its template is read as text: a pick of a colony starts the panel's reads once, which leave the page shown and out of its loading state while the panel shows their progress or failure, and a source that failed to read inside the sources is offered for a retry that reads them again and recovers its rows, where a column the save lacks is not.
 
-  The saves (AuroraDB.db, game 140, race 784, and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only; a save that is not there is skipped and counts as neither a pass nor a failure) give the real reads, which are compared with raw counts, the engineers' rating at each colony compared with the figure the Production page's modifiers hold, the routes of real colonies, and copies of the saves in memory (temporary tables over the read-only save) with a colony short of workers, a null rating, a null commander bonus, a dropped column and an unconfirmed commander bonus lookup.
+  The fixture save (scripts/lib/fixtures.js, read-only; a save that is not there is skipped and counts as neither a pass nor a failure) gives the real reads, which are compared with raw counts, the engineers' rating at each colony compared with the figure the Production page's modifiers hold, the routes of real colonies, and copies of the save in memory (temporary tables over the read-only save) with a colony short of workers, a null rating, a null commander bonus, a dropped column and an unconfirmed commander bonus lookup. The engineers' route rests on the ground assistance rule, which lists the line the save's schema states, so the checks that plant a fault into that route run on the fixture; a save whose version no rule maps leaves them printed as needs tier b.
 
   Each mutation of a utility, the page or the haul module must fail the checks it names. A mutation's run calls only the functions that make the checks it names and loads the page only for the page's checks or the saves'; the head fails when a check a run names reads the page that run leaves out. Exit code 1 when a check fails.
 */
@@ -22,6 +22,7 @@ const { patched } = require('./lib/mutant-source')
 const { runChild } = require('./lib/check-pool')
 const { HarnessError } = require('./lib/browser-observe')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const U = 'src/renderer/utilities/mine-bootstrap.js'
@@ -29,12 +30,10 @@ const D = 'src/renderer/utilities/mine-bootstrap-data.js'
 const H = 'src/renderer/utilities/haul-plan.js'
 const P = 'src/renderer/pages/colony-outlook.vue'
 const C = 'src/renderer/utilities/capabilities.js'
+const M = 'src/renderer/mixins/production-modifiers.js'
 const FILES = { [U]: 'mine-bootstrap', [D]: 'mine-bootstrap-data', [H]: 'haul-plan' }
 const NAMES = ['mine-bootstrap', 'mine-bootstrap-data', 'colonies', 'production', 'haul-plan', 'provenance', 'minerals']
-const SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const SAVES = [fixtureSave()]
 const STUBS = {
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
   'dayjs/plugin/utc.js': 'export default {}',
@@ -81,18 +80,18 @@ const fixtures = (m) => {
   const B3 = { colony: { PopulationID: 4, PopName: 'Idle', SystemID: 10, Xcor: 1e6, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' }, rate: cap(0), stock: { 10: 5000 } }
   const FREIGHTER = { ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 2 }
   const options = (requirement = req()) => m['mine-bootstrap'].builderOptions({ requirement, target: T, builders: [B3, B2, B1], jumpPoints: [] })
-  const importing = (over = {}) => ({ builder: options()[0], freighters: [FREIGHTER], shuttleTechnology: 1, version: '2.7.x', workers: { now: split(249.9), later: split(249.9), cost: 0 }, ...over })
+  const importing = (over = {}) => ({ builder: options()[0], freighters: [FREIGHTER], shuttleTechnology: 1, version: '3.2.x', workers: { now: split(249.9), later: split(249.9), cost: 0 }, ...over })
   const runImport = (over = {}, requirement = req()) => m['mine-bootstrap'].importRoute({ requirement, target: T, ...importing(over) })
   const form = (id, over = {}) => ({ FormationID: id, Name: `F${id}`, PopulationID: 1, ShipID: 0, ParentFormationID: 0, ownSize: 5000, hq: 6000, rating: 0, commander: null, ...over })
   const power = (formations, population = 1) => m['mine-bootstrap'].engineerPower(formations, population)
-  const FACTOR = { ConstructionProduction: 12, EngineerProductionModifier: 0.5 }
+  const FACTOR = { ConstructionProduction: 12 }
   const groundFormations = () => [
     form(1, { PopulationID: 5, rating: 10, commander: { bonus: 1.2 } }),
     form(2, { PopulationID: 5, rating: 4, commander: { bonus: 1.5 }, ownSize: 7000 }),
     form(3, { PopulationID: 0, ShipID: 9, rating: 3, commander: { bonus: 1.3 } }),
     form(4, { PopulationID: 1, rating: 2, commander: { bonus: 1.1 } }),
   ]
-  const ground = (over = {}) => ({ requirement: req(), target: T, ground: { gaps: [], formations: groundFormations() }, factor: FACTOR, capacity: cap(1000), usage: undefined, version: '2.7.x', troopCapacity: { lift: 16000, ships: 2, classes: [{ TroopCapacity: 8000, Ships: 2 }] }, ...over })
+  const ground = (over = {}) => ({ requirement: req(), target: T, ground: { gaps: [], formations: groundFormations() }, factor: FACTOR, capacity: cap(1000), usage: undefined, version: '3.2.x', troopCapacity: { lift: 16000, ships: 2, classes: [{ TroopCapacity: 8000, Ships: 2 }] }, ...over })
   const runGround = (over = {}) => m['mine-bootstrap'].groundRoute(ground(over))
 
   return { cap, split, MINE, AUTO, req, local, T, B1, B2, B3, FREIGHTER, options, importing, runImport, form, power, FACTOR, groundFormations, ground, runGround }
@@ -199,9 +198,9 @@ const pure = (ctx) => {
   const add = (name, test) => statements.push([name, test])
   const runLocal = (over = {}) => mb.localRoute(local(over))
 
-  add('rules: the four rules are registered for 2.7.x with the kind of check each is', () => {
-    const expected = { 'mineBootstrap.requirements': 'confirmed', 'mineBootstrap.localBuild': 'estimated', 'mineBootstrap.import': 'estimated', 'mineBootstrap.groundAssistance': 'estimated' }
-    const bad = Object.entries(expected).filter(([id, verification]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes('2.7.x') }).map(([id]) => id)
+  add('rules: the four rules keep their verification, with worker-sensitive bootstrap registrations retained for erased Ark membership and geometry and the import also for route timing', () => {
+    const expected = { 'mineBootstrap.requirements': ['confirmed', '3.2.x'], 'mineBootstrap.localBuild': ['estimated', '2.7.x'], 'mineBootstrap.import': ['estimated', '2.7.x'], 'mineBootstrap.groundAssistance': ['estimated', '3.2.x'] }
+    const bad = Object.entries(expected).filter(([id, [verification, version]]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || rule.versions.length !== 1 || !rule.versions.includes(version) }).map(([id]) => id)
 
     assert.deepEqual(bad, [])
 
@@ -351,7 +350,7 @@ const pure = (ctx) => {
     return true
   })
   add('local-full: the full capacity takes the saved efficiency out of the overall modifier, and is not known at an efficiency of 0 or unknown', () => {
-    const modifiers = { ConstructionProduction: 10, OverallProductionModifier: 50, ConstructionPower: 4, EngineerProductionModifier: 1, GroundConstructionPower: 0 }
+    const modifiers = { ConstructionProduction: 10, OverallProductionModifier: 50, ConstructionPower: 4, GroundConstructionPower: 0 }
     const full = mb.fullStaffModifiers(modifiers, 0.5)
 
     near(full.OverallProductionModifier, 100)
@@ -455,11 +454,14 @@ const pure = (ctx) => {
 
     return true
   })
-  add('import: a colony without a spaceport that a large ship cannot land at blocks the route and names the handling problem', () => {
-    const route = runImport({ builder: { ...f.options()[0], colony: { ...B1.colony, ShuttleCapacity: 0 } }, freighters: [{ ...FREIGHTER, ShuttleStrength: 0 }] })
+  add('import: a bayless large ship at a colony without a spaceport still loads, at the technology alone, so the route is timed and names no unverified landing size', () => {
+    const bare = runImport({ builder: { ...f.options()[0], colony: { ...B1.colony, ShuttleCapacity: 0 } }, freighters: [{ ...FREIGHTER, ShuttleStrength: 0 }] })
+    const bayed = runImport({ builder: { ...f.options()[0], colony: { ...B1.colony, ShuttleCapacity: 0 } } })
 
-    assert.equal(route.status, 'blocked')
-    assert.ok(route.limits[0].includes('No freighter class can run the haul'))
+    assert.notEqual(bare.status, 'unavailable')
+    assert.ok(!bare.missing.some((text) => text.includes('landing size')))
+    assert.ok(bare.figures.best, 'a class is timed')
+    near(bare.figures.tripDays, bayed.figures.tripDays)
 
     return true
   })
@@ -482,9 +484,9 @@ const pure = (ctx) => {
   })
   add('haul: a haul of installations counts one cargo point to the tonne and a haul of minerals two, and the default is minerals', () => {
     const haul = { tonnes: 100000, km: 1e6, from: B1.colony, to: T }
-    const installations = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '2.7.x', 'installations')
-    const minerals = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '2.7.x', 'minerals')
-    const byDefault = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '2.7.x')
+    const installations = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.2.x', 'installations')
+    const minerals = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.2.x', 'minerals')
+    const byDefault = m['haul-plan'].haulByClass(haul, FREIGHTER, 1, '3.2.x')
 
     assert.equal(installations.holds, 1)
     assert.equal(minerals.holds, 2)
@@ -578,17 +580,17 @@ const pure = (ctx) => {
 
     return true
   })
-  add('ground: engineers at other colonies add rating x commander multiplier x the race rate x the engineer modifier; those at the colony are counted apart', () => {
+  add('ground: engineers at other colonies add rating x commander multiplier x the race rate; those at the colony are counted apart', () => {
     const route = runGround()
     const figures = route.figures
 
     assert.equal(figures.candidates.length, 2)
-    near(figures.added, (12 + 4) * 12 * 0.5)
-    near(figures.present, 2.2 * 12 * 0.5)
+    near(figures.added, (12 + 4) * 12)
+    near(figures.present, 2.2 * 12)
     near(figures.rateNow, 1000)
-    near(figures.rateWith, 1096)
+    near(figures.rateWith, 1000 + (12 + 4) * 12)
     near(figures.daysNow, 438)
-    near(figures.daysWith, (1200 / 1096) * 365)
+    near(figures.daysWith, (1200 / (1000 + (12 + 4) * 12)) * 365)
     assert.equal(figures.aboard.length, 1)
     assert.equal(route.status, 'limited')
     assert.equal(runGround({ ground: { gaps: [], formations: [...groundFormations(), f.form(6, { PopulationID: 5, ShipID: 9, rating: 7 })] } }).figures.candidates.length, 2)
@@ -596,9 +598,11 @@ const pure = (ctx) => {
     return true
   })
   add('ground: the engineers\' contribution follows the race rate, not a fixed total: half the rate gives half the points', () => {
-    const half = runGround({ factor: { ConstructionProduction: 6, EngineerProductionModifier: 0.5 } })
+    const full = runGround()
+    const half = runGround({ factor: { ConstructionProduction: 6 } })
 
-    near(half.figures.added, 48)
+    near(full.figures.added, (12 + 4) * 12)
+    near(half.figures.added, (12 + 4) * 6)
 
     return true
   })
@@ -639,7 +643,7 @@ const pure = (ctx) => {
   })
   add('ground-unavailable: a save without the formation columns or the race rate makes the route unavailable and names them', () => {
     const gap = runGround({ ground: { gaps: ['FCT_GroundUnitClass.ConstructionRating'], formations: [] } })
-    const noFactor = runGround({ factor: { ConstructionProduction: 12, EngineerProductionModifier: null } })
+    const noFactor = runGround({ factor: { ConstructionProduction: null } })
 
     assert.equal(gap.status, 'unavailable')
     assert.ok(gap.limits[0].includes('FCT_GroundUnitClass.ConstructionRating'))
@@ -668,7 +672,7 @@ const pure = (ctx) => {
   const farOver = (jumpPoints) => mb.builderOptions({ requirement: req(), target: T, builders: [f.B2], jumpPoints }).find((option) => option.colony.PopName === 'Far')
   const ungatedRoute = { jumps: 1, km: 5e6, ungated: 1 }
   const viaRoute = (freighters, route = ungatedRoute, gatedRoute = null, requirement = req(MINE, 1)) => runImport({ builder: { ...f.options()[0], route, gatedRoute }, freighters }, requirement)
-  const MAPPING = { ConstructionProduction: 12, OverallProductionModifier: 50, ConstructionPower: 4, EngineerProductionModifier: 0.5, GroundConstructionPower: 99 }
+  const MAPPING = { ConstructionProduction: 12, OverallProductionModifier: 50, ConstructionPower: 4, GroundConstructionPower: 99 }
   const candidate = (id, size) => ({ formation: { FormationID: id, Name: `F${id}`, ownSize: size }, bp: size })
   const short = { now: split(300), later: split(300), cost: 0 }
 
@@ -775,15 +779,15 @@ const pure = (ctx) => {
   })
   add('ground-mapped: the engineers at the colony are counted by the mapped command rule in the colony\'s own capacity, so its baseline holds exactly what the route calls present', () => {
     const formations = groundFormations()
-    const mapped = mb.withMappedEngineers(MAPPING, { gaps: [], formations }, '2.7.x', 1)
-    const over = mb.withMappedEngineers(MAPPING, { gaps: [], formations: [form(8, { PopulationID: 1, rating: 10, commander: { bonus: 1.2 }, ownSize: 7000 })] }, '2.7.x', 1)
-    const none = mb.withMappedEngineers(MAPPING, { gaps: [], formations: [] }, '2.7.x', 1)
-    const route = runGround({ factor: { ConstructionProduction: 12, EngineerProductionModifier: 0.5 }, ground: { gaps: [], formations } })
+    const mapped = mb.withMappedEngineers(MAPPING, { gaps: [], formations }, '3.2.x', 1)
+    const over = mb.withMappedEngineers(MAPPING, { gaps: [], formations: [form(8, { PopulationID: 1, rating: 10, commander: { bonus: 1.2 }, ownSize: 7000 })] }, '3.2.x', 1)
+    const none = mb.withMappedEngineers(MAPPING, { gaps: [], formations: [] }, '3.2.x', 1)
+    const route = runGround({ factor: { ConstructionProduction: 12 }, ground: { gaps: [], formations } })
 
     near(mapped.GroundConstructionPower, 2.2)
     assert.equal(MAPPING.GroundConstructionPower, 99)
     assert.equal(mapped.ConstructionPower, 4)
-    near(route.figures.present, mapped.GroundConstructionPower * 12 * 0.5)
+    near(route.figures.present, mapped.GroundConstructionPower * 12)
     near(over.GroundConstructionPower, 10)
     assert.equal(none.GroundConstructionPower, 0)
 
@@ -794,9 +798,9 @@ const pure = (ctx) => {
 
     assert.equal(mb.withMappedEngineers(MAPPING, ground, '2.6.5', 1), null)
     assert.equal(mb.withMappedEngineers(MAPPING, ground, null, 1), null)
-    assert.equal(mb.withMappedEngineers(MAPPING, { gaps: ['FCT_GroundUnitClass.HQCapacity'], formations: [] }, '2.7.x', 1), null)
-    assert.equal(mb.withMappedEngineers(undefined, ground, '2.7.x', 1), null)
-    assert.equal(mb.withMappedEngineers(MAPPING, { gaps: [], formations: [form(8, { PopulationID: 1, rating: null })] }, '2.7.x', 1), null)
+    assert.equal(mb.withMappedEngineers(MAPPING, { gaps: ['FCT_GroundUnitClass.HQCapacity'], formations: [] }, '3.2.x', 1), null)
+    assert.equal(mb.withMappedEngineers(undefined, ground, '3.2.x', 1), null)
+    assert.equal(mb.withMappedEngineers(MAPPING, { gaps: [], formations: [form(8, { PopulationID: 1, rating: null })] }, '3.2.x', 1), null)
 
     return true
   })
@@ -908,10 +912,10 @@ const pure = (ctx) => {
     assert.equal(none.figures.carried.length, 0)
     assert.ok(none.limits.some((text) => text.includes('No troop ship can carry an engineer formation whole')))
     assert.equal(some.status, 'limited')
-    near(some.figures.added, 72)
-    near(some.figures.addedUpper, 96)
+    near(some.figures.added, 144)
+    near(some.figures.addedUpper, 192)
     assert.ok(some.limits.some((text) => text.includes('too large for any troop ship') && text.includes('F2')))
-    near(all.figures.added, 96)
+    near(all.figures.added, 192)
     near(all.figures.troopNeeded, 12000)
 
     return true
@@ -921,8 +925,8 @@ const pure = (ctx) => {
     const route = runGround({ ground: { gaps: [], formations }, troopCapacity: { lift: 5000, ships: 1, classes: [{ TroopCapacity: 5000, Ships: 1 }] } })
 
     assert.equal(route.status, 'limited')
-    near(route.figures.added, 144)
-    near(route.figures.addedUpper, 144)
+    near(route.figures.added, 288)
+    near(route.figures.addedUpper, 288)
     assert.equal(route.figures.carried.length, 2)
     assert.equal(route.figures.lifts, 2)
     assert.equal(route.figures.oversize.length, 0)
@@ -1525,16 +1529,16 @@ const pageStatements = (ctx) => {
   const { provenance } = m
   const f = fixtures(m)
   const { cap, split, MINE, AUTO, T, B1, FREIGHTER } = f
-  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: { RaceNPR: false }, dispatch: async () => {} } }
+  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} } }
   const statements = []
   const add = (name, test) => statements.push([name, test])
-  const MODIFIERS = { ConstructionProduction: 10, OverallProductionModifier: 50, ConstructionPower: 4, EngineerProductionModifier: 1, GroundConstructionPower: 0 }
+  const MODIFIERS = { ConstructionProduction: 10, OverallProductionModifier: 50, ConstructionPower: 4, GroundConstructionPower: 0 }
   const rows = () => [
     { PopulationID: 1, name: 'Target', Efficiency: 0.5, workersNow: split(300), workersLater: split(300), r: { construction: cap(2000), cost: cap(0) } },
     { PopulationID: 2, name: 'Builder', Efficiency: 1, workersNow: split(100), workersLater: split(100), r: { construction: cap(600), cost: cap(0) } },
   ]
   const sources = (over = {}) => ({ types: [MINE, AUTO], colonies: [T, { ...B1.colony, stock: { 10: 5000 } }].map((colony) => ({ stock: { 10: 5000 }, ...colony })), projects: [], freighters: [FREIGHTER], troops: { lift: 16000, ships: 2, classes: [{ TroopCapacity: 8000, Ships: 2 }] }, ground: { gaps: [], formations: [f.form(1, { PopulationID: 5, rating: 10, commander: { bonus: 1.2 } })] }, jumpPoints: [], shuttleTechnology: 1, problems: [], ...over })
-  const mount = (data = {}, database = null) => instantiate(pageOptions, { ...store, database, GameID: 1, RaceID: 1, data: { rows: rows(), bootstrapSources: sources(), bootstrapVersion: '2.7.x', bootstrapColonyId: 1, populationProductionModifiers: { 1: MODIFIERS }, ...data } })
+  const mount = (data = {}, database = null) => instantiate(pageOptions, { ...store, database, GameID: 1, RaceID: 1, data: { rows: rows(), bootstrapSources: sources(), bootstrapVersion: '3.2.x', bootstrapColonyId: 1, populationProductionModifiers: { 1: MODIFIERS }, ...data } })
   const stubDatabase = () => ({ queries: [], query(sql) { this.queries.push(sql); return Promise.resolve([[]]) } })
   // Every read the page labels settled, as when the page is shown with no colony picked.
   const settledInputs = () => Object.fromEntries([...(((pageText.match(/const INPUT_LABELS = \{([\s\S]*?)\n\}/) || [])[1] || '').matchAll(/^ {2}(\w+):/gm))].map((match) => [match[1], null]))
@@ -1777,7 +1781,7 @@ const pageStatements = (ctx) => {
 
   // ----- the review fixes -----
   const withGround = (formations) => sources({ ground: { gaps: [], formations } })
-  const BUILDER_MODIFIERS = { ConstructionProduction: 1, OverallProductionModifier: 100, ConstructionPower: 6, EngineerProductionModifier: 1, GroundConstructionPower: 0 }
+  const BUILDER_MODIFIERS = { ConstructionProduction: 1, OverallProductionModifier: 100, ConstructionPower: 6, GroundConstructionPower: 0 }
   const routesOf = (vm) => Object.fromEntries(vm.bootstrapRoutes.map((route) => [route.id, route]))
 
   add('page: the engineers at the colony are counted in its capacity by the mapped command rule: the build now, the full capacity and the engineers\' route agree, and an unmapped save keeps the Production page\'s figure', () => {
@@ -1828,18 +1832,18 @@ const pageStatements = (ctx) => {
 
     return true
   })
-  add('page: a freighter class with a fuel input the save leaves null leaves only the import unavailable, naming it', () => {
-    const routes = routesOf(mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }) }))
+  add('page: a freighter class with a fuel input the save leaves null leaves the import unavailable, naming it, and the local route as it was', () => {
+    const routes = routesOf(mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.2.x' }))
 
     assert.equal(routes.import.status, 'unavailable')
     assert.ok(routes.import.missing.includes('the engine power of Hauler'))
     assert.equal(routes.local.status, 'limited')
-    assert.equal(routes.ground.status, 'limited')
+    assert.equal(routes.ground.status, 'limited', 'the fuel gap of the import does not touch the engineers\' route, which the ground assistance rule maps for this save\'s version')
 
     return true
   })
   add('page: an import that stops before the haul is timed marks its hauling and total time rows with a result naming what is missing', () => {
-    const vm = mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }) })
+    const vm = mount({ bootstrapSources: sources({ freighters: [{ ...FREIGHTER, EnginePower: null }] }), bootstrapVersion: '3.2.x' })
     const rows = Object.fromEntries(vm.routeFigures(routesOf(vm).import).map((figure) => [figure.label, figure]))
 
     ;['Hauling time', 'Hauling and build time'].forEach((label) => {
@@ -1959,10 +1963,12 @@ const saveStatements = async (ctx, save) => {
   const scope = { GameID: save.game, RaceID: save.race }
   const data = m['mine-bootstrap-data']
   const mb = m['mine-bootstrap']
+  const provenance = m.provenance
   const label = (text) => `${text} (${save.file})`
   const statements = []
+  const tierB = []
   const add = (name, test) => statements.push([label(name), test])
-  const store = (blocked = new Set()) => ({ $store: { getters: { 'capabilities/blockedBonuses': blocked }, state: { RaceNPR: false }, dispatch: async () => {} } })
+  const store = (blocked = new Set()) => ({ $store: { getters: { 'capabilities/blockedBonuses': blocked, 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} } })
   const pageOf = async (db = database, blocked = new Set()) => {
     const vm = instantiate(pageOptions, { ...store(blocked), database: db, GameID: save.game, RaceID: save.race })
 
@@ -1982,7 +1988,7 @@ const saveStatements = async (ctx, save) => {
   }
   const routesOf = (vm) => Object.fromEntries(vm.bootstrapRoutes.map((route) => [route.id, route]))
   // A colony the routes can be compared on: a place, an idle construction rate and engineers at other colonies.
-  const pick = async (vm) => {
+  const pick = async (vm, needGround = true) => {
     await withTarget(vm, vm.rows[0].PopulationID)
 
     let fallback = null
@@ -1992,7 +1998,7 @@ const saveStatements = async (ctx, save) => {
 
       const routes = routesOf(vm)
 
-      if (routes.local.figures.full && routes.ground.figures.candidates && routes.ground.figures.candidates.length > 0) {
+      if (routes.local.figures.full && (!needGround || (routes.ground.figures.candidates && routes.ground.figures.candidates.length > 0))) {
         if (routes.local.figures.rate.value > 0) {
           return row
         }
@@ -2003,6 +2009,14 @@ const saveStatements = async (ctx, save) => {
 
     return fallback
   }
+
+  // The engineers' route is available only for a version a rule maps. The ground assistance rule lists the line the fixture's schema states, so the checks that plant a fault into the route run on it; a save whose version no rule maps leaves them without a case (needs tier b, printed by the head).
+  const first = await pageOf()
+
+  await withTarget(first, first.rows[0].PopulationID)
+
+  const groundMapped = m.provenance.ruleSupports('mineBootstrap.groundAssistance', first.bootstrapVersion) === true
+  const addGround = (name, test) => (groundMapped ? add(name, test) : tierB.push(label(name)))
 
   add('save-sources: the reads are checked against raw counts: types, colonies, formations, commanders and the units x rating total', async () => {
     const sources = await data.loadBootstrapSources(database, scope)
@@ -2050,6 +2064,69 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
+  addGround('save-ground-factor: a colony whose economic and radiation factor is half counts its engineers at the race rate alone: the baseline agrees with the same working, and the two rates and build times follow it', async () => {
+    const reference = await pageOf()
+
+    await withTarget(reference, reference.rows[0].PopulationID)
+
+    let target = null
+
+    for (const row of reference.rows) {
+      if (!(row.Population > 0 && row.Efficiency > 0)) {
+        continue
+      }
+
+      reference.bootstrapColonyId = row.PopulationID
+      const routes = routesOf(reference)
+      const ground = routes.ground
+
+      if (ground.figures && ground.figures.present > 0 && ground.figures.rateNow > 0 && provenance.valueOrNull(routes.local.figures.rate) > 0) {
+        target = row
+
+        break
+      }
+    }
+
+    assert.ok(target, 'no colony with engineers standing and an idle construction rate')
+
+    reference.bootstrapColonyId = target.PopulationID
+
+    const [[economic]] = await database.query(`select FCT_Race.EconomicProdModifier as value from FCT_Race where FCT_Race.RaceID = ${save.race}`)
+    const body = target.SystemBodyID
+
+    await database.overlay(['create temp table FCT_SystemBody as select * from main.FCT_SystemBody', `update FCT_SystemBody set RadiationLevel = 5000 where SystemBodyID = ${body}`])
+
+    try {
+      const vm = await withTarget(await pageOf(), target.PopulationID)
+      const routes = routesOf(vm)
+      const modifiers = vm.populationProductionModifiers[target.PopulationID]
+      const mapped = mb.withMappedEngineers(modifiers, vm.bootstrapSources.ground, vm.bootstrapVersion, target.PopulationID)
+      const [[radiation]] = await database.query(`select FCT_SystemBody.RadiationLevel as value from FCT_SystemBody where FCT_SystemBody.SystemBodyID = ${body}`)
+      const factor = economic.value * (1 - radiation.value / 10000)
+      const rate = mapped.ConstructionProduction
+      const present = rate * mapped.GroundConstructionPower
+      const capacity = vm.mappedConstruction(target)
+      const usage = vm.bootstrapUsage[`${target.PopulationID}-construction`]
+      const share = Math.max(0, 100 - (usage ? usage.used : 0)) / 100
+      const bp = vm.bootstrapRequirement.bp.value
+      const idle = (total) => total * share
+
+      assert.equal(factor, 0.5, 'the colony\'s economic and radiation factor is not the planted half')
+      assert.ok(present > 0, 'the colony has no engineers of its own to count')
+      assert.ok(provenance.isAvailable(capacity), 'the colony\'s construction capacity is unavailable')
+      assert.equal(capacity.rule.id, 'production.populationCapacity', 'the capacity is of another rule')
+      near(capacity.value, rate * mapped.OverallProductionModifier * mapped.ConstructionPower + present)
+      near(routes.ground.figures.present, present)
+      near(routes.ground.figures.rateNow, idle(capacity.value))
+      near(routes.ground.figures.rateWith, idle(capacity.value + routes.ground.figures.added))
+      near(routes.ground.figures.daysNow, (bp / routes.ground.figures.rateNow) * 365)
+      near(routes.ground.figures.daysWith, (bp / routes.ground.figures.rateWith) * 365)
+
+      return true
+    } finally {
+      await database.overlay(['drop table temp.FCT_SystemBody'])
+    }
+  })
   add('save-routes: real colonies get three routes in order with a status, the tonnage of the mines and a build time that is the cost over the idle rate', async () => {
     const vm = await pageOf()
     const sample = vm.rows.filter((row) => row.Population > 0).slice(0, 4)
@@ -2083,7 +2160,7 @@ const saveStatements = async (ctx, save) => {
   })
   add('save-faults: a copy of the save in memory with a colony short of workers: the route is limited, the lost capacity is named, and the full capacity is unchanged by the lower efficiency', async () => {
     const reference = await pageOf()
-    const row = await pick(reference)
+    const row = await pick(reference, false)
 
     assert.ok(row, 'no colony to cut')
 
@@ -2111,7 +2188,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a null construction rating at a candidate makes the engineers\' route unavailable, naming the formation', async () => {
+  addGround('save-faults: a null construction rating at a candidate makes the engineers\' route unavailable, naming the formation', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2134,7 +2211,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a null commander bonus value makes the engineers\' route unavailable', async () => {
+  addGround('save-faults: a null commander bonus value makes the engineers\' route unavailable', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2156,7 +2233,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a dropped rating column makes the engineers\' route unavailable and names the column; the other routes stay', async () => {
+  addGround('save-faults: a dropped rating column makes the engineers\' route unavailable and names the column; the other routes stay', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2176,12 +2253,12 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: a save that is not of the 2.7 shape (a dropped game column) makes the engineers\' route unavailable for its version', async () => {
+  addGround('save-faults: a save that does not state the game rules it was played under (a dropped signature column) makes the engineers\' route unavailable for its version', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
     assert.ok(row)
-    await database.overlay(['create temp table FCT_Game as select * from main.FCT_Game', 'alter table FCT_Game drop column AncientRelics'])
+    await database.overlay(['create temp table FCT_Game as select * from main.FCT_Game', 'alter table FCT_Game drop column LostColonies'])
 
     try {
       const vm = await withTarget(await pageOf(), row.PopulationID)
@@ -2194,7 +2271,7 @@ const saveStatements = async (ctx, save) => {
 
     return true
   })
-  add('save-faults: with the commander bonus lookup not confirmed the engineers\' route is unavailable, not computed at a bonus of 1', async () => {
+  addGround('save-faults: with the commander bonus lookup not confirmed the engineers\' route is unavailable, not computed at a bonus of 1', async () => {
     const reference = await pageOf()
     const row = await pick(reference)
 
@@ -2207,7 +2284,7 @@ const saveStatements = async (ctx, save) => {
     return true
   })
 
-  return { skipped: false, statements, database }
+  return { skipped: false, statements, database, tierB }
 }
 
 // ---------- the mutations: each must fail the checks it names ----------
@@ -2243,6 +2320,7 @@ const MUTATIONS = [
   { name: 'the routes in another order', file: U, find: '  importRoute({ requirement, target, ...importing, format }),\n  localRoute({ requirement, ...local, format }),', replace: '  localRoute({ requirement, ...local, format }),\n  importRoute({ requirement, target, ...importing, format }),', fails: ['compare'] },
   { name: 'an unmapped version taken as mapped', file: U, find: 'if (ruleSupports(\'mineBootstrap.groundAssistance\', version) !== true) {', replace: 'if (false) {', fails: ['ground-unavailable'] },
   { name: 'an unknown version taken as mapped', file: U, find: 'if (ruleSupports(\'mineBootstrap.groundAssistance\', version) !== true) {', replace: 'if (ruleSupports(\'mineBootstrap.groundAssistance\', version) === false) {', fails: ['ground-unavailable'] },
+  { name: 'the ground rule kept on the earlier line', file: U, find: 'versions: GROUND_VERSIONS', replace: 'versions: [\'2.7.x\']', fails: ['rules'] },
   { name: 'a column the save lacks not named', file: U, find: 'if (ground.gaps.length) {', replace: 'if (false) {', fails: ['ground-unavailable'] },
   { name: 'a null rating or bonus given a figure', file: U, find: 'if (unknown.length || atTarget.unknown.length) {', replace: 'if (false) {', fails: ['ground-unavailable'] },
   { name: 'the capacity of a headquarters ignored', file: U, find: 'total === null || !isNumber(formation.hq) ? null : total > formation.hq ? 0 : 1', replace: 'total === null || !isNumber(formation.hq) ? null : 1', fails: ['ground-command'] },
@@ -2256,8 +2334,9 @@ const MUTATIONS = [
   { name: 'a formation aboard a ship counted', file: U, find: 'formation.PopulationID !== target.PopulationID && !formation.ShipID', replace: 'formation.PopulationID !== target.PopulationID', fails: ['ground'] },
   { name: 'a formation aboard a ship counted at the colony', file: U, find: 'formation.PopulationID === population && !formation.ShipID', replace: 'formation.PopulationID === population', fails: ['ground-command'] },
   { name: 'the engineers at the colony counted twice', file: U, find: 'formation.PopulationID > 0 && formation.PopulationID !== target.PopulationID', replace: 'formation.PopulationID > 0', fails: ['ground'] },
-  { name: 'the engineers\' share taken as a fixed total', file: U, find: 'const factorValue = factor.ConstructionProduction * factor.EngineerProductionModifier', replace: 'const factorValue = 5', fails: ['ground'] },
-  { name: 'the engineers\' economic modifier left out', file: U, find: 'const factorValue = factor.ConstructionProduction * factor.EngineerProductionModifier', replace: 'const factorValue = factor.ConstructionProduction', fails: ['ground'] },
+  { name: 'the engineers\' share taken as a fixed total', file: U, find: 'const factorValue = factor.ConstructionProduction', replace: 'const factorValue = 5', fails: ['ground'] },
+  { name: 'the engineers\' share of the capacity scaled by the economic and radiation factor the game never applies', file: M, find: '(modifiers.ConstructionProduction * modifiers.GroundConstructionPower)', replace: '(modifiers.ConstructionProduction * 0.5 * modifiers.GroundConstructionPower)', fails: ['save-ground-factor'] },
+  { name: 'the engineers\' share of the route scaled by that factor', file: U, find: 'const present = atTarget.power * factorValue', replace: 'const present = atTarget.power * factorValue * 0.5', fails: ['ground', 'save-ground-factor'] },
   { name: 'a route with no troop lift called open', file: U, find: 'if (!(troopCapacity.lift > 0)) {', replace: 'if (false) {', fails: ['ground'] },
   { name: 'a route with no idle capacity called open', file: U, find: 'if (rateWith !== null && isAvailable(rateWith) && !(rateWith.value > 0)) {', replace: 'if (false) {', fails: ['ground'] },
   { name: 'engineers aboard ships not named', file: U, find: 'if (aboard.length) {', replace: 'if (false) {', fails: ['ground'] },
@@ -2307,7 +2386,7 @@ const MUTATIONS = [
   { name: 'the colony\'s workers not passed', file: P, find: 'const workers = { now: target.workersNow, later: target.workersLater, cost: valueOrNull(target.r.cost) }', replace: 'const workers = { now: null, later: null, cost: valueOrNull(target.r.cost) }', fails: ['page'] },
   { name: 'the number of mines ignored', file: P, find: 'mineRequirements(this.bootstrapType, this.bootstrapCount)', replace: 'mineRequirements(this.bootstrapType, 1)', fails: ['page'] },
   { name: 'the troop lift not passed', file: P, find: 'troopCapacity: troops, workers, stock,', replace: 'troopCapacity: null, workers, stock,', fails: ['page'] },
-  { name: 'the formula version not passed to the engineers', file: P, find: 'usage, version: this.bootstrapVersion, troopCapacity: troops', replace: 'usage, version: \'2.7.x\', troopCapacity: troops', fails: ['page'] },
+  { name: 'the formula version not passed to the engineers', file: P, find: 'usage, version: this.bootstrapVersion, troopCapacity: troops', replace: 'usage, version: \'3.0.x\', troopCapacity: troops', fails: ['page'] },
   { name: 'the chosen builder ignored', file: P, find: 'this.bootstrapBuilders.find((option) => option.colony.PopulationID === this.bootstrapBuilderId) || this.bootstrapBuilders[0]', replace: 'this.bootstrapBuilders[0]', fails: ['page'] },
   { name: 'the read\'s label under another name', file: P, find: 'bootstrapSources: \'the mine bootstrap reads\'', replace: 'bootstrapSource: \'the mine bootstrap reads\'', fails: ['page'] },
   { name: 'the read tracked under another name', file: P, find: 'tracked(\'bootstrapSources\'', replace: 'tracked(\'bootstrapSource\'', fails: ['page'] },
@@ -2421,7 +2500,7 @@ const TEXTS = {}
 const textOf = (file) => (TEXTS[file] = TEXTS[file] || fs.readFileSync(path.join(root, file), 'utf8'))
 
 const sourcesOf = (mutant) => {
-  const sources = Object.fromEntries([U, D, H, P, C].map((file) => [file, textOf(file)]))
+  const sources = Object.fromEntries([U, D, H, P, C, M].map((file) => [file, textOf(file)]))
 
   if (mutant) {
     sources[mutant.file] = patched(mutant.file, sources[mutant.file], mutant.find, mutant.replace)
@@ -2445,7 +2524,7 @@ const contextOf = async (sources, page = true, mutant = null) => {
   const ctx = { m, pageText: sources[P], capabilitiesText: sources[C], mutant: mutant ? mutant.id : null }
 
   if (page) {
-    const pageSources = { 'pages/colony-outlook': sources[P], ...Object.fromEntries(Object.entries(utilitySources).map(([name, text]) => [`utilities/${name}`, text])) }
+    const pageSources = { 'pages/colony-outlook': sources[P], 'mixins/production-modifiers': sources[M], ...Object.fromEntries(Object.entries(utilitySources).map(([name, text]) => [`utilities/${name}`, text])) }
 
     ctx.pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/load-state': null }, sources: pageSources })
   }
@@ -2517,6 +2596,7 @@ const statementsOf = async (ctx, withSaves, keys = null, names = BUILDER_NAMES) 
   const misplaced = [...new Set(built.flatMap(([name, list]) => list.map(([title]) => keyOf(title)).filter((key) => builderOf(key) !== name).map((key) => `${key} made by ${name}`)))]
   const opened = []
   const skipped = []
+  const tierB = []
 
   if (withSaves) {
     ctx.reader = 'make saves'
@@ -2528,22 +2608,27 @@ const statementsOf = async (ctx, withSaves, keys = null, names = BUILDER_NAMES) 
         skipped.push(save.file)
       } else {
         statements.push(...result.statements)
+        tierB.push(...result.tierB)
         opened.push(result.database)
       }
     }
   }
 
-  return { statements: statements.filter(([name]) => !keys || keys.includes(keyOf(name))), opened, skipped, misplaced }
+  return { statements: statements.filter(([name]) => !keys || keys.includes(keyOf(name))), opened, skipped, misplaced, tierB }
 }
 
 const checkHead = async (withSaves) => {
   const { ctx, reads } = traced(await contextOf(sourcesOf(null)))
-  const { statements, opened, skipped, misplaced } = await statementsOf(ctx, withSaves)
+  const { statements, opened, skipped, misplaced, tierB } = await statementsOf(ctx, withSaves)
 
   console.log('\nThe routes to mining capacity at a colony, on colonies, freighters and formations worked by hand, on a database of its own, on the page and on the saves')
 
   for (const file of skipped) {
     console.log(`SKIP  ${file} is not there`)
+  }
+
+  for (const name of tierB) {
+    console.log(`SKIP  ${name}: no case in the save: the engineers' route is unavailable for a save whose version no rule maps, so a fault planted in it has no case`)
   }
 
   check('mutations: the checks of each key are all made by the function a mutation\'s run calls for that key, so the run judges every check of the keys it names', misplaced.length ? misplaced.join('; ') : true)

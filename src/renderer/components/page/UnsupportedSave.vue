@@ -3,9 +3,9 @@
     <v-card-title class="unsupported-save__title"><v-icon left color="error">mdi-file-alert-outline</v-icon>Unsupported save</v-card-title>
     <v-card-text class="unsupported-save__body">
       <p class="body-1" :data-unsupported-reason="line.reason">{{ refusal.notice }}</p>
-      <p>Aurora Electrons <span data-unsupported-version>{{ version }}</span> reads Aurora <span data-unsupported-line>{{ stated }}</span> saves only: a save of any other Aurora version is not read, and no figure on any page is for it. Open an Aurora {{ lineName }} save from the Empires page, or use Aurora Electrons <a :href="releaseUrl" target="_blank" rel="noopener" data-unsupported-release>{{ releaseVersion }}</a>, the last release that read older saves.</p>
+      <p>Aurora Electrons <span data-unsupported-version>{{ version }}</span> reads Aurora <span data-unsupported-line>{{ stated }}</span> saves only: a save of any other Aurora line is not read, and no figure on any page is for it. Open an Aurora {{ lineName }} save from the Empires page. A save of Aurora 2.7 is read by the Aurora Electrons 2.7.x line, whose latest release is <a :href="releaseUrl" target="_blank" rel="noopener" data-unsupported-release>{{ releaseVersion }}</a>; a save from before Aurora 2.7 is read by Aurora Electrons 0.11.0.</p>
       <template v-if="line.missing.length">
-        <p class="mb-1">Data Aurora {{ lineName }} added, absent from the save:</p>
+        <p class="mb-1">Columns Aurora 3.0 added, absent from the save:</p>
         <ul class="unsupported-save__list">
           <li v-for="words in missingWords" :key="words" data-unsupported-column>{{ words }}</li>
         </ul>
@@ -24,11 +24,11 @@ import { LINE_NAME, REFUSALS, STATED_FORMULA_VERSION } from '../../utilities/cap
 import { fieldWords } from '../../utilities/provenance'
 import { version } from '../../../../package.json'
 
-// The release of Aurora Electrons that still reads saves older than the line the app is for.
-const RELEASE_VERSION = '0.11.0'
+// The latest release of the Aurora 2.7.x line of Aurora Electrons, the line that reads Aurora 2.7 saves.
+const RELEASE_VERSION = '2.7.11'
 const RELEASES_URL = 'https://github.com/rubybrowncoat/Aurora-Electrons/releases/tag'
 
-// What the app shows in place of a page, or of the empire list, when the save now open is not of the Aurora line the app reads (store/capabilities.js `line`, utilities/capabilities.js `lineResult`): one notice saying so, the columns of the line the save lacks, the release that read older saves, and a button to check the save again. It is no section panel: it stands where the page would, and the Save panel of the Empires page is left under it for opening another save.
+// What the app shows in place of a page, or of the empire list, when the save now open is not of the Aurora line the app reads (store/capabilities.js `line`, utilities/capabilities.js `lineResult`): one notice saying so, the columns of the line the save lacks, the releases of the older lines that read such saves, and a button to check the save again. It is no section panel: it stands where the page would, and the Save panel of the Empires page is left under it for opening another save.
 export default {
   name: 'UnsupportedSave',
   data () {

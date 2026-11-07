@@ -6,25 +6,24 @@
 
   Fixtures: mines at a body whose deposit rows are all at 0 t (exhausted), at a surveyed body with no row (empty), with a deposit left, automated only, civilian only; orbital miners at an exhausted, empty, oversized or colony-less body, those reasons together on one site, a ship with one module (assessed), a diameter limit or diameter that is not stored (unknown, never "fits" and never oversized), a body the race has not surveyed, a save without the formula columns, counts of ships and modules and of mines, the destination requirements and the inputs a relocation lacks (travel, production, stored). The mine counts and the fleet speed queries run against an in-memory SQLite, and the warning's rows, cells, links and signatures against a fake database of fixture rows.
 
-  Saves: with no recommendation to be had in a real save (the sample saves hold no exhausted mine and no miner out of its limits), the queue is compared with queries written another way on each save as it stands, then with the rows the app's own loaders read from the save changed in memory (deposit rows at 0 t, a body wider than the limit, a missing limit, a ship with one module, a body with no colony, modules all damaged), the saves never written to. A save that is not there is reported as skipped and never counted as passed.
+  Saves: with no recommendation to be had in a real save (the fixture holds no exhausted mine and no miner out of its limits), the queue is compared with queries written another way on each save as it stands, then with the rows the app's own loaders read from the save changed in memory (deposit rows at 0 t, a body wider than the limit, a missing limit, a ship with one module, a body with no colony, modules all damaged), the saves never written to. With no --save the default fixture is read (scripts/lib/fixtures.js: game 141, race 784 of the interim 3.1 fixture). A save that is not there is reported as skipped and never counted as passed.
 
   Mutations: each planted fault in the utility, the sites it reads or the warning must fail the checks it names, and every one of them names a fixture check so that it is caught with no save there. Exit code 1 when a check fails.
 */
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilities = path.join(root, 'src', 'renderer', 'utilities')
 const NAMES = ['mining-redeployment', 'mining-sites', 'provenance', 'capabilities', 'warnings/common', 'warnings/index']
-const DEFAULT_SAVES = [
-  { label: 'modded', file: 'AuroraDB.db', game: 140, race: 784 },
-  { label: 'stock', file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [{ label: 'fixture', ...fixtureSave() }]
 // The parts run as children of the one that was started, so the saves given on its command line reach them through the environment.
 const SAVES = process.env.MINING_REDEPLOYMENT_SAVES ? JSON.parse(process.env.MINING_REDEPLOYMENT_SAVES) : DEFAULT_SAVES
 const STUBS = {
@@ -35,7 +34,7 @@ const STUBS = {
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const KEY = 'mining-redeployment'
-const VERSION = '2.7.1'
+const VERSION = '3.2.0'
 const MISSING = (result) => (result && result.inputs ? result.inputs.missing : [])
 
 let failures = 0
@@ -397,10 +396,13 @@ const sqlStatements = (m) => [
 
 // ---------- the warning on a fake database of fixture rows ----------
 
+// The seven columns of the 3.2 line's signature (written here from the shipped databases, as scripts/check-capabilities.js does): a fake save that has them all is of the line, whose formula version the app states.
+const LINE_COLUMNS = [['FCT_Game', 'LostColonies'], ['FCT_Game', 'GenerateNonOxygenRaces'], ['FCT_Game', 'NoShieldTechnology'], ['FCT_Game', 'OrbitalMovementInSubPulse'], ['FCT_Ship', 'ShipSeniorCO'], ['FCT_Race', 'NoResearchProjects'], ['FCT_Population', 'AlienArtifacts']].map(([tbl, name]) => ({ tbl, name }))
+
 const fakeDatabase = ({ colonies, mines, fleets, speeds, formula = true, speedColumn = true }) => ({
   query: async (sql) => {
     if (sql.includes('pragma_table_xinfo(\'FCT_Game\')')) {
-      return [formula ? [{ tbl: 'FCT_Game', name: 'AllowCMC' }, { tbl: 'FCT_Game', name: 'AncientRelics' }] : []]
+      return [formula ? LINE_COLUMNS : []]
     } else if (sql.includes('pragma_table_info(\'FCT_Fleet\')')) {
       return [[{ name: 'FleetID' }, { name: 'RaceID' }, ...(speedColumn ? [{ name: 'Speed' }] : [])]]
     } else if (sql.includes('as MannedMines')) {
@@ -610,14 +612,14 @@ const warningStatements = (m) => {
 }
 
 const registryStatements = (m) => [
-  ['registry: the queue and the warning are registered with a verification, a structure and the 2.7 versions', () => {
+  ['registry: the queue and the warning are registered with a verification, a structure and the versions of the line', () => {
     ;['miningRedeployment.queue', 'warnings.miningRedeployment'].forEach((id) => {
       const rule = m.provenance.getRule(id)
 
       assert.ok(rule && rule.structure.length > 0 && ['confirmed', 'estimated', 'assumed'].includes(rule.verification), id)
     })
     assert.equal(m.provenance.getRule('miningRedeployment.queue').verification, 'estimated')
-    assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', '2.7.1'), true)
+    assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', '3.2.0'), true)
     assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', '2.6.4'), false)
     assert.equal(m.provenance.ruleSupports('miningRedeployment.queue', null), null)
   }],
@@ -641,7 +643,7 @@ const openSave = (file) => new Promise((resolve, reject) => {
       return
     }
 
-    resolve({ query: (sql) => new Promise((resolve, reject) => raw.all(sql, (queryError, rows) => (queryError ? reject(queryError) : resolve([rows])))), close: () => raw.close() })
+    resolve({ query: (sql) => new Promise((resolve, reject) => raw.all(sql, (queryError, rows) => (queryError ? reject(queryError) : resolve([rows])))), close: () => new Promise((resolve) => raw.close(resolve)) })
   })
 })
 
@@ -776,6 +778,52 @@ const saveStatements = (m, held) => {
       })
       world.sites.fleets.forEach((site) => assert.equal(site.row.Speed, speeds.get(site.id), `speed of fleet ${site.id}`))
     }),
+    ...per('manned mines and a civilian complex planted on a copy of the save at a colony that holds automated mines are counted by the loader as manned mines and not as automated ones, and the complex as neither', async (world, save) => {
+      const colony = world.sites.colonies.find((site) => site.surface && site.row.AutomatedMines > 0)
+
+      if (!colony) {
+        return skip('the save has no colony with automated mines')
+      }
+
+      const copy = path.join(os.tmpdir(), `ae-mining-redeployment-${process.pid}.db`)
+
+      fs.copyFileSync(path.resolve(root, save.file), copy)
+
+      try {
+        await new Promise((resolve, reject) => {
+          const raw = new sqlite3.Database(copy, (openError) => {
+            if (openError) {
+              reject(openError)
+
+              return
+            }
+
+            raw.run(`insert into FCT_PopulationInstallations (GameID, PopID, PlanetaryInstallationID, Amount) values (${save.game}, ${colony.id}, 7, 5), (${save.game}, ${colony.id}, 39, 4)`, (runError) => (runError ? reject(runError) : raw.close(resolve)))
+          })
+        })
+
+        const database = await openSave(copy)
+
+        try {
+          const sites = await m.common.readRedeploymentSites({ ...contextOf(m, database), GameID: save.game, RaceID: save.race })
+          const mines = await mineOracle({ database }, save)
+          const planted = sites.colonies.find((site) => site.id === colony.id)
+
+          sites.colonies.filter((site) => site.surface).forEach((site) => {
+            const own = mines.get(site.id) || { manned: 0, automated: 0 }
+
+            assert.equal(site.row.MannedMines, own.manned || 0, `manned mines of colony ${site.id}`)
+            assert.equal(site.row.AutomatedMines, own.automated || 0, `automated mines of colony ${site.id}`)
+          })
+          assert.equal(planted.row.MannedMines, (colony.row.MannedMines || 0) + 5, 'the planted manned mines are counted as manned')
+          assert.equal(planted.row.AutomatedMines, colony.row.AutomatedMines, 'the planted manned mines and the civilian complex are not automated mines')
+        } finally {
+          await database.close()
+        }
+      } finally {
+        fs.rmSync(copy, { force: true, maxRetries: 10, retryDelay: 100 })
+      }
+    }),
     ...per('mines with their deposit rows at 0 t, none, or unsurveyed, and mines counted as zero, are queued as exhausted, empty, not evaluated and not at all', async (world, save) => {
       const picked = targets(world, 'ground', 5)
 
@@ -808,7 +856,7 @@ const saveStatements = (m, held) => {
       const picked = targets(world, 'orbital', 6)
 
       if (!picked) {
-        return skip('the save has fewer than 6 working orbital miners')
+        return skip('needs tier b: the save has fewer than 6 working orbital miners, so the diameter limit and the fleet speed have no case in it')
       }
 
       const [exhaustedFleet, bothFleet, limitFleet, limitAndGoneFleet, oneModuleFleet, damagedFleet] = picked.map((site) => site.id)
@@ -867,7 +915,7 @@ const MUTATIONS = [
   { name: 'an unknown deposit read as no reason', file: U, find: 'deposit.state === \'missing\' ? 1 : deposit.state === \'met\' ? 0 : null', replace: 'deposit.state === \'missing\' ? 1 : 0', fails: ['unknown', 'warning'], real: ['real'] },
   { name: 'a colony with no mines queued', file: U, find: 'const verdict = all(present, gone)', replace: 'const verdict = gone', fails: ['ground'] },
   { name: 'an unknown mine count read as mines', file: U, find: 'const present = any(positive(row.MannedMines, row.MineGaps), positive(row.AutomatedMines, row.MineGaps))', replace: 'const present = 1', fails: ['ground', 'unknown'] },
-  { name: 'a missing diameter limit read as fitting', file: U, find: 'verdict: reasons.length ? 1 : undecided.length ? null : 0,', replace: 'verdict: reasons.length ? 1 : 0,', fails: ['unknown', 'warning'], real: ['real'] },
+  { name: 'a missing diameter limit read as fitting', file: U, find: 'verdict: reasons.length ? 1 : undecided.length ? null : 0,', replace: 'verdict: reasons.length ? 1 : 0,', fails: ['unknown', 'warning'] },
   { name: 'only the first reason kept', file: U, find: 'const reasons = found.filter((need) => need.state === \'missing\').map((need) => ({ key: reasonKey(need, row), need }))', replace: 'const reasons = found.filter((need) => need.state === \'missing\').slice(0, 1).map((need) => ({ key: reasonKey(need, row), need }))', fails: ['orbital', 'warning'] },
   { name: 'the colony left out of the reasons', file: U, find: 'const REDEPLOY = [\'deposit\', \'diameter\', \'colony\']', replace: 'const REDEPLOY = [\'deposit\', \'diameter\']', fails: ['orbital', 'version'] },
   { name: 'a wide body called unsupported', file: U, find: 'need.key === \'diameter\' ? \'oversized\' : \'unsupported\'', replace: 'need.key === \'diameter\' ? \'unsupported\' : \'oversized\'', fails: ['orbital'] },
@@ -893,7 +941,7 @@ const MUTATIONS = [
   { name: 'civilian complexes counted as mines', file: C, find: 'DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount else 0 end) as MannedMines', replace: 'DIM_PlanetaryInstallation.CivilianInstallation >= 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount else 0 end) as MannedMines', fails: ['sql'] },
   { name: 'the mine counts of every race', file: C, find: ' and FCT_Population.RaceID = ${RaceID}) group by FCT_PopulationInstallations.PopID', replace: ') group by FCT_PopulationInstallations.PopID', fails: ['sql'] },
   { name: 'the fleet speeds of fleets out of orbit too', file: C, find: 'FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.OrbitBodyID > 0`', replace: 'FCT_Fleet.RaceID = ${RaceID}`', fails: ['sql'] },
-  { name: 'the fleet speed never merged', file: C, find: 'Speed: speedOf.has(site.id) ? speedOf.get(site.id) : null', replace: 'Speed: null', fails: ['warning'], real: ['real'] },
+  { name: 'the fleet speed never merged', file: C, find: 'Speed: speedOf.has(site.id) ? speedOf.get(site.id) : null', replace: 'Speed: null', fails: ['warning'] },
   { name: 'the fleet speed read without asking the save for the column', file: C, find: 'columns.some((column) => column.name === \'Speed\') ? rowsOf(ctx, fleetSpeedQuery(ctx)) : []', replace: 'rowsOf(ctx, fleetSpeedQuery(ctx))', fails: ['warning'] },
   { name: 'the fleet speed read by the shared mining loader', file: C, find: 'loadFormulaVersion(ctx.database)])\n  const minesOf', replace: 'loadFormulaVersion(ctx.database), rowsOf(ctx, fleetSpeedQuery(ctx))])\n  const minesOf', fails: ['warning'] },
   { name: 'a colony with no mine row read as not counted', file: C, find: 'MannedMines: minesOf.has(row.PopulationID) ? minesOf.get(row.PopulationID).MannedMines : 0', replace: 'MannedMines: minesOf.has(row.PopulationID) ? 0 : 0', fails: ['warning'], real: ['real'] },

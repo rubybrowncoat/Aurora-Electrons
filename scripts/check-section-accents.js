@@ -1053,7 +1053,7 @@ const INVALID = [
   ['an anchor that matches nothing', { file: APPEARANCE, from: 'export const PRESETS = {{{', to: 'export const PRESETS = {' }],
 ]
 
-// Every fault is judged in a process of its own, because each fresh copy of the modules stays in memory and the many copies of a whole run exhaust the heap of one process; the processes run side by side (CHECK_JOBS).
+// Every fault is judged in a process of its own, because each fresh copy of the modules stays in memory and the many copies of a whole run exhaust the heap of one process; up to four processes run side by side.
 const FAULTS = [...MUTATIONS, ...INVALID].map(([, fault]) => fault)
 
 const judgeApart = async (index) => {
@@ -1077,7 +1077,7 @@ const run = async () => {
 
   console.log('Section accents')
 
-  const verdicts = mutating() ? inParallel([...FAULTS.keys()], judgeApart) : null
+  const verdicts = mutating() ? inParallel([...FAULTS.keys()], judgeApart, 4) : null
 
   for (const [name, result] of await runChecks()) {
     tally(result === true)

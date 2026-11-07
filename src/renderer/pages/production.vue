@@ -70,6 +70,8 @@
               <div class="py-2">
                 <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree({ tech: item.TechSystemID })" :name="item.name" /><page-link v-if="item.ShipyardID" class="ml-1" :to="linkTo.shipyards({ yard: item.ShipyardID })" :name="item.yardName" /></div>
                 <div class="caption text--secondary">{{ typeLabels[item.type] }}<span v-if="item.detail"> · {{ item.detail }}</span></div>
+                <div v-if="item.terms" class="caption text--secondary" data-industry-terms>{{ item.terms }}</div>
+                <div v-for="(line, index) in item.components" :key="line" class="caption text--secondary" data-use-components>{{ line }}<provenance-mark v-if="index === 0 && item.componentResult" :result="item.componentResult" /><provenance-mark v-else-if="index === item.components.length - 1 && item.useResult" :result="item.useResult" /></div>
                 <div v-if="item.note" class="caption warning--text">{{ item.note }}</div>
               </div>
             </template>
@@ -121,7 +123,8 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or fighter capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
+            Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or light naval capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. An Engineering, Ordnance or Ground Unit Project develops a component, missile or ground unit class the race designed, for twice its stored development cost, and draws on construction capacity (ordnance capacity for an Ordnance Project); the line under the job gives the item, its cost and its minerals. A Light Naval or Space Station project takes the components in the colony's stock when it is made, a whole batch of each; the lines under it give what they credited a unit against the class's cost, the minerals they took off, what that saves at the project's rate and what the credit says of the Use Components box, which an industrial project does not store, while a construction, refit or automatic refit task shows its box as stored. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
+            <p class="mt-2 mb-0">Terraforming has no completion while body gravity stays below 0.1 g; unknown gravity leaves the finish unknown. Eligible jobs finish at the end of an assumed minimum construction increment: addition must pass a positive target, while a target of 0 means unlimited addition and has no finish date. Ordinary gas pressure is updated each increment, with no date if it does not finish within 100,000 increments. Gravity and the rate are held. Water vapour is forecast with condensation only at or below 369 K, followed by evaporation and terraforming. Temperature, water phase, albedo and gas freezing are recalculated each water increment; orbital distance, dust and other gas amounts are held at their present values. A water job not finishing within 200 years has no date under those assumptions.</p>
           </div>
         </v-card>
 
@@ -171,7 +174,7 @@
             </v-card>
           </v-col>
           <v-col cols="12" xl="7">
-            <v-card class="panel" data-summary="Find unused construction, ordnance, fighter, training, research and slipway capacity at each colony." elevation="1">
+            <v-card class="panel" data-summary="Find unused construction, ordnance, light naval, training, research and slipway capacity at each colony." elevation="1">
               <div class="panel-head">
                 <span class="d-flex align-center">
                   <span>Idle capacity by colony<provenance-mark rule="production.capacityFree" /></span>
@@ -205,7 +208,7 @@
                 </template>
               </v-data-table>
               <div class="panel-foot caption text--secondary">
-                Find where more work can start. Idle capacity is what each colony leaves unused, of its total. It is build points a year for construction, ordnance, fighters and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity. A dash means the figure is not known, and its mark names what is missing.
+                Find where more work can start. Idle capacity is what each colony leaves unused, of its total. It is build points a year for construction, ordnance, light naval units and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity. A dash means the figure is not known, and its mark names what is missing.
               </div>
             </v-card>
           </v-col>
@@ -241,12 +244,17 @@ import { gameTime, populationName } from '../utilities/aurora'
 import { sourcesOf } from '../utilities/component-calc'
 import { fitsDouble } from '../utilities/decimal'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
+import { NO_DEVELOPMENT_ITEMS, developmentTerms, loadDevelopmentItems } from '../utilities/development-projects'
+import { climateBaseTemp } from '../utilities/habitability'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { boxLineShown, boxLines, categoryOf, completionBins, componentCredit, creditLines, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, taskUseComponents, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { DEVELOPMENT_ITEMS, PRODUCTION_TYPE, PRODUCTION_TYPE_NAMES, isDevelopmentType, loadedProject } from '../utilities/production-types'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
+import { REFIT_TASK_TYPES } from '../utilities/refits'
+import { fieldBonuses, loadResearchConstructs } from '../utilities/research'
 import { SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES } from '../utilities/shipyard-growth'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, loadTerraformSources, terraformBreakdown } from '../utilities/terraform-capacity'
 import { NO_PROCUREMENT_SOURCES, loadProcurementSources } from '../utilities/procurement-data'
@@ -264,6 +272,7 @@ const INPUT_LABELS = {
   navalAdmins: 'the naval admin commands',
   componentSources: 'the ship classes\' components and the colonies\' component stock',
   procurementSources: 'the shipyard tasks, the queued component projects and the colonies',
+  developments: 'the items of the Engineering, Ordnance and Ground Unit Projects',
 }
 
 const SECONDS_PER_DAY = 86400
@@ -304,6 +313,8 @@ const JOB_PAGE_SIZES = [15, 30, -1]
 const CAPACITY_PAGE_SIZES = [10, 25, -1]
 
 const CAPACITY_KINDS = ['construction', 'ordnance', 'fighter']
+// The capacity kinds in the words of the page's text; the internal id of the light naval kind is the 'fighter' of its stored columns.
+const CAPACITY_WORDS = { construction: 'construction', ordnance: 'ordnance', fighter: 'light naval' }
 const ARRIVAL_RESOURCES = [...MINERALS.map((mineral) => mineral.name), 'fuel']
 
 const ARRIVAL_HEADERS = [
@@ -315,19 +326,11 @@ const ARRIVAL_HEADERS = [
   { text: '', value: 'actions', align: 'end', sortable: false },
 ]
 
-const PRODUCTION_TYPES = {
-  0: 'Construction',
-  1: 'Ordnance',
-  2: 'Fighter',
-  3: 'Component',
-  4: 'Space station',
-}
-
 // Idle capacity columns; `bp` ones are build points a year, the others counts.
 const CAPACITY_COLUMNS = [
   { key: 'construction', text: 'Construction', bp: true },
   { key: 'ordnance', text: 'Ordnance', bp: true },
-  { key: 'fighter', text: 'Fighters', bp: true },
+  { key: 'fighter', text: 'Light Naval', bp: true },
   { key: 'training', text: 'Ground training', bp: true },
   { key: 'research', text: 'Research labs', bp: false },
   { key: 'slipways', text: 'Slipways', bp: false },
@@ -450,12 +453,11 @@ export default {
 
     // Each research project, then its queue: a queued tech starts when the one ahead finishes, with the same labs.
     researchJobs() {
-      const { projects, queues } = this.researches
+      const { projects, queues, bonuses } = this.researches
 
       return projects.flatMap((project) => {
-        const modifiers = this.populationProductionModifiers[project.PopulationID]
         const paused = flagOf(project.Paused)
-        const rate = researchRate(modifiers, project)
+        const rate = researchRate(project, bonuses)
         const finish = finishDays({ rule: 'production.researchFinish', rate, remaining: project.RemainingProduction, remainingName: 'the project\'s remaining research points', paused })
         const labs = `${this.count(project.Facilities)} ${project.Facilities === 1 ? 'lab' : 'labs'}`
         let ahead = finish
@@ -475,8 +477,8 @@ export default {
         })]
 
         queues.filter((queue) => queue.CurrentProjectID === project.ID).sort((a, b) => a.ResearchOrder - b.ResearchOrder).forEach((queue, index) => {
-          const queueRate = researchRate(modifiers, queuedResearch(project, queue))
-          const queueFinish = finishDays({ rule: 'production.researchFinish', rate: queueRate, remaining: queue.DevelopCost, remainingName: 'the tech\'s development cost', ahead })
+          const queueRate = researchRate(queuedResearch(project, queue), bonuses)
+          const queueFinish = finishDays({ rule: 'production.researchFinish', rate: queueRate, remaining: queuedRemaining(queue), remainingName: 'the tech\'s development cost and the points saved on it', ahead })
           const start = isAvailable(ahead.result) ? this.duration(ahead.result.value) : null
           const startNote = start !== null ? `Starts in ${start}` : ahead.idle ? (paused ? 'Never starts: the project ahead is paused' : 'Never starts: the project ahead makes no progress') : `Start not known: missing ${ahead.result.inputs.missing.join(', ')}`
 
@@ -564,7 +566,7 @@ export default {
           } else if (!isAvailable(rate)) {
             status = { id: 'unknown', label: 'Not known', note: `Missing ${rate.inputs.missing.join(', ')}` }
           } else if (!(rate.value > 0)) {
-            status = { id: 'stalled', label: 'No capacity', note: `The colony has no ${category} capacity` }
+            status = { id: 'stalled', label: 'No capacity', note: `The colony has no ${CAPACITY_WORDS[category]} capacity` }
           } else if (shortage) {
             const supplied = planned ? null : valueOrNull(finish.result)
 
@@ -581,16 +583,22 @@ export default {
             status = { id: 'running', label: 'Running' }
           }
 
+          const credit = this.creditOf(project, rate)
+
           return this.job({
             key: `industry-${project.ID}`,
             type: 'industry',
             PopulationID,
             name: `${this.units(project.Amount)} × ${project.Name}`,
-            detail: PRODUCTION_TYPES[project.ProductionType],
+            detail: PRODUCTION_TYPE_NAMES[project.ProductionType],
+            terms: isDevelopmentType(project.ProductionType) ? this.developmentLine(project) : '',
+            components: credit.lines,
+            componentResult: credit.result,
+            useResult: credit.useResult,
             rate,
             finish,
             rateText: this.rateText(rate, this.bp, 'BP/yr'),
-            rateNote: category === 'unknown' ? 'Production type not known' : isKnownNumber(project.Percentage) ? `${this.count(project.Percentage, 1)}% of ${category}` : `Share of ${category} not known`,
+            rateNote: category === 'unknown' ? 'Production type not known' : isKnownNumber(project.Percentage) ? `${this.count(project.Percentage, 1)}% of ${CAPACITY_WORDS[category]}` : `Share of ${CAPACITY_WORDS[category]} not known`,
             amount: project.Amount,
             queued,
             shortage,
@@ -610,7 +618,9 @@ export default {
         const modifiers = this.populationProductionModifiers[ship.PopulationID]
         const paused = flagOf(ship.Paused)
         const rate = shipRate(modifiers, ship)
-        const finish = finishDays({ rule: 'production.shipFinish', rate, remaining: ship.RemainingProduction, remainingName: 'the task\'s remaining build points', paused })
+        const finish = shipTaskFinish({ rate, task: { remaining: ship.RemainingProduction, totalBP: ship.TotalBP, hulls: ship.Hulls }, paused })
+
+        const box = boxLines(ship)
 
         return this.job({
           key: `ship-${ship.ID}`,
@@ -619,7 +629,9 @@ export default {
           ShipyardID: ship.ShipyardID,
           yardName: ship.ShipyardName,
           name: ship.Name,
-          detail: [SHIPYARD_TASK_TYPES[ship.ShipyardTaskType], ship.ClassName].filter(Boolean).join(' · '),
+          components: box,
+          componentResult: box.length ? taskUseComponents(ship).result : null,
+          detail: [SHIPYARD_TASK_TYPES[ship.ShipyardTaskType], ship.ClassName, ship.Hulls > 1 ? `1 of ${this.count(ship.Hulls)} ships left` : ''].filter(Boolean).join(' · '),
           rate,
           finish,
           rateText: this.rateText(rate, this.bp, 'BP/yr'),
@@ -679,11 +691,11 @@ export default {
     terraformingJobs() {
       const { raceRate, speed, colonies } = this.terraformSources
 
-      return this.terraforms.filter((terraform) => !(terraform.TerraformStatus && terraform.MaxAtm === 0) && colonies[terraform.PopulationID] && hasTerraformers(colonies[terraform.PopulationID])).map((terraform) => {
+      return this.terraforms.filter((terraform) => colonies[terraform.PopulationID] && hasTerraformers(colonies[terraform.PopulationID])).map((terraform) => {
         const modifiers = this.populationProductionModifiers[terraform.PopulationID]
         const breakdown = terraformBreakdown({ raceRate, speed, source: colonies[terraform.PopulationID], admins: this.navalAdmins })
         const rate = breakdown.rate
-        const finish = terraformFinish(modifiers, terraform, rate)
+        const finish = terraformFinish(modifiers, { ...terraform, Gravity: colonies[terraform.PopulationID].gravity }, rate)
         const waterOnSurface = terraform.GasName === 'Water Vapour' && terraform.HydroID === 3
         const adding = flagOf(terraform.TerraformStatus)
         const status = jobStatus({ paused: false, rate, stalled: { label: 'No capacity' } })
@@ -692,7 +704,7 @@ export default {
           key: `terraforming-${terraform.PopulationID}`,
           type: 'terraforming',
           PopulationID: terraform.PopulationID,
-          name: `${terraform.GasName || 'Unknown gas'} to ${isKnownNumber(terraform.MaxAtm) ? terraform.MaxAtm : UNKNOWN_TEXT} atm`,
+          name: adding && terraform.MaxAtm === 0 ? `${terraform.GasName || 'Unknown gas'} without a stop target` : `${terraform.GasName || 'Unknown gas'} to ${isKnownNumber(terraform.MaxAtm) ? terraform.MaxAtm : UNKNOWN_TEXT} atm`,
           detail: waterOnSurface ? `Hydrographic extent ${this.count(terraform.HydroExt, 1)}%` : '',
           rate,
           finish,
@@ -923,6 +935,10 @@ export default {
       return {
         detail: '',
         note: '',
+        terms: '',
+        components: [],
+        componentResult: null,
+        useResult: null,
         approx: false,
         queued: false,
         shortage: null,
@@ -941,6 +957,27 @@ export default {
         finishSort: days,
         searchText: `${fields.name} ${fields.detail || ''} ${colony.colonyName} ${colony.place}`.toLowerCase(),
       }
+    },
+
+    // The line under a development project: its item, cost and minerals, or that the save's tables for the item were not read.
+    developmentLine(project) {
+      if (this.developments.unread.includes(project.ProductionType)) {
+        return `Develops a ${DEVELOPMENT_ITEMS[project.ProductionType]}: the item and its development cost are not in the save's tables`
+      }
+
+      return developmentTerms(project, this.developments.items[project.ID], this.count)
+    },
+
+    // The lines under a Light Naval or Space Station job: what the components in stock took off the project when it was made, told from its stored cost and minerals against its class (`componentCredit`) and worded by `creditLines`; none for another type. The box line carries the box rule's own result, which is unavailable: the stored cost never shows that the box was ticked.
+    creditOf(project, rate) {
+      if (project.ProductionType !== PRODUCTION_TYPE.LIGHT_NAVAL && project.ProductionType !== PRODUCTION_TYPE.SPACE_STATION) {
+        return { lines: [], result: null, useResult: null }
+      }
+
+      const credit = componentCredit({ classCost: project.ClassCost, parts: this.componentSources.parts[project.ItemID], storedCost: project.ProdPerUnit, storedMinerals: project })
+      const figure = (value) => this.count(value, Number.isInteger(value) ? 0 : 2)
+
+      return { lines: creditLines({ credit, classCost: project.ClassCost, storedCost: project.ProdPerUnit, units: project.Amount, perYear: valueOrNull(rate), format: figure, duration: (days) => this.duration(days), npr: this.RaceNPR }), result: credit.result, useResult: boxLineShown(credit.use, this.RaceNPR) ? credit.use.result : null }
     },
 
     colony(populationId, fallbackName) {
@@ -1099,17 +1136,19 @@ export default {
         const blocked = this.blockedBonuses
 
         if (!this.database || !this.GameID || !this.RaceID) {
-          return { projects: [], queues: [] }
+          return { projects: [], queues: [], bonuses: {} }
         }
 
-        const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_ResearchQueue.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
+        const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_ResearchQueue.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, case when exists (select 1 from FCT_PausedResearch where FCT_PausedResearch.TechSystemID = FCT_ResearchQueue.TechSystemID and FCT_PausedResearch.GameID = ${this.GameID} and FCT_PausedResearch.RaceID = ${this.RaceID}) then (select FCT_PausedResearch.PointsAccumulated from FCT_PausedResearch where FCT_PausedResearch.TechSystemID = FCT_ResearchQueue.TechSystemID and FCT_PausedResearch.GameID = ${this.GameID} and FCT_PausedResearch.RaceID = ${this.RaceID}) else 0 end as Saved, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
 
-        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, VIR_ResearchBonus.CommandID as ScientistCommandID, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
+        // Only an absent percentage bonus row supplies the neutral multiplier; a present NULL stays unknown. No scientist retains the disclosed planner assumption, and an absent or nonmatching local construct is neutral.
+        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, FCT_Species.ResearchRateModifier, FCT_Race.Research as ResearchBase, FCT_Race.EconomicProdModifier, FCT_Population.Efficiency, FCT_SystemBody.RadiationLevel, FCT_Population.UnrestPoints, DIM_PopPoliticalStatus.ProductionMod, FCT_Game.ResearchSpeed, case when VIR_ResearchBonus.CommandID is null then 1 else VIR_ResearchBonus.CommanderBonus end as CommanderBonus, VIR_ResearchBonus.CommanderField, VIR_ResearchBonus.CommandID as ScientistCommandID, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.AncientConstructID as AnomalyID, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, case when VIR_ResearchBonus.CommandID is null then 1 when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end as ActualCommanderResearchBonus, case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, case when FCT_CommanderBonuses.CommanderID is null then 1 else FCT_CommanderBonuses.BonusValue end as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID left join FCT_Race on FCT_Race.RaceID = FCT_ResearchProject.RaceID left join FCT_Game on FCT_Game.GameID = FCT_ResearchProject.GameID left join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
+        const bonuses = fieldBonuses(await loadResearchConstructs(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
 
         // A project with a scientist has the figure of the Research bonus the save's lookup row does not confirm left unknown, never read as no bonus.
-        return { projects: blocked.has(RESEARCH_BONUS) ? projects.map((project) => (project.ScientistCommandID === null ? project : { ...project, CommanderBonus: null, ActualCommanderResearchBonus: null })) : projects, queues }
+        return { projects: blocked.has(RESEARCH_BONUS) ? projects.map((project) => (project.ScientistCommandID === null ? project : { ...project, CommanderBonus: null, ActualCommanderResearchBonus: null })) : projects, queues, bonuses }
       }),
-      default: { projects: [], queues: [] },
+      default: { projects: [], queues: [], bonuses: {} },
     },
     // Each project with its per-unit minerals and fuel, and the colony's stock of each.
     industry: {
@@ -1121,7 +1160,7 @@ export default {
         const needs = MINERALS.map((mineral) => `FCT_IndustrialProjects.${mineral.name}`).join(', ')
         const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name} as Stock${mineral.name}`).join(', ')
 
-        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.ProductionID as ItemID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, FCT_ShipClass.Cost as ClassCost, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_IndustrialProjects.ProductionID and FCT_ShipClass.GameID = FCT_IndustrialProjects.GameID and FCT_IndustrialProjects.ProductionType in (${PRODUCTION_TYPE.LIGHT_NAVAL}, ${PRODUCTION_TYPE.SPACE_STATION}) where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and ${loadedProject()}`)
 
         return rows
       }),
@@ -1133,7 +1172,7 @@ export default {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name, FCT_ShipyardTask.UseComponents, FCT_Shipyard.ShipyardName, TaskClass.ClassName, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then TargetClass.Size else TaskClass.Size end) as Size, FCT_ShipyardTask.TotalBP, FCT_ShipyardTask.NumShips as Hulls, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_ShipyardTask.TaskTypeID in (${REFIT_TASK_TYPES.join(', ')}) then (case when TargetClass.Commercial = 0 then 1.0 when TargetClass.Commercial is null then null else 0.25 end) else (case when TaskClass.Commercial = 0 then 1.0 when TaskClass.Commercial is null then null else 0.25 end) end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass TaskClass on TaskClass.ShipClassID = FCT_ShipyardTask.ClassID left join FCT_ShipClass TargetClass on TargetClass.ShipClassID = FCT_ShipyardTask.RefitID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
 
         return rows
       }),
@@ -1183,7 +1222,27 @@ export default {
           return []
         }
 
-        const [terraforms] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_Population left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.TerraformingGasID != 0`)
+        const [terraforms] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.Albedo, FCT_SystemBody.DustLevel, FCT_SystemBody.DistanceToParent, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, FCT_SystemBody.Year, VIR_Parent.DistanceToParent as ParentDistanceToParent, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, VIR_Parent.Eccentricity as ParentEccentricity, VIR_Parent.Year as ParentYear, FCT_Star.Luminosity as StarLuminosity, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_Population left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.TerraformingGasID != 0`)
+
+        if (terraforms.some((row) => row.GasName === 'Water Vapour')) {
+          const [gases] = await this.database.query(`select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.FreezingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas from FCT_AtmosphericGas left join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID where FCT_AtmosphericGas.GameID = ${this.GameID} and exists (select 1 from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = 5)`)
+          const atmospheres = new Map()
+
+          gases.forEach((gas) => {
+            const rows = atmospheres.get(gas.SystemBodyID) || []
+
+            rows.push(gas)
+            atmospheres.set(gas.SystemBodyID, rows)
+          })
+          terraforms.forEach((row) => {
+            if (row.GasName === 'Water Vapour') {
+              const distance = row.BodyClass === 2 ? row.ParentDistanceToParent : row.DistanceToParent
+
+              row.BaseTemp = isKnownNumber(distance) && distance > 0 && isKnownNumber(row.StarLuminosity) && row.StarLuminosity > 0 ? climateBaseTemp(row) : null
+              row.Atmosphere = atmospheres.get(row.SystemBodyID) || []
+            }
+          })
+        }
 
         return terraforms
       }),
@@ -1230,6 +1289,17 @@ export default {
         return await loadProcurementSources(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: NO_PROCUREMENT_SOURCES,
+    },
+    // The items the race's Engineering, Ordnance and Ground Unit Projects develop and the development cost of each, for the line under those jobs. The jobs do not rest on it: a save without the tables leaves the line saying so.
+    developments: {
+      get: tracked('developments', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_DEVELOPMENT_ITEMS
+        }
+
+        return await loadDevelopmentItems(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_DEVELOPMENT_ITEMS,
     },
   },
 }

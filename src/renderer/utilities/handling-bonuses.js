@@ -1,4 +1,4 @@
-// The Logistics bonuses that multiply a ship's own loading strength: the ship commander's, the naval admin chain's, the colony governor's and the sector's. Each is an adapter that reads one officer's bonus from what the loader (utilities/handling-support.js) read, and the product stays apart from the colony's additive support, which no officer multiplies. Evidence: docs/plans/backlog/evidence/AE-082-01.md.
+// The Logistics bonuses that multiply a ship's loading strength: the ship commander's, the naval admin chain's, the colony governor's and the sector's. Each is an adapter that reads one officer's bonus from what the loader (utilities/handling-support.js) read, and their product multiplies the whole base transfer value, the colony's spaceport or cargo shuttle station term included (utilities/transport.js `handlingBreakdown`). Evidence: docs/plans/backlog/evidence/AE-082-01.md and AE-302-08.md.
 
 import { fleetCommandChain } from './minerals'
 import { registerRule } from './provenance'
@@ -18,11 +18,11 @@ export const CLASS_ONLY = Object.freeze({ mode: 'class' })
 
 registerRule({
   id: 'transport.logisticsBonuses',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: '×',
   verification: 'estimated',
   structure: ['FCT_CommanderBonuses.BonusValue (Logistics)', 'FCT_Commander.CommandType, CommandID', 'FCT_Fleet.ParentCommandID', 'FCT_NavalAdminCommand', 'DIM_NavalAdminCommandType.Logistics', 'FCT_RaceSysSurvey.SectorID'],
-  note: 'A ship\'s own loading strength is multiplied by its commander\'s Logistics bonus, by the naval administration chain of the system where it loads (each command passes on its commander\'s bonus scaled by the command type\'s Logistics share), by the colony governor\'s bonus, and by a quarter of the excess of the sector commander\'s bonus. The colony\'s spaceport or cargo shuttle station adds the race\'s technology once more and no officer multiplies it. An officer with no Logistics bonus counts as 1. The stacking is read from the game\'s documented rules, not compared with a time the game stores.',
+  note: 'A ship\'s loading strength, the base transfer value (its own term plus the colony\'s spaceport or cargo shuttle station term), is multiplied by its commander\'s Logistics bonus, by the naval administration chain of the system where it loads (each command passes on its commander\'s bonus scaled by the command type\'s Logistics share), by the colony governor\'s bonus, and by a quarter of the excess of the sector commander\'s bonus. The colony\'s term joins the base before any officer multiplies, so the officers\' product applies to it as well. An officer with no Logistics bonus counts as 1. The stacking is read from the game\'s documented rules, not compared with a time the game stores.',
   assumptions: ['the naval administration chain is the one of the fleet\'s command and, for a fleet with none, the race\'s top command', 'a bonus the save cannot name counts as 1 and the figure is an estimate that errs long'],
 })
 

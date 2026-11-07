@@ -7,7 +7,7 @@ import { isKnownNumber } from './math'
 import { MINERALS } from './minerals'
 import { ofRule, registerRule, unavailable } from './provenance'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const SURVEY_INPUT = 'a geological survey of the body by the race'
 const COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
@@ -20,7 +20,7 @@ registerRule({
   units: 't',
   verification: 'confirmed',
   structure: ['FCT_MineralDeposit.Amount', 'FCT_SystemBodySurveys.SystemBodyID, RaceID'],
-  note: 'The tons of one mineral in the body\'s deposit as the save stores them, shown only for a body the race has surveyed geologically (the survey covers the whole body, not one mineral). A body that is not surveyed has no figure, whatever the save holds for it. A surveyed body with no deposit of the mineral holds none. Deposits found by a later ground survey and the depletion of mining are not forecast: the figure is the deposit as of the save.',
+  note: 'The tons of one mineral in the body\'s deposit as the save stores them, shown only for a body the race has surveyed geologically (the survey covers the whole body, not one mineral). A body that is not surveyed has no figure, whatever the save holds for it. A surveyed body with no deposit of the mineral holds none. Deposits found by a later ground survey and the depletion of mining are not forecast: the figure is the deposit as of the save. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['a surveyed body with no deposit row of a mineral holds none of it'],
 })
 
@@ -30,7 +30,7 @@ registerRule({
   units: '0 to 1',
   verification: 'confirmed',
   structure: ['FCT_MineralDeposit.Accessibility', 'FCT_SystemBodySurveys.SystemBodyID, RaceID'],
-  note: 'How easily one mineral\'s deposit is mined, 0 to 1, as the save stores it, shown only for a body the race has surveyed geologically. A mineral with no deposit has no accessibility. The figure is the deposit as of the save; mining and later ground surveys change it.',
+  note: 'How easily one mineral\'s deposit is mined, 0 to 1, as the save stores it, shown only for a body the race has surveyed geologically. A mineral with no deposit has no accessibility. The figure is the deposit as of the save; mining and later ground surveys change it. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 export const amountKey = (mineralId) => `amount${mineralId}`
@@ -88,7 +88,7 @@ const bodyName = (body) => `${body.SystemName} ${systemBodyName(body)}`
 
 const flat = (cells) => Object.fromEntries(cells.flatMap((cell) => [[amountKey(cell.id), cell.amount], [accessKey(cell.id), cell.accessibility]]))
 
-const NO_FIGURES = { speciesId: null, speciesName: null, costValue: null, capacityValue: null, lowGravity: false, reason: null, missing: [], results: { cost: null, capacity: null } }
+const NO_FIGURES = { speciesId: null, speciesName: null, costValue: null, capacityValue: null, lowGravity: false, gravityClass: null, reason: null, missing: [], results: { cost: null, capacity: null } }
 
 // The cost and the limit as they are today, the two figures the body detail's headlines open with.
 const figuresOf = (row, evaluation) => {
@@ -103,7 +103,7 @@ const figuresOf = (row, evaluation) => {
     return { ...base, state: 'unfit', reason: assessment.reason || assessment.cost.reason || 'no reason recorded' }
   }
 
-  return { ...base, state: 'known', costValue: assessment.cost.worst, capacityValue: evaluation.capacityNow, lowGravity: !!assessment.lowGravity }
+  return { ...base, state: 'known', costValue: assessment.cost.worst, capacityValue: evaluation.capacityNow, lowGravity: !!assessment.lowGravity, gravityClass: assessment.gravityClass || null }
 }
 
 // The worksheet's rows: one per distinct selected body, in the order selected, each worked out for `speciesId` (null: the species the Planner's table shows for the body). `rows` is the Planner's ranked rows before any filter. A selected body the rows do not hold stays in the worksheet as an `absent` row with no figures.

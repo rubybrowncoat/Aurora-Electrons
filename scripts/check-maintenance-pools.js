@@ -17,17 +17,20 @@ const sqlite3 = require('sqlite3')
 const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, HarnessError, settled, installScreen, pairedBy, readFigure } = require('./lib/browser-observe')
 const { assert, subjectModule, runChecks, judged, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
+const { plantedPatch } = require('./lib/mutant-source')
 const { loadUtilities } = require('./lib/utilities')
+const { mutating: canMutate } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const POOLS_FILE = 'src/renderer/utilities/maintenance-pools.js'
 const LOGISTICS_FILE = 'src/renderer/utilities/logistics.js'
 const PAGE_FILE = 'src/renderer/pages/logistics.vue'
 const POOL_FILE = 'src/renderer/components/logistics/MaintenancePool.vue'
-const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
-const IDS = { GameID: 138, RaceID: 785 }
-const NAMES = { game: 'EggSample', race: 'EggSample' }
+const SAVE = FIXTURE.file
+const IDS = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 const DETAIL = process.argv.includes('--detail')
 // The page draws figures in groups of three with the apostrophe under the setting the checks start with.
@@ -52,7 +55,8 @@ const swap = (from, to) => (text) => {
 
 const SHIP = { ShipID: 1, ShipName: 'Ship', FleetID: 1, FleetName: 'Fleet', SystemID: 1, SystemName: 'Sol', OrbitBodyID: 1, Xcor: 0, Ycor: 0, AssignedPopulationID: 0, ShipClassID: 1, ClassName: 'Class', Size: 2, Cost: 4000, Commercial: 0, SupplyShip: 0, MinimumSupplies: 0, ClassSupplies: 0, MaintPriority: 5, CurrentMaintSupplies: 0, MaintenanceState: 0, LastOverhaul: 0, MothershipID: 0, CarrierCommercialHangar: null, Modules: 0, Bays: 0 }
 const ship = (id, changes = {}) => ({ ...SHIP, ShipID: id, ShipName: `Ship ${id}`, FleetID: id, FleetName: `Fleet ${id}`, ...changes })
-const colony = (id, changes = {}) => ({ PopulationID: id, PopName: `Colony ${id}`, SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceFacilities: 1, MaintenanceStockpile: 0, Population: 1, ...changes })
+const POPULATED = { value: true, status: 'estimated', inputs: { present: ['the shared population census'], missing: [] }, assumptions: [] }
+const colony = (id, changes = {}) => ({ PopulationID: id, PopName: `Colony ${id}`, NPR: 0, SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceFacilities: 1, MaintenanceStockpile: 0, MspPopulated: POPULATED, ...changes })
 const FULL_COLONY = { MSPProduction: 10, MaintProdStatus: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 10.9, WarningMSP: 0, SystemBodyID: 1 }
 // A ship that asks 60 MSP a day at full coverage: a class cost of 365 x 4 x 60.
 const DAILY_60 = 87600
@@ -401,10 +405,20 @@ const plan = async (raw) => {
     await run(raw, `update FCT_Fleet set Xcor = Xcor + 1000000, Ycor = Ycor + 1000000 where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and SystemID = ${at.sys} and abs(Xcor - ${at.x}) < 2 and abs(Ycor - ${at.y}) < 2`)
   }
 
-  const classId = async (name) => (await first(`select ShipClassID as id from FCT_ShipClass where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and ClassName = '${name}'`)).id
-  const bonk = await classId('Bonk')
-  const well = await classId('Well')
-  const shed = await classId('Shed01-0.5k')
+  // The classes cloned are chosen by what the planted ships need of them: any class of the race for the ordinary ships, a supply ship with a cargo shuttle bay, and a class with maintenance modules.
+  const ownClasses = `from FCT_ShipClass where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID}`
+  const classWhere = async (condition) => {
+    const found = await first(`select ShipClassID as id ${ownClasses} and ${condition} order by ShipClassID limit 1`)
+
+    if (!found) {
+      throw new HarnessError(`the save has no class of the race with ${condition}`)
+    }
+
+    return found.id
+  }
+  const bonk = await classWhere('1 = 1')
+  const well = await classWhere('SupplyShip = 1 and exists (select 1 from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = FCT_ShipClass.ShipClassID and d.ComponentTypeID = 14)')
+  const shed = await classWhere('MaintModules > 0')
   const { top } = await first('select max(ShipClassID) as top from FCT_ShipClass')
   const classes = { W: top + 1, K: top + 2, C: top + 3, S1: top + 4, S2: top + 5, M: top + 6, P: top + 7 }
   const ordinary = ['Size = 2', 'Cost = 4000', 'SupplyShip = 0', 'MinimumSupplies = 0', 'MaintModules = 0', 'MaintPriority = 5']
@@ -652,11 +666,6 @@ const drill = async (page, step, key) => {
   }
 
   await row.locator('[data-location-place]').first().click({ timeout: 30000 })
-  step(`waiting for the drill-down of ${key}`)
-  await page.waitForFunction((wanted) => document.querySelector(`[data-pool="${wanted}"]`) !== null, key, { timeout: 30000 }).catch(async (error) => {
-    await page.screenshot({ path: path.join(os.tmpdir(), 'ae-maintenance-pools-failure.png') })
-    throw new Error(`the drill-down of ${key} did not open (${error.message.split('\n')[0]}); open: ${short(await page.evaluate(() => [...document.querySelectorAll('[data-pool]')].map((element) => element.getAttribute('data-pool'))))}`)
-  })
   step(`settling after opening ${key}`)
   await settled(page, { limit: TIMEOUT, loading: pageLoading })
   step(`reading the drill-down of ${key}`)
@@ -1109,11 +1118,21 @@ const PAGE_FAULTS = [
 // A rewrite is judged by the checks that read the part of the page it changes (`checks`), and the drill-downs those checks read are the ones opened.
 const PAGE_BENIGN = [
   { name: 'the switch of the locations bound by an explicit prop and event instead of v-model', file: PAGE_FILE, checks: ['standalone', 'clusters', 'no-errors'], change: swap('v-model="showIdleLocations"', ':input-value="showIdleLocations" @change="showIdleLocations = $event"') },
-  { name: 'the retry of the supplied-output panel listened to by the longhand of the event', file: PAGE_FILE, checks: ['totals', 'no-errors'], change: swap('@retry="retryMspSupply"', 'v-on:retry="retryMspSupply"') },
+  { name: 'the location row expanded by the longhand of its click event', file: PAGE_FILE, checks: ['clusters'], change: swap('@click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"', 'v-on:click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"') },
   { name: 'the tonnage line states its qualifier after the figure instead of before it', file: POOL_FILE, checks: ['capacity'], change: swap('Tonnage of the assigned ships: <span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span>', '<span class="text-no-wrap" data-pool-value="tonnage">{{ tons(location.tons) }}</span> is the tonnage of the assigned ships') },
   { name: 'the supply caption of a row worded with another word of the reviewed table', file: POOLS_FILE, checks: ['totals', 'no-errors'], change: swap('supply: \'on supply ships\'', 'supply: \'aboard supply ships\'') },
   { name: 'the condition of the drill-down parenthesised', file: POOL_FILE, checks: ['rule', 'clusters'], change: swap('<template v-if="location.pool">', '<template v-if="(location.pool)">') },
 ]
+
+const LOCATION_CLICK = '@click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"'
+const LOCATION_CLICK_LONGHAND = 'v-on:click:row="(item, { expand, isExpanded }) => expand(!isExpanded)"'
+const LOCATION_CLICK_BROKEN = 'v-on:click:row="(item, { expand, isExpanded }) => expand(isExpanded)"'
+const LOCATION_CLICK_FAULT = {
+  name: 'the longhand location-row listener leaves the clicked location collapsed',
+  file: PAGE_FILE,
+  fails: ['clusters'],
+  change: (text) => plantedPatch(PAGE_FILE, swap(LOCATION_CLICK, LOCATION_CLICK_LONGHAND)(text), LOCATION_CLICK_LONGHAND, LOCATION_CLICK_BROKEN),
+}
 
 // ---------- the run ----------
 
@@ -1321,10 +1340,11 @@ const variantsOf = (mutating) => [
   { key: 'page', name: 'the head: the Logistics page as it is', head: true, heading: '\nThe drill-down of the maintenance locations on the Logistics page (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.page, run: checkPageHead },
   ...(mutating ? PAGE_FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.page, run: () => checkPageFault(fault) })) : []),
   ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.page, run: () => checkPageRewrite(rewrite) })) : []),
+  ...(mutating ? [{ key: 'fault:location-click-longhand', name: `fault caught: ${LOCATION_CLICK_FAULT.name}`, heading: '\nbroken location-row longhand listener', pool: 'suite', deadline: DEADLINES.page, run: () => checkPageFault(LOCATION_CLICK_FAULT) }] : []),
 ]
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const mutating = canMutate()
   const totals = await runSuite({
     script: __filename,
     inputs: [SAVE],

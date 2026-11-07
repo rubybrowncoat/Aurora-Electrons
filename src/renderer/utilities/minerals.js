@@ -1,10 +1,11 @@
-// Mineral maths shared by the Mineral Outlook page: deposit depletion, the game's mineral ledger and the industrial queue's demand. Validated against the sample save; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
+// Mineral maths shared by the Mineral Outlook page: deposit depletion, the game's mineral ledger and the industrial queue's demand. Validated against saved games; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
 import { crewFraction } from './crew'
 import { roundToDecimal, separatedNumber } from './math'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
+import { capacityKind } from './production-types'
 
-const MINERALS_VERSIONS = ['2.7.x']
+const MINERALS_VERSIONS = ['3.2.x']
 const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
 const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']
 
@@ -73,7 +74,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility'],
-  note: 'What one mine digs a year at the deposit\'s current accessibility: the race\'s mine production times accessibility, before the colony\'s efficiency, stability, governor and radiation. The full surface rate of this product reproduced the logged mining of 385 colony-by-mineral series in the sample save; this page\'s product on its own was not re-checked. A race with no mine production recorded has no figure.',
+  note: 'What one mine digs a year at the deposit\'s current accessibility: the race\'s mine production times accessibility, before the colony\'s efficiency, stability, governor and radiation. The full surface rate of this product reproduced the logged mining of 385 colony-by-mineral series in a save it was checked on; this page\'s product on its own was not re-checked. A race with no mine production recorded has no figure.',
 })
 
 registerRule({
@@ -105,7 +106,7 @@ registerRule({
 
 registerRule({
   id: 'minerals.massDriverRate',
-  versions: MINERALS_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
@@ -411,7 +412,7 @@ export const FLOW_GROUPS = [
   { key: 'salvage', label: 'Salvage', income: true, types: [10, 15, 17, 18, 19] },
   { key: 'construction', label: 'Construction', income: false, types: [4, 40, 45] },
   { key: 'shipbuilding', label: 'Shipbuilding', income: false, types: [5, 9] },
-  { key: 'ordnance', label: 'Ordnance & fighters', income: false, types: [2, 3] },
+  { key: 'ordnance', label: 'Ordnance & light naval', income: false, types: [2, 3] },
   { key: 'ground', label: 'Ground units', income: false, types: [6] },
   { key: 'fuel', label: 'Fuel refining', income: false, types: [14] },
   { key: 'maintenance', label: 'Maintenance', income: false, types: [16] },
@@ -419,7 +420,7 @@ export const FLOW_GROUPS = [
 
 export const TRANSFER_TYPES = new Set([7, 8, 12, 13, 20])
 
-// Types the game logs in its production phase, once per cycle and all at the same time (on the sample, every one of them falls on a mining tick). Salvage and transfers come at other times.
+// Types the game logs in its production phase, once per cycle and all at the same time (in the saves examined, every one of them falls on a mining tick). Salvage and transfers come at other times.
 export const PRODUCTION_TYPES = FLOW_GROUPS.filter((group) => group.key !== 'salvage').flatMap((group) => group.types)
 
 export const flowGroupOf = (type) => FLOW_GROUPS.find((group) => group.types.includes(type))
@@ -493,8 +494,8 @@ const SCHEDULE_INPUTS = [['Queue', 'place in the queue'], ['Amount', 'units left
 
 const recorded = (value) => typeof value === 'number' && Number.isFinite(value)
 
-// The capacity a project draws on: ordnance and fighters have their own and everything else uses construction; null for a production type the save lacks, which is never taken as construction.
-const facilityOf = (productionType) => (!recorded(productionType) ? null : productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
+// The capacity a project draws on (`capacityKind` of utilities/production-types.js); null for a production type the save lacks, which is never taken as construction.
+const facilityOf = (productionType) => (!recorded(productionType) ? null : capacityKind(productionType))
 
 export const annualQueueDemand = (projects, capacityOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))
@@ -755,7 +756,7 @@ export const compact = (value) => {
   return `${roundToDecimal(value, 0)} t`
 }
 
-// Years at a readable precision from COMPACT_YEARS on: 120 k, 2.4 M, 1.3 bn. At today's rate the sample's homeworld deposits last millions of years.
+// Years at a readable precision from COMPACT_YEARS on: 120 k, 2.4 M, 1.3 bn. A homeworld's deposits at today's rate can last millions of years.
 export const COMPACT_YEARS = 100000
 const YEAR_UNITS = [[1e9, 'bn'], [1e6, 'M'], [1e3, 'k']]
 

@@ -321,7 +321,7 @@ import { loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
 import { drawGrid, drawLegend, exportComposition, legendLayout, LEGEND_MIN_WIDTH } from '../utilities/map-export'
-import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { allBandCounts, bandBasisNote, bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
 import { loadGroundFormations, roleTotals } from '../utilities/ground-formations'
 import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
 import { gridDotColor, hierarchyView, HIERARCHY_LEVELS, labelInk, labelMinPx, linkStyle } from '../utilities/map-hierarchy'
@@ -1034,9 +1034,9 @@ export default {
       return legendCounts(this.currentHabitability, this.systemRows, { reason: this.habitabilityGap, version: this.formulaVersion })
     },
 
-    // Each system's count of bodies per band of COLONY_COST_BANDS, for systems with any.
+    // Each system's count of bodies per band of COLONY_COST_BANDS as the race's Galaxy Map options choose it, for systems with any.
     habitableBands() {
-      return this.currentHabitability ? this.currentHabitability.systems : {}
+      return this.currentHabitability ? allBandCounts(this.currentHabitability) : {}
     },
 
     savedPositions() {
@@ -1697,7 +1697,8 @@ export default {
             ...COLONY_COST_BANDS.map((limit, band) => ({ kind: 'dot', color: colors.bands[band], label: `${band ? 'Best' : 'A habitable world,'} colony cost under ${limit} (${counts.value.bands[band]})`, rule: band ? '' : 'map.bestBand' })),
             { kind: 'dot', color: colors.none, label: `None under ${last} (${counts.value.none})` },
             ...(counts.value.unknown ? [unknown(`Colony costs unknown, a body's stored value is missing (${counts.value.unknown})`, { result: counts })] : []),
-            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds`, result: counts }
+            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds`, result: counts },
+            { kind: 'note', label: bandBasisNote(this.currentHabitability.options), result: counts }
           )
         }
       } else if (this.layer === 'stars') {
@@ -3399,7 +3400,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.MineralSearchFlag, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.PopulationReported, Colonies.Capital, Stars.Stars, DIM_StellarType.SpectralClass, DIM_StellarType.SpectralNumber, DIM_StellarType.SizeText from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, count(FCT_Population.Population) as PopulationReported, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Star.SystemID, count(*) as Stars, max(case when FCT_Star.Component = 1 then FCT_Star.StarTypeID end) as PrimaryType from FCT_Star where FCT_Star.GameID = ${this.GameID} group by FCT_Star.SystemID) as Stars on Stars.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_StellarType on DIM_StellarType.StellarTypeID = Stars.PrimaryType where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.MineralSearchFlag, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.PopulationReported, Colonies.Capital, Stars.Stars, DIM_StellarType.SpectralClass, DIM_StellarType.SpectralNumber, DIM_StellarType.SizeText from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, count(FCT_Population.Population) as PopulationReported, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Star.SystemID, count(*) as Stars, max(case when FCT_Star.ComponentNumber = 1 then FCT_Star.StarTypeID end) as PrimaryType from FCT_Star where FCT_Star.GameID = ${this.GameID} group by FCT_Star.SystemID) as Stars on Stars.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_StellarType on DIM_StellarType.StellarTypeID = Stars.PrimaryType where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
       }),
       default: [],
     },
@@ -3539,8 +3540,9 @@ export default {
   }
 
   .tool--tags {
-    flex: 0 1 170px;
-    min-width: 140px;
+    // The chooser's own value, "All tags (0)", is wider than the field at the monospace face and the largest text size, so the field takes the width it needs there.
+    flex: 0 1 200px;
+    min-width: 190px;
   }
 
   .tool--actions {

@@ -5,7 +5,7 @@
 
   The synthetic checks need no save: they build a small database in memory with two games, several races, a shipping line, a ship that cannot move, a warship, classes with no recorded cargo or colonist capacity, and colonies and outposts of the race and of other races and games, among them two records on one body, outposts with no people, a body of a class and a body of a type the planner leaves out, and a colony in a system the race has not surveyed. They prove: the Transport line counts only the selected race's own ships that can move and carry cargo or colonists, in the selected game, with the capacity summed (hand-written lines for each race); a race with no such ship reads "No transport ships"; a capacity that is not recorded makes the line unknown (null), never 0; the Colonization line counts, as the planner's Colonies view does, the bodies of surveyed systems that hold a colony or outpost of the race (one body once however many records it has, an outpost with no people as one), and the surveyed systems that hold one, never a body of another race or game, one in a system the race has not surveyed, or one of a class or type the planner leaves out; a race that knows no system reads "No known systems"; a read that gives no row, or a figure that is null, leaves the line null; the lines read FCT_SystemBody only by primary key from the race's own population records (never a scan of it) and every statement they send is scoped by GameID and RaceID; a line shown again reuses the cached read (the underlying database sees no statement), the Galaxy Map line and the Colonization line share one read of the known systems, and a write to a table they read drops the kept read; and the store keeps a line until the database, game, race, history revision or separator changes, loads nothing a second time and leaves a failing peek's line null. A value is compared with its expectation part by part (an array item by item, an object key by key, whatever order its keys were added in), so the store's lines are compared route by route and the order the lines finish loading in cannot change a result; two controls force each order on a game change (the database sends one line's statements only once the store has set the other line) and must pass. Then each of the mutations below, one fault planted in a copy of the sources, must make at least one check fail, so that the checks cannot pass by checking nothing; a mutation that names a check counts only when that check fails by a wrong value, never by a throw. Exit code 1 when a check fails.
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also compares, for every race of the game, the Transport numbers with a direct reading of the same tables (the rows summed here in JavaScript, not by the peek's SQL), and the Colonization numbers with the planner's own `loadBodies` (colonised bodies, and the systems they are in, of the bodies whose `OwnPopulations` is not empty), for every race with a population record and the selected race; it checks that the race's figures are not the whole game's and that another game's data does not reach them, that the save holds outposts with no people (and reports bodies with several records), and measures the cold cost of each line (the median of --laps fresh connections, default 7, each timing the first statements of a connection; a median over the budget is measured again, up to three rounds, for the other work on the machine) against --budget (default 20 ms, the flyout's budget in docs/ARCHITECTURE.md), and the warm cost, which must reach the database not at all.
+  With a save (by default the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141 race 784; a save named by --stock or --modded is run as given, and one that is not there is reported as not run) it also compares, for every race of the game, the Transport numbers with a direct reading of the same tables (the rows summed here in JavaScript, not by the peek's SQL), and the Colonization numbers with the planner's own `loadBodies` (colonised bodies, and the systems they are in, of the bodies whose `OwnPopulations` is not empty), for every race with a population record and the selected race; it checks that the race's figures are not the whole game's and that another game's data does not reach them (a save that holds one game only prints a skip), that the save holds outposts with no people (and reports bodies with several records), and measures the cold cost of each line (the median of --laps fresh connections, default 7, each timing the first statements of a connection; a median over the budget is measured again, up to three rounds, for the other work on the machine) against --budget (default 20 ms, the flyout's budget in docs/ARCHITECTURE.md), and the warm cost, which must reach the database not at all.
 
   The store holds off while the save is refused as a save of another Aurora line (store/capabilities.js `refused`): a refused copy loads no line, sends no statement and drops the lines of an earlier copy, and the lines load again once it is no longer refused (one synthetic check, and a mutation that leaves the hold out).
 
@@ -17,9 +17,12 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
+const { assert, runChecks: creditChecks, judged, caughtBy, through, harnessOwn, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { watchLoad, loadShare, describeLoad, processorTimes } = require('./lib/machine-load')
 const { routes: routeTable } = require('./lib/store-routes')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -177,7 +180,7 @@ const storeOver = (store) => {
     visible: () => store.getters.visible(state, {}, rootState, rootGetters),
     dispatch,
     commit,
-    load: (routes) => store.actions.load({ state, commit, dispatch, rootState, rootGetters }, routes),
+    load: (routes) => through('the peeks store load', () => store.actions.load({ state, commit: harnessOwn(commit), dispatch: harnessOwn(dispatch), rootState, rootGetters }, routes)),
   })
 }
 
@@ -500,17 +503,27 @@ const synthetic = (m) => {
     ['a peek that fails leaves its line null and the load resolves', async (store) => {
       const warn = console.warn
       let warned = 0
+      const expectedFailure = new Error('no such table')
+      let resolved = true
 
       console.warn = () => { warned += 1 }
 
       try {
-        store.root.database = { query: () => Promise.reject(new Error('no such table')) }
-        await store.load(ROUTES)
+        store.root.database = { query: () => Promise.reject(expectedFailure) }
+
+        // This named non-rejection contract observes only the injected read failure; any unrelated subject or harness crash remains uncredited.
+        await store.load(ROUTES).catch((error) => {
+          if (!isSubjectThrow(error) || error.original !== expectedFailure) {
+            throw error
+          }
+
+          resolved = false
+        })
       } finally {
         console.warn = warn
       }
 
-      return same([store.state.lines['/information'], store.state.lines['/habitability'], warned], [null, null, 2])
+      return same([resolved, store.state.lines['/information'], store.state.lines['/habitability'], warned], [true, null, null, 2])
     }],
   ]
 
@@ -529,6 +542,8 @@ const synthetic = (m) => {
 
 // A copy of the utilities and store folders in the temp folder in which `file` ('utilities/peeks.js') has `from` replaced by `to`.
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(file)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-peeks-mutant-'))
 
   ;['utilities', 'store'].forEach((folder) => fs.cpSync(path.join(rendererDirectory, folder), path.join(directory, folder), { recursive: true }))
@@ -553,43 +568,43 @@ const SETTLEMENT = 'inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID =
 const KNOWN = 'where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}`)\n\n  return found ? found.Systems : null'
 
 const MUTATIONS = [
-  ['the Transport read leaves out the race of the ships', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and FCT_Ship.RaceID = ${RaceID}', '')],
-  ['the Transport read leaves out the game of the ships', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace('FCT_Ship.GameID = ${GameID} and ', '')],
-  ['the Transport read counts a shipping line\'s ships', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and FCT_Fleet.ShippingLine = 0', '')],
-  ['the Transport read counts a ship that cannot move', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and FCT_ShipClass.MaxSpeed > 1', '')],
-  ['the Transport read counts ships with no hold and no colony bay', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and (FCT_ShipClass.CargoCapacity > 0 or FCT_ShipClass.ColonistCapacity > 0)', '')],
-  ['the Transport cargo of an unrecorded capacity is 0, not unknown', 'utilities/peeks.js', 'case when count(FCT_ShipClass.CargoCapacity) = count(*) then coalesce(sum(FCT_ShipClass.CargoCapacity), 0) else null end as Cargo', 'coalesce(sum(FCT_ShipClass.CargoCapacity), 0) as Cargo'],
-  ['the Transport colonists of an unrecorded capacity are 0, not unknown', 'utilities/peeks.js', 'case when count(FCT_ShipClass.ColonistCapacity) = count(*) then coalesce(sum(FCT_ShipClass.ColonistCapacity), 0) else null end as Colonists', 'coalesce(sum(FCT_ShipClass.ColonistCapacity), 0) as Colonists'],
-  ['the Transport line shows an unknown cargo as a line', 'utilities/peeks.js', '!isKnownNumber(totals.cargo) || ', ''],
-  ['the Transport line shows no ships as "0 ships"', 'utilities/peeks.js', '    if (totals.ships === 0) {\n      return \'No transport ships\'\n    }\n\n', ''],
-  ['the Colonization read counts the records, not the bodies that hold them', 'utilities/peeks.js', 'count(distinct FCT_Population.SystemBodyID) as Bodies', 'count(FCT_Population.SystemBodyID) as Bodies'],
-  ['the Colonization read counts the records, not the systems that hold the bodies', 'utilities/peeks.js', 'count(distinct FCT_SystemBody.SystemID) as Settled', 'count(FCT_SystemBody.SystemID) as Settled'],
-  ['the Colonization read counts only the records with people', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('not in (0, 4, 5)', 'not in (0, 4, 5) and FCT_Population.Population > 0')],
-  ['the Colonization read leaves out the race of the surveyed systems', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('FCT_RaceSysSurvey.RaceID = ${RaceID} and ', '')],
-  ['the Colonization read leaves out the game of the surveyed systems', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_RaceSysSurvey.GameID = ${GameID}', '')],
-  ['the Colonization read leaves out the game of the records and of the bodies', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('FCT_Population.GameID = ${GameID} and ', '').replace(' and FCT_SystemBody.GameID = ${GameID}', '')],
-  ['the Colonization read leaves out the race of the records', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_Population.RaceID = ${RaceID}', '')],
-  ['the Colonization read counts a body of a class the planner leaves out', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_SystemBody.BodyClass in (1, 2, 3, 5)', '')],
-  ['the Colonization read counts a body of a type the planner leaves out', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_SystemBody.BodyTypeID not in (0, 4, 5)', '')],
-  ['the Colonization read scans the system bodies', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('where FCT_Population.GameID', 'where exists (select 1 from FCT_SystemBody) and FCT_Population.GameID')],
-  ['the known systems are counted for every race', 'utilities/peeks.js', KNOWN, KNOWN.replace(' and FCT_RaceSysSurvey.RaceID = ${RaceID}', '')],
-  ['the known systems are counted for every game', 'utilities/peeks.js', KNOWN, KNOWN.replace('FCT_RaceSysSurvey.GameID = ${GameID} and ', '')],
-  ['the Colonization line shows an unknown known-system count', 'utilities/peeks.js', 'return found && isKnownNumber(known) ? {', 'return found ? {'],
-  ['the Colonization line shows no known system as "0 colonised bodies in 0 of 0"', 'utilities/peeks.js', 'totals.known === 0 ? \'No known systems\' : ', ''],
-  ['the Galaxy Map line stops sharing the known-systems read', 'utilities/peeks.js', 'const Systems = await knownSystems(database, GameID, RaceID)', 'const { Systems } = await row(database, `select count(*) as Systems from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID} and 1 = 1`)'],
-  ['the store keeps a line whatever the route (it loads every time)', 'store/peeks.js', '!(route in state.lines) && ', ''],
-  ['the store ignores the race', 'store/peeks.js', '${GameID}:${RaceID}:${rootState', '${GameID}:${rootState'],
-  ['the store ignores the game', 'store/peeks.js', '${databaseId(database)}:${GameID}:', '${databaseId(database)}:'],
-  ['the store ignores a new database', 'store/peeks.js', '`${databaseId(database)}:', '`'],
-  ['the store ignores the history revision', 'store/peeks.js', '${rootState.history.revision}:${separator}', '${separator}'],
-  ['the store ignores the separator', 'store/peeks.js', '${rootState.history.revision}:${separator}`', '${rootState.history.revision}`'],
-  ['the store lets a failing peek reject the load', 'store/peeks.js', 'console.warn(`Menu line for ${route} failed`, error)', 'throw error'],
-  ['the store drops one route\'s line (each line set replaces the lines before it)', 'store/peeks.js', 'state.lines = { ...state.lines, [route]: line }', 'state.lines = { [route]: line }', 'Store: a game change loads the lines again'],
-  ['the store loads the lines of a refused save', 'store/peeks.js', 'if (rootGetters[\'capabilities/refused\']) {', 'if (false) {', 'Store: a refused save loads no line, sends no statement and drops the lines of an earlier copy, and the lines load again once it is no longer refused'],
-  ['the store does not wait for the capability check', 'store/peeks.js', "await dispatch('capabilities/preflight', null, { root: true })", '', 'Store: a refusal that is known only after the capability check answers, while the lines wait for it, loads no line and sends no statement'],
-  ['the store asks for the capability check without the root route', 'store/peeks.js', "dispatch('capabilities/preflight', null, { root: true })", "dispatch('capabilities/preflight')", 'Store: the capability check is asked for through the root route, as a namespaced module reaches the capabilities module, and the call is accepted'],
-  ['the store publishes the lines read after the save is refused', 'store/peeks.js', "&& !rootGetters['capabilities/refused']) {\n          commit('set', { route, line })", ") {\n          commit('set', { route, line })", 'Store: a refusal that is known while a line is being read publishes none of the lines read'],
-  ['the store shows the lines published before the copy was refused', 'store/peeks.js', "return rootGetters['capabilities/refused'] ? {} : state.lines", 'return state.lines', 'Store: the lines of the flyout are none once the copy is refused, though they were published before, and are those published again once it is not refused'],
+  ['the Transport read leaves out the race of the ships', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and FCT_Ship.RaceID = ${RaceID}', ''), ['Transport: its numbers are']],
+  ['the Transport read leaves out the game of the ships', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace('FCT_Ship.GameID = ${GameID} and ', ''), ['Transport: the same race id in game 2']],
+  ['the Transport read counts a shipping line\'s ships', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and FCT_Fleet.ShippingLine = 0', ''), ['Transport: a race whose only ship sails']],
+  ['the Transport read counts a ship that cannot move', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and FCT_ShipClass.MaxSpeed > 1', ''), ['Transport: its numbers are']],
+  ['the Transport read counts ships with no hold and no colony bay', 'utilities/peeks.js', TRANSPORT_WHERE, TRANSPORT_WHERE.replace(' and (FCT_ShipClass.CargoCapacity > 0 or FCT_ShipClass.ColonistCapacity > 0)', ''), ['Transport: its numbers are']],
+  ['the Transport cargo of an unrecorded capacity is 0, not unknown', 'utilities/peeks.js', 'case when count(FCT_ShipClass.CargoCapacity) = count(*) then coalesce(sum(FCT_ShipClass.CargoCapacity), 0) else null end as Cargo', 'coalesce(sum(FCT_ShipClass.CargoCapacity), 0) as Cargo', ['Transport: a class with no recorded cargo capacity']],
+  ['the Transport colonists of an unrecorded capacity are 0, not unknown', 'utilities/peeks.js', 'case when count(FCT_ShipClass.ColonistCapacity) = count(*) then coalesce(sum(FCT_ShipClass.ColonistCapacity), 0) else null end as Colonists', 'coalesce(sum(FCT_ShipClass.ColonistCapacity), 0) as Colonists', ['Transport: a class with no recorded colonist capacity']],
+  ['the Transport line shows an unknown cargo as a line', 'utilities/peeks.js', '!isKnownNumber(totals.cargo) || ', '', ['Transport: a class with no recorded cargo capacity']],
+  ['the Transport line shows no ships as "0 ships"', 'utilities/peeks.js', '    if (totals.ships === 0) {\n      return \'No transport ships\'\n    }\n\n', '', ['Transport: a race whose only ship sails']],
+  ['the Colonization read counts the records, not the bodies that hold them', 'utilities/peeks.js', 'count(distinct FCT_Population.SystemBodyID) as Bodies', 'count(FCT_Population.SystemBodyID) as Bodies', ['Colonization: race 10 has']],
+  ['the Colonization read counts the records, not the systems that hold the bodies', 'utilities/peeks.js', 'count(distinct FCT_SystemBody.SystemID) as Settled', 'count(FCT_SystemBody.SystemID) as Settled', ['Colonization: race 10 has']],
+  ['the Colonization read counts only the records with people', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('not in (0, 4, 5)', 'not in (0, 4, 5) and FCT_Population.Population > 0'), ['Colonization: race 10 has']],
+  ['the Colonization read leaves out the race of the surveyed systems', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('FCT_RaceSysSurvey.RaceID = ${RaceID} and ', ''), ['Colonization: race 10 has']],
+  ['the Colonization read leaves out the game of the surveyed systems', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_RaceSysSurvey.GameID = ${GameID}', ''), ['Colonization: race 10 has']],
+  ['the Colonization read leaves out the game of the records and of the bodies', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('FCT_Population.GameID = ${GameID} and ', '').replace(' and FCT_SystemBody.GameID = ${GameID}', ''), ['Colonization: the same race id in game 2']],
+  ['the Colonization read leaves out the race of the records', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_Population.RaceID = ${RaceID}', ''), ['Colonization: race 10 has']],
+  ['the Colonization read counts a body of a class the planner leaves out', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_SystemBody.BodyClass in (1, 2, 3, 5)', ''), ['Colonization: race 10 has']],
+  ['the Colonization read counts a body of a type the planner leaves out', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace(' and FCT_SystemBody.BodyTypeID not in (0, 4, 5)', ''), ['Colonization: race 10 has']],
+  ['the Colonization read scans the system bodies', 'utilities/peeks.js', SETTLEMENT, SETTLEMENT.replace('where FCT_Population.GameID', 'where exists (select 1 from FCT_SystemBody) and FCT_Population.GameID'), ['The lines read FCT_SystemBody only by primary key from the race\'s own population records']],
+  ['the known systems are counted for every race', 'utilities/peeks.js', KNOWN, KNOWN.replace(' and FCT_RaceSysSurvey.RaceID = ${RaceID}', ''), ['Colonization: race 10 has']],
+  ['the known systems are counted for every game', 'utilities/peeks.js', KNOWN, KNOWN.replace('FCT_RaceSysSurvey.GameID = ${GameID} and ', ''), ['Colonization: the same race id in game 2']],
+  ['the Colonization line shows an unknown known-system count', 'utilities/peeks.js', 'return found && isKnownNumber(known) ? {', 'return found ? {', ['Unknown is not zero:']],
+  ['the Colonization line shows no known system as "0 colonised bodies in 0 of 0"', 'utilities/peeks.js', 'totals.known === 0 ? \'No known systems\' : ', '', ['Colonization: a race that knows no system']],
+  ['the Galaxy Map line stops sharing the known-systems read', 'utilities/peeks.js', 'const Systems = await knownSystems(database, GameID, RaceID)', 'const { Systems } = await row(database, `select count(*) as Systems from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID} and 1 = 1`)', ['The Galaxy Map line and the Colonization line share']],
+  ['the store keeps a line whatever the route (it loads every time)', 'store/peeks.js', '!(route in state.lines) && ', '', ['Store: lines are kept:']],
+  ['the store ignores the race', 'store/peeks.js', '${GameID}:${RaceID}:${rootState', '${GameID}:${rootState', ['Store: a race change loads']],
+  ['the store ignores the game', 'store/peeks.js', '${databaseId(database)}:${GameID}:', '${databaseId(database)}:', ['Store: a game change loads the lines again']],
+  ['the store ignores a new database', 'store/peeks.js', '`${databaseId(database)}:', '`', ['Store: a new database']],
+  ['the store ignores the history revision', 'store/peeks.js', '${rootState.history.revision}:${separator}', '${separator}', ['Store: a recorded snapshot']],
+  ['the store ignores the separator', 'store/peeks.js', '${rootState.history.revision}:${separator}`', '${rootState.history.revision}`', ['Store: the thousands separator setting']],
+  ['the store lets a failing peek reject the load', 'store/peeks.js', 'console.warn(`Menu line for ${route} failed`, error)', 'throw error', ['Store: a peek that fails']],
+  ['the store drops one route\'s line (each line set replaces the lines before it)', 'store/peeks.js', 'state.lines = { ...state.lines, [route]: line }', 'state.lines = { [route]: line }', ['Store: a game change loads the lines again']],
+  ['the store loads the lines of a refused save', 'store/peeks.js', 'if (rootGetters[\'capabilities/refused\']) {', 'if (false) {', ['Store: a refused save loads no line, sends no statement and drops the lines of an earlier copy, and the lines load again once it is no longer refused']],
+  ['the store does not wait for the capability check', 'store/peeks.js', "await dispatch('capabilities/preflight', null, { root: true })", '', ['Store: a refusal that is known only after the capability check answers, while the lines wait for it, loads no line and sends no statement']],
+  ['the store asks for the capability check without the root route', 'store/peeks.js', "dispatch('capabilities/preflight', null, { root: true })", "dispatch('capabilities/preflight')", ['Store: the capability check is asked for through the root route, as a namespaced module reaches the capabilities module, and the call is accepted']],
+  ['the store publishes the lines read after the save is refused', 'store/peeks.js', "&& !rootGetters['capabilities/refused']) {\n          commit('set', { route, line })", ") {\n          commit('set', { route, line })", ['Store: a refusal that is known while a line is being read publishes none of the lines read']],
+  ['the store shows the lines published before the copy was refused', 'store/peeks.js', "return rootGetters['capabilities/refused'] ? {} : state.lines", 'return state.lines', ['Store: the lines of the flyout are none once the copy is refused, though they were published before, and are those published again once it is not refused']],
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -612,10 +627,27 @@ const runChecks = async (modules, wanted = () => true) => {
   return results
 }
 
-const failedChecks = async (modules) => (await runChecks(modules)).filter(([, result]) => result !== true)
+const failedChecks = async (modules, fails, name) => {
+  const named = synthetic(modules).filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+  const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+
+  if (absent.length) {
+    throw new Error(`${name}: no check begins ${absent.join('; ')}`)
+  }
+
+  return judged(await creditChecks(named.map(([id, test]) => ({
+    id,
+    name: id,
+    run: async () => {
+      const held = await test()
+
+      assert.ok(held === true, typeof held === 'string' ? held : `${id} returned ${held}`)
+    },
+  })), {}), name)
+}
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], budget: 20, laps: 7, mutations: true, only: [] }
+  const options = { modded: fixtureTriple(), stock: null, budget: 20, laps: 7, mutations: mutating(), only: [] }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -870,18 +902,17 @@ const run = async () => {
 
   const mutations = options.mutations ? MUTATIONS.filter(([label]) => selected(label)) : []
 
-  for (const [label, file, from, to, named] of mutations) {
+  for (const [label, file, from, to, fails] of mutations) {
     let directory
 
     try {
       directory = mutatedCopy(file, from, to)
 
       const mutants = await loadUtilities(MODULES, { stubs: STUBS, directory: path.join(directory, 'utilities') })
-      const failed = await failedChecks(mutants)
-      const own = failed.find(([name]) => name === named)
-      const caught = named ? Boolean(own) && !String(own[1]).startsWith('threw ') : failed.length > 0
+      const failed = await failedChecks(mutants, fails, label)
+      const caught = fails.every((start) => caughtBy(failed, failed.filter(({ id }) => id.startsWith(start)).map(({ id }) => id), { name: label }))
 
-      check(`mutation caught: ${label}`, caught ? true : named ? `${named} ${own ? own[1] : 'still passes'}` : 'every check still passes', `${failed.length} checks fail${own ? `; ${named}: ${own[1]}` : ''}`)
+      check(`mutation caught: ${label}`, caught ? true : `the named checks still pass: ${fails.join('; ')}`, failed.map(({ id, detail }) => `${id}: ${detail}`).join('; '))
     } catch (error) {
       check(`mutation caught: ${label}`, error.message)
     } finally {
@@ -897,10 +928,15 @@ const run = async () => {
 
     const load = watchLoad()
 
-    await measureSave('modded', options.modded, options, modules, load)
-    await measureSave('stock', options.stock, options, modules, load)
-    await compareSave('modded', options.modded, modules, planner)
-    await compareSave('stock', options.stock, modules, planner)
+    const named = [['modded', options.modded], ['stock', options.stock]].filter(([, triple]) => triple)
+
+    for (const [label, triple] of named) {
+      await measureSave(label, triple, options, modules, load)
+    }
+
+    for (const [label, triple] of named) {
+      await compareSave(label, triple, modules, planner)
+    }
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

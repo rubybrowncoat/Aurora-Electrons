@@ -17,8 +17,11 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -68,11 +71,15 @@ const drain = (iterator) => {
 }
 
 // A check that throws has not held, and says so.
-const settle = async (test) => {
+const settle = async (test, valueOnly = false) => {
   try {
     return await test()
   } catch (error) {
-    return `threw ${error.message}`
+    if (valueOnly && (kindOf(error) !== 'assertion' || isSubjectThrow(error))) {
+      throw error
+    }
+
+    return valueOnly ? error.message : `threw ${error.message}`
   }
 }
 
@@ -218,7 +225,7 @@ const syntheticChecks = (m) => {
   const checks = []
   const add = (name, test) => checks.push([name, test])
 
-  pv.registerRule({ id: 'check.figure', versions: ['2.7.x'], note: 'A figure of this check.', verification: 'confirmed' })
+  pv.registerRule({ id: 'check.figure', versions: ['3.2.x'], note: 'A figure of this check.', verification: 'confirmed' })
 
   const figure = (statusName, extra = {}) => (statusName === 'unavailable' ? pv.unavailable({ rule: 'check.figure', missing: ['a value'] }) : pv.envelope({ value: 5, status: statusName, rule: 'check.figure', inputs: { present: ['a'] }, units: 'km/s', ...extra }))
 
@@ -449,7 +456,9 @@ const syntheticChecks = (m) => {
     const tech = await loaded(2, ['create table FCT_RaceTech (GameID integer, RaceID integer, TechID integer)', 'insert into FCT_RaceTech values (1, 2, 9), (1, 2, 10), (1, 3, 10)'])
     const engines = tech.lines[ENGINE]
 
-    return same([engines.levels.map((item) => [item.id, item.obsolete]), engines.pick.id], [[[9, null], [10, null]], 10])
+    assert.deepEqual([engines.levels.map((item) => [item.id, item.obsolete]), engines.pick.id], [[[9, null], [10, null]], 10])
+
+    return true
   })
 
   add('loader: a save with FCT_RaceTech.Obsolete gives the flag of each level', async () => {
@@ -798,7 +807,7 @@ const PAGE_MUTATIONS = [
 const MUTATIONS = [
   { name: 'the hypothetical assumptions of a result taken with the others', file: 'tech-scenarios.js', find: 'result.assumptions.filter((assumption) => assumption.startsWith(HYPOTHETICAL_PREFIX))))]', replace: 'result.assumptions))]', fails: ['marking: the hypothetical assumptions of some results are listed once'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the obsolete flag read by its table column', file: 'race-tech.js', find: '(columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `null as ${name}`)', replace: '`${RACE_TECH_TABLE}.${name} as ${name}`', fails: ['loader: a save without'] },
+  { name: 'an absent obsolete column supplies a set flag', file: 'race-tech.js', find: '(columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `null as ${name}`)', replace: '(columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `1 as ${name}`)', fails: ['loader: a save without'] },
   { name: 'an absent obsolete flag read as false', file: 'race-tech.js', find: 'obsolete: row.Obsolete === null ? null : Boolean(row.Obsolete),', replace: 'obsolete: Boolean(row.Obsolete),', fails: ['loader: a save without'] },
   { name: 'the game\'s pick taken by the highest figure', file: 'race-tech.js', find: '!best || item.cost > best.cost ? item : best', replace: '!best || item.info > best.info ? item : best', fails: ['pick: where development order and figure disagree'] },
   { name: 'the game\'s pick taken by the lowest figure', file: 'race-tech.js', find: '!best || item.cost > best.cost ? item : best', replace: '!best || item.info < best.info ? item : best', fails: ['pick: the game designs with the researched level of the highest development cost', 'pick: where development order and figure disagree'] },
@@ -830,6 +839,8 @@ const MUTATIONS = [
 ]
 
 const mutatedCopy = (file, from, to) => {
+  refusePlanting(file)
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-race-tech-mutant-'))
 
   fs.cpSync(utilitiesDirectory, directory, { recursive: true })
@@ -850,7 +861,7 @@ const mutatedCopy = (file, from, to) => {
 // ---------- the saves ----------
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { modded: fixtureTriple(), stock: null, mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -895,6 +906,9 @@ const openSave = (file) => new Promise((resolve, reject) => {
     })
   })
 })
+
+// The first id of the techs the owner's mod adds to the baseline (game 0): the shipped saves of the game hold none from this id on, and the fixture holds 262 of 74 types.
+const MOD_ID = 500000
 
 const rowsOf = async (database, sql, replacements = {}) => (await database.query(sql, { replacements }))[0]
 
@@ -941,20 +955,23 @@ const saveChecks = async (m, database, { GameID, RaceID }, label) => {
     add(`${rt.techFamily(typeId).name} defaults to the lowest figure, the level of the highest development cost (${entry.pick.info} of ${entry.levels.length})`, entry.pick.info === Math.min(...infos) && entry.pick.cost === Math.max(...entry.levels.map((item) => item.cost)) ? true : short(entry.levels.map((item) => [item.cost, item.info])))
   }
 
-  add('the pick is the best figure the registry names, on every line that has a direction', (() => {
-    const wrong = lines.filter((entry) => entry.pick && rt.techFamily(entry.typeId).better !== 'none' && entry.pick.info !== (rt.techFamily(entry.typeId).better === 'higher' ? Math.max : Math.min)(...entry.levels.map((item) => item.info))).map((entry) => entry.typeId)
+  // The owner's mod adds baseline levels from MOD_ID on, whose figures need not follow the development cost (on the fixture a minimum cloak size of 0.1 costs less than one of 8), and the game's pick is the highest cost whatever the figure, which the groups above check: a line that holds a level of the mod is left out here and named in the detail.
+  const modded = lines.filter((entry) => entry.levels.some((item) => item.id >= MOD_ID)).map((entry) => entry.typeId)
+
+  add('the pick is the best figure the registry names, on every line that has a direction and no level of the mod', (() => {
+    const wrong = lines.filter((entry) => !modded.includes(entry.typeId) && entry.pick && rt.techFamily(entry.typeId).better !== 'none' && entry.pick.info !== (rt.techFamily(entry.typeId).better === 'higher' ? Math.max : Math.min)(...entry.levels.map((item) => item.info))).map((entry) => entry.typeId)
 
     return wrong.length ? `lines ${wrong.join()} default to another figure than the registry's best` : true
-  })())
+  })(), `${modded.length} lines hold a level of the mod`)
 
   // The registry against the save.
   const names = new Map((await rowsOf(database, 'select TechTypeID, Description from DIM_TechType')).map((row) => [row.TechTypeID, row.Description]))
 
   add('the registry\'s names are DIM_TechType\'s descriptions', typeIds.every((typeId) => names.get(typeId) === rt.techFamily(typeId).name) || typeIds.filter((typeId) => names.get(typeId) !== rt.techFamily(typeId).name).map((typeId) => `${typeId}: ${names.get(typeId)}`).join('; '), `${typeIds.length} types`)
 
-  const baseline = await rowsOf(database, `select TechTypeID, DevelopCost, AdditionalInfo from FCT_TechSystem where GameID = 0 and AdditionalInfo is not null and TechTypeID in (${typeIds.join(', ')}) order by TechTypeID, DevelopCost, TechSystemID`)
+  const baseline = await rowsOf(database, `select TechTypeID, DevelopCost, AdditionalInfo from FCT_TechSystem where GameID = 0 and AdditionalInfo is not null and TechSystemID < ${MOD_ID} and TechTypeID in (${typeIds.join(', ')}) order by TechTypeID, DevelopCost, TechSystemID`)
 
-  add('the baseline rows of a type run the way the registry says as their development cost rises', (() => {
+  add('the baseline rows of the game of a type run the way the registry says as their development cost rises', (() => {
     const wrong = typeIds.filter((typeId) => {
       const rows = baseline.filter((row) => row.TechTypeID === typeId)
       const { better } = rt.techFamily(typeId)
@@ -1006,7 +1023,7 @@ const saveChecks = async (m, database, { GameID, RaceID }, label) => {
     add(`a candidate of this save chosen from the research graph is hypothetical and marks a result (line ${open.typeId}, ${open.next.name})`, (() => {
       const resolved = ts.resolveChoices(tech, { [open.typeId]: { techId: open.next.id, source: 'scenario' } })[open.typeId]
       const { assumptions } = ts.hypotheticalOf(ts.resolveChoices(tech, { [open.typeId]: { techId: open.next.id, source: 'scenario' } }), [open.typeId])
-      pv.registerRule({ id: 'check.figure', versions: ['2.7.x'], note: 'A figure of this check.', verification: 'confirmed' })
+      pv.registerRule({ id: 'check.figure', versions: ['3.2.x'], note: 'A figure of this check.', verification: 'confirmed' })
       const marked = ts.markHypothetical(pv.envelope({ value: 1, status: 'confirmed', rule: 'check.figure', inputs: { present: ['a'] } }), assumptions)
 
       return resolved.hypothetical && resolved.level.id === open.next.id && resolved.level !== open.pick && marked.status === 'assumed' && ts.isHypothetical(marked) ? true : short([resolved.kind, marked.status])
@@ -1086,7 +1103,7 @@ const run = async () => {
         const failed = []
 
         for (const [checkName, test] of named) {
-          if ((await settle(test)) !== true) {
+          if ((await settle(test, true)) !== true) {
             failed.push(checkName)
           }
         }
@@ -1104,6 +1121,7 @@ const run = async () => {
     }
 
     for (const { name, find, replace, fails } of PAGE_MUTATIONS) {
+      refusePlanting(name)
       const began = Date.now()
 
       try {
@@ -1112,7 +1130,7 @@ const run = async () => {
         const failed = []
 
         for (const [statement, held] of named) {
-          if ((await settle(held)) !== true) {
+          if ((await settle(held, true)) !== true) {
             failed.push(statement)
           }
         }
@@ -1126,7 +1144,7 @@ const run = async () => {
     }
   }
 
-  for (const [label, [file, GameID, RaceID]] of [['modded', options.modded], ['stock', options.stock]]) {
+  for (const [label, [file, GameID, RaceID]] of [['modded', options.modded], ['stock', options.stock]].filter(([, named]) => named)) {
     console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
 
     const database = await openSave(file)

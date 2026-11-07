@@ -6,7 +6,7 @@ import { LOW_RATE_RECIPIENT_HS, REASONS as DONOR_REASONS, fuelDonor, isLowRate, 
 import { columnsOf } from './mine-bootstrap-data'
 import { UNVERIFIED_SAVE, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
-const LEDGER_VERSIONS = ['2.7.x']
+const LEDGER_VERSIONS = ['3.2.x']
 const SECONDS_PER_HOUR = 3600
 
 registerRule({

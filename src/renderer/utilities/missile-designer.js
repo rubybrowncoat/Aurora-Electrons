@@ -16,7 +16,7 @@ export const MAX_ALTERNATIVES = 3
 export const NAME_LENGTH = 80
 export const DESIGNER_KIND = 'planner.missileDesign'
 export const MISSILE_LINK_TYPE = 'missile'
-export const DESIGNER_SCHEMA = 2
+export const DESIGNER_SCHEMA = 3
 const TECH_LINK_TYPE = 'tech'
 const TECH_NAME_LENGTH = 200
 
@@ -28,7 +28,7 @@ export const PLANNER_FIGURE = 'Planner figure'
 export const PLANNER_FIGURE_FORMULA = 'warhead × hit chance × (1 − PD / speed)'
 export const PLANNER_FIGURE_HINT = 'A planner figure, not a game statistic: the warhead strength times the capped hit chance times (1 − PD / speed), per warhead. PD is a point-defence attenuation in km/s, the units of speed, and no verified model of interception. It needs a finite PD of 0 or more, not above the missile speed. The strength and the hit chance are those of one warhead and are not multiplied by the number of warheads.'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 export const DESIGNER_RULES = Object.freeze({ plannerFigure: 'missileDesigner.plannerFigure', manualTech: 'missileDesigner.manualTech', overboost: 'missileDesigner.overboost', size: 'missileDesigner.sizeUnits' })
 
@@ -209,6 +209,7 @@ export const INPUT_ROWS = Object.freeze([
   Object.freeze({ id: 'eccm', label: 'ECCM', unit: 'level', digits: 0, hint: 'The ECCM level of the missile, 0.25 MSP.' }),
   Object.freeze({ id: 'terminal', label: 'Terminal guidance', unit: '×', digits: 2, hint: 'The multiplier on the hit chance, 0.25 MSP; 1 for none.' }),
   Object.freeze({ id: 'retarget', label: 'Retargeting', unit: 'level', digits: 0, hint: 'Retargeting, 0.5 MSP at level 1. A higher level has no saved design to check its size and cost against.' }),
+  Object.freeze({ id: 'lurker', label: 'Lurker', unit: '', digits: 0, hint: 'A lurking missile holds its place until a sensor sees a target. It adds 0.5 MSP, 0.5 BP and 0.5 Boronide.' }),
   Object.freeze({ id: 'laser', label: 'Laser warhead', unit: '', digits: 0, hint: 'A laser warhead keeps the share of the strength its efficiency gives, 0.25 MSP.' }),
 ])
 
@@ -236,7 +237,7 @@ export const rowOf = (id) => INPUT_ROWS.find((row) => row.id === id) || FIGURE_R
 export const GATED_OPTIONS = Object.freeze([
   Object.freeze({ id: 'secondStage', label: 'Second stage', reason: 'A second stage is another saved design: the designer carries the one a seeded design has and builds none.' }),
   Object.freeze({ id: 'shipDecoy', label: 'Ship decoy', reason: 'A decoy missile is carried from a seeded design as it was: its warhead is a decoy and no hit chance is worked out for it.' }),
-  Object.freeze({ id: 'groundPod', label: 'Ground attack pod', reason: 'A ground pod\'s size, cost and Vendarite are not covered by the missile accounting rules, so no figure of it is worked out.' }),
+  Object.freeze({ id: 'groundPod', label: 'Ground attack pod', reason: 'The game no longer designs a ground pod: a design that stores one is read as it was saved, no figure of the pod is worked out, and a design made here has none.' }),
   Object.freeze({ id: 'enhancedRadiation', label: 'Enhanced radiation warhead', reason: 'The multiplier of an enhanced radiation warhead is a design choice the rules do not cover, so its cost is not worked out.' }),
   Object.freeze({ id: 'retargetHigh', label: `Retargeting above level ${VALIDATED_RETARGETING}`, reason: `A retargeting level above ${VALIDATED_RETARGETING} has no saved design to check its size and cost against.` }),
   Object.freeze({ id: 'missileEcm', label: 'Missile ECM', reason: 'A saved design records its missile ECM level, but no size, cost or hit rule here follows from it.' }),
@@ -283,8 +284,8 @@ export const emptyDraft = (name = '') => ({
   geoMsp: '0',
   resolution: '',
   sizeLimit: '0',
-  options: { eccm: false, terminal: false, retarget: false, laser: false },
-  carried: { stageId: 0, stages: 0, shipDecoy: false, groundPod: false, enhancedRadiation: false },
+  options: { eccm: false, terminal: false, retarget: false, lurker: false, laser: false },
+  carried: { stageId: 0, stages: 0, shipDecoy: false, enhancedRadiation: false },
   manual: emptyManual(),
 })
 
@@ -293,7 +294,7 @@ export const savedAlternative = (savedId, name = '') => ({ kind: 'saved', key: '
 
 const copyOf = (value) => JSON.parse(JSON.stringify(value))
 
-// The draft a saved design seeds: its own sizes, counts and options as text, designed with the page's tech lines. What it keeps that the designer cannot change (a second stage, a decoy warhead, a ground pod, an enhanced radiation warhead) is carried. Nothing the save did not store is invented: a thrust the design does not store and its engine does not imply is left blank.
+// The draft a saved design seeds: its own sizes, counts and options as text, designed with the page's tech lines. What it keeps that the designer cannot change (a second stage, a decoy warhead, an enhanced radiation warhead) is carried. A ground pod a stored row records is not: the game's own previous-design selection has no pod to copy, so the draft is the missile without it. Nothing the save did not store is invented: a thrust the design does not store and its engine does not imply is left blank.
 export const seedDraft = (saved, name = '') => {
   const { row, engine } = saved
   const draft = emptyDraft(name || `${row.Name} (reoptimised)`)
@@ -313,8 +314,8 @@ export const seedDraft = (saved, name = '') => {
     emMsp: text(row.MSPEM),
     geoMsp: text(row.MSPGeo),
     resolution: row.SensorResolution > 0 ? text(row.SensorResolution) : '',
-    options: { eccm: row.ECCM > 0, terminal: row.ATG > 1, retarget: row.Retargeting > 0, laser: row.LaserWarhead > 0 },
-    carried: { stageId: row.SecondStageID > 0 ? row.SecondStageID : 0, stages: row.SecondStageID > 0 || row.NumSS > 0 ? Number(row.NumSS) || 0 : 0, shipDecoy: row.ShipDecoy === 1, groundPod: row.GroundShots > 0, enhancedRadiation: saved.enhancedRadiation },
+    options: { eccm: row.ECCM > 0, terminal: row.ATG > 1, retarget: row.Retargeting > 0, lurker: row.Lurker > 0, laser: row.LaserWarhead > 0 },
+    carried: { stageId: row.SecondStageID > 0 ? row.SecondStageID : 0, stages: row.SecondStageID > 0 || row.NumSS > 0 ? Number(row.NumSS) || 0 : 0, shipDecoy: row.ShipDecoy === 1, enhancedRadiation: saved.enhancedRadiation },
   })
 }
 
@@ -454,10 +455,9 @@ const candidateOf = (draft, values, tech, stage) => {
       sizeLimit: values.sizeLimit,
       stage: stage || null,
       stages: stage ? draft.carried.stages : 0,
-      options: { eccm: eccm ? Math.trunc(tech.eccm) : 0, terminal: terminal ? tech.terminal : 1, retarget: retarget ? Math.trunc(tech.retarget) : 0, laser },
+      options: { eccm: eccm ? Math.trunc(tech.eccm) : 0, terminal: terminal ? tech.terminal : 1, retarget: retarget ? Math.trunc(tech.retarget) : 0, lurker: Boolean(asked.lurker), laser },
       tech: { warhead: tech.warhead, laserEfficiency: tech.laserEfficiency, reactor: tech.reactor, active: tech.active, thermal: tech.thermal, em: tech.em, geo: tech.geo },
       sensor: { resolution: values.resolution, emSensitivity: tech.em },
-      groundPod: draft.carried.groundPod,
       enhancedRadiation: draft.carried.enhancedRadiation,
     },
   }
@@ -609,6 +609,7 @@ const savedColumn = ({ role, key, saved, scenario, version, obsolete = false, na
     eccm: inputCell('eccm', row.ECCM, basis),
     terminal: inputCell('terminal', row.ATG, basis),
     retarget: inputCell('retarget', row.Retargeting, basis),
+    lurker: inputCell('lurker', row.Lurker > 0 ? 1 : 0, basis),
     laser: inputCell('laser', row.LaserWarhead > 0 ? 1 : 0, basis),
   }
 
@@ -658,7 +659,7 @@ const designedColumn = ({ role, key, draft, context, scenario, version, name }) 
   const base = { key, role, kind: 'designed', name, source, savedId: null, seededFrom: draft.seededFrom || null, hypothetical: hypothetical.assumptions, assumptions, tech: Object.freeze(levels), errors }
   const carried = draft.carried
   const gatedFrom = (blocked, evaluation) => GATED_OPTIONS.map((option) => {
-    const carriedNow = { secondStage: carried.stages > 0, shipDecoy: carried.shipDecoy, groundPod: carried.groundPod, enhancedRadiation: carried.enhancedRadiation }[option.id]
+    const carriedNow = { secondStage: carried.stages > 0, shipDecoy: carried.shipDecoy, enhancedRadiation: carried.enhancedRadiation }[option.id]
     const refused = blocked.find((entry) => entry.id === option.id) || (evaluation && evaluation.unsupported.find((entry) => entry.option === (option.id === 'retargetHigh' ? 'retarget' : option.id)))
 
     if (option.id === 'retargetHigh') {
@@ -703,6 +704,7 @@ const designedColumn = ({ role, key, draft, context, scenario, version, name }) 
     eccm: inputCell('eccm', candidate.options.eccm, lineBasis('eccm')),
     terminal: inputCell('terminal', candidate.options.terminal, lineBasis('terminal')),
     retarget: inputCell('retarget', candidate.options.retarget, lineBasis('retarget')),
+    lurker: inputCell('lurker', candidate.options.lurker ? 1 : 0, basis),
     laser: inputCell('laser', candidate.options.laser ? 1 : 0, lineBasis('laserEfficiency')),
   }
 
@@ -924,13 +926,13 @@ const entryProblems = (entry, index) => {
     }
   })
 
-  if (!isObject(entry.options) || !['eccm', 'terminal', 'retarget', 'laser'].every((name) => typeof entry.options[name] === 'boolean')) {
+  if (!isObject(entry.options) || !['eccm', 'terminal', 'retarget', 'lurker', 'laser'].every((name) => typeof entry.options[name] === 'boolean')) {
     problems.push(`${where} has its options as true or false`)
   }
 
   const carried = entry.carried
 
-  if (!isObject(carried) || !Number.isInteger(carried.stageId) || carried.stageId < 0 || !Number.isInteger(carried.stages) || carried.stages < 0 || !['shipDecoy', 'groundPod', 'enhancedRadiation'].every((name) => typeof carried[name] === 'boolean')) {
+  if (!isObject(carried) || !Number.isInteger(carried.stageId) || carried.stageId < 0 || !Number.isInteger(carried.stages) || carried.stages < 0 || !['shipDecoy', 'enhancedRadiation'].every((name) => typeof carried[name] === 'boolean')) {
     problems.push(`${where} has what it carries as a stage and flags`)
   }
 
@@ -997,12 +999,25 @@ export const knownDesigns = (designs) => Object.fromEntries((designs.fixture ? d
 
 const idsOf = (payload) => [...new Set([payload.baselineId, ...payload.alternatives.filter((entry) => entry.kind === 'saved').map((entry) => entry.savedId), ...payload.alternatives.filter((entry) => entry.kind === 'designed' && entry.seededFrom).map((entry) => entry.seededFrom)].filter(savedIdOk))]
 
+// A record of an earlier schema, brought to the current one: the tech choices came in schema 2, and in schema 3 the lurker option came in (a design made before it has none) and the ground pod went out of a design made here (a pod is only read from a stored row, never carried by a draft). Anything that is not a draft in the shape of its schema is left for the validation to report.
+const migrated = (payload, fromSchema) => {
+  const next = fromSchema < 2 ? { ...payload, tech: { choices: {} } } : payload
+
+  if (fromSchema >= 3 || !isObject(next) || !Array.isArray(next.alternatives)) {
+    return next
+  }
+
+  const older = (entry) => (isObject(entry) && entry.kind === 'designed' && isObject(entry.options) && isObject(entry.carried) ? { ...entry, options: { ...entry.options, lurker: false }, carried: Object.fromEntries(Object.entries(entry.carried).filter(([name]) => name !== 'groundPod')) } : entry)
+
+  return { ...next, alternatives: next.alternatives.map(older) }
+}
+
 // The adapter of the scenario repository for the designer's inputs. A record is of the branch (policy 'branch'): the research a hypothetical alternative rests on belongs to it. The saved designs it names are links of type 'missile' fingerprinted by their name and figures, so a design that is gone reads as missing and one whose figures changed as changed, and neither is rebound.
 export const designerAdapter = Object.freeze({
   kind: DESIGNER_KIND,
   schema: DESIGNER_SCHEMA,
   validate: problemsOf,
-  migrate: (payload, fromSchema) => (fromSchema < 2 ? { ...payload, tech: { choices: {} } } : payload),
+  migrate: (payload, fromSchema) => migrated(payload, fromSchema),
   fingerprint: (type, row) => (type === TECH_LINK_TYPE ? [type, row.typeId, row.name, row.info, row.info2, row.cost].join('|') : [type, row.name, row.size, row.speed, row.cost, row.warhead].join('|')),
   resolve: (links, context) => links.map((link) => (context && context.known && context.known[link.type] && context.known[link.type][link.id]) || null),
   versions: () => ({ 'missileDesigner.plannerFigure': VERSIONS.join(', ') }),

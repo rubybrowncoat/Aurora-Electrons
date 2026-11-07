@@ -23,6 +23,12 @@
         <v-alert v-else-if="!startPointsKnown" type="warning" outlined dense class="mt-3">
           The starting tech points left are not stored, so whether any can be spent is unknown.<provenance-mark :result="startPointsResult" />
         </v-alert>
+        <v-alert v-if="noResearch.value === true" type="info" outlined dense class="mt-3" data-no-research>
+          {{ noResearchWords }}
+        </v-alert>
+        <v-alert v-else-if="noResearch.value === null" type="warning" outlined dense class="mt-3" data-no-research-unknown>
+          The save does not say whether the race may start research projects, so its idle labs are reported as for any race.
+        </v-alert>
 
         <stat-tiles :tiles="tiles" class="mt-2" />
 
@@ -59,7 +65,8 @@ import { tracked } from '../utilities/load-tracking'
 import { isKnownNumber, UNKNOWN_TEXT } from '../utilities/math'
 import { sectionById } from '../utilities/navigation'
 import { describeResult, isAvailable } from '../utilities/provenance'
-import { ACTIVE, AVAILABLE, availableResult, BLOCKED, buildLines, buildTechGraph, countStatuses, DONE, durationLabel, evaluateResearch, fieldBonuses, freeScientistsResult, groupTechs, labsResults, LOCKED, nextLandingResult, outputResult, QUEUED, researchedResults, researchState, scheduleProjects, startPointsResult } from '../utilities/research'
+import { ACTIVE, AVAILABLE, availableResult, BLOCKED, buildLines, buildTechGraph, countStatuses, DONE, durationLabel, evaluateResearch, fieldBonuses, freeScientistsResult, groupTechs, labsResults, loadResearchConstructs, LOCKED, nextLandingResult, outputResult, QUEUED, researchedResults, researchState, scheduleProjects, startPointsResult } from '../utilities/research'
+import { NO_RESEARCH_UNREAD, NO_RESEARCH_WORDS, loadNoResearchProjects } from '../utilities/research-data'
 
 const INPUT_LABELS = {
   catalogue: 'the technologies',
@@ -72,6 +79,7 @@ const INPUT_LABELS = {
   constructs: 'the ancient constructs',
   game: 'the game clock',
   race: 'the race',
+  noResearch: 'the race\'s No Research Projects setting',
 }
 const SECONDS_PER_YEAR = 31536000
 
@@ -135,7 +143,7 @@ export default {
       const fields = this.catalogue.fields.filter((field) => !toBoolean(field.DoNotDisplay)).sort((a, b) => a.FieldName.localeCompare(b.FieldName))
       const shown = new Set(fields.map((field) => field.ResearchFieldID))
       const visible = (tech) => shown.has(tech.fieldId)
-      const graph = buildTechGraph(this.catalogue.techs)
+      const graph = buildTechGraph(this.catalogue.techs, this.catalogue.categories)
       const state = researchState({
         raceId: this.RaceID,
         researched: this.researched.map((row) => row.TechID),
@@ -250,6 +258,10 @@ export default {
       return tech ? tech.name : null
     },
 
+    noResearchWords() {
+      return NO_RESEARCH_WORDS
+    },
+
     tiles() {
       const { counts, schedule, scientists, output } = this.research
       const tile = (fields, ...results) => ({ ...fields, result: results[0], title: results.map(describeResult).join('. ') })
@@ -261,15 +273,17 @@ export default {
       const busy = isAvailable(labs.assigned) ? this.count(labs.assigned.value) : UNKNOWN_TEXT
       const built = isAvailable(labs.built) ? this.count(labs.built.value) : UNKNOWN_TEXT
       const idle = isAvailable(labs.idle) ? labs.idle.value : null
+      // A race that starts no research projects has no idle labs to flag (the game leaves the event out for it).
+      const exempt = this.noResearch.value === true
       const unrated = output.unknown ? `, ${this.count(output.unknown)} of them with no rate known` : ''
-      const idleText = idle ? `, ${this.count(idle)} idle` : ''
+      const idleText = idle && !exempt ? `, ${this.count(idle)} idle` : ''
       const overText = labs.over ? `, ${this.count(labs.over)} assigned beyond those built` : ''
-      const landing = next.project && isAvailable(next.result) ? `${this.landing(next.project.years)}, in ${durationLabel(next.project.years, this.separator)}` : ''
+      const landing = next.project && isAvailable(next.result) ? `about ${this.landing(next.project.years)}, in ${durationLabel(next.project.years, this.separator)}` : ''
       const nothing = next.unknown ? `${this.count(next.unknown)} ${plural(next.unknown, 'project has', 'projects have')} no landing time${next.causes.length ? `, missing ${next.causes.join(', ')}` : ''}` : schedule.length ? 'Every project is paused or has no scientist or rate' : 'No research project is under way'
 
       return [
         tile({ label: 'Researched', value: `${this.count(done.done.value)} of ${this.count(done.reachable.value)}`, note: `${share}${isAvailable(done.share) ? ' of what the race can research' : ': nothing is reachable to measure against'}${counts[BLOCKED] ? `, ${this.count(counts[BLOCKED])} more out of reach` : ''}`, icon: 'mdi-check-circle', iconColor: 'primary' }, done.done, done.share),
-        tile({ label: 'Research output', value: isAvailable(output.result) ? `${this.count(output.result.value)} RP a year` : '—', note: `${this.count(output.projects)} ${plural(output.projects, 'project', 'projects')}${unrated}, ${busy} of ${built} labs busy${idleText}${overText}`, icon: idle ? 'mdi-alert' : null, iconColor: 'warning' }, output.result, labs.assigned, labs.built, labs.idle),
+        tile({ label: 'Research output', value: isAvailable(output.result) ? `${this.count(output.result.value)} RP a year` : '—', note: `${this.count(output.projects)} ${plural(output.projects, 'project', 'projects')}${unrated}, ${busy} of ${built} labs busy${idleText}${overText}`, icon: idle && !exempt ? 'mdi-alert' : null, iconColor: 'warning' }, output.result, labs.assigned, labs.built, labs.idle),
         next.project ? tile({ label: 'Next to land', value: next.project.Name, note: isAvailable(next.result) ? `${landing}${next.unknown ? `; ${this.count(next.unknown)} ${plural(next.unknown, 'project', 'projects')} with no landing time could land first` : ''}` : `Landing date unavailable: ${next.result.inputs.missing.join(', ')}` }, next.result) : tile({ label: 'Next to land', value: next.unknown ? '—' : 'Nothing running', note: nothing }, next.result),
         tile({ label: 'Available now', value: `${this.count(availableResult(counts).value)} ${plural(counts[AVAILABLE], 'technology', 'technologies')}`, note: `${this.count(freeScientistsResult(this.scientists).value)} free ${plural(scientists.total, 'scientist', 'scientists')} to run them` }, availableResult(counts), freeScientistsResult(this.scientists)),
       ]
@@ -347,16 +361,18 @@ export default {
     catalogue: {
       get: tracked('catalogue', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return { fields: [], techs: [], eligible: [] }
+          return { fields: [], categories: [], techs: [], eligible: [] }
         }
 
         const [fields] = await this.database.query('select DIM_ResearchField.ResearchFieldID, DIM_ResearchField.FieldName, DIM_ResearchField.Abbreviation, DIM_ResearchField.DoNotDisplay from DIM_ResearchField')
+        const [categories] = await this.database.query('select DIM_ResearchCategories.CategoryID, DIM_ResearchCategories.Name from DIM_ResearchCategories')
         const eligible = await this.database.query(`select FCT_EligibleProjects.TechSystemID from FCT_EligibleProjects where FCT_EligibleProjects.GameID = ${this.GameID} and FCT_EligibleProjects.RaceID = ${this.RaceID}`).then(([rows]) => rows.map((row) => row.TechSystemID))
-        const [techs] = await this.database.query(`select FCT_TechSystem.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.TechDescription, FCT_TechSystem.DevelopCost, FCT_TechSystem.RaceID, FCT_TechSystem.Prerequisite1, FCT_TechSystem.Prerequisite2, FCT_TechSystem.RuinOnly, FCT_TechSystem.AutomaticResearch, FCT_TechSystem.StartingSystem, FCT_TechSystem.ConventionalSystem, FCT_TechSystem.TechTypeID, DIM_TechType.Description as TypeName, DIM_TechType.FieldID from FCT_TechSystem inner join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_TechSystem.GameID = 0${eligible.length ? ` or FCT_TechSystem.TechSystemID in (${eligible.join(', ')})` : ''}`)
+        // The techs the game loads: the baseline (GameID 0) and those of the game, of which the race's own designs belong to its list beside the baseline and the alien projects it is eligible for.
+        const [techs] = await this.database.query(`select FCT_TechSystem.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.TechDescription, FCT_TechSystem.DevelopCost, FCT_TechSystem.RaceID, FCT_TechSystem.CategoryID, FCT_TechSystem.Prerequisite1, FCT_TechSystem.Prerequisite2, FCT_TechSystem.RuinOnly, FCT_TechSystem.AutomaticResearch, FCT_TechSystem.StartingSystem, FCT_TechSystem.ConventionalSystem, FCT_TechSystem.TechTypeID, DIM_TechType.Description as TypeName, DIM_TechType.FieldID from FCT_TechSystem inner join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_TechSystem.GameID = 0 or (FCT_TechSystem.GameID = ${this.GameID} and FCT_TechSystem.RaceID = ${this.RaceID})${eligible.length ? ` or FCT_TechSystem.TechSystemID in (${eligible.join(', ')})` : ''}`)
 
-        return Object.freeze({ fields, techs: Object.freeze(techs), eligible })
+        return Object.freeze({ fields, categories, techs: Object.freeze(techs), eligible })
       }),
-      default: { fields: [], techs: [], eligible: [] },
+      default: { fields: [], categories: [], techs: [], eligible: [] },
     },
 
     researched: {
@@ -372,7 +388,7 @@ export default {
       default: [],
     },
 
-    // Each running project with its colony, scientist and the labs' output; RP a year follows from them.
+    // Processor inputs for rates and finish forecasts: unlike the game's list display, the local construct applies even while dormant.
     projects: {
       get: tracked('projects', async function () {
         const blocked = this.blockedBonuses
@@ -381,7 +397,8 @@ export default {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_ResearchProject.ProjectID, FCT_ResearchProject.PopulationID, FCT_ResearchProject.TechID, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResSpecID as FieldID, FCT_ResearchProject.ResearchPointsRequired, FCT_ResearchProject.Pause, FCT_ResearchProject.AssignNew, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, FCT_Population.PopName, FCT_Commander.CommanderID, FCT_Commander.Name as ScientistName, FCT_Commander.ResSpecID as ScientistField, case when JOI_Research.CommanderID is null then 1 else JOI_Research.BonusValue end as ResearchBonus, case when JOI_Admin.CommanderID is null then 0 else JOI_Admin.BonusValue end as MaxLabs, FCT_Species.ResearchRateModifier * FCT_Race.Research * FCT_Race.EconomicProdModifier * FCT_Population.Efficiency * (1 - FCT_SystemBody.RadiationLevel / 10000.0) * (1 - FCT_Population.UnrestPoints / 100.0) * DIM_PopPoliticalStatus.ProductionMod * (FCT_Game.ResearchSpeed / 100.0) as OutputPerLab, FCT_AncientConstruct.ResearchField as LocalConstructField, FCT_AncientConstruct.ResearchBonus as LocalConstructBonus from FCT_ResearchProject
+        // Only an absent percentage or administration bonus row defaults to 1 or 0; a present NULL stays unknown.
+        const [rows] = await this.database.query(`select FCT_ResearchProject.ProjectID, FCT_ResearchProject.PopulationID, FCT_ResearchProject.TechID, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResSpecID as FieldID, FCT_ResearchProject.ResearchPointsRequired, FCT_ResearchProject.Pause, FCT_ResearchProject.AssignNew, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, FCT_Population.PopName, FCT_Commander.CommanderID, FCT_Commander.Name as ScientistName, FCT_Commander.ResSpecID as ScientistField, case when JOI_Research.CommanderID is null then 1 else JOI_Research.BonusValue end as ResearchBonus, case when JOI_Admin.CommanderID is null then 0 else JOI_Admin.BonusValue end as MaxLabs, FCT_Species.ResearchRateModifier, FCT_Race.Research as ResearchBase, FCT_Race.EconomicProdModifier, FCT_Population.Efficiency, FCT_SystemBody.RadiationLevel, FCT_Population.UnrestPoints, DIM_PopPoliticalStatus.ProductionMod, FCT_Game.ResearchSpeed, FCT_AncientConstruct.AncientConstructID as LocalConstructID, FCT_AncientConstruct.ResearchField as LocalConstructField, FCT_AncientConstruct.ResearchBonus as LocalConstructBonus from FCT_ResearchProject
           inner join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID
           inner join FCT_Race on FCT_Race.RaceID = FCT_ResearchProject.RaceID
           inner join FCT_Game on FCT_Game.GameID = FCT_ResearchProject.GameID
@@ -389,7 +406,7 @@ export default {
           inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID
           left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID
           left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus
-          left join FCT_AncientConstruct on FCT_AncientConstruct.SystemBodyID = FCT_Population.SystemBodyID and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID and FCT_AncientConstruct.Active = 1
+          left join FCT_AncientConstruct on FCT_AncientConstruct.SystemBodyID = FCT_Population.SystemBodyID and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID
           left join FCT_Commander on FCT_Commander.GameID = FCT_ResearchProject.GameID and FCT_Commander.RaceID = FCT_ResearchProject.RaceID and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID = FCT_ResearchProject.ProjectID and FCT_Commander.Deceased = 0
           left join FCT_CommanderBonuses as JOI_Research on JOI_Research.CommanderID = FCT_Commander.CommanderID and JOI_Research.BonusID = 3
           left join FCT_CommanderBonuses as JOI_Admin on JOI_Admin.CommanderID = FCT_Commander.CommanderID and JOI_Admin.BonusID = 27
@@ -467,18 +484,14 @@ export default {
       default: [],
     },
 
-    // One row per populated colony of the race on an active ancient construct, as the game counts them.
+    // Each active construct's racial contribution counts colonies with at least a million surface and eligible orbital people.
     constructs: {
       get: tracked('constructs', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_AncientConstruct.ResearchField as FieldID, FCT_AncientConstruct.ResearchBonus from FCT_AncientConstruct
-          inner join FCT_Population on FCT_Population.SystemBodyID = FCT_AncientConstruct.SystemBodyID
-          where FCT_AncientConstruct.GameID = ${this.GameID} and FCT_AncientConstruct.Active = 1 and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.Population >= 1`)
-
-        return rows
+        return loadResearchConstructs(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: [],
     },
@@ -507,6 +520,18 @@ export default {
         return rows[0] || null
       }),
       default: null,
+    },
+
+    // Whether the race starts no research projects (`FCT_Race.NoResearchProjects`): the labs a race of that kind leaves idle are not a fault, and the page says so. The read guards its own column, so a save without it leaves the setting unknown; the page does not rest on it.
+    noResearch: {
+      get: tracked('noResearch', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_RESEARCH_UNREAD
+        }
+
+        return await loadNoResearchProjects(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_RESEARCH_UNREAD,
     },
   },
 }

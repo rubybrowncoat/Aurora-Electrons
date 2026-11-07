@@ -125,12 +125,12 @@ export const saveObservationChoice = (settings, campaignId, RaceID, kind, on) =>
 
 // ---- Reading a save ------------------------------------------------------------------------------------------------
 
-// What one capture takes of a race: { kind, objects: [[id, digest]] } or, when the read failed, { kind, failed }. A kind's reader gives each object's signature (a text of what the object is compared by) and the digest is its hash. The failure is kept, not thrown, so the empire snapshot of the pass does not fail with it.
+// What one capture takes of a race: { kind, objects: [[id, digest]] } or, when the read failed, { kind, failed }. A kind's reader gives each object's signature (a text of what the object is compared by) and the digest is its hash. A reader that has changed what it compares an object by gives `[id, signature, earlier]` for an object whose text differs from the one it made before, `earlier` being that text: the capture holds `[id, digest, earlierDigest]` and a run kept under the earlier digest goes on (`mergeCapture`). The failure is kept, not thrown, so the empire snapshot of the pass does not fail with it.
 export const readObservations = async (database, kind, { GameID, RaceID }, options = undefined) => {
   try {
     const objects = await OBSERVED_KINDS[kind].read(database, { GameID, RaceID }, options)
 
-    return { kind, objects: objects.map(([id, signature]) => [id, hashValue(signature)]) }
+    return { kind, objects: objects.map(([id, signature, earlier]) => [id, hashValue(signature), ...(earlier === undefined ? [] : [hashValue(earlier)])]) }
   } catch (error) {
     return { kind, failed: error }
   }
@@ -165,7 +165,7 @@ const copyRecord = (record) => ({ ...record, captures: record.captures.map((capt
 
 const entryEquals = (a, b) => a.length === b.length && a.every((part, index) => part === b[index])
 
-// Merges one capture ({ t, n, objects: [[id, digest]] }) into a record: { record, changed, outcome }. `outcome` is 'first' (the record had no capture), 'added' (a later save), 'again' (the save of the newest capture read again), 'behind' (a save older than the newest capture, which never extends a run) or 'ledger' (the same game time on another ledger, which is another timeline). Behind and ledger leave the record as it was. A run goes on only where the object was seen with the same digest; a new or differing object starts at this capture, and one the capture did not see is dropped.
+// Merges one capture ({ t, n, objects: [[id, digest]] or [id, digest, earlierDigest] }) into a record: { record, changed, outcome }. `outcome` is 'first' (the record had no capture), 'added' (a later save), 'again' (the save of the newest capture read again), 'behind' (a save older than the newest capture, which never extends a run) or 'ledger' (the same game time on another ledger, which is another timeline). Behind and ledger leave the record as it was. A run goes on only where the object was seen with the same digest, or with the earlier digest the capture gives for it (the same object under the name the reader gave it before: the run goes on and keeps the digest of now); a new or differing object starts at this capture, and one the capture did not see is dropped.
 export const mergeCapture = (stored, capture) => {
   const record = stored ? copyRecord(stored) : emptyRecord()
   const tip = record.captures.length ? record.captures[record.captures.length - 1] : null
@@ -182,12 +182,13 @@ export const mergeCapture = (stored, capture) => {
   const seed = isKnownNumber(record.seed) ? record.seed : null
   const objects = {}
 
-  capture.objects.forEach(([id, digest]) => {
+  capture.objects.forEach(([id, digest, earlier]) => {
     const before = record.objects[id]
+    const carried = Boolean(before) && before[2] !== digest && earlier !== undefined && before[2] === earlier
 
-    if (before && before[2] === digest) {
+    if (before && (before[2] === digest || carried)) {
       if (again) {
-        objects[id] = before
+        objects[id] = carried ? [before[0], before[1], digest, ...(before[3] ? [before[3]] : [])] : before
       } else if (seed !== null && before[1] <= seed) {
         // The parent branch saw the object, and its id is not certified across the fork: the span starts at the first capture of this branch.
         objects[id] = [capture.t, capture.t, digest, RESTARTED]
@@ -418,8 +419,8 @@ export const spanOf = (record, id) => {
   }
 }
 
-// What the page shows of one current object against a record: { state, span }. `state` is 'observed' (the record holds the object as it is now), 'changed' (it holds the object as it was before a change the recorder has not read yet), 'new' (it holds no such object), 'unrecorded' (the record holds no capture, or the object was not read) or 'ahead' (the open save is older than the newest capture, or on another ledger at the same game time: the record describes a save this one is not, so the object is not compared). `digest` is the object's digest in the open save, null when it was not read; `open` is { t, n }, the game time and the increments of the open save, as a capture holds them.
-export const observationOf = (record, id, digest, open = undefined) => {
+// What the page shows of one current object against a record: { state, span }. `state` is 'observed' (the record holds the object as it is now, or as it was under the digest `earlier` gives for it), 'changed' (it holds the object as it was before a change the recorder has not read yet), 'new' (it holds no such object), 'unrecorded' (the record holds no capture, or the object was not read) or 'ahead' (the open save is older than the newest capture, or on another ledger at the same game time: the record describes a save this one is not, so the object is not compared). `digest` is the object's digest in the open save, null when it was not read; `open` is { t, n }, the game time and the increments of the open save, as a capture holds them.
+export const observationOf = (record, id, digest, open = undefined, earlier = undefined) => {
   if (!record || !record.captures.length || digest === null || digest === undefined) {
     return { state: 'unrecorded', span: null }
   }
@@ -436,7 +437,7 @@ export const observationOf = (record, id, digest, open = undefined) => {
     return { state: 'new', span: null }
   }
 
-  return { state: span.digest === digest ? 'observed' : 'changed', span }
+  return { state: span.digest === digest || (earlier !== undefined && span.digest === earlier) ? 'observed' : 'changed', span }
 }
 
 // The widest stretch between two captures anywhere in a record, { from, to }, or null with fewer than two.

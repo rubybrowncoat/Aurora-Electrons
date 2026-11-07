@@ -4,7 +4,9 @@
 //
 // What each side may see (the field rules of the game, as the observer's views have them): the race's own pod shows its ship's name, crew, class and creation time; a foreign pod and a foreign wreck show only the system, the position, the size of a wreck and the class as the race's intelligence names it (`FCT_AlienClass` of the viewing race, `Unknown` where it has none). Every read below is a whitelist of columns, never `select *`: no column of a foreign object that the game hides is selected, stored, compared or hashed. The yield of a wreck and the time a pod's life support lasts are never read.
 //
-// Identity. An id can be given again after a reload, a rewind or a replayed branch, so the record keeps what names the object besides its id (`fingerprint`): an own pod by the time it was created, its system and its name; an own wreck by its system, class, size and ship; a foreign pod by its system, position and the observer's class; a foreign wreck by its system, size, orbit and the observer's class. A foreign object has no time the save dates it by, so its trail is by content, and the number of objects that match it (`copies`) is counted: an entry whose object has twins is `ambiguous`, never certified. A link that cannot be checked is not read as held and one whose object is not shown to be the one kept is told apart from one that is gone.
+// Identity. An id can be given again after a reload, a rewind or a replayed branch, so the record keeps what names the object besides its id (`fingerprint`): an own pod by the time it was created, its system and its name; an own wreck by its system, class, size and ship; a foreign pod by its system, the body or Lagrange point it is tied to (or its position when it is free) and the observer's class; a foreign wreck by its system, size, orbit (the body or Lagrange point it is tied to) and the observer's class. A pod or a wreck tied to a body or a Lagrange point has its coordinates rewritten as the point moves, so it is named by the point and never by where it is now. A wreck an incomplete salvage left with contents stays in the save with its size, so it stays listed under the same fingerprint; what is left in it is never read. An own pod an evacuation left to its officers has no crew and is told so (`survivorsText`). A foreign object has no time the save dates it by, so its trail is by content, and the number of objects that match it (`copies`) is counted: an entry whose object has twins is `ambiguous`, never certified. A link that cannot be checked is not read as held and one whose object is not shown to be the one kept is told apart from one that is gone.
+//
+// Names kept before the points. A status kept, and a span observed, while a foreign pod was named by its position and a foreign wreck by the id of the body it orbits alone still carry those names. The save opened is the save they were kept from (or one where the object has not moved), so an object that still has the old details under its id is the one kept: its status is read as held and `migrateRecoveryRecords` stores the new name, the observation carries its span over (utilities/observations.js `mergeCapture`). Where more than one object of the kind has the old details nothing shows which one was kept, so the status is read as unverified and the ambiguity is recorded in the status, never decided; an object that no longer has them (it moved, was replaced or is gone) is mapped by nothing and reads as before.
 //
 // Storage and the rules of a stale edit are the repository's. This module takes the repository and the database as arguments, so a check runs it on in-memory stores and databases.
 
@@ -89,6 +91,12 @@ const sizeKey = (size) => (finite(size) ? size.toFixed(6) : '')
 // A coordinate as a whole number of the game's unit: a pod's place never changes once it is made.
 const spot = (value) => (finite(value) ? String(Math.round(value)) : '')
 
+// What an object is tied to: the body or the Lagrange point it orbits (the game moves the object with it and rewrites its coordinates at each update, so the coordinates are no name for it), null for one that is free. A body wins where both are stored.
+const anchorOf = (row) => (finite(row.orbitBodyId) && row.orbitBodyId > 0 ? `body${row.orbitBodyId}` : finite(row.orbitLagrangeId) && row.orbitLagrangeId > 0 ? `lagrange${row.orbitLagrangeId}` : null)
+
+// The orbit part of a foreign wreck's fingerprint: the id of the body it orbits as it always was, the Lagrange point it is tied to, or nothing the game anchors it by (the stored 0 or no value).
+const orbitOf = (row) => (finite(row.orbitBodyId) && row.orbitBodyId > 0 ? present(row.orbitBodyId) : anchorOf(row) || present(row.orbitBodyId))
+
 // ---- What the save holds ----------------------------------------------------------------------------------------------
 
 const PODS = 'FCT_Lifepods'
@@ -102,31 +110,40 @@ const requireIds = ({ GameID, RaceID }) => {
   }
 }
 
-// The four statements that read what the race can see. A system the race does not know is not joined, so its objects are not read at all. Each statement names its columns: the own ones read what the game shows the owner, the others only what it shows an observer, and the class of a foreign object comes from the observer's own intelligence (`FCT_AlienClass` of the viewing race), never from the class table of the other race.
+// The four statements that read what the race can see. An own pod also reads the officers aboard (the race's active commanders whose stored pod it is), since an evacuation can leave officers alone in a pod with no crew; a pod or a wreck tied to a body or a Lagrange point reads the point it is tied to. A system the race does not know is not joined, so its objects are not read at all. Each statement names its columns: the own ones read what the game shows the owner, the others only what it shows an observer, and the class of a foreign object comes from the observer's own intelligence (`FCT_AlienClass` of the viewing race), never from the class table of the other race.
 export const recoverySql = ({ GameID, RaceID }) => {
   requireIds({ GameID, RaceID })
 
   const context = { GameID, RaceID }
 
   return {
-    ownLifepod: `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_Lifepods.CreationTime, FCT_Lifepods.ClassID, FCT_ShipClass.ClassName, FCT_HullDescription.HullAbbr from FCT_Lifepods ${KNOWN(PODS, context)} left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Lifepods.ClassID and FCT_ShipClass.GameID = FCT_Lifepods.GameID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_ShipClass.HullDescriptionID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.LifepodID`,
-    lifepod: `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr from FCT_Lifepods ${KNOWN(PODS, context)} left join FCT_AlienClass on FCT_AlienClass.GameID = FCT_Lifepods.GameID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.ActualClassID = FCT_Lifepods.ClassID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_AlienClass.HullID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID != ${RaceID} order by FCT_Lifepods.LifepodID`,
-    ownWreck: `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Wrecks.OrbitBodyID, FCT_Wrecks.Xcor, FCT_Wrecks.Ycor, FCT_Wrecks.Size, FCT_Wrecks.ClassID, FCT_Wrecks.ShipID, FCT_ShipClass.ClassName, FCT_HullDescription.HullAbbr from FCT_Wrecks ${KNOWN(WRECKS, context)} left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Wrecks.ClassID and FCT_ShipClass.GameID = FCT_Wrecks.GameID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_ShipClass.HullDescriptionID where FCT_Wrecks.GameID = ${GameID} and FCT_Wrecks.RaceID = ${RaceID} order by FCT_Wrecks.WreckID`,
-    wreck: `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Wrecks.OrbitBodyID, FCT_Wrecks.Xcor, FCT_Wrecks.Ycor, FCT_Wrecks.Size, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr, FCT_AlienRace.Abbrev as RaceTag from FCT_Wrecks ${KNOWN(WRECKS, context)} left join FCT_AlienClass on FCT_AlienClass.GameID = FCT_Wrecks.GameID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.ActualClassID = FCT_Wrecks.ClassID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_AlienClass.HullID left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Wrecks.GameID and FCT_AlienRace.ViewRaceID = ${RaceID} and FCT_AlienRace.AlienRaceID = FCT_Wrecks.RaceID and FCT_AlienClass.AlienClassID is not null where FCT_Wrecks.GameID = ${GameID} and FCT_Wrecks.RaceID != ${RaceID} order by FCT_Wrecks.WreckID`,
+    ownLifepod: `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.OrbitBodyID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) as Officers, FCT_Lifepods.CreationTime, FCT_Lifepods.ClassID, FCT_ShipClass.ClassName, FCT_HullDescription.HullAbbr from FCT_Lifepods ${KNOWN(PODS, context)} left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Lifepods.ClassID and FCT_ShipClass.GameID = FCT_Lifepods.GameID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_ShipClass.HullDescriptionID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.LifepodID`,
+    lifepod: `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.OrbitBodyID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr from FCT_Lifepods ${KNOWN(PODS, context)} left join FCT_AlienClass on FCT_AlienClass.GameID = FCT_Lifepods.GameID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.ActualClassID = FCT_Lifepods.ClassID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_AlienClass.HullID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID != ${RaceID} order by FCT_Lifepods.LifepodID`,
+    ownWreck: `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Wrecks.OrbitBodyID, FCT_Wrecks.OrbitLagrangeID, FCT_Wrecks.Xcor, FCT_Wrecks.Ycor, FCT_Wrecks.Size, FCT_Wrecks.ClassID, FCT_Wrecks.ShipID, FCT_ShipClass.ClassName, FCT_HullDescription.HullAbbr from FCT_Wrecks ${KNOWN(WRECKS, context)} left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Wrecks.ClassID and FCT_ShipClass.GameID = FCT_Wrecks.GameID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_ShipClass.HullDescriptionID where FCT_Wrecks.GameID = ${GameID} and FCT_Wrecks.RaceID = ${RaceID} order by FCT_Wrecks.WreckID`,
+    wreck: `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Wrecks.OrbitBodyID, FCT_Wrecks.OrbitLagrangeID, FCT_Wrecks.Xcor, FCT_Wrecks.Ycor, FCT_Wrecks.Size, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr, FCT_AlienRace.Abbrev as RaceTag from FCT_Wrecks ${KNOWN(WRECKS, context)} left join FCT_AlienClass on FCT_AlienClass.GameID = FCT_Wrecks.GameID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.ActualClassID = FCT_Wrecks.ClassID left join FCT_HullDescription on FCT_HullDescription.HullDescriptionID = FCT_AlienClass.HullID left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Wrecks.GameID and FCT_AlienRace.ViewRaceID = ${RaceID} and FCT_AlienRace.AlienRaceID = FCT_Wrecks.RaceID and FCT_AlienClass.AlienClassID is not null where FCT_Wrecks.GameID = ${GameID} and FCT_Wrecks.RaceID != ${RaceID} order by FCT_Wrecks.WreckID`,
   }
 }
 
 // The kinds of object the ledger links to, in the shape of the milestones' `LINK_TYPES` (utilities/history-milestones.js), which the link check reads. `place` is the kind of place the object is (the ledger's own and the Route Finder's `place` key), `own` whether the race owns it. `fingerprint` holds only what the game does not change over the object's life and only fields the viewing race may see: the owner's own for an own object, the observer's for any other. `identity` says what makes the object the same one when its id may have been given again: 'created' is the time it was made (an own pod's creation time, the index of the fingerprint part that holds it), 'content' is what the race knows of an object that no time dates.
 export const RECOVERY_TARGETS = Object.freeze({
   ownLifepod: Object.freeze({ label: 'Own life pods', place: 'lifepod', own: true, identity: 'created', created: 0, fingerprint: (row) => ['ownLifepod', present(row.created), present(row.systemId), present(row.shipName)].join('|') }),
-  lifepod: Object.freeze({ label: 'Life pods', place: 'lifepod', own: false, identity: 'content', fingerprint: (row) => ['lifepod', present(row.systemId), spot(row.x), spot(row.y), present(row.aliasId)].join('|') }),
+  lifepod: Object.freeze({ label: 'Life pods', place: 'lifepod', own: false, identity: 'content', fingerprint: (row) => ['lifepod', present(row.systemId), ...(anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)]), present(row.aliasId)].join('|') }),
   ownWreck: Object.freeze({ label: 'Own wrecks', place: 'wreck', own: true, identity: 'content', fingerprint: (row) => ['ownWreck', present(row.systemId), present(row.classId), sizeKey(row.size), present(row.shipId)].join('|') }),
-  wreck: Object.freeze({ label: 'Wrecks', place: 'wreck', own: false, identity: 'content', fingerprint: (row) => ['wreck', present(row.systemId), sizeKey(row.size), present(row.orbitBodyId), present(row.aliasId)].join('|') }),
+  wreck: Object.freeze({ label: 'Wrecks', place: 'wreck', own: false, identity: 'content', fingerprint: (row) => ['wreck', present(row.systemId), sizeKey(row.size), orbitOf(row), present(row.aliasId)].join('|') }),
 })
 
 export const TYPE_KEYS = Object.freeze(Object.keys(RECOVERY_TARGETS))
 
 const targetOf = (type) => (hasOwn(RECOVERY_TARGETS, type) ? RECOVERY_TARGETS[type] : null)
+
+// The names of a foreign pod and a foreign wreck before they were tied to their points: a pod by its position wherever it was, a wreck by the id of the body it orbits alone (the stored 0 at a Lagrange point).
+const LEGACY_FINGERPRINTS = Object.freeze({
+  lifepod: (row) => ['lifepod', present(row.systemId), spot(row.x), spot(row.y), present(row.aliasId)].join('|'),
+  wreck: (row) => ['wreck', present(row.systemId), sizeKey(row.size), present(row.orbitBodyId), present(row.aliasId)].join('|'),
+})
+
+// The fingerprint an object had before pods and wrecks were named by their points: the one it has now for what the change did not touch (an own object, a free pod, a wreck that orbits a body).
+export const legacyFingerprintOf = (type, row) => (hasOwn(LEGACY_FINGERPRINTS, type) ? LEGACY_FINGERPRINTS[type] : targetOf(type).fingerprint)(row)
 
 // The place of an object in Route Finder's terms: `lifepod:7` or `wreck:7`.
 export const placeKeyOf = (row) => place[row.place](row.id)
@@ -137,14 +154,14 @@ const classLabelOf = (className, hullAbbr) => [hullAbbr, className].filter(Boole
 const rowOf = (type, source) => {
   const target = RECOVERY_TARGETS[type]
   const pod = target.place === 'lifepod'
-  const base = { type, place: target.place, id: pod ? source.LifepodID : source.WreckID, own: target.own, systemId: source.SystemID, systemName: present(source.SystemName), x: numberOrNull(source.Xcor), y: numberOrNull(source.Ycor) }
+  const base = { type, place: target.place, id: pod ? source.LifepodID : source.WreckID, own: target.own, systemId: source.SystemID, systemName: present(source.SystemName), x: numberOrNull(source.Xcor), y: numberOrNull(source.Ycor), orbitBodyId: numberOrNull(source.OrbitBodyID), orbitLagrangeId: numberOrNull(source.OrbitLagrangeID) }
 
   if (pod) {
-    return target.own ? { ...base, shipName: present(source.ShipName), crew: numberOrNull(source.Crew), created: numberOrNull(source.CreationTime), classId: numberOrNull(source.ClassID), className: source.ClassName || null, hullAbbr: source.HullAbbr || null } : { ...base, aliasId: numberOrNull(source.AlienClassID), className: source.AlienClassName || null, hullAbbr: source.HullAbbr || null }
+    return target.own ? { ...base, shipName: present(source.ShipName), crew: numberOrNull(source.Crew), officers: numberOrNull(source.Officers), created: numberOrNull(source.CreationTime), classId: numberOrNull(source.ClassID), className: source.ClassName || null, hullAbbr: source.HullAbbr || null } : { ...base, aliasId: numberOrNull(source.AlienClassID), className: source.AlienClassName || null, hullAbbr: source.HullAbbr || null }
   }
 
   const size = numberOrNull(source.Size)
-  const wreck = { ...base, orbitBodyId: numberOrNull(source.OrbitBodyID), size: size === null ? null : Number(size.toFixed(6)), tons: size === null ? null : size * 50 }
+  const wreck = { ...base, size: size === null ? null : Number(size.toFixed(6)), tons: size === null ? null : size * 50 }
 
   return target.own ? { ...wreck, classId: numberOrNull(source.ClassID), shipId: numberOrNull(source.ShipID), className: source.ClassName || null, hullAbbr: source.HullAbbr || null } : { ...wreck, aliasId: numberOrNull(source.AlienClassID), className: source.AlienClassName || null, hullAbbr: source.HullAbbr || null, raceTag: String(source.RaceTag || '').trim() || null }
 }
@@ -182,10 +199,20 @@ export const loadRecoveryObjects = async (database, { GameID, RaceID }, options 
 
 const tonsText = (row, count) => (row.tons === null ? 'unknown size' : `${count(row.tons)} tons`)
 
+// The survivors of an own pod in words: its crew, with the officers aboard after it, and `no crew` with the officers for a pod an evacuation left to its officers alone. A pod with no officers reads as its crew does, whatever the crew; a crew or an officer count the save does not hold is not guessed.
+export const survivorsText = (row, count = String) => {
+  const crew = row.crew === null ? 'crew unknown' : row.crew === 0 && row.officers > 0 ? 'no crew' : `${count(row.crew)} crew`
+
+  return row.officers > 0 ? `${crew}, ${count(row.officers)} ${row.officers === 1 ? 'officer' : 'officers'}` : crew
+}
+
+// Whether an own pod holds officers and no crew.
+export const isOfficerOnly = (row) => row.place === 'lifepod' && row.own && row.crew === 0 && row.officers > 0
+
 // The label of an object as the game words it: an own pod by its ship's name and crew, a foreign pod by the class the race knows and its id, a wreck by the class (the observer's for another race's, `Unknown` where it has none), the observer's tag of the race when it knows the class, its id and its tons. A foreign pod's name and crew are never part of it. `count(number)` formats a figure.
 export const labelOf = (row, count = String) => {
   if (row.place === 'lifepod') {
-    return row.own ? `${row.shipName || 'Unnamed'} life pods: ${row.crew === null ? 'crew unknown' : `${count(row.crew)} crew`}` : `${classLabelOf(row.className, row.hullAbbr) || 'Unknown'} life pods #${row.id}`
+    return row.own ? `${row.shipName || 'Unnamed'} life pods: ${survivorsText(row, count)}` : `${classLabelOf(row.className, row.hullAbbr) || 'Unknown'} life pods #${row.id}`
   }
 
   return `Wreck of ${row.className || 'Unknown'} class${row.raceTag ? ` [${row.raceTag}]` : ''} #${row.id}: ${tonsText(row, count)}`
@@ -199,8 +226,11 @@ export const ageOf = (row, gameTime) => (row.place === 'lifepod' && row.own && f
 
 // ---- What an observation compares ----------------------------------------------------------------------------------------
 
-// The text an observation of an object is hashed from: where it is and what the race knows of it (own or not, the system, the position of a pod, the orbit and the size of a wreck, the class as the viewing race knows it), and for an own object what identifies it besides its id (a pod's creation time and name, a wreck's ship), so an id given again to another object starts a new span. A wreck tied to a body follows the body's clock, so its coordinates are no part of it; a free one is compared by position. Nothing the race may not see is in it.
-export const observationSignature = (row) => (row.place === 'lifepod' ? [row.own ? 'own' : 'seen', present(row.systemId), spot(row.x), spot(row.y), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.created), present(row.shipName)] : [])].join('/') : [row.own ? 'own' : 'seen', present(row.systemId), present(row.orbitBodyId), sizeKey(row.size), ...(row.orbitBodyId ? [] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.shipId)] : [])].join('/'))
+// The text an observation of an object is hashed from: where it is and what the race knows of it (own or not, the system, the position of a pod, the orbit and the size of a wreck, the class as the viewing race knows it), and for an own object what identifies it besides its id (a pod's creation time and name, a wreck's ship), so an id given again to another object starts a new span. A pod or a wreck tied to a body or a Lagrange point follows that point, so its coordinates are no part of it and the point is; a free one is compared by position. Nothing the race may not see is in it.
+export const observationSignature = (row) => (row.place === 'lifepod' ? [row.own ? 'own' : 'seen', present(row.systemId), ...(anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.created), present(row.shipName)] : [])].join('/') : [row.own ? 'own' : 'seen', present(row.systemId), present(row.orbitBodyId), sizeKey(row.size), ...(row.orbitBodyId ? [] : anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.shipId)] : [])].join('/'))
+
+// The text an observation of an object was hashed from before a pod or a wreck tied to a body or a Lagrange point was compared by that point and not by its coordinates. The same text as `observationSignature` for an object the change did not touch.
+export const legacyObservationSignature = (row) => (row.place === 'lifepod' ? [row.own ? 'own' : 'seen', present(row.systemId), spot(row.x), spot(row.y), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.created), present(row.shipName)] : [])].join('/') : [row.own ? 'own' : 'seen', present(row.systemId), present(row.orbitBodyId), sizeKey(row.size), ...(row.orbitBodyId ? [] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.shipId)] : [])].join('/'))
 
 const observedOf = async (database, ids, options, kinds) => {
   const statements = recoverySql(ids)
@@ -212,10 +242,15 @@ const observedOf = async (database, ids, options, kinds) => {
     rows.push(...source.map((row) => rowOf(type, row)))
   }
 
-  return rows.sort((a, b) => a.id - b.id).map((row) => [row.id, observationSignature(row)])
+  return rows.sort((a, b) => a.id - b.id).map((row) => {
+    const signature = observationSignature(row)
+    const earlier = legacyObservationSignature(row)
+
+    return earlier === signature ? [row.id, signature] : [row.id, signature, earlier]
+  })
 }
 
-// The life pods and the wrecks of a race at the open save for an observation: `[[id, signature]]`, read with `options` (the recorder's transaction). A save that lacks a table or column the statements read makes the statement fail, so the recorder notes a failed read and not an empty one.
+// The life pods and the wrecks of a race at the open save for an observation: `[[id, signature]]`, or `[id, signature, earlier]` for an object that has another text than it had before pods and wrecks tied to a body or a Lagrange point were compared by that point and not by their coordinates (`earlier` is the text it was hashed from then, so a span observed under it goes on), read with `options` (the recorder's transaction). A save that lacks a table or column the statements read makes the statement fail, so the recorder notes a failed read and not an empty one.
 export const readLifepodObservations = (database, { GameID, RaceID }, options = undefined) => observedOf(database, { GameID, RaceID }, options, ['ownLifepod', 'lifepod'])
 
 export const readWreckObservations = (database, { GameID, RaceID }, options = undefined) => observedOf(database, { GameID, RaceID }, options, ['ownWreck', 'wreck'])
@@ -323,7 +358,48 @@ const currentRowOf = (context, link) => {
 
 const NOT_SHOWN = ['newer-schema', 'no-adapter', 'invalid-payload']
 
+// Whether the repository reads a status as current in the open save. One kept at a later game time than the save is `ahead` (the save was rewound, or the branch was forked before the record's save): the ledger lists it apart and applies it to nothing (utilities/scenario-records.js), so neither the name it holds is mapped against the objects of this save nor the migration writes it, until a save at or after its base time is open. The objects of a rewound save are not the ones it was kept for: an old name held a pod's position, so a pod the earlier save shows under the same id at the same place would be taken for it.
+const currentInSave = (item) => item.status !== 'ahead'
+
 const refusal = (error) => ({ code: error.code, message: error.message })
+
+// Why a status kept under an old name reads as unverified, and what is stored in it: more than one object of its kind has the details it was kept with.
+const AMBIGUOUS_TEXT = 'The status was kept before pods and wrecks tied to a body or a Lagrange point were named by that point, and more than one object in the save has the details it was kept with, so nothing shows which of them it was kept for.'
+const AMBIGUOUS_NOTE = 'Kept before pods and wrecks tied to a body or a Lagrange point were named by that point: more than one object had the details it was kept with, so the status was not renamed and no object is certified as the one it was kept for'
+
+// How a link kept under an old name stands against the open save, or null when it is no such link (`legacyFingerprintOf`): `carried` when the object under the id has, by the old name, the details the link holds and no other object of its kind has them, so it is the one the link was kept for and takes its new name; `ambiguous` when other objects of the kind have them too. A link whose object under the id does not have the old details (it moved, was replaced or is gone) is mapped by nothing.
+const carryOf = (stored, context) => {
+  if (stored.status !== 'changed') {
+    return null
+  }
+
+  const objects = context && context.objects ? context.objects[stored.type] : null
+  const row = objects instanceof Map ? objects.get(stored.id) : null
+
+  if (!row || legacyFingerprintOf(stored.type, row) !== stored.fingerprint) {
+    return null
+  }
+
+  const alike = [...objects.values()].filter((other) => legacyFingerprintOf(stored.type, other) === stored.fingerprint).length
+
+  return alike === 1 ? { state: 'carried', fingerprint: targetOf(stored.type).fingerprint(row) } : { state: 'ambiguous', alike }
+}
+
+// The link of an entry as the list shows it: the repository's, with a link kept under an old name read as held when it is carried to the new name (nothing is written here) and as unverified when it is ambiguous. `carry` is false for a status the open save is not the one of (`currentInSave`): the old name is then compared with nothing.
+const linkOf = (stored, ref, context, carry = true) => {
+  const carried = carry ? carryOf(stored, context) : null
+  const named = { name: ref.label, origin: ref.origin }
+
+  if (!carried) {
+    return resolveLink(stored, named, context, RECOVERY_TARGETS)
+  }
+
+  if (carried.state === 'carried') {
+    return resolveLink({ ...stored, status: 'linked', fingerprint: carried.fingerprint, current: carried.fingerprint }, named, context, RECOVERY_TARGETS)
+  }
+
+  return { ...resolveLink(stored, named, context, RECOVERY_TARGETS), status: 'unknown', unverified: true, reason: AMBIGUOUS_TEXT }
+}
 
 const entryOf = (item, context) => {
   if (item.links.length !== 1 || !targetOf(item.links[0].type) || item.links[0].type !== item.payload.ref.type || item.links[0].id !== item.payload.ref.id) {
@@ -332,7 +408,8 @@ const entryOf = (item, context) => {
 
   const stored = item.links[0]
   const ref = item.payload.ref
-  const link = resolveLink(stored, { name: ref.label, origin: ref.origin }, context, RECOVERY_TARGETS)
+  const ahead = !currentInSave(item)
+  const link = linkOf(stored, ref, context, !ahead)
   const state = stateOf(link)
   const row = state === STATES.UNREAD || state === STATES.GONE ? null : currentRowOf(context, stored)
 
@@ -346,7 +423,7 @@ const entryOf = (item, context) => {
     ref: copyOf(ref),
     observed: item.payload.observed === null || item.payload.observed === undefined ? null : { first: item.payload.observed.first, last: item.payload.observed.last },
     madeAt: item.record.base.gameTime,
-    ahead: item.status === 'ahead',
+    ahead,
     otherBranch: item.flags.includes('other-branch'),
     flags: [...item.flags],
     link,
@@ -393,6 +470,61 @@ export const readRecovery = (repository, scope, context = null) => {
   })
 
   return { entries: entries.sort((a, b) => a.ref.label.localeCompare(b.ref.label) || (a.uuid < b.uuid ? -1 : 1)), notes, error: null }
+}
+
+// Stores the new name in the statuses kept under an old one (`carryOf`): a status whose object is the one it was kept for has its link renamed, so it stays held when the object's coordinates move, and a status whose object cannot be told from others by the old name has the ambiguity recorded in it and is otherwise left as it was. A status kept at a later game time than the open save is left as it is: it is `ahead` of this save and not its to map (`currentInSave`). `{ ok, carried, ambiguous, conflicts, changed }` with the uuids; nothing is written where the records cannot be written from this window (`ok` is false with the reason) or for a status another window changed meanwhile (`conflicts`), and a later read does it again. Safe to run on every read: a status already renamed or recorded is not written again.
+export const migrateRecoveryRecords = async (repository, scope, context) => {
+  const result = { ok: true, carried: [], ambiguous: [], conflicts: [], changed: false }
+
+  if (!repository || !scope || !context || !isObject(context.objects)) {
+    return result
+  }
+
+  try {
+    const allowed = await mayWrite(repository, scope, 'status')
+
+    if (!allowed.ok) {
+      return { ...result, ok: false, code: allowed.code, message: allowed.message }
+    }
+
+    const listed = repository.list(scope, { kind: RECOVERY_KIND, context })
+
+    listed.filter((item) => currentInSave(item) && !item.flags.some((flag) => NOT_SHOWN.includes(flag)) && item.links.length === 1 && targetOf(item.links[0].type)).forEach((item) => {
+      const stored = item.links[0]
+      const carried = carryOf(stored, context)
+
+      if (!carried) {
+        return
+      }
+
+      const recorded = carried.state === 'ambiguous' && item.record.assumptions.includes(AMBIGUOUS_NOTE)
+
+      try {
+        if (carried.state === 'carried') {
+          repository.update(scope, item.record.uuid, item.record.revision, { links: [{ type: stored.type, id: stored.id, fingerprint: carried.fingerprint }] })
+          result.carried.push(item.record.uuid)
+        } else {
+          if (!recorded) {
+            repository.update(scope, item.record.uuid, item.record.revision, { assumptions: [...item.record.assumptions, AMBIGUOUS_NOTE] })
+          }
+
+          result.ambiguous.push(item.record.uuid)
+        }
+
+        result.changed = result.changed || !recorded
+      } catch (error) {
+        if (!error || error.name !== 'RevisionConflict') {
+          throw error
+        }
+
+        result.conflicts.push(item.record.uuid)
+      }
+    })
+
+    return result
+  } catch (error) {
+    return { ...result, ...failure(error), ok: false }
+  }
 }
 
 // ---- The ledger's rows ---------------------------------------------------------------------------------------------------

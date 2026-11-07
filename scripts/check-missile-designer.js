@@ -12,7 +12,7 @@
   - compare: the baseline is pinned and apart from the three alternatives, a fourth is refused with its reason, the columns carry the same rows with their source visible, and an alternative never changes the baseline;
   - sources: a design is researched, hypothetical (carrying the assumption) or manual (typed figures, blank is unknown), and a saved design shows as saved;
   - gating: every column lists every option the designer does not build, with its state, and an option asked for without its tech is blocked with the reason and not applied, and the column shows no figure as that missile's;
-  - owned: only the designs the race owns and has researched are imported, read from the modded and the stock save; a check whose save is not there is reported as skipped, never as passed, and a mutant that names only skipped checks is skipped with them;
+  - owned: only the designs the race owns and has researched are imported, read from the fixture of scripts/lib/fixtures.js (the race of the save that owns the most designs and the one with the next most, found by SQL, since the player race 784 owns none) and from the stock save when one is named; a check whose save is not there is reported as skipped, never as passed, and a mutant that names only skipped checks is skipped with them;
   - record: a comparison is a typed record of the race on its branch, written only when the tab holds the file, with its saved designs and the tech levels it was made with as links, an older record migrated, and the tech restored on opening;
   - the page: its reads, its state, its copy and its records on a pseudo instance (scripts/lib/page-loader.js).
 
@@ -96,6 +96,8 @@ const loadAll = async (directory = utilitiesDirectory) => {
 // ---------- fixtures ----------
 
 const FIXTURES = require('./lib/missile-fixtures.json').fixtures
+const { fixtureTriple } = require('./lib/fixtures')
+const { plantLurker } = require('./lib/planted-lurker')
 
 const STOCK = { label: 'stock-271-g138', race: 785 }
 const MODDED = { label: 'modded-g140', race: 784 }
@@ -135,6 +137,7 @@ const MODDED_CONTEXT = (m, overrides) => contextOf(m, MODDED, overrides)
 
 const ORDINARY = 154630
 const LASER = 500724
+const ARROW = 154261
 
 const columnOf = (m, context, id, scenario = {}) => m.md.compareDesigns(context, { baselineId: id, alternatives: [], scenario }).columns[0]
 
@@ -739,6 +742,47 @@ const gatingChecks = (m) => [
 
     return column.gated.find((entry) => entry.id === 'groundPod').state === 'recorded' && column.gated.filter((entry) => entry.state === 'recorded').length >= 1 ? true : short(column.gated.map((entry) => [entry.id, entry.state]))
   }],
+  ['gating: the designer offers no ground pod: a draft seeded from a stored pod row is a plain missile, a blank draft carries none, and a designed column lists the pod as not offered', () => {
+    const fixture = copy(fixtureOf(STOCK))
+
+    fixture.designs.find((entry) => entry.id === ORDINARY).row.GroundShots = 2
+
+    const ctx = contextOf(m, STOCK, {}, fixture)
+    const seeded = m.md.seedAlternative(ctx, ORDINARY).draft
+    const result = compareOf(m, ctx, ORDINARY, withKeys([seeded, m.md.emptyDraft('Blank')]))
+    const states = result.columns.map((column) => column.gated.find((entry) => entry.id === 'groundPod').state)
+    const pod = m.md.GATED_OPTIONS.find((option) => option.id === 'groundPod')
+
+    return !('groundPod' in seeded.carried) && !('groundPod' in m.md.emptyDraft('Blank').carried) && equal(states, ['recorded', 'not-offered', 'not-offered']) && Number.isFinite(valueOf(result.columns[1], 'sizeSum')) && /no longer designs/.test(pod.reason) ? true : short([states, Object.keys(seeded.carried), valueOf(result.columns[1], 'sizeSum')])
+  }],
+  ['lurker: a stored lurker design reconciles its size, cost and speed, shows the lurker input and seeds a draft with the lurker on, and a plain design does not', () => {
+    const { copy: fixture, design } = plantLurker(fixtureOf(STOCK), ORDINARY)
+    const ctx = contextOf(m, STOCK, {}, fixture)
+    const column = columnOf(m, ctx, ORDINARY)
+    const seeded = m.md.seedAlternative(ctx, ORDINARY).draft
+    const plain = m.md.seedAlternative(STOCK_CONTEXT(m), ORDINARY).draft
+    const verdicts = ['size', 'cost', 'speed', 'maxRange'].map((id) => column.figures[id].verdict)
+
+    return verdicts.every((verdict) => verdict === 'agree') && valueOf(column, 'size') === design.row.Size && close(valueOf(column, 'cost'), design.row.Cost) && column.inputs.lurker.value === 1 && columnOf(m, STOCK_CONTEXT(m), ORDINARY).inputs.lurker.value === 0 && seeded.options.lurker === true && plain.options.lurker === false ? true : short([verdicts, valueOf(column, 'size'), design.row.Size, valueOf(column, 'cost'), design.row.Cost, column.inputs.lurker.value, seeded.options, plain.options])
+  }],
+  ['lurker: a designed alternative with the lurker adds 0.5 MSP and 0.5 BP to the same design without it, and no tech line', () => {
+    const ctx = contextOf(m, { ...MODDED, race: 786 })
+    const seeded = draftOf(m, ctx, ARROW)
+    const [plain, lurking] = compareOf(m, ctx, ARROW, withKeys([seeded, { ...seeded, options: { ...seeded.options, lurker: true } }])).columns.slice(1)
+
+    return close(valueOf(lurking, 'sizeSum') - valueOf(plain, 'sizeSum'), 0.5) && close(valueOf(lurking, 'cost') - valueOf(plain, 'cost'), 0.5) && lurking.inputs.lurker.value === 1 && plain.inputs.lurker.value === 0 && equal(lurking.tech, plain.tech) && lurking.blocked.length === 0 ? true : short([valueOf(lurking, 'sizeSum'), valueOf(plain, 'sizeSum'), valueOf(lurking, 'cost'), valueOf(plain, 'cost'), lurking.tech, plain.tech])
+  }],
+  ['lurker: the comparison record of the earlier schema is migrated to one with the lurker off and no ground pod carried, and is valid; the earlier shape is not', () => {
+    const ctx = STOCK_CONTEXT(m)
+    const older = (entry) => ({ ...entry, options: Object.fromEntries(Object.entries(entry.options).filter(([name]) => name !== 'lurker')), carried: { ...entry.carried, groundPod: true } })
+    const alternatives = withKeys([draftOf(m, ctx, ORDINARY), m.md.savedAlternative(154678)]).map((entry) => (entry.kind === 'designed' ? older(entry) : entry))
+    const payload = payloadOf(m, 'Earlier', { alternatives })
+    const migrated = m.md.designerAdapter.migrate(copy(payload), 2)
+    const current = m.md.designerAdapter.migrate(copy(payload), 3)
+    const entry = migrated.alternatives.find((item) => item.kind === 'designed')
+
+    return m.md.DESIGNER_SCHEMA === 3 && m.md.designerAdapter.schema === 3 && m.md.problemsOf(payload).length > 0 && m.md.problemsOf(migrated).length === 0 && entry.options.lurker === false && !('groundPod' in entry.carried) && migrated.alternatives.find((item) => item.kind === 'saved').savedId === 154678 && equal(current, payload) ? true : short([m.md.problemsOf(payload), m.md.problemsOf(migrated), entry.options, entry.carried])
+  }],
   ['gating: the states are described in words', () => (['not-offered', 'carried', 'recorded', 'blocked'].every((state) => m.md.gatedStateText(state) && m.md.gatedStateText(state) !== state) ? true : 'a state with no words')],
 ]
 
@@ -750,33 +794,51 @@ const skipped = (reason) => ({ skipped: reason })
 const ownedChecks = (m) => {
   const wrap = (database, change) => ({ query: async (sql, options) => change(sql, await database.query(sql, options)) })
   const heldRows = (sql) => /FCT_RaceTech/.test(sql) && !/FCT_TechSystem/.test(sql)
-  const on = (key, test) => async () => (SAVES[key] ? test(SAVES[key]) : skipped(`the ${key} save is not there`))
+  const on = (key, test) => async () => (SAVES[key] ? test(SAVES[key]) : skipped(`the ${key} save is not named or is not there (--${key} <save> <game> <race> names one)`))
   const idsOf = (designs) => designs.fixture.designs.filter((design) => !design.stageOnly).map((design) => design.id).sort((a, b) => a - b)
+
+  // The missile designs of the slot's save by the race that researched each (the FCT_TechSystem row of tech type 122 names it), read by SQL here and not by the loader: the race that owns the most, the race with the next most, and the ids of each.
+  const ownersOf = async (save) => {
+    const [rows] = await save.database.query('select t.RaceID as race, t.TechSystemID as id from FCT_TechSystem t where t.TechTypeID = 122 and t.RaceID in (select RaceID from FCT_Race where GameID = :game) order by t.RaceID, t.TechSystemID', { replacements: { game: save.ids.GameID } })
+    const owners = new Map()
+
+    rows.forEach((row) => owners.set(Number(row.race), [...(owners.get(Number(row.race)) || []), Number(row.id)]))
+
+    const [[owner, own], [other, theirs]] = [...owners.entries()].sort((a, b) => b[1].length - a[1].length || a[0] - b[0])
+
+    return { owner, own, other, theirs, scope: { GameID: save.ids.GameID, RaceID: owner } }
+  }
+  const sorted = (ids) => [...ids].sort((a, b) => a - b).join()
 
   return [
     ['owned: the designs a race owns and has researched are imported, with their obsolete flags', on('modded', async (save) => {
-      const designs = await m.md.loadDesigns(save.database, save.ids)
+      const { own, scope } = await ownersOf(save)
+      const database = wrap(save.database, (sql, result) => (heldRows(sql) ? [result[0].map((row) => (Number(row.TechID) === own[1] ? { ...row, Obsolete: 1 } : row))] : result))
+      const designs = await m.md.loadDesigns(database, scope)
 
-      return idsOf(designs).join() === '500724,500726,500728' && designs.excluded === 0 && designs.obsolete[500726] === true && designs.obsolete[500724] === false ? true : short([designs.fixture.designs.map((design) => design.id), designs.obsolete, designs.excluded])
+      return sorted(idsOf(designs)) === sorted(own) && designs.excluded === 0 && designs.obsolete[own[1]] === true && designs.obsolete[own[0]] === false ? true : short([designs.fixture.designs.map((design) => design.id), designs.obsolete, designs.excluded])
     })],
     ['owned: a design the race owns and has not researched is not imported and is counted', on('modded', async (save) => {
-      const database = wrap(save.database, (sql, result) => (heldRows(sql) ? [result[0].filter((row) => Number(row.TechID) !== 500726)] : result))
-      const designs = await m.md.loadDesigns(database, save.ids)
+      const { own, scope } = await ownersOf(save)
+      const database = wrap(save.database, (sql, result) => (heldRows(sql) ? [result[0].filter((row) => Number(row.TechID) !== own[1])] : result))
+      const designs = await m.md.loadDesigns(database, scope)
 
-      return idsOf(designs).join() === '500724,500728' && designs.excluded === 1 && !(500726 in designs.obsolete) ? true : short([designs.fixture.designs.map((design) => design.id), designs.excluded])
+      return sorted(idsOf(designs)) === sorted(own.filter((id) => id !== own[1])) && designs.excluded === 1 && !(own[1] in designs.obsolete) ? true : short([designs.fixture.designs.map((design) => design.id), designs.excluded])
     })],
     ['owned: a design another race owns is not imported even when this race holds its tech', on('modded', async (save) => {
-      const database = wrap(save.database, (sql, result) => (heldRows(sql) ? [[...result[0], { TechID: 154198, Obsolete: 0 }, { TechID: 500363, Obsolete: 0 }]] : result))
-      const designs = await m.md.loadDesigns(database, save.ids)
-      const ids = idsOf(designs).join()
+      const { own, theirs, scope } = await ownersOf(save)
+      const database = wrap(save.database, (sql, result) => (heldRows(sql) ? [[...result[0], ...theirs.map((id) => ({ TechID: id, Obsolete: 0 }))]] : result))
+      const designs = await m.md.loadDesigns(database, scope)
+      const ids = idsOf(designs)
 
-      return ids === '500724,500726,500728' && designs.excluded === 0 ? true : short([ids, designs.excluded])
+      return sorted(ids) === sorted(own) && designs.excluded === 0 ? true : short([ids, designs.excluded])
     })],
     ['owned: another race of the same save gets its own designs and none of this race\'s', on('modded', async (save) => {
-      const other = await m.md.loadDesigns(save.database, { GameID: save.ids.GameID, RaceID: 785 })
-      const own = other.fixture.designs.filter((design) => !design.stageOnly)
+      const { own, other } = await ownersOf(save)
+      const another = await m.md.loadDesigns(save.database, { GameID: save.ids.GameID, RaceID: other })
+      const mine = another.fixture.designs.filter((design) => !design.stageOnly)
 
-      return own.length > 0 && own.every((design) => design.race === 785) && !own.some((design) => [500724, 500726, 500728].includes(design.id)) ? true : short(own.map((design) => [design.id, design.race]))
+      return mine.length > 0 && mine.every((design) => design.race === other) && !mine.some((design) => own.includes(design.id)) ? true : short(mine.map((design) => [design.id, design.race]))
     })],
     ['owned: the designs loaded from the stock save are researched designs of its fixture, with the figures the fixture holds', on('stock', async (save) => {
       const designs = await m.md.loadDesigns(save.database, save.ids)
@@ -1064,7 +1126,7 @@ const recordChecks = (m) => {
       const edited = await md.saveDesign(repository, scopeIn(), designs, { entry, payload: payloadOf(m, 'Old', { scenario: { ...payloadOf(m).scenario, pd: '3' } }) })
       const stored = repository.list(scopeIn(), { kind: md.DESIGNER_KIND })[0].record
 
-      return md.DESIGNER_SCHEMA === 2 && read.entries.length === 1 && read.notes.length === 0 && entry && equal(entry.payload.tech, { choices: {} }) && edited.ok && stored.schema === md.DESIGNER_SCHEMA && stored.payload.tech && equal(stored.payload.tech, { choices: {} }) ? true : short([read.entries.length, read.notes, edited, stored.schema])
+      return md.DESIGNER_SCHEMA === 3 && read.entries.length === 1 && read.notes.length === 0 && entry && equal(entry.payload.tech, { choices: {} }) && edited.ok && stored.schema === md.DESIGNER_SCHEMA && stored.payload.tech && equal(stored.payload.tech, { choices: {} }) ? true : short([read.entries.length, read.notes, edited, stored.schema])
     }],
   ]
 }
@@ -1171,6 +1233,23 @@ const pageStatements = async (mutate, m) => {
       vm.addSaved(154192)
 
       return seeded.columns.length === 2 && seeded.columns[1].kind === 'designed' && seeded.columns[1].seededFrom === ORDINARY && equal(seeded.columns[0].figures, before) && full === 3 && vm.alternatives.length === 3 && /At most 3/.test(vm.alternativeMessage) && vm.comparison.columns.length === 4 && vm.comparison.columns[0].role === 'baseline' && vm.comparison.columns[0].savedId === ORDINARY ? true : short([seeded.columns.length, full, vm.alternatives.length, vm.alternativeMessage])
+    }],
+    ['page: the designer opens on a save whose row keeps GroundShots and offers no ground pod: the baseline records it, the design seeded from it has none and the editor lists the lurker and no pod', async () => {
+      const editor = await loadPage('components/missiles/MissileDraftEditor', { stubs: STUBS })
+      const offered = editor.data.call({}).options.map((option) => option.id)
+      const podded = copy(designs)
+
+      podded.fixture.designs.find((entry) => entry.id === ORDINARY).row.GroundShots = 2
+
+      const vm = page({ designs: podded, baselineId: ORDINARY, alternatives: [] })
+
+      vm.seedFromBaseline()
+
+      const columns = vm.comparison.columns
+      const draft = vm.alternatives[0]
+      const carried = editor.computed.carried.call({ draft })
+
+      return offered.includes('lurker') && !offered.some((id) => /pod/i.test(id)) && equal(columns.map((column) => column.gated.find((entry) => entry.id === 'groundPod').state), ['recorded', 'not-offered']) && !('groundPod' in draft.carried) && !carried.some((text) => /pod/.test(text)) && draft.options.lurker === false ? true : short([offered, columns.map((column) => column.gated.find((entry) => entry.id === 'groundPod').state), draft.carried, carried])
     }],
     ['page: a PD below 0 is a field error and the planner figure is unavailable, never negative', () => {
       const vm = page({ baselineId: ORDINARY, alternatives: [], pd: '-1' })
@@ -1547,7 +1626,15 @@ const MUTATIONS = [
   { name: 'a choice kept with no link is linked to the open save by a save', file: 'missile-designer.js', find: 'return kept.fingerprint ? { type, id, fingerprint: kept.fingerprint } : null', replace: 'return kept.fingerprint ? { type, id, fingerprint: kept.fingerprint } : (row ? { type, id, row } : null)', fails: ['record: a tech choice kept with no link'] },
   { name: 'a tech choice with no link is not carried as one', file: 'missile-designer.js', find: '.filter((choice) => !stored.some((link) => link.type === TECH_LINK_TYPE && link.id === choice.techId))', replace: '.filter(() => false)', fails: ['record: a tech choice kept with no link'] },
   { name: 'a payload with a tech choice that is not valid is kept', file: 'missile-designer.js', find: 'problems.push(...techProblems(payload.tech))', replace: 'void techProblems', fails: ['record: a tech choice that is not'] },
-  { name: 'a comparison of the earlier schema is not migrated', file: 'missile-designer.js', find: 'migrate: (payload, fromSchema) => (fromSchema < 2 ? { ...payload, tech: { choices: {} } } : payload),', replace: 'migrate: (payload) => payload,', fails: ['record: a comparison saved before'] },
+  { name: 'a comparison of the earlier schema is not migrated', file: 'missile-designer.js', find: 'migrate: (payload, fromSchema) => migrated(payload, fromSchema),', replace: 'migrate: (payload) => payload,', fails: ['record: a comparison saved before', 'lurker: the comparison record'] },
+  { name: 'a comparison of schema 1 given no tech choices', file: 'missile-designer.js', find: 'const next = fromSchema < 2 ? { ...payload, tech: { choices: {} } } : payload', replace: 'const next = payload', fails: ['record: a comparison saved before'] },
+  { name: 'the lurker of an earlier comparison not set off', file: 'missile-designer.js', find: 'options: { ...entry.options, lurker: false }', replace: 'options: entry.options', fails: ['lurker: the comparison record'] },
+  { name: 'the ground pod of an earlier comparison kept', file: 'missile-designer.js', find: "carried: Object.fromEntries(Object.entries(entry.carried).filter(([name]) => name !== 'groundPod'))", replace: 'carried: entry.carried', fails: ['lurker: the comparison record'] },
+  { name: 'the lurker of a stored design not seeded into a draft', file: 'missile-designer.js', find: 'retarget: row.Retargeting > 0, lurker: row.Lurker > 0, laser: row.LaserWarhead > 0 },', replace: 'retarget: row.Retargeting > 0, lurker: false, laser: row.LaserWarhead > 0 },', fails: ['lurker: a stored lurker design'] },
+  { name: 'the lurker of a draft not applied to its candidate', file: 'missile-designer.js', find: 'lurker: Boolean(asked.lurker), laser },', replace: 'lurker: false, laser },', fails: ['lurker: a designed alternative'] },
+  { name: 'the lurker input of a stored design not shown', file: 'missile-designer.js', find: "lurker: inputCell('lurker', row.Lurker > 0 ? 1 : 0, basis),", replace: "lurker: inputCell('lurker', 0, basis),", fails: ['lurker: a stored lurker design'] },
+  { name: 'a ground pod carried by a seeded draft', file: 'missile-designer.js', find: 'shipDecoy: row.ShipDecoy === 1, enhancedRadiation: saved.enhancedRadiation },', replace: 'shipDecoy: row.ShipDecoy === 1, groundPod: row.GroundShots > 0, enhancedRadiation: saved.enhancedRadiation },', fails: ['gating: the designer offers no ground pod'] },
+  { name: 'a stored ground pod not recorded', file: 'missile-designer.js', find: 'shipDecoy: row.ShipDecoy === 1, groundPod: ground, enhancedRadiation: saved.enhancedRadiation,', replace: 'shipDecoy: row.ShipDecoy === 1, groundPod: false, enhancedRadiation: saved.enhancedRadiation,', fails: ['gating: a ground pod or an enhanced radiation warhead', 'gating: the designer offers no ground pod'] },
   { name: 'a column with an option not applied still shows the figures of the design without it', file: 'missile-designer.js', find: 'withheld ? NO_FIGURE(DESIGNER_RULES.plannerFigure, withheld, definition.unit) : mark(figures[definition.id])', replace: 'mark(figures[definition.id])', fails: ['gating: a column with an option not applied', 'gating: a laser warhead asked for'] },
 ]
 
@@ -1572,7 +1659,7 @@ const mutatedCopy = (file, from, to) => {
 // ---------- the saves ----------
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true, mutant: null, probe: null }
+  const options = { modded: fixtureTriple(), stock: null, mutations: true, mutant: null, probe: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1624,20 +1711,22 @@ const openSave = (file) => new Promise((resolve, reject) => {
 
 // Opens the two saves the ownership checks read into SAVES; a save that is not there is left out.
 const openSaves = async (options) => {
-  const [moddedFile, moddedGame, moddedRace] = options.modded
-  const [stockFile, stockGame, stockRace] = options.stock
-  const modded = await openSave(moddedFile)
-  const stock = await openSave(stockFile)
+  const named = {}
 
-  if (modded) {
-    SAVES.modded = { database: modded, ids: { GameID: moddedGame, RaceID: moddedRace } }
+  for (const label of ['modded', 'stock']) {
+    if (options[label]) {
+      const [file, GameID, RaceID] = options[label]
+      const database = await openSave(file)
+
+      named[label] = { file, database }
+
+      if (database) {
+        SAVES[label] = { database, ids: { GameID, RaceID } }
+      }
+    }
   }
 
-  if (stock) {
-    SAVES.stock = { database: stock, ids: { GameID: stockGame, RaceID: stockRace } }
-  }
-
-  return { moddedFile, stockFile, modded, stock }
+  return named
 }
 
 const closeSaves = () => Object.values(SAVES).forEach((save) => save.database.close())
@@ -1719,7 +1808,7 @@ const inChild = async (argv) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 // Every planted fault in a process of its own, as many at a time as the pool allows, results printed in the order of the list. The loader of the utilities imports modules from data URLs made of their source, so two copies of an unchanged module in one process are one module with one registry of provenance rules: a fault that registered something would reach the checks and the faults that follow it.
 const runMutants = async (options) => {
@@ -1783,9 +1872,9 @@ const run = async () => {
   }
 
   const real = await loadAll()
-  const { moddedFile, stockFile, modded, stock } = await openSaves(options)
+  const named = await openSaves(options)
 
-  console.log(`Saves read by the ownership checks: modded ${modded ? moddedFile : `${moddedFile} (not there)`}, stock ${stock ? stockFile : `${stockFile} (not there)`}`)
+  console.log(`Saves read by the ownership checks: ${['modded', 'stock'].map((label) => (named[label] ? `${label} ${named[label].database ? named[label].file : `${named[label].file} (not there)`}` : `${label} (none named)`)).join(', ')}`)
 
   console.log('The missile designer: units, reconciliation, designs, engine, planner figure, comparison, sources, gating, ownership and the record')
 

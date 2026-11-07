@@ -1,11 +1,17 @@
-// The calculations behind the Production page: what each colony can build, research and train, what is idle, and when each job finishes. Every figure is a provenance result (utilities/provenance.js): a missing input gives an unavailable result naming it, never 0, and a job that is not making progress gives an unavailable finish that says so. The colony's production modifiers and its construction, ordnance and fighter capacity come from the production-modifiers mixin (rule `production.populationCapacity`).
+// The calculations behind the Production page: what each colony can build, research and train, what is idle, and when each job finishes. Every figure is a provenance result (utilities/provenance.js): a missing input gives an unavailable result naming it, never 0, and a job that is not making progress gives an unavailable finish that says so. The colony's production modifiers and its construction, ordnance and light naval capacity come from the production-modifiers mixin (rule `production.populationCapacity`).
 
 import { admitQueued, forecastColonySteps, FUEL, HORIZON_DAYS } from './industry-cycle'
+import { BODY_TYPE, GAS, HYDROSPHERE, hydrosphereAtTemperature, surfaceTemperature } from './habitability'
 import { TERMINATION, UNPACED } from './search-run'
 import { MINERALS, projectShortages } from './minerals'
+import { capacityKind } from './production-types'
+import { isFullCapacityYard } from './shipyard-types'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
+import { researchAnnualRate, researchOutputPerLab } from './research'
 
-const PRODUCTION_VERSIONS = ['2.7.x']
+const PRODUCTION_VERSIONS = ['3.2.x']
+// The versions the rules hold for: the credit of stored components and the cycle forecast's mineral floor.
+const LINE_VERSIONS = ['3.2.x']
 const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
 const DAYS_PER_YEAR = 365
@@ -16,30 +22,32 @@ const CONDENSATION_TO_HYDRO_RATE = 40
 const WATER_VAPOUR_IN_ATMOSPHERE = 0.01
 // How far ahead the water vapour estimate looks.
 export const WATER_VAPOUR_HORIZON = 200
+const ORDINARY_GAS_INCREMENT_CAP = 100000
 
 const ESTIMATE = 'The rate is not compared with a saved figure of the job.'
 
+// The game's terraforming: an adding target of zero does not stop the job.
 registerRule({
   id: 'production.jobCount',
   versions: PRODUCTION_VERSIONS,
   units: 'jobs',
   verification: 'confirmed',
   structure: ['FCT_ResearchProject', 'FCT_IndustrialProjects.Queue, Pause', 'FCT_ShipyardTask', 'FCT_Shipyard.TaskType, PauseActivity', 'FCT_GroundUnitTraining', 'FCT_Population.TerraformingGasID, MaxAtm'],
-  note: 'A count of the save\'s research projects, industrial projects, shipyard tasks and activities, ground training tasks and terraforming colonies. Queued jobs are counted apart from the running ones; a colony adding a gas up to 0 atm has no terraforming job.',
+  note: 'A count of the save\'s research projects, industrial projects, shipyard tasks and activities, ground training tasks and terraforming colonies. Queued jobs are counted apart from the running ones; an adding target of 0 atm means unlimited addition, so it still counts as a job.',
 })
 
 registerRule({
   id: 'production.capacityFree',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.populationCapacity', 'production.trainingCapacity', 'FCT_IndustrialProjects.Percentage, Queue, Pause, ProductionType', 'FCT_GroundUnitTraining.TaskPercentage'],
-  note: 'A colony\'s capacity for construction, ordnance, fighters or ground training times the share no running project or task uses. A queued project holds no share and a paused one keeps its share without building, so it counts as idle. The capacity is estimated; the shares are stored percentages.',
+  note: 'A colony\'s capacity for construction, ordnance, light naval units or ground training times the share no running project or task uses. A queued project holds no share and a paused one keeps its share without building, so it counts as idle. The capacity is estimated; the shares are stored percentages.',
 })
 
 registerRule({
   id: 'production.trainingCapacity',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['FCT_Race.GroundFormationConstructionRate, EconomicProdModifier', 'FCT_Species.ProductionRateModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'FCT_Commander, FCT_CommanderBonuses', 'DIM_PlanetaryInstallation.GroundTrainingValue', 'FCT_PopulationInstallations.Amount'],
@@ -69,8 +77,8 @@ registerRule({
   versions: PRODUCTION_VERSIONS,
   units: 'RP/yr',
   verification: 'estimated',
-  structure: ['FCT_ResearchProject.Facilities', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses (Research)', 'FCT_AncientConstruct.ResearchField, ResearchBonus', 'FCT_Race.Research', 'FCT_Species.ResearchRateModifier', 'FCT_Game.ResearchSpeed'],
-  note: `The project's facilities times the colony's overall research modifier (race and species rate, economy, efficiency, radiation, stability, political status and the game's research speed) times the scientist's Research bonus (four times the bonus less 3 in the scientist's own field, the bonus itself outside it) times the anomaly bonus. ${ESTIMATE}`,
+  structure: ['FCT_ResearchProject.Facilities, ResSpecID', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses (Research)', 'FCT_AncientConstruct.Active, ResearchField, ResearchBonus', 'FCT_Population.Population and eligible orbital colonists', 'FCT_Race.Research', 'FCT_Species.ResearchRateModifier', 'FCT_Game.ResearchSpeed'],
+  note: `The project's facilities times the colony's research output per lab, the scientist's Research bonus (four times the bonus less 3 in the scientist's own field), the local construct's bonus in its field whether active or dormant, and the racial field factor. Each active construct adds a tenth of its bonus above 1 to its racial field factor for every colony with at least a million surface and eligible orbital people. Radiation production is at least 0. ${ESTIMATE}`,
   assumptions: ['A project with no scientist, or a scientist without the Research bonus, takes no bonus (×1)'],
 })
 
@@ -80,7 +88,7 @@ registerRule({
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.populationCapacity', 'FCT_IndustrialProjects.Percentage'],
-  note: `The colony's capacity for the project's kind (construction, ordnance or fighters) times the project's share. The share is stored; the capacity is estimated. ${ESTIMATE}`,
+  note: `The colony's capacity for the project's kind (construction, ordnance or light naval units) times the project's share. The share is stored; the capacity is estimated. ${ESTIMATE}`,
 })
 
 registerRule({
@@ -88,8 +96,8 @@ registerRule({
   versions: PRODUCTION_VERSIONS,
   units: 'BP/yr',
   verification: 'estimated',
-  structure: ['FCT_Population (shipbuilding modifiers)', 'FCT_ShipClass.Size', 'FCT_Shipyard.SYType'],
-  note: `The colony's shipyard build rate times a factor for the class's size: half of one plus the size in hull spaces over 100 (a quarter of it at a military yard). ${ESTIMATE}`,
+  structure: ['FCT_Population (shipbuilding modifiers)', 'FCT_ShipClass.Size, Commercial', 'FCT_ShipyardTask.TaskTypeID, RefitID'],
+  note: `The colony's shipyard build rate times a factor for the class's size: half of one plus the size in hull spaces over 100, the size counted at a quarter for a commercial class and in full for any other, whatever the yard's type: the quarter is the class's own commercial flag. A refit task counts its target class's size and flag, as the game dates one. ${ESTIMATE}`,
 })
 
 registerRule({
@@ -103,7 +111,7 @@ registerRule({
 
 registerRule({
   id: 'production.trainingRate',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'BP/yr',
   verification: 'estimated',
   structure: ['production.trainingCapacity', 'FCT_GroundUnitTraining.TaskPercentage'],
@@ -120,18 +128,37 @@ registerRule({
   assumptions: ['The date is approximate: the game\'s own steps are not reproduced exactly'],
 })
 
+// The cycle forecast debits what a build takes from the colony's stock as the game does: every one of the eleven balances is floored at 0 after the subtraction, so a build rounded up to 4 decimals past what a mineral's stock covers leaves 0, never a negative balance that would hold back the next cycle and take from what arrives. The shipyard and scaled debits floor the same way. docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since the earlier line lists this floor (B341, B355), the creation of the Light Naval and Space Station projects (B343, `production.componentCredit`), the development project types and the ordnance capacity term as its changes to industrial production, and no other step of the cycle.
+registerRule({
+  id: 'production.industryFinish',
+  versions: LINE_VERSIONS,
+  units: 'days',
+  verification: 'estimated',
+  structure: ['production.industryRate'],
+  note: `The project's remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony's production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony's one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A build takes its minerals off the stock and leaves no balance below 0: a build rounded up past what a mineral's stock covers leaves 0. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes. ${ESTIMATE}`,
+})
+
 ;[
-  { key: 'research', note: 'The remaining research points over the project\'s rate, in days. A queued tech starts when the one ahead finishes, with the same labs.' },
-  { key: 'industry', note: 'The project\'s remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony\'s production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony\'s one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes.' },
-  { key: 'ship', note: 'The task\'s remaining build points over the yard\'s rate, in days. Minerals are not simulated.' },
+  { key: 'research', versions: PRODUCTION_VERSIONS, note: 'The remaining research points over the project\'s effective rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs and scientist but its own field bonuses. The game carries unused time into that tech; the date is continuous time and the game completes it at the end of the first increment at or after it.', assumptions: ['The current labs, scientist, colony output and racial field bonuses stay fixed throughout the queue'] },
+  { key: 'ship', versions: ['3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
-  { key: 'training', note: 'The task\'s remaining build points over its rate, in days.' },
-  { key: 'terraform', note: 'The pressure still to add or remove over the local rate, in days; for water vapour over liquid water, the construction cycles it takes as the vapour condenses and the oceans evaporate. Not within 200 years reads as no date.' },
-].forEach(({ key, note }) => registerRule({ id: `production.${key}Finish`, versions: PRODUCTION_VERSIONS, units: 'days', verification: 'estimated', structure: [`production.${key}Rate`], note: `${note} ${ESTIMATE}` }))
+  { key: 'training', versions: ['2.7.x'], note: 'The task\'s remaining build points over its rate, in days.' },
+].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`], assumptions = [] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}`, assumptions }))
+
+// The terraforming job, with the strategic water update (condensation and evaporation of water vapour) before it and, at the end of each increment, the hydrosphere transition, atmospheric pressure and surface temperature updates; terraforming has a minimum gravity of 0.1 g.
+registerRule({
+  id: 'production.terraformFinish',
+  versions: PRODUCTION_VERSIONS,
+  units: 'days',
+  verification: 'estimated',
+  structure: ['production.terraformRate', 'FCT_Game.MinConstructionPeriod', 'FCT_Population.TerraformStatus, MaxAtm', 'FCT_SystemBody.Gravity, BodyTypeID, BodyClass, SurfaceTemp, HydroID, HydroExt, AtmosPress, Albedo, DustLevel, DistanceToParent, OrbitalDistance, Eccentricity, Year', 'FCT_Star.Luminosity', 'FCT_AtmosphericGas.GasAtm, FrozenOut', 'DIM_Gases.FreezingPoint, GHGas, AntiGHGas'],
+  note: 'Below 0.1 g, no terraforming progress or order clearing occurs, so there is no completion while that gravity holds. At or above that minimum, addition stops only above a positive target. Removal stops at a positive pressure no higher than a positive target; it also stops when the gas is gone, except that water vapour removal keeps running while surface water remains. An eligible selected removal of absent or zero-pressure gas clears on the next increment. Zero is an unlimited adding target. A missing gas is created in the first increment and its adding target is checked from the next. Ordinary gas pressure is updated increment by increment, with no date if it does not finish within 100,000 increments. Water condenses only at or below 369 K, then surface water evaporates, before terraforming. After each water increment, temperature, water phase, albedo and gas freezing are recalculated. Thaw replenishes atmospheric humidity before the remaining surface water raises albedo. Gas giants and superjovians keep their base temperature regardless of the atmosphere. The finish is the end of that increment; water without a finish within 200 years has no date.',
+  assumptions: ['The gravity and rate hold and each future increment lasts the minimum construction period', 'The ordinary-gas forecast looks ahead at most 100,000 increments', 'For the water forecast, the present orbital distance, dust and other gas amounts hold while temperature, gas freezing and water phase evolve each increment', 'The water forecast looks ahead at most 200 years'],
+})
 
 registerRule({
   id: 'production.timeline',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'jobs',
   verification: 'estimated',
   structure: ['production.researchFinish, industryFinish, shipFinish, shipyardUpgradeFinish, trainingFinish, terraformFinish'],
@@ -149,7 +176,7 @@ registerRule({
 
 registerRule({
   id: 'production.stockCover',
-  versions: PRODUCTION_VERSIONS,
+  versions: ['2.7.x'],
   units: 'units',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.Amount, PartialCompletion, FuelRequired and the mineral columns', 'FCT_Population mineral stockpiles and FuelStockpile', 'production.industryFinish'],
@@ -157,10 +184,230 @@ registerRule({
   assumptions: ['The order the game takes a colony\'s projects in each cycle is not saved'],
 })
 
+// A Light Naval or Space Station project is made by the game's project creation: it clones the class's minerals and takes the class's cost as the cost a unit (`ProdPerUnit`, set from the class's cost when the project is chosen), and then takes the stored components. For each component the class mounts it counts the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds is taken only when the Industry tab's Use Components box is Checked, one of technology the race does not hold is always taken and its shortage refuses the project; each component taken lowers the cost a unit by `Cost * NumComponent` and the project's minerals by the component's, scaled by `NumComponent`, and the colony's stock by the batch; after the last the cost a unit is floored at 1 BP. A Space Station refuses a class with prototype components. The box is an argument of the creation and no column of `FCT_IndustrialProjects` (a saved project stores the cost a unit and the eleven minerals, nothing else of it). docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since the earlier line (B343).
+registerRule({
+  id: 'production.componentCredit',
+  versions: LINE_VERSIONS,
+  units: 'BP',
+  verification: 'estimated',
+  structure: ['FCT_IndustrialProjects.ProductionType, ProductionID, Amount, ProdPerUnit and the mineral columns', 'FCT_ShipClass.Cost', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.Cost and the mineral columns', 'FCT_RaceTech.TechID'],
+  note: 'What the components in a colony\'s stock took off a Light Naval or Space Station project when it was made: the class\'s cost less the cost a unit the project stores, which already counts the credit, so the finish date does too. Making the project takes each component the class mounts from the colony\'s stock for the whole batch, and only where the stock holds that much of it: a component of technology the race has not researched must be there, or the project is refused, and one of researched technology is taken only when Use Components is ticked. Each component taken lowers the cost and the minerals a unit by its own, and a unit never costs less than 1 BP. The box is not stored with an industrial project and the credit does not tell it: the research read is the race\'s current research, so a component that was alien and taken when the project was made and has been researched since gives the credit a ticked box would have given, and a credit beyond what the components alien as the race now stands give shows only that components of researched technology were taken. A stored cost a unit within one part in a million of the class\'s cost, either side, counts as the class\'s cost and credits 0, never a negative figure: a stored cost summed from the components\' own costs may sit a rounding off the class\'s. A stored cost a unit beyond that band above the class\'s cost is no credit of the class\'s components, which only ever lower a unit\'s cost, so both costs are given and the credit is not known. The class is read as it now stands.',
+  assumptions: ['The class\'s cost, components and minerals are the ones the project was made from', 'A component with no research row of the race is not researched', 'The research is the race\'s current research, not the one it held when the project was made'],
+})
+
+// The Use Components box of a shipyard task is stored as the player left it, where the earlier game forced it true, and a repeat or an automatic refit copies it from the task before. A construction task takes a component of researched technology from the stock only when the box is Checked and one of alien technology always; a refit takes the components it adds the same way; the next task of an automatic refit takes stock only when the stored box is true, and a repeat of a construction task applies the stored box. docs/SHIPYARD_DEVELOPMENT_AND_SHIP_WORK_REFERENCE.md § Changes since the earlier line (B354).
+registerRule({
+  id: 'production.useComponents',
+  versions: LINE_VERSIONS,
+  units: 'flag',
+  verification: 'confirmed',
+  structure: ['FCT_ShipyardTask.UseComponents, TaskTypeID'],
+  note: 'The Use Components box of a construction, refit or automatic refit task as the save stores it: 1 when it was ticked and 0 when it was not, never taken as ticked. A save without the column, or with a value that is no flag, gives no figure. Whether the box was ticked decides which components of researched technology the task credited and what the tasks that follow it credit. An industrial project stores no box, so its result is unavailable: the stored cost shows that components of researched technology were taken, which a ticked box allows and which a component researched since the project was made explains just as well, and never whether the box was ticked. A stored cost a unit above the class\'s cost is no cost the class\'s components give, so neither the credit nor the box is told from it.',
+})
+
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // A 0 or 1 flag column as true or false, null when the save does not hold one.
 export const flagOf = (value) => (value === 0 || value === 1 ? Boolean(value) : null)
+
+// The least a unit of a Light Naval or Space Station project costs, in build points: the game holds the cost a unit at 1 BP after the stored components are taken off.
+export const UNIT_COST_FLOOR = 1
+
+// The cost a unit takes once `credit` BP of stored components is taken off the class's `classCost`, held at the floor.
+export const creditedCost = (classCost, credit) => Math.max(UNIT_COST_FLOOR, classCost - credit)
+
+const CREDIT_TOLERANCE = 1e-6
+const nearly = (a, b) => Math.abs(a - b) <= CREDIT_TOLERANCE * Math.max(1, Math.abs(a), Math.abs(b))
+const beyond = (a, b) => a > b && !nearly(a, b)
+
+// Why the credit is not known where the stored cost a unit is above the class's cost: the class's components only ever lower a unit's cost, so no set of them leaves one above the class's.
+const aboveClassReason = (storedCost, classCost) => `the project's stored cost of ${storedCost} BP a unit is above the class's ${classCost} BP a unit`
+
+// What a Light Naval or Space Station project's class mounts, as the sums the credit is told from: the BP the components of alien technology give (taken whatever the box says) and all of them give, or the gaps the save leaves.
+const mountedCredit = (parts) => {
+  const gaps = []
+  let alien = 0
+  let whole = 0
+
+  parts.forEach((part) => {
+    if (!isNumber(part.count) || !isNumber(part.cost)) {
+      gaps.push(`the count and the cost of ${part.name}`)
+    } else if (part.researched !== 0 && part.researched !== 1) {
+      gaps.push(`whether the race has researched ${part.name}`)
+    } else {
+      whole += part.cost * part.count
+      alien += part.researched === 0 ? part.cost * part.count : 0
+    }
+  })
+
+  return { gaps: [...new Set(gaps)], alien, whole }
+}
+
+// What the Use Components box of an industrial project would be read from: the project stores none, and the stored cost tells the box only as far as the research the race holds now, which a research made since the project was made changes.
+const BOX_UNTOLD = 'the project\'s Use Components box: the project stores none, and the stored cost cannot tell it once a component has been researched since'
+const BOX_LIMIT = 'The research is the race\'s current research, not the one the race held when the project was made'
+const boxResult = (missing = []) => unavailable({ rule: 'production.useComponents', missing: [BOX_UNTOLD, ...missing], units: 'flag', assumptions: [BOX_LIMIT] })
+
+// What the stored cost shows of the Use Components box, which an industrial project does not store: never that the box was ticked, only which components must have been taken under the research the race holds now. The game always takes the components of alien technology and those of researched technology only with the box ticked, so the stored cost lies between the class's cost less every component and its cost less the ones alien now: below the latter by more than one part in a million means components of researched technology were taken ('researched'), which a ticked box allows and which a component researched after the project was made explains just as well; at the latter the cost does not decide it ('untold', with `credited` 'alien' or 'none'), and where the class mounts nothing of researched technology the box had nothing to decide ('moot'); any other cost is one the class's components cannot give ('unexplained'), and a stored cost beyond that band above the class's cost is no cost of the class's components whatever the research, so neither the credit nor the box is told ('above'). 'unknown' with the gaps where the save leaves a count, a cost or whether the race has researched a component. `result` is the rule's own result for the box: unavailable, naming why the stored cost cannot tell it.
+const useOf = ({ classCost, parts, storedCost }) => {
+  const { gaps, alien, whole } = mountedCredit(parts)
+
+  if (gaps.length) {
+    return { state: 'unknown', missing: gaps, result: boxResult(gaps) }
+  }
+
+  const mandatory = creditedCost(classCost, alien)
+  const least = creditedCost(classCost, whole)
+
+  if (beyond(storedCost, classCost)) {
+    return { state: 'above', alien, result: boxResult() }
+  }
+
+  if (beyond(storedCost, mandatory) || beyond(least, storedCost)) {
+    return { state: 'unexplained', alien, result: boxResult() }
+  }
+
+  if (!parts.some((part) => part.researched === 1)) {
+    return { state: 'moot', alien, result: boxResult() }
+  }
+
+  if (beyond(mandatory, storedCost)) {
+    return { state: 'researched', alien, result: boxResult() }
+  }
+
+  return { state: 'untold', alien, credited: nearly(mandatory, creditedCost(classCost, 0)) ? 'none' : 'alien', result: boxResult() }
+}
+
+// The minerals a unit the stored components took off, as [{ name, tonnes }] in the order of the minerals: what the class's components need of each (their count times their minerals) less what the project stores a unit; null while a count, a mineral or a stored figure is not in the save.
+const mineralCredit = (parts, stored) => {
+  if (!stored) {
+    return null
+  }
+
+  const credited = []
+
+  for (const { name } of MINERALS) {
+    const mounted = parts.reduce((total, part) => (total === null || !isNumber(part.count) || !part.minerals || !isNumber(part.minerals[name]) ? null : total + part.count * part.minerals[name]), 0)
+
+    if (mounted === null || !isNumber(stored[name])) {
+      return null
+    }
+
+    if (beyond(mounted, stored[name])) {
+      credited.push({ name, tonnes: mounted - stored[name] })
+    }
+  }
+
+  return credited
+}
+
+// What the stored components took off a Light Naval or Space Station project when it was made, from the project's stored cost a unit and minerals against the class it builds (`production.componentCredit`): { result (the BP a unit credited, unavailable naming what the save lacks), credit (BP a unit, 0 where the two costs are equal within one part in a million, null while unknown), aboveClass (the stored cost a unit is above the class's cost beyond that band, which leaves the credit and the box untold), floored (the stored cost is the 1 BP floor), minerals ([{ name, tonnes }] a unit credited or null), use (what the credit shows of the Use Components box, `useOf`: never that it was ticked, and `result`, the box rule's own unavailable result naming the limit) }. `classCost`: the class's stored cost; `parts`: its components, [{ name, count, cost, minerals: { [mineral]: tonnes }, researched (1, 0 or null where the save cannot say) }], as the component calculator's sources hold them; `storedCost` and `storedMinerals` the project's `ProdPerUnit` and mineral columns.
+export const componentCredit = ({ classCost, parts, storedCost, storedMinerals }) => {
+  const rule = 'production.componentCredit'
+  const missing = []
+
+  if (!isNumber(classCost)) {
+    missing.push('the class\'s cost')
+  }
+
+  if (!isNumber(storedCost)) {
+    missing.push('the project\'s stored cost a unit')
+  }
+
+  if (!Array.isArray(parts) || !parts.length) {
+    missing.push('the components of the class')
+  }
+
+  if (missing.length) {
+    return { result: unavailable({ rule, missing, units: 'BP' }), credit: null, aboveClass: false, floored: false, minerals: null, use: { state: 'unknown', missing, result: boxResult(missing) } }
+  }
+
+  const aboveClass = beyond(storedCost, classCost)
+  // Within the band the two costs are equal for the credit rule: a stored cost summed from the components' own costs may sit a rounding off the class's, and the credit is 0 there, never the negative the difference gives.
+  const credit = aboveClass ? null : nearly(storedCost, classCost) ? 0 : classCost - storedCost
+
+  return {
+    result: aboveClass ? unavailable({ rule, missing: [aboveClassReason(storedCost, classCost)], units: 'BP' }) : ofRule({ rule, value: credit, inputs: { present: ['the class\'s cost', 'the project\'s stored cost a unit', 'the components of the class'] }, units: 'BP' }),
+    credit,
+    aboveClass,
+    floored: credit > 0 && nearly(storedCost, UNIT_COST_FLOOR),
+    minerals: aboveClass ? null : mineralCredit(parts, storedMinerals),
+    use: useOf({ classCost, parts, storedCost }),
+  }
+}
+
+// The lines under a Light Naval or Space Station job, one text each: what the stored components credited, the minerals they took off, what that saves at the project's rate, and what the stored cost shows of the Use Components box, which is never that the box was ticked. A credit that cannot be told is one line naming both costs where the stored cost is above the class's, with the box's line after it, or the figures the save leaves out. `credit`: `componentCredit`'s result; `classCost` and `storedCost` its two costs; `units`: the units left; `perYear`: the project's rate in BP a year, null while it is not known; `format(value)` writes a figure of a cost or a mass, `duration(days)` a span; `npr`: a spied empire, whose research the save does not show (the box is left out of the lines).
+export const creditLines = ({ credit, classCost, storedCost, units, perYear, format, duration, npr = false }) => {
+  const lines = []
+  const { use } = credit
+
+  if (credit.credit === null) {
+    lines.push(credit.aboveClass ? `Credit of the stored components not known: the project's stored cost of ${format(storedCost)} BP a unit is above the class's ${format(classCost)} BP a unit` : `Credit of the stored components not known: missing ${credit.result.inputs.missing.join(', ')}`)
+
+    if (!npr && use.state === 'above') {
+      lines.push('The Use Components box is not stored with the project: the stored cost is above the class\'s cost, so the box\'s state cannot be told from it')
+    }
+
+    return lines
+  }
+
+  if (!(credit.credit > 0)) {
+    lines.push(`No stored components credited: the project costs the class's ${format(classCost)} BP a unit`)
+  } else {
+    lines.push(`Stored components credited ${format(credit.credit)} BP of the class's ${format(classCost)} BP a unit, so the project costs ${format(storedCost)} BP a unit${credit.floored ? ', held at the 1 BP floor' : ''}`)
+  }
+
+  if (credit.minerals && credit.minerals.length) {
+    lines.push(`Minerals credited a unit: ${credit.minerals.map((mineral) => `${mineral.name} ${format(mineral.tonnes)} t`).join(', ')}`)
+  }
+
+  if (credit.credit > 0 && isNumber(units) && units > 0 && isNumber(perYear) && perYear > 0) {
+    lines.push(`At the project's rate the credit saves ${format(credit.credit * units)} BP over the ${format(units)} units left, ${duration(credit.credit * units / perYear * DAYS_PER_YEAR)}`)
+  }
+
+  if (use.state === 'unexplained') {
+    lines.push('The stored cost is not one the class\'s components give: the class or its components differ from the ones the project was made from')
+  } else if (!npr && use.state === 'researched') {
+    lines.push(use.alien > 0 ? `The credit goes beyond the ${format(use.alien)} BP a unit that the class's alien components give alone, so components of researched technology were taken: a ticked Use Components box allows that, and a component researched after the project was made explains the same credit, so the box's state cannot be told from the cost` : 'Components of researched technology were taken: a ticked Use Components box allows that, and a component researched after the project was made explains the same credit, so the box\'s state cannot be told from the cost')
+  } else if (!npr && use.state === 'untold') {
+    lines.push(use.credited === 'alien' ? `The Use Components box is not stored with the project: the credit is what the class's alien components give (${format(use.alien)} BP a unit), taken whether the box is ticked or not, so the box's state cannot be told from the cost` : 'The Use Components box is not stored with the project: with nothing credited, the cost cannot tell whether the box was not ticked or the stock did not cover a whole batch of a component of researched technology')
+  } else if (!npr && use.state === 'moot') {
+    lines.push('The class mounts no component of researched technology, so the Use Components box changed nothing for the project and the cost says nothing of it')
+  }
+
+  return lines
+}
+
+// Whether `creditLines` words the box of a project: the box is left out for a spied empire, whose research the save does not hold, and where the stored cost is below every cost the class's components give the one line says it is no stored one. A stored cost above the class's cost cannot be told of the box either, so that line carries the box rule's result too. The page marks the box line with `use.result`.
+export const boxLineShown = (use, npr = false) => !npr && (use.state === 'researched' || use.state === 'untold' || use.state === 'moot' || use.state === 'above')
+
+// A shipyard task's Use Components box as the save stores it, as { flag (true, false, or null where the save holds none), result } with the result of 'production.useComponents': the box as stored, never taken as ticked.
+export const taskUseComponents = (task) => {
+  const rule = 'production.useComponents'
+  const flag = flagOf(task.UseComponents)
+
+  return { flag, result: flag === null ? unavailable({ rule, missing: ['the task\'s Use Components box'], units: 'flag' }) : ofRule({ rule, value: flag ? 1 : 0, inputs: { present: ['FCT_ShipyardTask.UseComponents'] }, units: 'flag' }) }
+}
+
+// What the stored box decides, by shipyard task type: a construction task credits the components in stock when it is made and again for each task a repeat makes; a refit credits those it adds; an automatic refit credits those it adds and, with the box ticked, the same for the task it makes for the next ship. A repair and a scrap take none, so the box says nothing there.
+const BOX_WORDS = Object.freeze({
+  0: Object.freeze({ on: 'components in stock of researched and alien technology are credited to the task, and to the tasks a repeat makes after it', off: 'only components in stock of alien technology are credited to the task, and to the tasks a repeat makes after it' }),
+  2: Object.freeze({ on: 'components in stock that the refit adds are credited, researched technology included', off: 'only components in stock of alien technology that the refit adds are credited' }),
+  4: Object.freeze({ on: 'components in stock that the refit adds are credited to the task and to each task it makes for the next ship', off: 'only alien components that the refit adds are credited to the task, and the tasks it makes for the next ships credit none' }),
+})
+
+// The line under a shipyard task about its Use Components box, as an array of 0 or 1 text: for a construction, refit or automatic refit task the box as stored and what it decides; none for a repair or a scrap, which the box does not touch, or for a type the save does not give.
+export const boxLines = (task) => {
+  const words = BOX_WORDS[task.ShipyardTaskType]
+
+  if (!words) {
+    return []
+  }
+
+  const { flag } = taskUseComponents(task)
+
+  return [flag === null ? 'Use Components is not stored for the task' : `Use Components ${flag ? 'on' : 'off'}: ${flag ? words.on : words.off}`]
+}
 
 const MODIFIER_TEXT = {
   row: 'the colony\'s production modifiers',
@@ -174,8 +421,8 @@ const MODIFIER_TEXT = {
 // What the colony's modifiers row lacks of `keys`: its own text when the row is not there at all.
 const modifierGaps = (modifiers, keys) => (modifiers ? keys.filter((key) => !isNumber(modifiers[key])).map((key) => MODIFIER_TEXT[key]) : [MODIFIER_TEXT.row])
 
-// The capacity a project draws on: ordnance and fighters have their own, and everything else, components and space stations included, uses construction capacity. A project with no production type in the save draws on a capacity not known: 'unknown', never construction.
-export const categoryOf = (productionType) => (!isNumber(productionType) ? 'unknown' : productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
+// The capacity a project draws on (`capacityKind` of utilities/production-types.js): ordnance and light naval units have their own, and everything else, components, space stations and the Engineering, Ordnance and Ground Unit Projects included, uses construction capacity apart from the Ordnance Projects, which draw on ordnance capacity. A project with no production type in the save draws on a capacity not known: 'unknown', never construction.
+export const categoryOf = (productionType) => (!isNumber(productionType) ? 'unknown' : capacityKind(productionType))
 
 // The capacity of a project whose production type is not in the save: unavailable, naming the type, so the project's rate and finish are unavailable with it.
 export const unknownKindCapacity = () => unavailable({ rule: 'production.industryRate', missing: ['the project\'s production type'] })
@@ -370,24 +617,43 @@ export const jobStatus = ({ paused, rate, stalled, finish = null }) => {
   return rate.value > 0 ? { id: 'running', label: 'Running' } : { id: 'stalled', ...stalled }
 }
 
-// A research project's rate in RP a year: the project's facilities times the colony's research modifier and the bonuses. `project`: { Facilities, ActualCommanderResearchBonus, ActualAnomalyBonus, CommanderField }.
-export const researchRate = (modifiers, project) => {
+// A research project's processor rate in RP a year, with the racial bonus of the project's own field.
+export const researchRate = (project, bonuses = {}) => {
   const rule = 'production.researchRate'
-  const missing = [...modifierGaps(modifiers, ['OverallResearchModifier']), ...(isNumber(project.Facilities) ? [] : ['the facilities the project holds']), ...(isNumber(project.ActualCommanderResearchBonus) ? [] : ['the scientist\'s research bonus']), ...(isNumber(project.ActualAnomalyBonus) ? [] : ['the anomaly bonus'])]
+  const outputPerLab = researchOutputPerLab(project)
+  const zeroOutput = (outputPerLab !== null && outputPerLab.m === 0n) || project.Facilities === 0
+  const fieldBonus = zeroOutput ? 1 : project.ProjectField in bonuses ? bonuses[project.ProjectField] : 1
+  const missing = [...(outputPerLab === null ? ['the colony\'s research output per lab'] : []), ...(isNumber(project.Facilities) ? [] : ['the facilities the project holds']), ...(isNumber(project.ActualCommanderResearchBonus) ? [] : ['the scientist\'s research bonus']), ...(isNumber(project.ActualAnomalyBonus) ? [] : ['the anomaly bonus']), ...(isNumber(fieldBonus) && (zeroOutput || !('unknown' in bonuses)) ? [] : ['the racial research field bonus'])]
+  if (!zeroOutput) {
+    missing.push(...(bonuses.missing ? bonuses.missing[project.ProjectField] || [] : []), ...(bonuses.missing ? bonuses.missing.unknown || [] : []))
+  }
+  if (project.AnomalyID != null && !isNumber(project.AnomalyField)) {
+    missing.push('the colony\'s ancient construct field')
+  }
+  if (!isNumber(project.ProjectField)) {
+    missing.push('the research field of the tech')
+  }
+  if (project.ScientistCommandID != null && !isNumber(project.CommanderField)) {
+    missing.push('the scientist\'s research field')
+  }
 
   if (missing.length) {
     return unavailable({ rule, missing })
   }
 
-  return ofRule({ rule, value: project.ActualCommanderResearchBonus * project.ActualAnomalyBonus * modifiers.OverallResearchModifier * project.Facilities, inputs: { present: [MODIFIER_TEXT.OverallResearchModifier, 'the project\'s facilities and bonuses'] }, assumptions: project.CommanderField ? [] : ['No scientist is assigned, so the project takes no research bonus (×1)'] })
+  return ofRule({ rule, value: researchAnnualRate({ outputPerLab, facilities: project.Facilities, scientist: project.ActualCommanderResearchBonus, local: project.ActualAnomalyBonus, racial: fieldBonus }), inputs: { present: ['the colony\'s research output per lab', 'the project\'s facilities and bonuses', 'the racial research field bonus'] }, assumptions: project.ScientistCommandID != null ? [] : ['No scientist is assigned, so the project takes no research bonus (×1)'] })
 }
 
-// The project a queued tech runs as: the same labs, the scientist's bonus out of his field (the bonus itself) or in it (four times it less 3, as the project's query gives it), and the anomaly bonus only in the project's field.
-export const queuedResearch = (project, queue) => {
-  const inField = project.ProjectField === queue.ProjectField
+// A queued tech keeps the labs and scientist, but selects specialty and the local construct by its own field.
+export const queuedResearch = (project, queue) => ({
+  ...project,
+  ProjectField: queue.ProjectField,
+  ActualCommanderResearchBonus: !isNumber(queue.ProjectField) || (project.ScientistCommandID != null && !isNumber(project.CommanderField)) ? null : isNumber(project.CommanderBonus) ? project.CommanderField === queue.ProjectField ? 4 * project.CommanderBonus - 3 : project.CommanderBonus : null,
+  ActualAnomalyBonus: !isNumber(queue.ProjectField) || (project.AnomalyID != null && !isNumber(project.AnomalyField)) ? null : project.AnomalyField === queue.ProjectField ? project.AnomalyBonus : 1,
+})
 
-  return { ...project, ActualCommanderResearchBonus: inField ? project.ActualCommanderResearchBonus : project.CommanderBonus, ActualAnomalyBonus: inField ? project.ActualAnomalyBonus : 1 }
-}
+// The RP a queued tech still costs: its stored development cost less the points saved from cancelled research on it (none saved is 0), never below 0; null when the cost, or the points of a saved row, are not stored. The stored cost is used as the game set it: the game floors a computed development cost at the build cost before it is stored, so the figure is never recomputed here.
+export const queuedRemaining = (queue) => (!isNumber(queue.DevelopCost) || !isNumber(queue.Saved) ? null : Math.max(0, queue.DevelopCost - queue.Saved))
 
 // When each industrial project of one colony and category starts and finishes, in days from now, as the game runs them. Every project out of the queue builds at its share of the capacity; a paused one keeps its share and builds nothing. When a project finishes, the queued ones start in queue order, each that fits in the share the running and paused ones leave, skipping any that don't, until none is left. Minerals aren't simulated. `capacity`: BP a year at 100%. Returns { [ProjectID]: { start, finish } }, null where that never happens.
 export const industrySchedule = (projects, capacity) => {
@@ -756,16 +1022,43 @@ export const shortageOf = (project) => {
   return { shortage: null, covers: unknown.length ? unavailable({ rule: 'production.shortage', missing: unknown }) : null, unknown }
 }
 
-// A shipyard task's rate in BP a year: the colony's build rate times a factor for the class's size. `ship`: { Size, CommercialModifier }, null where the class or the yard is not in the save.
+// The weight a class's size carries in a shipyard's build rate: a quarter for a commercial class, the whole size for any other, and null when the save does not give the flag. It is the class's own `FCT_ShipClass.Commercial`, which the game multiplies the size by when it works out the yard's build rate for a class, wherever the class is built and whatever the yard's type.
+export const commercialSizeFactor = (commercial) => (commercial === null || commercial === undefined ? null : commercial ? 0.25 : 1)
+
+// A shipyard task's rate in BP a year: the colony's build rate times a factor for the class's size. `ship`: { Size, CommercialModifier }, the class's size and `commercialSizeFactor` of its `Commercial` flag; a class or a rate the save does not give makes the rate unavailable and names it.
 export const shipRate = (modifiers, ship) => {
   const rule = 'production.shipRate'
-  const missing = [...modifierGaps(modifiers, ['ShipyardBuildRate']), ...(isNumber(ship.Size) ? [] : ['the class\'s size']), ...(isNumber(ship.CommercialModifier) ? [] : ['the shipyard\'s type'])]
+  const missing = [...modifierGaps(modifiers, ['ShipyardBuildRate']), ...(isNumber(ship.Size) ? [] : ['the class\'s size']), ...(isNumber(ship.CommercialModifier) ? [] : ['the class\'s commercial flag'])]
 
   if (missing.length) {
     return unavailable({ rule, missing })
   }
 
-  return ofRule({ rule, value: modifiers.ShipyardBuildRate * (1 + ((ship.Size * ship.CommercialModifier) / 100 - 1) / 2), inputs: { present: [MODIFIER_TEXT.ShipyardBuildRate, 'the class\'s size', 'the shipyard\'s type'] } })
+  return ofRule({ rule, value: modifiers.ShipyardBuildRate * (1 + ((ship.Size * ship.CommercialModifier) / 100 - 1) / 2), inputs: { present: [MODIFIER_TEXT.ShipyardBuildRate, 'the class\'s size and commercial flag'] } })
+}
+
+// The build points a shipyard task has left over all its hulls, the measure of the game's own completion date: the current hull's balance plus the whole cost of each later hull, |TotalBP - CompletedBP| + max(NumShips - 1, 0) x |TotalBP|. A later hull counts at the current hull's cost, whatever stock credit it will take or repair it will be priced by. `task`: { remaining (TotalBP - CompletedBP), totalBP, hulls (the stored NumShips) }. { value, missing }: `missing` names what the save does not give, with `value` null.
+export const shipTaskLeft = (task) => {
+  if (!isNumber(task.remaining)) {
+    return { value: null, missing: 'the task\'s remaining build points' }
+  } else if (!isNumber(task.hulls)) {
+    return { value: null, missing: 'the number of ships the task builds' }
+  }
+
+  const later = Math.max(task.hulls - 1, 0)
+
+  if (later > 0 && !isNumber(task.totalBP)) {
+    return { value: null, missing: 'the task\'s build points' }
+  }
+
+  return { value: Math.abs(task.remaining) + (later > 0 ? later * Math.abs(task.totalBP) : 0), missing: null }
+}
+
+// A shipyard task's finish as { result, idle }, a result of 'production.shipFinish': the build points it has left over all its hulls (`shipTaskLeft`) over its rate (`shipRate`'s result), in days. `task` as for `shipTaskLeft`; `paused` true, false or null.
+export const shipTaskFinish = ({ rate, task, paused }) => {
+  const left = shipTaskLeft(task)
+
+  return finishDays({ rule: 'production.shipFinish', rate, remaining: left.value, remainingName: left.missing || 'the task\'s remaining build points', paused })
 }
 
 // A shipyard activity's rate in BP a year at the yard's capacity (`capacity`, which the continual upgrade raises): the colony's build rate times a factor for the capacity. `shipyard`: { SYType }.
@@ -777,7 +1070,7 @@ export const shipyardUpgradeRate = (modifiers, shipyard, capacity = shipyard.Cap
     return unavailable({ rule, missing })
   }
 
-  const commercialModifier = shipyard.SYType === 1 ? 1 : 0.1
+  const commercialModifier = isFullCapacityYard(shipyard.SYType) ? 1 : 0.1
 
   return ofRule({ rule, value: (1 + (capacity * commercialModifier / 5000 - 1) / 2) * modifiers.ShipyardBuildRate, inputs: { present: [MODIFIER_TEXT.ShipyardBuildRate, 'the yard\'s capacity and type'] } })
 }
@@ -802,7 +1095,7 @@ export const shipyardContinualDays = (modifiers, shipyard) => {
     const wat = (120 * shipyard.Slipways) * modifiers.ShipyardOperations
     const step = shipyardUpgradeRate(modifiers, shipyard, newCapacity).value * roi
 
-    lastUpgrade = step / wat * (shipyard.SYType === 1 ? 500 : 5000)
+    lastUpgrade = step / wat * (isFullCapacityYard(shipyard.SYType) ? 500 : 5000)
 
     if (!(lastUpgrade > 0) || !Number.isFinite(lastUpgrade)) {
       return idle(rule, 'a yard that can grow (its build rate gives no step)')
@@ -839,68 +1132,177 @@ export const trainingRate = (capacity, training) => {
   return combine({ rule, parts: { capacity }, compute: (values) => (values.capacity * training.TaskPercentage) / 100, inputs: { present: ['the task\'s share of the capacity'] } })
 }
 
-// How many construction cycles until adding or removing water vapour on a body with liquid water ends, as the game runs them: the terraformers change the gas each cycle and the job ends once it passes the target; vapour above the air's humidity then condenses into the oceans, up to 0.1 atm a year, and the oceans evaporate up to it. `step`: atm the terraformers move a cycle; `years`: a cycle's length. Null when that takes more than WATER_VAPOUR_HORIZON years.
+// The strategic water update precedes terraforming. Liquid water evaporates to its humidity; a vapour hydrosphere evaporates at most 4 percent of coverage a year, or 0.1 atm.
+const evaporateWater = (body, water, years) => {
+  if (!(body.HydroExt > 0) || ![HYDROSPHERE.LIQUID, HYDROSPHERE.VAPOUR].includes(body.HydroID)) {
+    return false
+  }
+
+  const liquid = body.HydroID === HYDROSPHERE.LIQUID
+  const target = liquid ? body.AtmosPress * (body.HydroExt / 100) * WATER_VAPOUR_IN_ATMOSPHERE : body.HydroExt / CONDENSATION_TO_HYDRO_RATE
+  const amount = Math.max(0, liquid ? target - water.GasAtm : Math.min(target - water.GasAtm, years * 4 / CONDENSATION_TO_HYDRO_RATE))
+
+  if (!(amount > 0)) {
+    return false
+  }
+
+  water.GasAtm += amount
+  body.HydroExt -= amount * CONDENSATION_TO_HYDRO_RATE
+  body.AtmosPress = Math.max(0, body.Atmosphere.reduce((sum, gas) => sum + gas.GasAtm, 0))
+
+  return true
+}
+
+// Terraforming ends each increment with the recalculation of the total atmospheric pressure, the hydrosphere transition and the atmospheric pressure update. Reuse the shared dampened temperature, but count each greenhouse flag independently as the game does.
+const updateWaterClimate = (body, water) => {
+  const temperature = () => {
+    // The game's surface temperature update bypasses every atmospheric, albedo, dust and orbital-dampening factor for both giant types.
+    if (body.BodyTypeID === BODY_TYPE.GAS_GIANT || body.BodyTypeID === BODY_TYPE.SUPERJOVIAN) {
+      body.SurfaceTemp = body.BaseTemp
+
+      return
+    }
+
+    const greenhouse = body.Atmosphere.reduce((sum, gas) => sum + (!gas.FrozenOut && gas.GHGas ? gas.GasAtm : 0), 0)
+    const anti = body.Atmosphere.reduce((sum, gas) => sum + (!gas.FrozenOut && gas.AntiGHGas ? gas.GasAtm : 0), 0)
+
+    body.SurfaceTemp = surfaceTemperature(body, Math.min(3, 1 + body.AtmosPress / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti))
+  }
+
+  body.AtmosPress = Math.max(0, body.Atmosphere.reduce((sum, gas) => sum + gas.GasAtm, 0))
+  temperature()
+  const was = body.HydroID
+
+  body.HydroID = hydrosphereAtTemperature(body.SurfaceTemp)
+
+  // The game's hydrosphere transition: thaw refills humidity before its albedo step; ice-to-vapour and liquid/vapour-to-ice retain their distinct branches.
+  if (was === HYDROSPHERE.ICE_SHEET && body.HydroID === HYDROSPHERE.LIQUID) {
+    evaporateWater(body, water, 0)
+    body.Albedo += 0.0015 * body.HydroExt
+    temperature()
+  } else if ([HYDROSPHERE.LIQUID, HYDROSPHERE.VAPOUR].includes(was) && body.HydroID === HYDROSPHERE.ICE_SHEET) {
+    body.Albedo -= 0.0015 * body.HydroExt
+    temperature()
+  } else if (was !== HYDROSPHERE.NONE && was !== body.HydroID && body.HydroExt > 0 && body.HydroID === HYDROSPHERE.VAPOUR) {
+    if (was === HYDROSPHERE.ICE_SHEET) {
+      body.Albedo += 0.0015 * body.HydroExt
+    }
+
+    temperature()
+  } else if (was === HYDROSPHERE.VAPOUR && body.HydroID === HYDROSPHERE.LIQUID) {
+    evaporateWater(body, water, 0)
+    temperature()
+  }
+
+  const pressure = body.AtmosPress
+
+  body.Atmosphere.forEach((gas) => { gas.FrozenOut = body.SurfaceTemp < gas.FreezingPoint })
+  body.AtmosPress = body.Atmosphere.reduce((sum, gas) => sum + (gas.FrozenOut ? 0 : gas.GasAtm), 0) || pressure / 20
+
+  if (body.AtmosPress !== pressure) {
+    temperature()
+  }
+}
+
+// The water forecast at uniform increments, with the game's order and stop comparisons. Its climate evolves after each increment; the present orbital distance, dust and other gas amounts are held. Null means no finish within the horizon, not proof that the job can never end.
 export const waterVapourCycles = (terraform, step, years) => {
-  let gas = terraform.GasAtm || 0
-  let pressure = terraform.AtmosPress
-  let hydro = terraform.HydroExt
-  const cycles = Math.ceil(WATER_VAPOUR_HORIZON / years)
+  const body = { ...terraform, Atmosphere: terraform.Atmosphere.map((gas) => ({ ...gas })) }
+  let water = body.Atmosphere.find((gas) => gas.AtmosGasID === GAS.WATER_VAPOUR)
+  let present = !!water
+
+  if (!water) {
+    water = { AtmosGasID: GAS.WATER_VAPOUR, GasAtm: 0, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }
+    body.Atmosphere.push(water)
+  }
+
+  const cycles = Math.floor(WATER_VAPOUR_HORIZON / years)
 
   for (let cycle = 1; cycle <= cycles; cycle++) {
-    if (terraform.TerraformStatus) {
-      gas += step
-      pressure += step
+    const humidity = body.HydroID === HYDROSPHERE.LIQUID ? body.AtmosPress * (body.HydroExt / 100) * WATER_VAPOUR_IN_ATMOSPHERE : 0
 
-      if (gas > terraform.MaxAtm) {
+    if (body.SurfaceTemp <= 369 && water.GasAtm > humidity) {
+      const condensed = Math.min(years * CONDENSATION_PER_YEAR, water.GasAtm - humidity)
+
+      water.GasAtm -= condensed
+      body.AtmosPress = Math.max(0, body.AtmosPress - condensed)
+      body.HydroExt += condensed * CONDENSATION_TO_HYDRO_RATE
+      present = water.GasAtm > 0
+    }
+
+    present = evaporateWater(body, water, years) || present
+
+    if (terraform.TerraformStatus) {
+      water.GasAtm += step
+
+      if (present && water.GasAtm > terraform.MaxAtm && terraform.MaxAtm > 0) {
         return cycle
       }
-    } else {
-      const removed = Math.min(step, gas)
 
-      gas -= removed
-      pressure -= removed
+      present = true
+    } else if (present) {
+      water.GasAtm -= step
 
-      if (gas <= 0) {
-        if (!(hydro > 0)) {
+      if (water.GasAtm > 0) {
+        if (water.GasAtm <= terraform.MaxAtm && terraform.MaxAtm > 0) {
           return cycle
         }
-      } else if (gas <= terraform.MaxAtm && terraform.MaxAtm > 0) {
+      } else if (body.HydroExt === 0) {
         return cycle
+      } else {
+        water.GasAtm = 0
       }
+    } else if (body.HydroExt === 0) {
+      return cycle
     }
 
-    const humidity = pressure * (hydro / 100) * WATER_VAPOUR_IN_ATMOSPHERE
-
-    if (gas > humidity) {
-      const condensed = Math.min(years * CONDENSATION_PER_YEAR, gas - humidity)
-
-      gas -= condensed
-      pressure -= condensed
-      hydro += condensed * CONDENSATION_TO_HYDRO_RATE
-    }
-
-    const target = pressure * (hydro / 100) * WATER_VAPOUR_IN_ATMOSPHERE
-
-    if (hydro > 0 && target > gas) {
-      hydro -= (target - gas) * CONDENSATION_TO_HYDRO_RATE
-      pressure += target - gas
-      gas = target
-    }
+    updateWaterClimate(body, water)
   }
 
   return null
 }
 
-// A terraforming job's finish as { result, idle, note }: the pressure still to move over the local rate, or the construction cycles water vapour takes over liquid water. `note` says why a water vapour job has no date (not within WATER_VAPOUR_HORIZON years). `terraform`: the colony's row (TerraformStatus, MaxAtm, GasAtm, GasAtmUnknown, GasName, HydroID, HydroExt, AtmosPress); `GasAtmUnknown` is 1 where the body's atmosphere has a row for the gas whose pressure is null, 0 where the row is absent (the gas is not there: 0 atm).
+// A terraforming job's finish as { result, idle, note }: the first uniform increment that satisfies the game's stopping comparison, with strategic water updates and evolving climate for water vapour. The flattened body row carries the shared climate fields and Atmosphere for water, and GasAtmUnknown distinguishes an absent selected gas (0) from a row with unknown pressure (1).
 export const terraformFinish = (modifiers, terraform, rate) => {
   const rule = 'production.terraformFinish'
-  const waterOnSurface = terraform.GasName === 'Water Vapour' && terraform.HydroID === 3
+  const waterOnSurface = terraform.GasName === 'Water Vapour'
   const status = flagOf(terraform.TerraformStatus)
+
+  if (status && terraform.MaxAtm === 0) {
+    const note = 'No stop target: addition continues'
+
+    return { result: unavailable({ rule, missing: ['a positive stop target (0 atm means unlimited addition)'], present: rate.inputs.present }), idle: true, note }
+  }
+
+  // The game updates no gas and clears no order below 0.1 g.
+  if (isNumber(terraform.Gravity) && terraform.Gravity < 0.1) {
+    const note = 'No completion while body gravity is below 0.1 g'
+
+    return { result: unavailable({ rule, missing: ['body gravity of at least 0.1 g'], present: rate.inputs.present }), idle: true, note }
+  }
+
   const gasUnknown = !isNumber(terraform.GasAtm) && terraform.GasAtmUnknown !== 0
-  const missing = [...(status === null ? ['whether the colony adds or removes the gas'] : []), ...(isNumber(terraform.MaxAtm) ? [] : ['the target pressure']), ...(gasUnknown ? ['the pressure of the gas in the body\'s atmosphere'] : [])]
+  const missing = [...modifierGaps(modifiers, ['MinConstructionPeriod']), ...(isNumber(terraform.Gravity) ? [] : ['the body\'s gravity']), ...(status === null ? ['whether the colony adds or removes the gas'] : []), ...(isNumber(terraform.MaxAtm) ? [] : ['the target pressure']), ...(gasUnknown ? ['the pressure of the gas in the body\'s atmosphere'] : [])]
 
   if (waterOnSurface) {
-    missing.push(...modifierGaps(modifiers, ['MinConstructionPeriod']), ...(isNumber(terraform.HydroExt) ? [] : ['the hydrographic extent']), ...(isNumber(terraform.AtmosPress) ? [] : ['the atmospheric pressure']))
+    const climateFields = [['HydroID', 'water phase'], ['HydroExt', 'water extent'], ['AtmosPress', 'atmospheric pressure'], ['SurfaceTemp', 'surface temperature'], ['BaseTemp', 'base temperature'], ['BodyTypeID', 'body type'], ['Albedo', 'albedo'], ['DustLevel', 'dust level'], ['BodyClass', 'body class'], ['Eccentricity', 'orbital eccentricity']]
+    const moon = terraform.BodyClass === 2
+    const eccentricity = moon ? terraform.ParentEccentricity : terraform.Eccentricity
+
+    if (moon) {
+      climateFields.push(['ParentEccentricity', 'planet orbital eccentricity'])
+    }
+
+    if (eccentricity > 0) {
+      climateFields.push(['StarLuminosity', 'star luminosity'], ...(moon ? [['ParentOrbitalDistance', 'planet orbital distance'], ['ParentYear', 'planet orbital year']] : [['OrbitalDistance', 'orbital distance'], ['Year', 'orbital year']]))
+    }
+
+    missing.push(...climateFields.filter(([key]) => !isNumber(terraform[key])).map(([, label]) => `the body's ${label}`))
+
+    if (!Array.isArray(terraform.Atmosphere)) {
+      missing.push('the body\'s atmosphere')
+    } else if (terraform.Atmosphere.some((gas) => ['AtmosGasID', 'GasAtm', 'FrozenOut', 'FreezingPoint', 'GHGas', 'AntiGHGas'].some((key) => !isNumber(gas[key])))) {
+      missing.push('the atmosphere\'s pressures, phases and greenhouse properties')
+    }
   }
 
   if (!isAvailable(rate)) {
@@ -911,26 +1313,59 @@ export const terraformFinish = (modifiers, terraform, rate) => {
     return { result: unavailable({ rule, missing: [...new Set(missing)], present: rate.inputs.present }), idle: false, note: undefined }
   }
 
-  const assumptions = isNumber(terraform.GasAtm) ? [] : ['A gas not in the body\'s atmosphere counts as 0 atm']
-  const gas = isNumber(terraform.GasAtm) ? terraform.GasAtm : 0
+  const assumptions = ['The gravity and rate hold and each future increment lasts the minimum construction period', ...(isNumber(terraform.GasAtm) ? [] : ['A gas not in the body\'s atmosphere counts as 0 atm'])]
+  const period = modifiers.MinConstructionPeriod
 
-  if (waterOnSurface) {
-    const period = modifiers.MinConstructionPeriod
-
-    if (!(period > 0)) {
-      return { result: unavailable({ rule, missing: ['a construction period above 0'], present: rate.inputs.present }), idle: false, note: undefined }
-    }
-
-    const cycles = waterVapourCycles({ ...terraform, GasAtm: gas }, (rate.value * period) / SECONDS_PER_YEAR, period / SECONDS_PER_YEAR)
-
-    if (cycles === null) {
-      return { result: unavailable({ rule, missing: [`a finish within ${WATER_VAPOUR_HORIZON} years (the vapour condenses into the oceans)`], present: rate.inputs.present }), idle: true, note: `Not within ${WATER_VAPOUR_HORIZON} years: the vapour condenses into the oceans` }
-    }
-
-    return { result: combine({ rule, parts: { rate }, compute: () => (cycles * period) / SECONDS_PER_DAY, inputs: { present: ['the pressure, hydrographic extent and target'] }, assumptions }), idle: false, note: undefined }
+  if (!(period > 0)) {
+    return { result: unavailable({ rule, missing: ['a construction period above 0'], present: rate.inputs.present }), idle: false, note: undefined }
   }
 
-  return { result: combine({ rule, parts: { rate }, compute: (values) => Math.max(0, status ? terraform.MaxAtm - gas : gas - terraform.MaxAtm) / (values.rate / DAYS_PER_YEAR), inputs: { present: ['the pressure and target'] }, assumptions }), idle: false, note: undefined }
+  if (waterOnSurface) {
+    const years = period / SECONDS_PER_YEAR
+
+    const cycles = waterVapourCycles(terraform, rate.value * years, years)
+
+    if (cycles === null) {
+      const note = `Not within ${WATER_VAPOUR_HORIZON} years under the forecast climate`
+
+      return { result: unavailable({ rule, missing: [`a finish within ${WATER_VAPOUR_HORIZON} years under the forecast climate`], present: rate.inputs.present, assumptions }), idle: true, note }
+    }
+
+    return { result: combine({ rule, parts: { rate }, compute: () => (cycles * period) / SECONDS_PER_DAY, inputs: { present: ['the atmosphere, climate, hydrographic extent, target and construction period'] }, assumptions: [...assumptions, 'Temperature, gas freezing and water phase are recalculated after each increment; orbital distance, dust and other gas amounts stay at their present values'] }), idle: false, note: undefined }
+  }
+
+  const step = (rate.value * period) / SECONDS_PER_YEAR
+  let gas = isNumber(terraform.GasAtm) ? terraform.GasAtm : 0
+  let present = isNumber(terraform.GasAtm)
+
+  // The game applies each double update before testing; a quotient or multiplication by the cycle count changes floating-point boundary crossings.
+  for (let cycle = 1; cycle <= ORDINARY_GAS_INCREMENT_CAP; cycle++) {
+    let done = false
+
+    if (status) {
+      if (present) {
+        gas += step
+        done = gas > terraform.MaxAtm && terraform.MaxAtm > 0
+      } else {
+        gas = step
+        present = true
+      }
+    } else {
+      if (present) {
+        gas -= step
+      }
+
+      done = !present || gas <= 0 || (gas <= terraform.MaxAtm && terraform.MaxAtm > 0)
+    }
+
+    if (done) {
+      return { result: combine({ rule, parts: { rate }, compute: () => (cycle * period) / SECONDS_PER_DAY, inputs: { present: ['the gravity, pressure, target and construction period'] }, assumptions }), idle: false, note: undefined }
+    }
+  }
+
+  const note = `Not within ${ORDINARY_GAS_INCREMENT_CAP.toLocaleString('en-US')} increments at the held rate`
+
+  return { result: unavailable({ rule, missing: [`a finish within ${ORDINARY_GAS_INCREMENT_CAP.toLocaleString('en-US')} increments at the held rate`], present: rate.inputs.present, assumptions }), idle: true, note }
 }
 
 // The jobs binned by the day they finish, over `years` in `bins` bins: { counts: { [id]: [per bin] }, later, total, binDays, skipped: { unknown, idle, done }, result }. A job is a row of the job table: { days (null for none), finishIdle (true when a null `days` is a job not progressing rather than a missing input), type (its bar), shortage (it goes in the short bar) }. A job finishing within no bin counts as `later`; one with no date is `skipped`, as `unknown` (an input is missing), `idle` (paused, no capacity, never starts) or `done` (0 days left). `ids`: the bars, 'short' is added.

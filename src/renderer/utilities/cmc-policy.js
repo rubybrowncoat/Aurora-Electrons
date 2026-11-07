@@ -4,7 +4,7 @@ import { massDriverRateResult, surfaceRate } from './minerals'
 import { gateMiningRows, surfaceMiningQuery } from './mining-data'
 import { combine, isAvailable, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
-const POLICY_VERSIONS = ['2.7.x']
+const POLICY_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'cmcPolicy.choice',
@@ -21,7 +21,7 @@ registerRule({
   units: 'yes or no',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.CivilianInstallation, MiningProductionValue', 'FCT_Race.MineProduction', 'FCT_SystemBody.RadiationLevel', 'FCT_MineralDeposit.Amount'],
-  note: 'The complexes produce, and the choice applies, when their capacity (amount times mining value) comes to at least one whole unit, the race\'s mine production is above 0, radiation leaves production above 0 and the body has a deposit left; otherwise the game neither charges nor pays for them, and the colony gets no row. Every complex colony of both sample saves produces, so the cut-off is not observed.',
+  note: 'The complexes produce, and the choice applies, when their capacity (amount times mining value) comes to at least one whole unit, the race\'s mine production is above 0, radiation leaves production above 0 and the body has a deposit left; otherwise the game neither charges nor pays for them, and the colony gets no row. Every complex colony of the saves it was checked on produces, so the cut-off is not observed.',
 })
 
 registerRule({
@@ -30,7 +30,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility', 'FCT_SystemBody.RadiationLevel', 'FCT_CommanderBonuses.BonusValue'],
-  note: 'What the complexes dig a year at each deposit\'s current accessibility: their capacity cut to a whole number, times the race\'s mine production, the accessibility, the governor\'s and a quarter of the sector commander\'s mining bonus and the radiation modifier; efficiency, stability and political status do not apply. Each colony that buys and exports in the sample save shipped exactly this output times the last update\'s length; a year ahead is an estimate, as accessibility falls past half a deposit.',
+  note: 'What the complexes dig a year at each deposit\'s current accessibility: their capacity cut to a whole number, times the race\'s mine production, the accessibility, the governor\'s and a quarter of the sector commander\'s mining bonus and the radiation modifier; efficiency, stability and political status do not apply. Each colony that buys and exports in the saves it was checked on shipped exactly this output times the last update\'s length; a year ahead is an estimate, as accessibility falls past half a deposit.',
 })
 
 registerRule({
@@ -39,7 +39,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'confirmed',
   structure: ['FCT_PopulationInstallations.Amount', 'FCT_WealthData.Amount, UseID'],
-  note: 'The race pays 250 wealth a year for each complex whose output it buys and collects 125 a year from each complex it taxes; an NPR pays and collects nothing. The save stores no rate: these are the game\'s constants, reproduced to the unit from each colony\'s entry in the wealth ledger (uses 35 and 36) of the sample save over five updates. A save whose game rules are not known has no rate.',
+  note: 'The race pays 250 wealth a year for each complex whose output it buys and collects 125 a year from each complex it taxes; an NPR pays and collects nothing. The save stores no rate: these are the game\'s constants, reproduced to the unit from each colony\'s entry in the wealth ledger (uses 35 and 36) of a save it was checked on, over five updates. A save whose game rules are not known has no rate.',
 })
 
 registerRule({
@@ -48,7 +48,7 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_Population.MassDriverDest, RaceID, SystemID'],
-  note: 'A bought output ships to the mass driver destination when that colony exists. Destination 0, or a colony that is gone, leaves the output at the source, as the game reads a missing destination as none. A destination of another race, in another system or the colony itself is never one the game offers, and one of another race would hand the minerals to that race. Neither sample save has a missing or invalid destination, so those cases are not observed.',
+  note: 'A bought output ships to the mass driver destination when that colony exists. Destination 0, or a colony that is gone, leaves the output at the source, as the game reads a missing destination as none. A destination of another race, in another system or the colony itself is never one the game offers, and one of another race would hand the minerals to that race. None of the saves it was checked on has a missing or invalid destination, so those cases are not observed.',
 })
 
 registerRule({
@@ -57,16 +57,16 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
-  note: 'The game offers destinations only to a colony with a mass driver, and offers only colonies of the race in the same system with a mass driver of their own; without a driver at the source, the stock above the reserve does not ship. Every destination in both sample saves has drivers at both ends, so a missing one is not observed.',
+  note: 'The game offers destinations only to a colony with a mass driver, and offers only colonies of the race in the same system with a mass driver of their own; without a driver at the source, the stock above the reserve does not ship. Every destination in the saves it was checked on has drivers at both ends, so a missing one is not observed.',
 })
 
 registerRule({
   id: 'cmcPolicy.throughput',
-  versions: POLICY_VERSIONS,
+  versions: ['2.7.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue, MiningProductionValue', 'FCT_MassDriverPackets.TotalSize, Speed'],
-  note: 'A bought output leaves each update in a packet of its own, whatever the source\'s drivers can send: in the sample save, colonies digging up to three times their drivers\' 5,000 t a year shipped their whole output. The drivers\' capacity limits what else ships, the stock above the reserve. A destination alone does not show what arrives, so the output and the capacity are compared only where both are known.',
+  note: 'A bought output leaves each update in a packet of its own, whatever the source\'s drivers can send: in the saves it was checked on, colonies digging up to three times their drivers\' 5,000 t a year shipped their whole output. The drivers\' capacity limits what else ships, the stock above the reserve. A destination alone does not show what arrives, so the output and the capacity are compared only where both are known.',
 })
 
 registerRule({

@@ -165,7 +165,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Find colonies that will outgrow their bodies or lack workers. Growth is an estimate from the game's growth rule. It slows as a colony fills its body and stops at the infrastructure cap, and the species and governor modifiers apply. Workers needed are today's installations and shipyards, apart from a shipyard aboard a ship, which needs none. With the queue counted, they also include the installations queued and the shipyard upgrades under way, each from the date the production forecast supports. The first figure counts only completions with a supported date. "At worst" counts every completion that could happen. A job with no date, a queued job the forecast may start in an order it did not try, and a continual upgrade add nothing to the first figure, and a paused or stalled job adds nothing certain. The figures for now and for the horizon are endpoints. A colony short of workers on the way is not counted in them but stays in the attention filter, and its row names the month the shortage starts. Population aboard Ark ships is listed separately, with no growth applied. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
+            Find colonies that will outgrow their bodies or lack workers. Population is a monthly-increment estimate: each step adds the annual rate times one twelfth of a year, with the temperature, colony costs, radiation and governor fixed at the snapshot. All races' surface residents count toward crowding: the selected race's colonies grow together, while other races' surface populations stay fixed at their snapshot values. Positive growth slows above a third of body capacity; an infrastructure shortfall causes shrinkage rather than a hard cap. Only ordinary infrastructure supplies support; low gravity doubles the requirement, not the balance. Agriculture takes surface people first, then services take a share of surface plus orbital people. Workers needed are today's installations and shipyards, apart from a shipyard aboard a ship, which needs none. With the queue counted, they also include the installations queued and the shipyard upgrades under way, each from the date the production forecast supports. The first figure counts only completions with a supported date. "At worst" counts every completion that could happen. A job with no date, a queued job the forecast may start in an order it did not try, and a continual upgrade add nothing to the first figure, and a paused or stalled job adds nothing certain. The figures for now and for the horizon are endpoints. A colony short of workers on the way is not counted in them but stays in the attention filter, and its row names the month the shortage starts. Orbital population stays fixed over the surface horizon. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
           </div>
         </v-card>
 
@@ -237,7 +237,7 @@
             </v-simple-table>
           </div>
           <div class="panel-foot caption text--secondary">
-            Use it to see where orbital population sits and how much room is left for more. People aboard an Ark ship count as orbital population only while its fleet sits at its colony's body with no move orders and is not a civilian fleet. Empty berths are room in the standard berths, not people, and stay apart from the population in orbit; people beyond the berths of a damaged ship are not counted. Orbital population is not surface population or workers, and the colony projections above leave it out. Its growth and its transfer to the surface are not verified, so none is applied and no forecast is made for it. A dash is a figure the save cannot support, and the mark beside it names what is missing.
+            Use it to see where orbital population sits and how much room is left for more. People aboard an Ark ship count as orbital population only while its fleet sits at its colony's body with no move orders and is not a civilian fleet. Empty berths are room in the standard berths, not people, and stay apart from the population in orbit; people beyond the berths of a damaged ship are not counted. Orbital people count toward services and manufacturing workers but not surface growth or agriculture. Their number stays fixed over the colony horizon: orbital growth and transfer to the surface are not forecast. The orbital census retains its coordinate-membership limitations. A dash is a figure the save cannot support, and the mark beside it names what is missing.
           </div>
         </v-card>
 
@@ -320,12 +320,14 @@ import { activeAppearance } from '../utilities/appearance'
 import { ORBIT_REASONS, arkLayer, loadArks } from '../utilities/arks'
 import { populationName } from '../utilities/aurora'
 import { WORKER_TOLERANCE, attentionResult, outlookColonies, people as peopleOf, totalResult } from '../utilities/colonies'
+import { loadColonyEnvironments, orbitalPopulationResult, withColonyEnvironment } from '../utilities/colony-environment'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { industryUsage, prepareForecast } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
+import { FULL_CAPACITY_YARD_SQL } from '../utilities/shipyard-types'
 import { committedSplitResult, committedWorkforce, workforceNeeds } from '../utilities/workforce-demand'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { ROUTE_STATUS, builderOptions, compareRoutes, engineerCapacityGap, fullStaffModifiers, idleConstruction, mineRequirements, plural, withMappedEngineers } from '../utilities/mine-bootstrap'
@@ -516,7 +518,13 @@ export default {
     },
 
     rows() {
-      return outlookColonies(this.colonies, this.inbound, this.horizon).map(({ colony, arriving, otherSeries, results }) => {
+      const colonies = this.colonies.map((colony) => {
+        const orbital = orbitalPopulationResult(this.ark, colony)
+
+        return { ...colony, OrbitalPopulation: valueOrNull(orbital), OrbitalPopulationResult: orbital }
+      })
+
+      return outlookColonies(colonies, this.inbound, this.horizon).map(({ colony, arriving, otherSeries, results }) => {
         const committedResult = this.committedView ? this.committedOf(colony, results) : null
         const committed = valueOrNull(committedResult)
         const worstLater = committed ? committed.later.worst : null
@@ -662,7 +670,7 @@ export default {
       const total = rows.length
 
       if (!total) {
-        return ['Population', 'Colonies short of workers', `Growth capped within ${horizon} y`, `Infrastructure for ${horizon} years of growth`].map((label) => ({ label, value: '—', note: 'No colonies with a population' }))
+        return ['Population', 'Colonies short of workers', `Infrastructure support reached within ${horizon} y`, `Infrastructure for ${horizon} years of growth`].map((label) => ({ label, value: '—', note: 'No colonies with a population' }))
       }
 
       const results = (name) => rows.map((row) => row.r[name])
@@ -721,8 +729,8 @@ export default {
           iconColor: shortNowValue > 0 || shortLaterValue > 0 || recovered > 0 || possible > 0 ? 'warning' : 'success',
         }),
         tile(cappedValue === null ? '—' : `${cappedValue}`, [capped.result, crowded.result], {
-          label: `Growth capped within ${horizon} y`,
-          note: `${cappedValue > 0 ? 'By infrastructure. ' : ''}${crowdedValue === null ? 'Crowding unavailable' : `${crowdedValue} past a third of their body's capacity`}${leftOut(unknownGrowth, total)}`,
+          label: `Infrastructure support reached within ${horizon} y`,
+          note: `${cappedValue > 0 ? 'At the maximum colony cost. ' : ''}${crowdedValue === null ? 'Crowding unavailable' : `${crowdedValue} past a third of their body's capacity`}${leftOut(unknownGrowth, total)}`,
           icon: cappedValue > 0 ? 'mdi-alert' : null,
           iconColor: 'warning',
         }),
@@ -1038,16 +1046,16 @@ export default {
       if (!row.projection) {
         return { label: supports, note: `${this.count(row.perMillion)} per million, no projection`, icon: null, mark: row.r.projection }
       } else if (row.projection.infrastructureAt === 0) {
-        return { label: 'At its cap', note: supports, icon: 'mdi-alert-octagon', color: 'error', mark: row.r.projection }
+        return { label: 'At support limit', note: supports, icon: 'mdi-alert-octagon', color: 'error', mark: row.r.projection }
       } else if (row.projection.infrastructureAt !== null) {
-        return { label: `Cap in ${this.years(row.projection.infrastructureAt)}`, note: supports, icon: 'mdi-alert', color: 'warning', mark: row.r.projection }
+        return { label: `Support limit in ${this.years(row.projection.infrastructureAt)}`, note: supports, icon: 'mdi-alert', color: 'warning', mark: row.r.projection }
       }
 
       return { label: supports, note: `${this.count(row.perMillion)} per million`, icon: null, mark: row.r.projection }
     },
 
     workerSegments(workers) {
-      const total = Math.max(workers.population, workers.service + workers.agriculture + workers.required)
+      const total = Math.max(workers.totalPopulation, workers.service + workers.agriculture + workers.required)
 
       if (!(total > 0)) {
         return []
@@ -1174,7 +1182,7 @@ export default {
       const near = (values) => values.some((value) => value > 0 && value !== Infinity && value <= peak * 2)
       const limits = [
         ['Growth slows', row.otherSeries.map((other) => row.capacity / 3 - other), [2, 3]],
-        ['Infrastructure cap', row.otherSeries.map(() => row.infrastructureCap), [6, 4]],
+        ['Infrastructure support', row.otherSeries.map(() => row.infrastructureCap), [6, 4]],
         ['Body capacity', row.otherSeries.map((other) => row.capacity - other), [10, 4]],
       ]
 
@@ -1204,7 +1212,7 @@ export default {
       const r = row.r
 
       if (row.infrastructureCap !== null && row.infrastructureCap !== Infinity) {
-        notes.push({ text: row.projection && row.projection.infrastructureAt !== null ? `Infrastructure stops growth at ${this.people(row.infrastructureCap)}.` : `Infrastructure supports ${this.people(row.infrastructureCap)}.`, results: [row.projection ? r.projection : r.cap] })
+        notes.push({ text: `Infrastructure supports ${this.people(row.infrastructureCap)} at the maximum colony cost${row.projection && row.projection.infrastructureAt !== null ? '; this threshold is reached within the horizon' : ''}. A shortfall against the current requirement causes shrinkage.`, results: [row.projection ? r.projection : r.cap] })
       }
 
       if (row.infrastructureNeeded === null) {
@@ -1238,7 +1246,12 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.ReqInf, FCT_Population.Capital, FCT_Population.SpeciesID, FCT_Species.SpeciesName, FCT_Species.PopulationGrowthModifier, FCT_Species.PopulationDensityModifier, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Radius, FCT_SystemBody.HydroExt, FCT_SystemBody.TidalLock, FCT_SystemBody.RadiationLevel, case when FCT_SystemBody.Gravity < FCT_Species.Gravity - FCT_Species.GravDev then 1 else 0 end as LowGravity, coalesce(VIR_Installations.Infrastructure, 0) as Infrastructure, coalesce(VIR_Installations.LGInfrastructure, 0) as LGInfrastructure, coalesce(VIR_Installations.Workers, 0) as InstallationWorkers, coalesce(VIR_Yards.Workers, 0) as YardWorkers, coalesce(VIR_Governor.BonusValue, 1) * (1 + (coalesce(VIR_Sector.BonusValue, 1) - 1) * 0.25) as PopulationGrowthBonus, VIR_Body.Population as BodyPopulation, VIR_InfrastructureCost.InfrastructureCost from FCT_Population inner join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID cross join (select min(case when DIM_PlanetaryInstallation.InfrastructureValue > 0 then DIM_PlanetaryInstallation.Cost end) as InfrastructureCost from DIM_PlanetaryInstallation) as VIR_InfrastructureCost left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.InfrastructureValue * FCT_PopulationInstallations.Amount) as Infrastructure, sum(DIM_PlanetaryInstallation.LGInfrastructureValue * FCT_PopulationInstallations.Amount) as LGInfrastructure, sum(DIM_PlanetaryInstallation.Workers * FCT_PopulationInstallations.Amount) as Workers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID left join (select FCT_Shipyard.PopulationID, sum(FCT_Shipyard.Capacity * FCT_Shipyard.Slipways * case FCT_Shipyard.SYType when 1 then 1.0 else 0.1 end) / 4000.0 as Workers from FCT_Shipyard where FCT_Shipyard.GameID = ${this.GameID} and FCT_Shipyard.RaceID = ${this.RaceID} and coalesce(FCT_Shipyard.ParentShipID, 0) <= 0 group by FCT_Shipyard.PopulationID) as VIR_Yards on VIR_Yards.PopulationID = FCT_Population.PopulationID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 8 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 3 and FCT_Commander.CommandID <> 0) as VIR_Governor on VIR_Governor.CommandID = FCT_Population.PopulationID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 8 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 4 and FCT_Commander.CommandID <> 0) as VIR_Sector on VIR_Sector.CommandID = FCT_RaceSysSurvey.SectorID and FCT_RaceSysSurvey.SectorID <> 0 left join (select FCT_Population.SystemBodyID, sum(FCT_Population.Population) as Population from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemBodyID) as VIR_Body on VIR_Body.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.Population > 0 order by FCT_Population.Population desc`).then(([items]) => (blocked.has(POPULATION_GROWTH_BONUS) ? items.map((item) => ({ ...item, PopulationGrowthBonus: null })) : items))
+        const read = async () => {
+          return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.ReqInf, FCT_Population.Capital, FCT_Population.SpeciesID, FCT_Species.SpeciesName, FCT_Species.PopulationGrowthModifier, FCT_Species.PopulationDensityModifier, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.ComponentNumber, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Radius, FCT_SystemBody.HydroExt, FCT_SystemBody.TidalLock, FCT_SystemBody.RadiationLevel, case when FCT_SystemBody.Gravity < FCT_Species.Gravity - FCT_Species.GravDev then 1 else 0 end as LowGravity, coalesce(VIR_Installations.Infrastructure, 0) as Infrastructure, coalesce(VIR_Installations.Workers, 0) as InstallationWorkers, coalesce(VIR_Yards.Workers, 0) as YardWorkers, coalesce(VIR_Governor.BonusValue, 1) * (1 + (coalesce(VIR_Sector.BonusValue, 1) - 1) * 0.25) as PopulationGrowthBonus, case when coalesce(VIR_Body.UnknownPopulation, 0) > 0 then null else VIR_Body.Population end as BodyPopulation, VIR_InfrastructureCost.InfrastructureCost from FCT_Population inner join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID cross join (select min(case when DIM_PlanetaryInstallation.InfrastructureValue > 0 then DIM_PlanetaryInstallation.Cost end) as InfrastructureCost from DIM_PlanetaryInstallation) as VIR_InfrastructureCost left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.InfrastructureValue * FCT_PopulationInstallations.Amount) as Infrastructure, sum(DIM_PlanetaryInstallation.Workers * FCT_PopulationInstallations.Amount) as Workers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID left join (select FCT_Shipyard.PopulationID, sum(FCT_Shipyard.Capacity * FCT_Shipyard.Slipways * case when FCT_Shipyard.SYType in (${FULL_CAPACITY_YARD_SQL}) then 1.0 else 0.1 end) / 4000.0 as Workers from FCT_Shipyard where FCT_Shipyard.GameID = ${this.GameID} and FCT_Shipyard.RaceID = ${this.RaceID} and coalesce(FCT_Shipyard.ParentShipID, 0) <= 0 group by FCT_Shipyard.PopulationID) as VIR_Yards on VIR_Yards.PopulationID = FCT_Population.PopulationID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 8 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 3 and FCT_Commander.CommandID <> 0) as VIR_Governor on VIR_Governor.CommandID = FCT_Population.PopulationID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 8 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 4 and FCT_Commander.CommandID <> 0) as VIR_Sector on VIR_Sector.CommandID = FCT_RaceSysSurvey.SectorID and FCT_RaceSysSurvey.SectorID <> 0 left join (select FCT_Population.SystemBodyID, sum(FCT_Population.Population) as Population, sum(case when FCT_Population.Population is null then 1 else 0 end) as UnknownPopulation from FCT_Population where FCT_Population.GameID = ${this.GameID} group by FCT_Population.SystemBodyID) as VIR_Body on VIR_Body.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.Population > 0 order by FCT_Population.Population desc`).then(([items]) => (blocked.has(POPULATION_GROWTH_BONUS) ? items.map((item) => ({ ...item, PopulationGrowthBonus: null })) : items))
+        }
+        const [items, environments] = await Promise.all([read(), loadColonyEnvironments(this.database, { GameID: this.GameID, RaceID: this.RaceID })])
+
+        return items.map((item) => withColonyEnvironment(item, environments))
       }),
       default: [],
     },
@@ -1249,7 +1262,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.PopulationID, sum(case when FCT_MoveOrders.MoveActionID = 6 and FCT_ShipCargo.CargoTypeID = 1 then FCT_ShipCargo.Amount else 0 end) / 1000000.0 as Colonists, sum(case when FCT_MoveOrders.MoveActionID in (96, 177) and FCT_ShipCargo.CargoTypeID = 2 then FCT_ShipCargo.Amount * (coalesce(DIM_PlanetaryInstallation.InfrastructureValue, 0) + coalesce(DIM_PlanetaryInstallation.LGInfrastructureValue, 0)) else 0 end) as Infrastructure, sum(case when FCT_MoveOrders.MoveActionID in (96, 177) and FCT_ShipCargo.CargoTypeID = 2 and coalesce(DIM_PlanetaryInstallation.InfrastructureValue, 0) + coalesce(DIM_PlanetaryInstallation.LGInfrastructureValue, 0) = 0 then FCT_ShipCargo.Amount else 0 end) as Installations from FCT_MoveOrders inner join FCT_Ship on FCT_Ship.FleetID = FCT_MoveOrders.FleetID inner join FCT_ShipCargo on FCT_ShipCargo.ShipID = FCT_Ship.ShipID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_ShipCargo.CargoID and FCT_ShipCargo.CargoTypeID = 2 where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} and FCT_MoveOrders.MoveActionID in (6, 96, 177) and FCT_MoveOrders.PopulationID <> 0 group by FCT_MoveOrders.PopulationID`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.PopulationID, sum(case when FCT_MoveOrders.MoveActionID = 6 and FCT_ShipCargo.CargoTypeID = 1 then FCT_ShipCargo.Amount else 0 end) / 1000000.0 as Colonists, sum(case when FCT_MoveOrders.MoveActionID in (96, 177) and FCT_ShipCargo.CargoTypeID = 2 then FCT_ShipCargo.Amount * coalesce(DIM_PlanetaryInstallation.InfrastructureValue, 0) else 0 end) as Infrastructure, sum(case when FCT_MoveOrders.MoveActionID in (96, 177) and FCT_ShipCargo.CargoTypeID = 2 and coalesce(DIM_PlanetaryInstallation.InfrastructureValue, 0) = 0 then FCT_ShipCargo.Amount else 0 end) as Installations from FCT_MoveOrders inner join FCT_Ship on FCT_Ship.FleetID = FCT_MoveOrders.FleetID inner join FCT_ShipCargo on FCT_ShipCargo.ShipID = FCT_Ship.ShipID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_ShipCargo.CargoID and FCT_ShipCargo.CargoTypeID = 2 where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} and FCT_MoveOrders.MoveActionID in (6, 96, 177) and FCT_MoveOrders.PopulationID <> 0 group by FCT_MoveOrders.PopulationID`).then(([items]) => items)
       }),
       default: [],
     },

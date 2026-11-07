@@ -508,21 +508,12 @@ export const resetDatabase = (storagePath) => {
 
     Name: Sequelize.STRING,
     CargoPoints: Sequelize.INTEGER,
-    CivMove: Sequelize.BOOLEAN,
     DisplayOrder: Sequelize.FLOAT,
   }, {
     sequelize,
     modelName: 'PlanetaryInstallation',
     tableName: 'DIM_PlanetaryInstallation',
     timestamps: false,
-
-    scopes: {
-      civilianEconomy: {
-        where: {
-          CivMove: true,
-        },
-      },
-    },
   })
 
   class System extends Model {}
@@ -613,7 +604,8 @@ export const resetDatabase = (storagePath) => {
     Protostar: Sequelize.INTEGER,
     Xcor: Sequelize.DOUBLE,
     Ycor: Sequelize.DOUBLE,
-    Component: Sequelize.INTEGER,
+    // The star's component number (1 is A, 2 is B): the game's column name, and the property name every read of it uses. A raw read selects `FCT_Star.ComponentNumber` as it is and the rows it returns carry it under the same name.
+    ComponentNumber: Sequelize.INTEGER,
     OrbitingComponent: Sequelize.INTEGER,
     Bearing: Sequelize.DOUBLE,
     Luminosity: Sequelize.DOUBLE,

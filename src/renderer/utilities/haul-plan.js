@@ -153,7 +153,7 @@ export const haulByClass = (haul, shipClass, shuttleTechnology, version = null, 
 // The rules this module implements, registered once (utilities/provenance.js). The days a class takes lean on the loading and round-trip rules in utilities/transport.js. Evidence: docs/plans/backlog/evidence/AE-080-01.md.
 registerRule({
   id: 'hauling.planTonnes',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 't',
   verification: 'estimated',
   structure: ['FCT_Population mineral stock and reserve', 'FCT_IndustrialProjects and shipyard tasks', 'FCT_MassDriverPackets'],
@@ -163,7 +163,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.haulDays',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_ShipClass.CargoCapacity, MaxSpeed'],

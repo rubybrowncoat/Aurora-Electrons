@@ -7,7 +7,7 @@ import { registerRule, valueOrNull } from './provenance'
 
 registerRule({
   id: 'history.mineralChange',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: '%',
   verification: 'confirmed',
   structure: ['FCT_Population.Duranium to Gallicite', 'snapshots of the app\'s history file'],

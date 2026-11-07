@@ -217,6 +217,9 @@ const INPUT_LABELS = {
   shipClasses: 'the ship classes',
 }
 
+// The words the capability preflight gives a check whose stored key keeps the capacity's old name: the key stays for the snoozes saved under it, and this is the name a report that cannot read the check shows.
+export const CHECK_LABELS = { 'check:free-fighter-capacity': 'the free light naval production capacity' }
+
 const checkReads = Object.fromEntries(CHECKS.map((check) => [readName(check), {
   get: tracked(readName(check), async function () {
     return this.runCheck(check)

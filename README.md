@@ -24,9 +24,11 @@ bun run lint
 
 ```
 
-The app reads `AuroraDB.db` from the project root in development. A sample save lives in `fixtures/AuroraDB.zip` (`unzip fixtures/AuroraDB.zip`).
+The app reads `AuroraDB.db` from the project root in development. A sample save lives in `fixtures/AuroraDB.zip` (`unzip fixtures/AuroraDB.zip`): a United Earth Federation campaign of this line, saved in 2102.
 
-The build reads Aurora 2.7.x saves and refuses others: a save with none of the fourteen columns Aurora 2.7 added, or without an `FCT_Game` table, is not read, and the app says so in place of the pages. A save from an earlier Aurora version needs Aurora Electrons 0.11.0, the last release that read them.
+The shared saved-snapshot orbital census is `loadOrbitalCensus(database, { GameID, RaceID })` in `utilities/orbital-census.js`. It returns per-colony finite population bounds and separate positive-population and million-person predicates; an unknown count is not zero. Only reachable rows and their shared-cell constraints affect a colony, and infeasible relationship alternatives do not erase supported ones. A missing categorical input is named only when its supported alternatives change that colony's population bounds, not merely because its row is reachable or another constraint tightens the result. Coupled unknown quantities can leave a conservative upper bound and an undecided gate. `bun scripts/check-orbital-census.js` checks SQLite tables built from `.github/exports/` headers against an independent completion oracle and semantic mutants, plus loader/interval-order smoke checks on the four played saves (`--no-mutations` runs the head cases only). Consumer migrations remain separate from this shared primitive.
+
+The build reads Aurora 3.2.x saves (the 3.0, 3.1 and 3.2 shapes) and refuses a pre-3.0 shape: a save with none of the seven columns Aurora 3.0 added, or without an `FCT_Game` table, is not read, and the app says so in place of the pages. A save from before Aurora 2.7 needs Aurora Electrons 0.11.0, the last release that read them. The Aurora 2.7.x line continues on the `release/2.7` branch (cut at `v2.7.11-cut`, fixes only) and reads Aurora 2.7.x saves; its last release is [2.7.11](https://github.com/rubybrowncoat/Aurora-Electrons/releases/tag/v2.7.11). This branch (`3.2`) is the Aurora 3.2 line, released as 3.2.N. `bun scripts/rule-versions-table.js` prints the registered version labels area by area, with the verification, repair and stored-column work behind them and the findings still unverified on the line.
 
 # Contributions
 

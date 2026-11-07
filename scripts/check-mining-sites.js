@@ -3,7 +3,7 @@
 
   node scripts/check-mining-sites.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785).
+  With no options a run checks the default fixture (scripts/lib/fixtures.js: game 141, race 784 of the interim 3.1 fixture). Explicit --save arguments are always used as given.
 
   It proves: every verdict of the model on fixtures (a deposit never surveyed against one empty or exhausted, the orbital diameter limit, crew, the colony at the body and the assignment, the workforce of manned mines, radiation and mine production, each way minerals leave a colony, a productive isolated site being delivery-blocked and never idle, a save with no version making the rules read from the game unknown), then on each save that the sites join the same colonies and fleets as a direct query, that each warning lists only the sites its verdict names and that every row names what it lacks and links the colony or fleet to fix. A reader that hides every colony and fleet must make the comparison fail (a self-check, left out by --no-mutations).
 */
@@ -12,12 +12,10 @@ const fs = require('fs')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating } = require('./lib/no-mutations')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const DEFAULT_SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [fixtureSave()]
 const STUBS = {
   'electron-store': 'export default class Config { constructor() {} get store() { return {} } set store(value) {} }',
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
@@ -55,7 +53,15 @@ const parseArguments = (argv) => {
     }
   }
 
-  return saves.length ? saves : DEFAULT_SAVES
+  if (saves.length) {
+    return saves
+  }
+
+  if (!mutating() && !fs.existsSync(path.resolve(root, DEFAULT_SAVES[0].file))) {
+    throw new Error(`quick representative save is missing: ${DEFAULT_SAVES[0].file}`)
+  }
+
+  return DEFAULT_SAVES
 }
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does.
@@ -88,7 +94,7 @@ const fleet = (over = {}) => ({ FleetID: 100, FleetName: 'Miner', AssignedPopula
 
 const worked = (model) => {
   const { assessMiningSites, depositState, missingNeeds, unknownNeeds, deliveryVerdict } = model
-  const assess = (colonies, fleets = [], version = '2.7.1') => assessMiningSites({ colonies, fleets }, { RaceID: RACE, version })
+  const assess = (colonies, fleets = [], version = '3.2.0') => assessMiningSites({ colonies, fleets }, { RaceID: RACE, version })
   const only = (row, version) => assess([row], [], version).colonies[0]
   const keys = (needs) => needs.map((need) => need.key)
   const text = (site, options) => missingNeeds(site, options).map((need) => need.text).join('; ')
@@ -145,10 +151,10 @@ const worked = (model) => {
   const stale = only(colony({ Efficiency: 0, ...driver }), null)
   check('worked: with no game version the rules read from the game are unknown, with the version as the input; no verdict', stale.idle === null && stale.delivery.state === 'unknown' && deliveryVerdict(stale) === null && unknownNeeds(stale, { delivery: true }).some((need) => need.inputs.some((input) => input.includes('version'))))
   check('worked: with no version the stored facts still decide: an empty body is idle', only(colony({ Deposits: 0 }), null).idle === 1)
-  check('worked: a 2.6 version is not the 2.7 rules either', only(colony({ Efficiency: 0 }), '2.6.4').idle === null)
+  check('worked: an earlier version is not the rules of the line either', only(colony({ Efficiency: 0 }), '2.6.4').idle === null)
   check('worked: with no version the radiation cut-off is unknown, the stored level stays readable and no output verdict is made from it', only(colony({ RadiationLevel: 10000 }), null).idle === null && only(colony({ RadiationLevel: 10000 }), null).row.RadiationLevel === 10000 && missingNeeds(only(colony({ RadiationLevel: 10000 }), null)).length === 0 && unknownNeeds(only(colony({ RadiationLevel: 10000 }), null)).some((need) => need.key === 'radiation' && need.inputs.some((input) => input.includes('version'))))
-  check('worked: a 2.6 version leaves the radiation cut-off unknown too, and 2.7.1 applies it', only(colony({ RadiationLevel: 10000 }), '2.6.4').idle === null && only(colony({ RadiationLevel: 10000 }), '2.7.1').idle === 1)
-  check('worked: an automated-only site on a save with no version is not judged by the radiation rule, nor reported idle, nor given a verdict of 0', only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), null).idle === null && only(colony({ Manned: 0, Automated: 3 }), null).idle === null && only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), '2.7.1').idle === 1 && only(colony({ Manned: 0, Automated: 3 }), '2.7.1').idle === 0)
+  check('worked: an earlier version leaves the radiation cut-off unknown too, and the line applies it', only(colony({ RadiationLevel: 10000 }), '2.6.4').idle === null && only(colony({ RadiationLevel: 10000 }), '3.2.0').idle === 1)
+  check('worked: an automated-only site on a save with no version is not judged by the radiation rule, nor reported idle, nor given a verdict of 0', only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), null).idle === null && only(colony({ Manned: 0, Automated: 3 }), null).idle === null && only(colony({ Manned: 0, Automated: 3, RadiationLevel: 10000 }), '3.2.0').idle === 1 && only(colony({ Manned: 0, Automated: 3 }), '3.2.0').idle === 0)
   check('worked: with no version a missing deposit or no mine production still stops an automated-only site', only(colony({ Manned: 0, Automated: 3, Deposits: 0 }), null).idle === 1 && only(colony({ Manned: 0, Automated: 3, MineProduction: 0 }), null).idle === 1)
 
   const good = orbitalOnly({})
@@ -177,7 +183,7 @@ const worked = (model) => {
   check('worked: a class with no crew requirement is crewed (the game never scales it)', orbitalOnly({ ClassCrew: 0, CurrentCrew: 0 }).fleets[0].producing === 1)
   check('worked: with no game version the colony and assignment of an orbital miner are unknown', orbitalOnly({}, null).fleets[0].producing === null && unknownNeeds(orbitalOnly({}, null).fleets[0]).some((need) => need.key === 'colony'))
   check('worked: an orbital miner that does not work gives its colony no output, and a colony with mines still counts', orbitalOnly({ Diameter: 5000 }).colonies.length === 1 && orbitalOnly({ Diameter: 5000 }).colonies[0].output === 0 && deliveryVerdict(orbitalOnly({ Diameter: 5000 }).colonies[0]) === 0)
-  const two = assessMiningSites({ colonies: [colony({ Manned: 0, Automated: 0, Civilian: 0, Efficiency: 0 })], fleets: [fleet({ FleetID: 1, Diameter: 5000 }), fleet({ FleetID: 2, ShipID: 2 })] }, { RaceID: RACE, version: '2.7.1' })
+  const two = assessMiningSites({ colonies: [colony({ Manned: 0, Automated: 0, Civilian: 0, Efficiency: 0 })], fleets: [fleet({ FleetID: 1, Diameter: 5000 }), fleet({ FleetID: 2, ShipID: 2 })] }, { RaceID: RACE, version: '3.2.0' })
   check('worked: a colony whose orbital miners include a working one has output', two.colonies[0].output === 1 && two.colonies[0].orbital.length === 2)
   check('worked: the fleet sites join the ships of one fleet into one site', assess([colony(noMines)], [fleet({ ShipID: 1 }), fleet({ ShipID: 2, CurrentCrew: 0 })]).fleets.length === 1)
 
@@ -195,7 +201,7 @@ const warningsWorked = (common, mining) => {
   const { needInputs, needsCell } = common
   const ctx = { unknown: (names) => ({ unknown: names }) }
   const row = (over) => ({ ...colony(over) })
-  const site = (over, version = '2.7.1') => mining.assessMiningSites({ colonies: [row(over)], fleets: [] }, { RaceID: RACE, version }).colonies[0]
+  const site = (over, version = '3.2.0') => mining.assessMiningSites({ colonies: [row(over)], fleets: [] }, { RaceID: RACE, version }).colonies[0]
   const lacks = needsCell(ctx, site({ Deposits: 0, Efficiency: 0 }))
   const unsure = needsCell(ctx, site({ Surveyed: 0, Deposits: 0 }))
   const mixed = needsCell(ctx, site({ Surveyed: 0, Deposits: 0, RadiationLevel: 20000 }))
@@ -211,7 +217,7 @@ const rulesRegistered = (provenance) => {
   const ids = ['miningSites.deposit', 'miningSites.surface', 'miningSites.orbital', 'miningSites.delivery']
 
   ids.forEach((id) => check(`rule ${id} is registered with a structure and a verification`, Boolean(provenance.getRule(id)) && provenance.getRule(id).structure.length > 0 && ['confirmed', 'estimated', 'assumed'].includes(provenance.getRule(id).verification)))
-  check('the game rules are bound to 2.7: true for 2.7.1, false for 2.6.4, null with no version', provenance.ruleSupports('miningSites.surface', '2.7.1') === true && provenance.ruleSupports('miningSites.surface', '2.6.4') === false && provenance.ruleSupports('miningSites.orbital', null) === null)
+  check('the game rules are bound to the 3.2 line: true for 3.2.0, false for 2.6.4, null with no version', provenance.ruleSupports('miningSites.surface', '3.2.0') === true && provenance.ruleSupports('miningSites.surface', '2.6.4') === false && provenance.ruleSupports('miningSites.orbital', null) === null)
 }
 
 const ids = (rows) => rows.map((row) => row.id)

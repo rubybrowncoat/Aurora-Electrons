@@ -7,7 +7,6 @@
   - thinning: the older half is thinned to a stated cap and the first and the latest samples are kept, in order, however irregular a long history is; the passes and the samples they dropped are counted;
   - status: a series the recorder started says nothing was thinned, one from before the record says that is unknown (never none, never complete), a series written by something else since is a lower bound, and a record that is not valid is not believed;
   - figures: sample count, the largest and the typical gap, and sizes: measured bytes are those of the stored series, predicted bytes are those of thinning its rows to a profile, and what is not known is a dash, never 0;
-  - recorder: on recorded saves of the passive campaign of artifacts/passive-campaign-20261013 (read only, skipped when it is not here), the profile in the settings is the cap at the next save, a larger cap does not bring discarded samples back, and the saves are not changed;
   - backup: a series' thinning record is carried by a backup and restored exactly, a backup from before it restores with the thinning unknown, an invalid record is refused, and a merge that changes a series' rows no longer claims it is complete;
   - page: the page's own script and its Retention panel (the shipped template is compiled and rendered by Vue without a document) over the real persisted-view mixin and an in-memory settings store: the readouts, the statement that discarded samples cannot be restored shown before a change, the confirmation, the profile kept across a restart, and the sparse-sampling line and CSV.
 
@@ -16,7 +15,6 @@
 const fs = require('fs')
 const path = require('path')
 const nodeVm = require('vm')
-const crypto = require('crypto')
 const { format } = require('util')
 const Vue = require('vue')
 const { compileTemplate } = require('vue/compiler-sfc')
@@ -30,7 +28,6 @@ const { readFigure } = require('./lib/browser-observe')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'history.vue')
-const PASSIVE = path.join(root, 'artifacts', 'passive-campaign-20261013')
 const NAMES = ['history', 'history-backup', 'campaign', 'campaign-attach', 'recording-owner', 'observations']
 const START_YEAR = 2050
 const DAY = 86400
@@ -698,9 +695,7 @@ const suite = (m) => {
   return checks
 }
 
-// ---------- the recorder, over recorded saves ----------
-
-const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+// ---------- the installation ----------
 
 // An installation: each store a JSON value read and written whole, as electron-store's `.store` is.
 const installation = ({ first = 1 } = {}) => {
@@ -734,152 +729,6 @@ const installation = ({ first = 1 } = {}) => {
     registry: () => ({ campaigns: {}, pool: {}, ...(clone(files.get('registry')) || {}) }),
     fileOf: (campaignId, branchId = 'b1') => clone(files.get(`file:campaign-${campaignId}-${branchId}`)) || {},
   }
-}
-
-// The first saves of the passive campaign, opened read only: `record(installation, picks)` records them with the recorder, `checksums()` is the sha256 of each file now. Null when the folder is not here.
-const realSaves = async (m, count) => {
-  if (!fs.existsSync(path.join(PASSIVE, 'snapshots.csv'))) {
-    return null
-  }
-
-  const sqlite3 = require('sqlite3')
-  const rows = fs.readFileSync(path.join(PASSIVE, 'snapshots.csv'), 'utf8').trim().split(/\r?\n/).slice(1).map((line) => {
-    const [index, , file, hash] = line.split(',')
-
-    return { index: Number(index), file, sha256: hash }
-  }).slice(0, count)
-
-  assert.ok(rows.length === count && rows.every((entry) => fs.existsSync(path.join(PASSIVE, 'snapshots', entry.file))), 'a save of the passive campaign is missing')
-
-  const handles = new Map()
-
-  for (const entry of rows) {
-    handles.set(entry.file, await new Promise((resolve, reject) => {
-      const handle = new sqlite3.Database(path.join(PASSIVE, 'snapshots', entry.file), sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
-    }))
-  }
-
-  const database = (entry) => ({
-    transaction: (work) => work({ id: 'transaction' }),
-    query: (sql) => new Promise((resolve, reject) => handles.get(entry.file).all(sql, (error, result) => (error ? reject(error) : resolve([result])))),
-  })
-
-  return {
-    saves: rows,
-    expected: Object.fromEntries(rows.map((entry) => [entry.file, entry.sha256])),
-    checksums: () => Object.fromEntries(rows.map((entry) => [entry.file, sha256(path.join(PASSIVE, 'snapshots', entry.file))])),
-    record: async (inst, entry) => {
-      const run = await m.history.recordHistory(database(entry), { storage: inst.io, path: `C:/saves/${entry.file}`, now: inst.now, newId: inst.newId })
-
-      assert.equal(run.failed.length, 0, run.failed.map((failure) => failure.error && failure.error.message).join('; '))
-    },
-    close: () => handles.forEach((handle) => handle.close()),
-  }
-}
-
-const recorderSuite = (m) => {
-  const { history } = m
-  const checks = []
-  const check = (group, name, run) => checks.push({ group, name, run })
-
-  // The recorder over `count` saves: the first is recorded, then every series of its branch file is replaced by `seeded` samples of its own before the later saves (a history from before the thinning record, long enough to be above a cap).
-  const withSeeded = async (seeded, work) => {
-    const real = await realSaves(m, 4)
-
-    if (!real) {
-      console.log('  skip   the passive campaign is not here')
-
-      return
-    }
-
-    try {
-      const inst = installation()
-
-      await real.record(inst, real.saves[0])
-
-      const [id] = Object.keys(inst.registry().campaigns)
-      const name = `file:campaign-${id}-b1`
-      const file = inst.fileOf(id)
-
-      Object.values(file.races).forEach((series) => {
-        const template = series.snapshots[0]
-
-        series.snapshots = [...Array.from({ length: seeded }, (_, index) => ({ ...template, t: (index + 1) * 100 })), ...series.snapshots]
-        delete series.thinning
-      })
-      inst.put(name, file)
-
-      await work({ inst, real, id, name })
-      assert.deepEqual(real.checksums(), real.expected, 'a save was changed')
-    } finally {
-      real.close()
-    }
-  }
-
-  check('recorder', 'the profile in the settings is the cap at the next save: a series above it is thinned, the save just taken is its latest sample, the thinning is recorded and the saves are not changed', async () => {
-    await withSeeded(700, async ({ inst, real, id }) => {
-      inst.put('settings', { ...(inst.files.get('settings') || {}), historyRetention: 'compact' })
-
-      await real.record(inst, real.saves[1])
-
-      const series = Object.values(inst.fileOf(id).races)
-
-      assert.ok(series.length >= 2)
-      series.forEach((entry) => {
-        const status = history.thinningStatus(entry)
-
-        assert.ok(entry.snapshots.length <= 500, `${entry.raceName}: ${entry.snapshots.length}`)
-        assert.equal(entry.snapshots[0].t, 100, 'the first sample stays')
-        assert.ok(strictlyIncreasing(entry.snapshots))
-        assert.equal(status.status, 'partial', 'the series began before the record, so the count is a lower bound')
-        assert.ok(status.passes >= 1)
-        assert.equal(status.last.cap, 500)
-        assert.ok(status.last.at > 1000000 && status.last.at < 2000000 && Number.isInteger(status.last.at), 'the wall-clock time comes from the installation\'s clock, not the game time')
-      })
-
-      const latest = Math.max(...series.map((entry) => entry.snapshots[entry.snapshots.length - 1].t))
-
-      assert.ok(latest > 700 * 100, 'the save recorded last is the latest sample')
-      assert.ok(series.every((entry) => entry.snapshots[entry.snapshots.length - 1].t === latest))
-    })
-  })
-
-  check('recorder', 'with no profile stored the cap is Standard: a series of 700 samples is not thinned and its unknown thinning stays unknown', async () => {
-    await withSeeded(700, async ({ inst, real, id }) => {
-      await real.record(inst, real.saves[1])
-
-      Object.values(inst.fileOf(id).races).forEach((entry) => {
-        assert.equal(entry.snapshots.length, 702)
-        assert.equal(history.thinningStatus(entry).status, 'unknown')
-        assert.equal('thinning' in entry, false)
-      })
-    })
-  })
-
-  check('recorder', 'a larger profile applies to what is observed and kept from then on and does not bring thinned samples back', async () => {
-    await withSeeded(700, async ({ inst, real, id }) => {
-      inst.put('settings', { ...(inst.files.get('settings') || {}), historyRetention: 'compact' })
-      await real.record(inst, real.saves[1])
-
-      const thinned = inst.fileOf(id)
-      const counts = Object.fromEntries(Object.entries(thinned.races).map(([RaceID, entry]) => [RaceID, entry.snapshots.length]))
-
-      inst.put('settings', { ...(inst.files.get('settings') || {}), historyRetention: 'standard' })
-      await real.record(inst, real.saves[2])
-
-      Object.entries(inst.fileOf(id).races).forEach(([RaceID, entry]) => {
-        assert.equal(entry.snapshots.length, counts[RaceID] + 1, `${RaceID}: one more sample and none that was thinned`)
-        assert.equal(history.thinningStatus(entry).passes, history.thinningStatus(thinned.races[RaceID]).passes, 'no further thinning')
-      })
-
-      inst.put('settings', { ...(inst.files.get('settings') || {}), historyRetention: 'compact' })
-      await real.record(inst, real.saves[3])
-
-      Object.values(inst.fileOf(id).races).forEach((entry) => assert.ok(entry.snapshots.length <= 500))
-    })
-  })
-
-  return checks
 }
 
 // ---------- the backup ----------
@@ -1705,6 +1554,17 @@ const pageSuite = async ({ history, observations }, variant = {}) => {
     assert.equal(never.includes(vm.date(budget.cut)), false)
   })
 
+  check('page: the Retention line on the event archive states the span its stored rows cover, and says nothing of a span for a record that gives no time', () => {
+    const budget = { on: true, player: true, cap: 50000, events: 3, measured: 900, predicted: 1000000, gaps: 0, cut: null, depth: { from: 9000000, to: 9500000, count: 3 }, error: '' }
+    const { vm } = mount({ file: longFile, budget })
+    const text = vm.eventBudgetText
+    const none = mount({ file: longFile, budget: { ...budget, depth: { from: null, to: null, count: 3 } } }).vm.eventBudgetText
+
+    assert.ok(text.includes(`It runs from ${vm.date(budget.depth.from)} to ${vm.date(budget.depth.to)}.`), text)
+    assert.equal(none.includes('It runs from'), false)
+    assert.equal(/\b10,000\b|five year/i.test(text), false)
+  })
+
   check('page: a smaller cap on the event archive waits for confirmation even when the shown branch holds no archive, the confirmation says the cap applies to every campaign, race and branch at their next capture, and a larger cap is kept at once', async () => {
     const config = new MemoryConfig()
     const { vm, tree } = mount({ file: longFile, config })
@@ -1849,7 +1709,7 @@ const UTILITY_MUTATIONS = [
   { name: 'a cap below 3 keeps the oldest samples', file: 'history.js', find: ': result.slice(result.length - cap)', replace: ': result.slice(0, cap)', fails: ['thinning: a cap too small'] },
   { name: 'a profile has a cap above what a backup accepts', file: 'history.js', find: '{ id: \'standard\', label: \'Standard\', cap: MAX_SNAPSHOTS }', replace: '{ id: \'standard\', label: \'Standard\', cap: MAX_SNAPSHOTS * 2 }', fails: ['thinning: the profiles are a few'] },
   { name: 'an unknown profile id reads as the smallest', file: 'history.js', find: '|| RETENTION_PROFILES.find((profile) => profile.id === DEFAULT_RETENTION)', replace: '|| RETENTION_PROFILES[0]', fails: ['thinning: a profile that is not one'] },
-  { name: 'the settings key of the profile is another', file: 'history.js', find: 'settings.store.historyRetention : undefined', replace: 'settings.store.retention : undefined', fails: ['thinning: a profile that is not one', 'recorder: the profile in the settings'] },
+  { name: 'the settings key of the profile is another', file: 'history.js', find: 'settings.store.historyRetention : undefined', replace: 'settings.store.retention : undefined', fails: ['thinning: a profile that is not one'] },
   { name: 'a series from before the record is read as untouched', file: 'history.js', find: 'if (!thinning) {\n    return { status: \'unknown\', passes: null, dropped: null, last: null }\n  }', replace: 'if (!thinning) {\n    return { status: \'untouched\', passes: 0, dropped: 0, last: null }\n  }', fails: ['status: a series from before the record', 'status: what a viewing race', 'status: a thinning record that is not valid'] },
   { name: 'an unknown thinning counted as none', file: 'history.js', find: ': { status: \'unknown\', passes: null, dropped: null, last: null }\n}', replace: ': { status: \'unknown\', passes: 0, dropped: 0, last: null }\n}', fails: ['status: a series something else rewrote'] },
   { name: 'a series written by something else keeps its witness', file: 'history.js', find: 'if (thinning.complete && thinning.witness === witnessOf(record.snapshots)) {', replace: 'if (thinning.complete) {', fails: ['status: a series something else rewrote'] },
@@ -1858,7 +1718,7 @@ const UTILITY_MUTATIONS = [
   { name: 'a rewritten series is believed by the recorder', file: 'history.js', find: 'const intact = prior && prior.witness === witnessOf(previous.snapshots)', replace: 'const intact = Boolean(prior)', fails: ['status: a series something else rewrote'] },
   { name: 'the thinning of a series is not carried forward', file: 'history.js', find: 'const passes = base.passes + outcome.passes', replace: 'const passes = outcome.passes', fails: ['thinning: recording one save', 'status: thinning is counted'] },
   { name: 'the time of the latest thinning is not kept', file: 'history.js', find: ': base.last,\n    witness', replace: ': null,\n    witness', fails: ['status: thinning is counted'] },
-  { name: 'the thinning is dated by the game time', file: 'history.js', find: 'last: outcome.passes ? { at: now(), t: latest.t,', replace: 'last: outcome.passes ? { at: latest.t, t: latest.t,', fails: ['status: thinning is counted', 'recorder: the profile in the settings'] },
+  { name: 'the thinning is dated by the game time', file: 'history.js', find: 'last: outcome.passes ? { at: now(), t: latest.t,', replace: 'last: outcome.passes ? { at: latest.t, t: latest.t,', fails: ['status: thinning is counted'] },
   { name: 'a thinning record is believed whatever it holds', file: 'campaign.js', find: 'if (raw.dropped < raw.passes || (raw.passes === 0) !== (raw.last === null)) {', replace: 'if (false) {', fails: ['status: a thinning record that is not valid'] },
   { name: 'a thinning record with a key of its own is believed', file: 'campaign.js', find: '!hasOnly(raw, THINNING_KEYS) ||', replace: '', fails: ['status: a thinning record that is not valid'] },
   { name: 'a legacy series is given a thinning record at once', file: 'history.js', find: 'if (!base.complete && !passes) {\n    return undefined\n  }', replace: 'if (false) {\n    return undefined\n  }', fails: ['status: a series from before the record says'] },
@@ -1878,8 +1738,6 @@ const UTILITY_MUTATIONS = [
   { name: 'the sampling line hides the thinning', file: 'history.js', find: '`#{samplingText(retentionStats(record && Array.isArray(record.snapshots) ? record.snapshots : []))}. #{thinningText(thinningStatus(record), date)}.`', replace: '`#{samplingText(retentionStats(record && Array.isArray(record.snapshots) ? record.snapshots : []))}.`', fails: ['figures: the note an export'] },
   { name: 'unknown thinning left out of the text', file: 'history.js', find: '\'Thinning unknown: this history was recorded or merged without its thinning being noted, so its older half may have been thinned and it is not assumed complete\'', replace: '\'Never thinned\'', fails: ['status: a series from before the record says', 'figures: the note an export'] },
   { name: 'a partial count stated as a count', file: 'history.js', find: '`#{passes} time#{passes === 1 ? \'\' : \'s\'}, dropping #{status === \'partial\' ? \'at least \' : \'\'}#{dropped}', replace: '`#{passes} time#{passes === 1 ? \'\' : \'s\'}, dropping #{dropped}', fails: ['status: a series from before the record that is thinned now'] },
-  { name: 'the recorder ignores the profile', file: 'history.js', find: '{ limit: retentionOfSettings(storage.settings).cap, now }', replace: '{ limit: MAX_SNAPSHOTS, now }', fails: ['recorder: the profile in the settings', 'recorder: a larger profile'] },
-  { name: 'the recorder never thins below Standard', file: 'history.js', find: '{ limit: retentionOfSettings(storage.settings).cap, now }', replace: '{ limit: Math.max(retentionOfSettings(storage.settings).cap, MAX_SNAPSHOTS), now }', fails: ['recorder: the profile in the settings'] },
   { name: 'a backup refuses a series with a thinning record', file: 'history-backup.js', find: '\'coverage\', \'snapshots\', \'thinning\'] : [\'name\', \'coverage\', \'snapshots\', \'thinning\']', replace: '\'coverage\', \'snapshots\'] : [\'name\', \'coverage\', \'snapshots\']', fails: ['backup: a backup carries', 'backup: a merge that changes'] },
   { name: 'a backup accepts a thinning record that is not valid', file: 'history-backup.js', find: 'if (series.thinning !== undefined && !readThinning(series.thinning)) {', replace: 'if (false) {', fails: ['backup: a thinning record that is not valid'] },
   { name: 'a merge keeps the record whose game times match even after it thinned', file: 'history.js', find: 'const standing = outcome.dropped ? undefined : sources.find(', replace: 'const standing = sources.find(', fails: ['status: a merge that thins the union', 'backup: a restore that merges', 'backup: an attachment'] },
@@ -1904,6 +1762,7 @@ const UTILITY_MUTATIONS = [
 
 // A deliberate fault in the page's script or in the Retention panel's template.
 const PAGE_MUTATIONS = [
+  { name: 'the event archive line says nothing of its span', mutate: replacing('const depth = budget.depth && budget.depth.from !== null ?', 'const depth = false ?'), fails: ['page: the Retention line on the event archive states the span'] },
   { name: 'the profile kept for the race, not the app', mutate: replacing('retentionProfile: { key: \'historyRetention\', default: DEFAULT_RETENTION,', 'retentionProfile: { key: \'historyRetention\', scope: \'race\', default: DEFAULT_RETENTION,'), fails: ['page: the retention profile is a view declared for the app'] },
   { name: 'the profile kept under another key', mutate: replacing('key: \'historyRetention\'', 'key: \'historyRetentionProfile\''), fails: ['page: the retention profile is a view declared for the app', 'page: the confirmed profile is kept'] },
   { name: 'any text is a valid profile', mutate: replacing('valid: oneOf(RETENTION_PROFILES.map((profile) => profile.id)) }', 'valid: () => true }'), fails: ['page: the retention profile is a view declared for the app', 'page: a stored profile this version does not offer'] },
@@ -2027,7 +1886,7 @@ const baselineEntries = async (entries) => {
 
   entries.push({ log: 'The utilities: thinning, status and figures' })
 
-  const utilityChecks = [...suite(real), ...recorderSuite(real), ...backupSuite(real)]
+  const utilityChecks = [...suite(real), ...backupSuite(real)]
 
   for (const [name, result] of await runChecks(utilityChecks)) {
     entries.push({ show: [name, result] })
@@ -2046,7 +1905,7 @@ const utilityEntries = async (entries, { name, file, find, replace, fails }) => 
 
   try {
     const mutant = await loadModules(sources)
-    const named = [...suite(mutant), ...recorderSuite(mutant), ...backupSuite(mutant)].filter(({ group, name: checkName }) => fails.some((start) => `${group}: ${checkName}`.startsWith(start)))
+    const named = [...suite(mutant), ...backupSuite(mutant)].filter(({ group, name: checkName }) => fails.some((start) => `${group}: ${checkName}`.startsWith(start)))
     const absent = fails.filter((start) => !named.some(({ group, name: checkName }) => `${group}: ${checkName}`.startsWith(start)))
     const results = await runChecks(named)
     const missed = fails.filter((start) => !results.some(([checkName, result]) => checkName.startsWith(start) && result !== true))

@@ -117,9 +117,10 @@
                       <span class="text--secondary">{{ roleText(role) }}:</span> {{ comparisonText(item.location[role]) }}<provenance-mark :result="item.location[role].result" />
                       <template v-if="item.location[role].distance"> · {{ distanceText(item.location[role].distance.value) }}<provenance-mark :result="item.location[role].distance" /></template>
                       <div v-if="item.location[role].state === 'unknown'" class="caption">{{ item.location[role].reason }}</div>
-                      <div v-if="item.location[role].movement === 'left-behind'" class="caption warning--text" data-station-not-followed>The fleet is at the body by position only: it does not move with the body, so it is left behind when the body moves.</div>
+                      <div v-if="item.location[role].following === true" class="caption text--secondary" data-station-following>The fleet follows the waypoint's point<template v-if="item.location[role].state === 'off'">; the waypoint joins it at the next update</template>.</div>
+                      <div v-if="item.location[role].movement === 'left-behind'" class="caption warning--text" data-station-not-followed>The fleet is at the station by position only: it does not move with the body or the Lagrange point the station is tied to, so it is left behind when that moves.</div>
                       <div v-else-if="item.location[role].movement === 'fixed'" class="caption text--secondary" data-station-fixed>The station is a fixed point: the fleet stays there only while nothing moves it.</div>
-                      <div v-else-if="item.location[role].movement === 'unknown'" class="caption text--secondary" data-station-movement-unknown>Whether the fleet moves with the station is not known: the orbit of the fleet or the body the station is tied to is not recorded.</div>
+                      <div v-else-if="item.location[role].following === null || item.location[role].movement === 'unknown'" class="caption text--secondary" data-station-movement-unknown>Whether the fleet moves with the station is not known: the orbit or Lagrange point association, or the point's exact position, is not recorded.</div>
                     </div>
                   </div>
                 </template>
@@ -239,7 +240,7 @@ import { NOTE_LENGTH, checklistOf, confirmTarget, deleteStation, loadStationBodi
 
 const ROLE_WORDS = { fleet: 'Fleet', station: 'Station', base: 'Supply base' }
 
-const WHERE_WORDS = { 'other-system': 'in another system', 'other-orbit': 'orbiting another body', 'open-space': 'in open space' }
+const WHERE_WORDS = { 'other-system': 'in another system', 'other-orbit': 'orbiting another body', 'at-point': 'at a Lagrange point', 'open-space': 'in open space' }
 
 const VERDICT_WORDS = { evidence: 'Confirmed by the save', confirmed: 'Confirmed by the player', reused: 'Another object holds this ID', unwitnessed: 'Not shown to be the same' }
 
@@ -615,7 +616,7 @@ export default {
     placeText(place) {
       const where = place.systemName ? `In ${place.systemName}` : 'System not known'
 
-      return place.inOrbit === null ? where : place.inOrbit ? `${where}, orbiting ${place.orbitName || 'a body'}` : `${where}, not in orbit`
+      return place.inOrbit === null ? where : place.inOrbit ? `${where}, orbiting ${place.orbitName || 'a body'}` : place.atPoint ? `${where}, at a Lagrange point` : `${where}, not in orbit`
     },
 
     verdictText(view) {
@@ -644,7 +645,7 @@ export default {
       }
 
       if (comparison.state === 'on') {
-        return comparison.basis === 'orbit' ? 'On station: in orbit' : 'On station: at the same position'
+        return comparison.basis === 'orbit' ? (comparison.onPoint ? 'On station: at its Lagrange point' : 'On station: in orbit') : 'On station: at the same position'
       }
 
       return `Off station: ${WHERE_WORDS[comparison.where] || 'elsewhere'}`
@@ -675,7 +676,7 @@ export default {
       }
 
       if (step.key === 'orbit') {
-        return `Order the fleet into orbit of ${step.target}, so that it moves with the body.`
+        return step.point ? `Place the fleet exactly at the Lagrange point of ${step.target} and establish its point association. A move to a point-only waypoint does not assign that association.` : `Order the fleet into orbit of ${step.target}, so that it moves with the body.`
       }
 
       if (step.key === 'move') {

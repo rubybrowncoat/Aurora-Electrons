@@ -3,7 +3,7 @@
 import { MINERALS } from './minerals'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-const COLONY_VERSIONS = ['2.7.x']
+const COLONY_VERSIONS = ['3.2.x']
 
 // The rules of a colony's mineral figures, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
 registerRule({
@@ -30,7 +30,7 @@ registerRule({
   units: 't',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.<mineral>, Amount', 'FCT_ShipyardTask.<mineral>, TotalBP, CompletedBP, TaskTypeID'],
-  note: 'What a colony\'s queue still needs of a mineral: each industrial project\'s cost per unit times the units left (paused and queued ones too), plus each shipyard task\'s cost times the share of its build points left. A scrap task needs nothing, as the stock is neither checked nor spent for it. The sums were not compared with a saved shortage. A colony with no project or task needs 0; a colony whose queue was not read, or whose cost is not recorded, has no figure.',
+  note: 'What a colony\'s queue still needs of a mineral: each industrial project\'s cost per unit times the units left (paused and queued ones too), plus each shipyard task\'s cost times the share of its build points left. A task that repeats (a count of ships above 1) counts the ship in hand only, as the game\'s own projection does: the later ships take their minerals when each is made, so none of them is counted here. A scrap task needs nothing, as the stock is neither checked nor spent for it. The sums were not compared with a saved shortage. A colony with no project or task needs 0; a colony whose queue was not read, or whose cost is not recorded, has no figure.',
 })
 
 registerRule({
@@ -153,10 +153,27 @@ export const worstState = (minerals) => {
 }
 
 // What each colony's queue still needs, by PopulationID: its industrial projects (per unit, times the units left; paused and queued ones too) and its shipyard tasks (their full cost, times the share of build points left). A scrap task needs nothing: the game neither checks the stock against its mineral figures nor spends them, and the other task types (construction, repair, refit) draw them. A term that cannot be worked out (a cost, an amount, the build points or the task type not recorded) is null and counted in the row's `Missing<mineral>`, so `colonyMineralResults` can tell a partial sum from a complete one.
-export const loadQueueNeeds = async (database, { GameID, RaceID }) => {
-  const [rows] = await database.query(`select VIR_Needs.PopulationID, ${sums('VIR_Needs')}, ${missingTerms('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, ${NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${GameID} and FCT_IndustrialProjects.RaceID = ${RaceID} union all select FCT_ShipyardTask.PopulationID, ${NAMES.map((name) => `case when FCT_ShipyardTask.TaskTypeID is null then null else FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP end as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} and (FCT_ShipyardTask.TotalBP is null or FCT_ShipyardTask.TotalBP > 0) and (FCT_ShipyardTask.TaskTypeID is null or FCT_ShipyardTask.TaskTypeID <> ${SCRAP_TASK})) as VIR_Needs group by VIR_Needs.PopulationID`)
+// With `byPhase`, retain the industrial/shipyard position around the mass-driver launch for the MSP ledger, beside the unchanged combined needs used by the haul planner.
+export const loadQueueNeeds = async (database, { GameID, RaceID, byPhase = false }) => {
+  const [rows] = await database.query(`select VIR_Needs.PopulationID, ${byPhase ? 'VIR_Needs.Phase, ' : ''}${sums('VIR_Needs')}, ${missingTerms('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, 'industrial' as Phase, ${NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${GameID} and FCT_IndustrialProjects.RaceID = ${RaceID} union all select FCT_ShipyardTask.PopulationID, 'shipyard' as Phase, ${NAMES.map((name) => `case when FCT_ShipyardTask.TaskTypeID is null then null else FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP end as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} and (FCT_ShipyardTask.TotalBP is null or FCT_ShipyardTask.TotalBP > 0) and (FCT_ShipyardTask.TaskTypeID is null or FCT_ShipyardTask.TaskTypeID <> ${SCRAP_TASK})) as VIR_Needs group by VIR_Needs.PopulationID${byPhase ? ', VIR_Needs.Phase' : ''}`)
 
-  return byPopulation(rows)
+  if (!byPhase) {
+    return byPopulation(rows)
+  }
+
+  const combined = {}
+
+  rows.forEach((row) => {
+    const total = combined[row.PopulationID] || { PopulationID: row.PopulationID }
+
+    NAMES.forEach((name) => {
+      total[name] = row[name] === null ? total[name] ?? null : (total[name] ?? 0) + row[name]
+      total[`Missing${name}`] = (total[`Missing${name}`] ?? 0) + row[`Missing${name}`]
+    })
+    combined[row.PopulationID] = total
+  })
+
+  return { combined: Object.freeze(combined), industrial: byPopulation(rows.filter((row) => row.Phase === 'industrial')), shipyard: byPopulation(rows.filter((row) => row.Phase === 'shipyard')) }
 }
 
 // Mass-driver packets in flight, by the PopulationID they are bound for, with each mineral's null terms counted in `Missing<mineral>`. A packet keeps the race that launched it when its destination changes hands and still lands there, so the race's packets are those it launched and those bound for one of its colonies in the game.

@@ -4,6 +4,8 @@ import { systemBodyName } from '../aurora'
 import { HELD_CONTACT } from '../contacts'
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
+import { loadOrbitalCensus } from '../orbital-census'
+import { valueOrNull } from '../provenance'
 import { amount, anyOf, bodyText, categoriesOf, checksOf, figure, lacking, listWords, rowsOf, signatureOf, systemText, tokenWords, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'space', title: 'Contacts and space', summary: 'Review intruders, hazards and finds in surveyed space that may need a response.' }
@@ -22,17 +24,19 @@ const CONTACT_TYPES = {
 
 const HOSTILE = 0
 
-// `13d 4h 2m 9s`, or `Expired` once the pod's two weeks are up; null while the pod's creation time or the game time is missing.
+// `13d 4h 2m 9s`, or `Expired` once game time is strictly past the pod's creation time plus two weeks; at exactly two weeks it still has 0s left. Missing creation time or game time leaves it unknown.
 const podExpiration = (lifepod, gameTime) => {
   if (!isKnownNumber(lifepod.CreationTime) || !isKnownNumber(gameTime)) {
     return null
   }
 
-  let remaining = Math.floor(SECONDS_PER_TWO_WEEKS - (gameTime - lifepod.CreationTime))
+  const left = SECONDS_PER_TWO_WEEKS - (gameTime - lifepod.CreationTime)
 
-  if (remaining <= 0) {
+  if (left < 0) {
     return 'Expired'
   }
+
+  let remaining = Math.floor(left)
 
   const days = Math.floor(remaining / 86400)
   remaining -= days * 86400
@@ -43,7 +47,15 @@ const podExpiration = (lifepod, gameTime) => {
   const minutes = Math.floor(remaining / 60)
   remaining -= minutes * 60
 
-  return [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`, remaining && `${remaining}s`].filter(Boolean).join(' ')
+  return [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`, remaining && `${remaining}s`].filter(Boolean).join(' ') || '0s'
+}
+
+// A pod's survivors as a cell reads them: its crew, with the officers aboard after it, and for a pod with no crew only the officers, which an evacuation can leave alone in a pod. An officer count that is not known leaves the crew as it is.
+const survivorsText = (ctx, crew, officers) => {
+  const aboard = isKnownNumber(officers) ? Number(officers) : 0
+  const word = aboard === 1 ? 'officer' : 'officers'
+
+  return crew === 0 && aboard > 0 ? `officers only (${ctx.count(aboard)})` : aboard > 0 ? `${ctx.count(crew)} + ${ctx.count(aboard)} ${word}` : ctx.count(crew)
 }
 
 // The inputs a contact can lack, keyed by the kind it is counted apart under, in that order: the standing of its empire, then whether it is held now (the time it was last detected, or the game time).
@@ -289,22 +301,22 @@ export const checks = checksOf([
     captured: [tokenWords({ adrift: 'adrift', expired: 'expired' })],
     clock: true,
     title: (count) => amount(count, 'active lifepod'),
-    rule: 'Detected lifepods are still adrift; their crews last two weeks from the ship\'s loss.',
+    rule: 'Lifepods of the race are still adrift; the life support of every pod lasts two weeks from the ship\'s loss, and the survivors in a pod, its crew or only its officers, are lost with it.',
     evidence: {
       verification: 'estimated',
-      structure: ['FCT_Lifepods.CreationTime, Crew, SystemID', 'the game time'],
-      note: 'The lifepods, their crews and creation times are stored rows; the two weeks a crew lasts is a figure this page uses, not one read from stored data, so the time remaining is an estimate. A missing creation time or game time shows a dash.',
-      assumptions: ['A lifepod crew lasts two weeks (1,209,600 seconds) from the pod\'s creation.'],
+      structure: ['FCT_Lifepods.CreationTime, Crew, SystemID, OrbitLagrangeID', 'FCT_Commander.LifepodID, RetireStatus', 'the game time'],
+      note: 'The lifepods, their crews and creation times are stored rows, and the officers aboard are the active commanders whose stored pod is the lifepod. A ship\'s evacuation can make a pod with no crew and only officers, and the game takes every pod, whatever it holds, once its two weeks are past, so the officers in a pod expire with it. The two weeks are read from the game\'s rules, not from stored data, so the time remaining is an estimate. A pod anchored to a Lagrange point moves with it, which the caption states. A missing creation time or game time shows a dash.',
+      assumptions: ['A lifepod lasts two weeks (1,209,600 seconds) from the pod\'s creation, with or without a crew.'],
     },
     columns: [
       { key: 'ship', text: 'Lifepod of' },
-      { key: 'crew', text: 'Crew', align: 'end' },
+      { key: 'crew', text: 'Survivors', align: 'end' },
       { key: 'remaining', text: 'Time remaining', align: 'end' },
     ],
     async read(ctx) {
       const { GameID, RaceID, GameTime } = ctx
 
-      const lifepods = await rowsOf(ctx, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_Lifepods.CreationTime, FCT_RaceSysSurvey.Name as SystemName from FCT_Lifepods left join FCT_RaceSysSurvey on FCT_Lifepods.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Lifepods.RaceID = FCT_RaceSysSurvey.RaceID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.CreationTime asc, FCT_Lifepods.Crew desc`)
+      const lifepods = await rowsOf(ctx, `select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_Lifepods.CreationTime, FCT_RaceSysSurvey.Name as SystemName, (select count(*) from FCT_Commander where FCT_Commander.GameID = FCT_Lifepods.GameID and FCT_Commander.RaceID = FCT_Lifepods.RaceID and FCT_Commander.LifepodID = FCT_Lifepods.LifepodID and FCT_Commander.RetireStatus = 0) as Officers from FCT_Lifepods left join FCT_RaceSysSurvey on FCT_Lifepods.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Lifepods.RaceID = FCT_RaceSysSurvey.RaceID where FCT_Lifepods.GameID = ${GameID} and FCT_Lifepods.RaceID = ${RaceID} order by FCT_Lifepods.CreationTime asc, FCT_Lifepods.Crew desc`)
 
       return lifepods.map((lifepod) => {
         const remaining = podExpiration(lifepod, GameTime)
@@ -313,10 +325,10 @@ export const checks = checksOf([
           id: `lifepod:${lifepod.LifepodID}`,
           cells: {
             ship: lifepod.ShipName || unknownCell(ctx, ['the name of the ship the lifepod came from']),
-            crew: figure(ctx, lifepod.Crew, 'the crew of the lifepod'),
+            crew: figure(ctx, lifepod.Crew, 'the crew of the lifepod', (known) => survivorsText(ctx, known, lifepod.Officers)),
             remaining: remaining === null ? unknownCell(ctx, [...lacking(lifepod, { CreationTime: 'the creation time of the lifepod' }), ...(isKnownNumber(GameTime) ? [] : ['the game time'])]) : { text: remaining, tone: remaining === 'Expired' ? 'error' : undefined },
           },
-          caption: lifepod.SystemName || undefined,
+          caption: lifepod.OrbitLagrangeID > 0 ? [lifepod.SystemName, 'at a Lagrange point'].filter(Boolean).join(' — ') : lifepod.SystemName || undefined,
           link: lifepod.SystemID ? linkTo.map(lifepod.SystemID) : undefined,
           signature: signatureOf(remaining === null ? null : remaining === 'Expired' ? 'expired' : 'adrift'),
         }
@@ -331,8 +343,8 @@ export const checks = checksOf([
     rule: 'A wreck lies in a surveyed system.',
     evidence: {
       verification: 'confirmed',
-      structure: ['FCT_Wrecks.SystemID, Size, ClassID, RaceID, OrbitBodyID', 'FCT_ShipClass.ClassName of the race\'s own wrecks', 'FCT_AlienClass.ClassName of the race\'s intelligence on other races\' wrecks', 'FCT_RaceSysSurvey.Name'],
-      note: 'A presence check on stored rows: a wreck in a system the race has surveyed. The race\'s own wreck shows its class; another race\'s shows the class name the race\'s intelligence holds, or Unknown. A missing size or owner shows a dash.',
+      structure: ['FCT_Wrecks.SystemID, Size, ClassID, RaceID, OrbitBodyID, OrbitLagrangeID', 'FCT_ShipClass.ClassName of the race\'s own wrecks', 'FCT_AlienClass.ClassName of the race\'s intelligence on other races\' wrecks', 'FCT_RaceSysSurvey.Name'],
+      note: 'A presence check on stored rows: a wreck in a system the race has surveyed. The race\'s own wreck shows its class; another race\'s shows the class name the race\'s intelligence holds, or Unknown. A wreck anchored to a Lagrange point moves with it, which the caption states. A missing size or owner shows a dash.',
     },
     columns: [
       { key: 'wreck', text: 'Wreck' },
@@ -342,7 +354,7 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
 
-      const wrecks = await rowsOf(ctx, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.Size, case when FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID then FCT_ShipClass.ClassName end as OwnClassName, FCT_AlienClass.ClassName as AlienClassName, (FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID) as Owned, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Wrecks join FCT_RaceSysSurvey on FCT_Wrecks.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} left join FCT_ShipClass on FCT_Wrecks.ClassID = FCT_ShipClass.ShipClassID left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Wrecks.ClassID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.GameID = FCT_Wrecks.GameID left join FCT_SystemBody on FCT_Wrecks.OrbitBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Wrecks.GameID = ${GameID}`)
+      const wrecks = await rowsOf(ctx, `select FCT_Wrecks.WreckID, FCT_Wrecks.SystemID, FCT_Wrecks.OrbitLagrangeID, FCT_Wrecks.Size, case when FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID then FCT_ShipClass.ClassName end as OwnClassName, FCT_AlienClass.ClassName as AlienClassName, (FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID) as Owned, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber from FCT_Wrecks join FCT_RaceSysSurvey on FCT_Wrecks.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} left join FCT_ShipClass on FCT_Wrecks.ClassID = FCT_ShipClass.ShipClassID left join FCT_AlienClass on FCT_AlienClass.ActualClassID = FCT_Wrecks.ClassID and FCT_AlienClass.ViewRaceID = ${RaceID} and FCT_AlienClass.GameID = FCT_Wrecks.GameID left join FCT_SystemBody on FCT_Wrecks.OrbitBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Wrecks.GameID = ${GameID}`)
 
       return wrecks.map((wreck) => ({
         id: `wreck:${wreck.WreckID}`,
@@ -351,7 +363,7 @@ export const checks = checksOf([
           size: figure(ctx, wreck.Size, 'the size of the wreck', (known) => ctx.count(known, 1)),
           design: isKnownNumber(wreck.Owned) ? (wreck.Owned ? 'Owned' : '') : unknownCell(ctx, ['the empire the wreck belonged to']),
         },
-        caption: wreck.SystemBodyID ? `${systemText(wreck)} — orbiting ${bodyText(wreck)}` : systemText(wreck),
+        caption: wreck.SystemBodyID ? `${systemText(wreck)} — orbiting ${bodyText(wreck)}` : wreck.OrbitLagrangeID > 0 ? `${systemText(wreck)} — at a Lagrange point` : systemText(wreck),
         link: linkTo.map(wreck.SystemID),
       }))
     },
@@ -361,14 +373,14 @@ export const checks = checksOf([
     group: group.key,
     severity: 'info',
     material: 'the blocker changing',
-    captured: [tokenWords({ active: 'active', dormant: 'dormant' }), tokenWords({ unpopulated: 'no colony of the race there', populated: 'a colony with over 10 million people', lacking: 'colonies there with 10 million people or fewer' })],
-    title: (count) => amount(count, 'unexploited ancient construct'),
-    rule: 'An ancient construct on a surveyed body is dormant, or has no colony of the race with 10 million people on it, so its research bonus goes unused.',
+    captured: [tokenWords({ active: 'active', dormant: 'dormant' }), tokenWords({ unpopulated: 'no colony of the race there', populated: 'a colony with at least 1 million people', lacking: 'colonies there with fewer than 1 million people' })],
+    title: (count) => amount(count, 'unused racial research bonus', 'unused racial research bonuses'),
+    rule: 'A surveyed ancient construct contributes no racial research bonus while dormant or without a colony of at least 1 million surface and eligible orbital people.',
     evidence: {
       verification: 'estimated',
-      structure: ['FCT_AncientConstruct.Active, ResearchBonus, ResearchField', 'FCT_Population.Population', 'FCT_Fleet.AssignedPopulationID', 'FCT_ShipCargo.Amount', 'FCT_ClassComponent berths'],
-      note: 'The construct\'s state and the colonies\' populations are stored values; the 10 million population a construct needs is a threshold this page uses, not one read from stored data, and colonists aboard orbiting ships are counted up to the berths they fill. A construct whose state or colony populations are missing, with no known colony of 10 million, is listed apart, as not evaluated.',
-      assumptions: ['A construct needs a colony of the race with 10 million people on its body, counting colonists aboard orbiting ships up to the berths they fill.'],
+      versions: ['3.2.x'],
+      structure: ['FCT_AncientConstruct.Active, ResearchBonus, ResearchField', 'population.orbitalCensus million eligibility and colony race'],
+      note: 'The racial research bonus requires an active construct and at least 1 million people at a colony, using the shared surface and orbital population census. Its field-wide contribution is a tenth of the local bonus above 1. A dormant construct can still multiply matching local research: this warning concerns only the unused racial contribution. An undecided census gate leaves the contribution unknown.',
     },
     columns: [
       { key: 'construct', text: 'Construct' },
@@ -378,52 +390,35 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
 
-      const orbitalRows = await rowsOf(ctx, `
-          select FCT_Fleet.AssignedPopulationID, total(FCT_ShipCargo.Amount) as LoadedColonistAmount, sum(case when FCT_ShipCargo.ShipID is not null and FCT_ShipCargo.Amount is null then 1 else 0 end) as LoadedGaps, VIR_StandardBerths.StandardBerthCapacity as StandardBerthCapacity, VIR_StandardBerths.BerthGaps as BerthGaps from FCT_Fleet
+      const populationsById = await loadOrbitalCensus(ctx.database, { GameID, RaceID })
 
-          left join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID
-          inner join (
-              select FCT_ClassComponent.ClassID, sum(FCT_ClassComponent.NumComponent * FCT_ShipDesignComponents.ComponentValue) as StandardBerthCapacity, sum(case when FCT_ClassComponent.NumComponent is null or FCT_ShipDesignComponents.ComponentValue is null then 1 else 0 end) as BerthGaps from FCT_ClassComponent
-
-              left join FCT_ShipDesignComponents on FCT_ClassComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID
-
-              where FCT_ShipDesignComponents.ComponentTypeID = 17 and FCT_ShipDesignComponents.SpecialFunction = 7 group by FCT_ClassComponent.ClassID
-          ) as VIR_StandardBerths on VIR_StandardBerths.ClassID = FCT_Ship.ShipClassID
-          left join FCT_ShipCargo on FCT_Ship.ShipID = FCT_ShipCargo.ShipID and FCT_ShipCargo.CargoTypeID = 1
-
-          where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.AssignedPopulationID != 0 group by FCT_Fleet.AssignedPopulationID
-        `)
-
-      // Colonists loaded aboard orbiting ships count towards a colony's population up to the berths they fill; null while a cargo amount or a berth is missing.
-      const orbitalPopulations = orbitalRows.reduce((accumulator, item) => {
-        const known = item.LoadedGaps === 0 && item.BerthGaps === 0 && isKnownNumber(item.StandardBerthCapacity)
-
-        accumulator[item.AssignedPopulationID] = known ? Math.min(item.LoadedColonistAmount, item.StandardBerthCapacity) : null
-
-        return accumulator
-      }, {})
-
-      const rows = await rowsOf(ctx, `select FCT_AncientConstruct.AncientConstructID, FCT_AncientConstruct.Active, FCT_AncientConstruct.ResearchBonus, DIM_ResearchField.FieldName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_Population.PopulationID, FCT_Population.Population from FCT_AncientConstruct inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${RaceID} left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_AncientConstruct.ResearchField left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_Population.RaceID = ${RaceID} where FCT_AncientConstruct.GameID = ${GameID} group by FCT_AncientConstruct.AncientConstructID, FCT_Population.PopulationID order by FCT_AncientConstruct.AncientConstructID`)
+      const rows = await rowsOf(ctx, `select FCT_AncientConstruct.AncientConstructID, FCT_AncientConstruct.Active, FCT_AncientConstruct.ResearchBonus, DIM_ResearchField.FieldName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_RaceSysSurvey.Name as SystemName, FCT_Population.PopulationID from FCT_AncientConstruct inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${RaceID} left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_AncientConstruct.ResearchField left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and (FCT_Population.RaceID = ${RaceID} or FCT_Population.RaceID is null) where FCT_AncientConstruct.GameID = ${GameID} group by FCT_AncientConstruct.AncientConstructID, FCT_Population.PopulationID order by FCT_AncientConstruct.AncientConstructID`)
 
       const constructs = new Map()
 
       for (const row of rows) {
         if (!constructs.has(row.AncientConstructID)) {
-          constructs.set(row.AncientConstructID, { construct: row, populations: [] })
+          constructs.set(row.AncientConstructID, { construct: row, populations: [], missing: [] })
         }
 
         if (row.PopulationID !== null) {
-          const orbital = orbitalPopulations[row.PopulationID] === undefined ? 0 : orbitalPopulations[row.PopulationID]
+          const census = populationsById.get(row.PopulationID)
+          const gate = census ? valueOrNull(census.millionEligible) : null
+          const population = gate === false ? 0 : census && census.raceMatches === true && gate === true ? 1 : null
+          const entry = constructs.get(row.AncientConstructID)
 
-          constructs.get(row.AncientConstructID).populations.push(isKnownNumber(row.Population) && isKnownNumber(orbital) ? row.Population + orbital : null)
+          entry.populations.push(population)
+          if (population === null) {
+            entry.missing.push(...(census ? [...census.millionEligible.inputs.missing, ...(census.raceMatches === true ? [] : ['the race of a colony on the construct\'s body'])] : ['the population of a colony on the construct\'s body']))
+          }
         }
       }
 
-      // Dormant, or without a colony of 10 million: 1, 0, or null while a state or a population is missing.
+      // The racial contribution requires Active and at least 1 million at one colony, not 10 million and not an aggregate over colonies.
       const verdictOf = ({ construct, populations }) => {
         const dormant = isKnownNumber(construct.Active) ? Number(!construct.Active) : null
         const unknown = populations.filter((population) => population === null).length
-        const populated = populations.some((population) => population !== null && population > 10)
+        const populated = populations.some((population) => population !== null && population >= 1)
         const blocked = populated ? 0 : unknown ? null : 1
 
         return anyOf(dormant, blocked)
@@ -431,19 +426,19 @@ export const checks = checksOf([
 
       return verdictRows(ctx, [...constructs.values()], {
         verdict: verdictOf,
-        missing: ({ construct, populations }) => [...lacking(construct, { Active: 'whether the ancient construct is active' }), ...(populations.includes(null) ? ['the population of a colony on the construct\'s body'] : [])],
+        missing: ({ construct, missing }) => [...lacking(construct, { Active: 'whether the ancient construct is active' }), ...new Set(missing)],
         build: ({ construct, populations }) => {
           const known = populations.filter((population) => population !== null)
           const unknown = populations.length - known.length
-          const base = known.length ? 'Lacking 10 million population on the body' : unknown ? '' : 'No population on the body'
-          const blocker = unknown ? [base, plural(unknown, 'colony of unknown population', 'colonies of unknown population')].filter(Boolean).join(', ') : base
+          const base = known.some((population) => population >= 1) ? '' : known.length ? 'Lacking 1 million population at any colony on the body' : unknown ? '' : 'No population on the body'
+          const blocker = [construct.Active === 0 ? 'Dormant' : '', base, unknown ? plural(unknown, 'colony of unknown population', 'colonies of unknown population') : ''].filter(Boolean).join(', ')
 
           return {
             id: `construct:${construct.AncientConstructID}`,
-            signature: signatureOf(isKnownNumber(construct.Active) ? (construct.Active ? 'active' : 'dormant') : null, unknown ? null : !known.length ? 'unpopulated' : known.some((population) => population > 10) ? 'populated' : 'lacking'),
+            signature: signatureOf(isKnownNumber(construct.Active) ? (construct.Active ? 'active' : 'dormant') : null, unknown ? null : !known.length ? 'unpopulated' : known.some((population) => population >= 1) ? 'populated' : 'lacking'),
             cells: {
               construct: `${systemText(construct)} — ${systemBodyName(construct)}`,
-              bonus: !isKnownNumber(construct.Active) ? unknownCell(ctx, ['whether the ancient construct is active']) : construct.Active ? figure(ctx, construct.ResearchBonus, 'the research bonus of the ancient construct', (bonus) => `${roundToDecimal((bonus - 1) * 100)}% ${construct.FieldName || 'of an unknown field'}`) : 'Dormant',
+              bonus: !isKnownNumber(construct.Active) ? unknownCell(ctx, ['whether the ancient construct is active']) : construct.Active ? figure(ctx, construct.ResearchBonus, 'the research bonus of the ancient construct', (bonus) => `${roundToDecimal((bonus - 1) * 10)}% field-wide ${construct.FieldName || 'of an unknown field'}`) : 'Dormant',
               blocker: unknown ? { text: blocker, result: ctx.unknown(['the population of a colony on the construct\'s body']) } : blocker,
             },
             link: linkTo.planner({
@@ -452,7 +447,7 @@ export const checks = checksOf([
                 SystemBodyName: construct.SystemBodyName,
                 SystemName: construct.SystemName,
                 BodyClass: construct.BodyClass,
-                Component: construct.Component,
+                ComponentNumber: construct.ComponentNumber,
                 PlanetNumber: construct.PlanetNumber,
                 OrbitNumber: construct.OrbitNumber,
               }],

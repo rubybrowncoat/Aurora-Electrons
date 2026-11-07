@@ -1,5 +1,5 @@
 /*
-  Checks the Game Log's triage (src/renderer/utilities/event-triage.js and log-visit.js) against the DIM_EventType export (.github/exports/DIM_EventType.csv).
+  Checks the Game Log's triage (src/renderer/utilities/event-triage.js and log-visit.js) against the DIM_EventType export (.github/exports/DIM_EventType.csv, the Aurora 3.2.0 export).
 
   node scripts/check-event-triage.js [--no-mutations]
 
@@ -8,16 +8,17 @@
   - presets: what a stored value must hold to be a preset, names, a preset's types keep every unknown type visible, keywords match any, as a case-insensitive substring, and no keyword matches everything;
   - visit: the Game Log's last look by branch (a number from before the branches is read through the ledger, a branch with no entry takes the lesser of its parent's look and the fork, an event is new when later than the look).
   - game-master-only events (`SMOnly`): the page's query, the archive list, the conflicts and the pins of the Game Log leave them out of every player-facing row and count, a row of one cannot be pinned, the Archive panel counts them without listing them, and the failed captures are listed newest first. Each gate is also planted out of the source, and the check that names it must fail.
+  - log depth and hidden types: the Events list states the span between the earliest and latest stored event time and the count of the rows it holds, for the save's log and for the archive, with no assumed window or load limit; a type the race hid in `FCT_HideEvents` marks its rows, and a hidden table that cannot be read marks none. Each gate is planted out of the source too.
   Prints `N of N checks passed`; any failed check sets exit code 1. With `--no-mutations` no gate is planted and only the checks of the real sources run.
 */
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { plantedPatch } = require('./lib/mutant-source')
-const { mutating } = require('./lib/no-mutations')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 
 const rows = fs.readFileSync(path.resolve(__dirname, '..', '.github', 'exports', 'DIM_EventType.csv'), 'utf8').trim().split(/\r?\n/).slice(1).map((line) => line.split(','))
 const EXPORT = rows.map(([id, , , , attack]) => ({ id: Number(id), attack: attack === '1' }))
@@ -206,6 +207,10 @@ const NAMES = { types: new Map(), colours: new Map(), systems: new Map(), coloni
 
 // The utilities, the Archive panel and the page as the app ships them, or with one fault planted in a utility (`utility` { file, find, replace }), in the panel (`panel` { find, replace }) or in the page (`page`, a `replacing` of its script).
 const loadGameMaster = async ({ utility = null, panel = null, page = null } = {}) => {
+  if (utility || panel || page) {
+    refusePlanting('the game-master event faults')
+  }
+
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-event-triage-'))
 
   try {
@@ -253,6 +258,42 @@ const pageOn = (m, { saved = [], database = null, data = {}, stored = undefined 
 })
 
 const panelOn = (m, record) => instantiate(m.panelOptions, { $store: { getters: {}, state: {} }, data: { ...Object.fromEntries(['status', 'reason', 'cap', 'startYear', 'source'].map((name) => [name, undefined])), record, startYear: 2000 } })
+
+// A log row of the page's own read, with what the depth and the hidden mark need.
+const logRow = ({ id = 1, IncrementID = 5, Time = 0, EventType = 3, ...over } = {}) => ({ id, IncrementID, Time, EventType, MessageText: 'row', SystemID: 0, PopulationID: 0, Xcor: 0, Ycor: 0, IDType: 0, SMOnly: 0, archived: false, ...over })
+
+// An archive record of two events, each in its own increment: [Time, EventType, MessageText, SystemID, PopulationID, Xcor, Ycor, IDType, SMOnly, count].
+const GROUP_AT = (Time, MessageText) => [Time, 3, MessageText, 0, 0, 0, 0, 0, 0, 1]
+const ARCHIVE_RECORD = { increments: [[5, 0, 86400, [GROUP_AT(0, 'early')]], [6, 172800, 86400, [GROUP_AT(172800, 'late')]]], spans: [[0, 259200]], revision: 1, captures: [], conflicts: [] }
+
+// The database the page's read sends its statements to: the race's log rows, its hidden types and the log's window.
+const databaseOf = ({ rows = [], hidden = [], failHidden = false, queries = [] }) => ({
+  query: async (sql) => {
+    queries.push(sql)
+
+    if (/FCT_HideEvents/.test(sql)) {
+      if (failHidden) {
+        throw new Error('no such table: FCT_HideEvents')
+      }
+
+      return [hidden.map((EventID) => ({ EventID }))]
+    }
+
+    if (/min\(FCT_GameLog\.IncrementID\)/.test(sql)) {
+      return [[{ first: rows.length ? Math.min(...rows.map((row) => row.IncrementID)) : null }]]
+    }
+
+    if (/from FCT_Increments/.test(sql)) {
+      return [[]]
+    }
+
+    if (/from FCT_GameLog as L/.test(sql)) {
+      return [rows]
+    }
+
+    throw new Error(`the harness was asked an unexpected statement: ${sql}`)
+  },
+})
 
 const gameMasterChecks = [
   ['the live query leaves out game-master-only events', async (m) => {
@@ -353,14 +394,57 @@ const GAME_MASTER_MUTANTS = [
   { name: 'a pin the store would reject is added', load: { utility: { file: 'event-pins.js', find: 'if (!validPin(pin)) {', replace: 'if (false) {' } }, fails: ['a pin the store would reject'] },
 ]
 
-const failedOf = async (m) => {
+const LOG_VIEW_CHECKS = [
+  ['the page states the log\'s span and count from the rows it reads, never an assumed window', (m) => {
+    const text = (rows) => pageOn(m, { data: { logEvents: rows } }).depthText
+
+    assert.equal(text([logRow({ id: 1, Time: 0 }), logRow({ id: 2, Time: 86400 }), logRow({ id: 3, Time: 172800 })]), 'The save holds 3 events of the race, from 2000-01-01 to 2000-01-03.')
+    assert.equal(text([logRow({ id: 1, Time: 0 }), logRow({ id: 2, Time: 0 })]), 'The save holds 2 events of the race, on 2000-01-01.')
+    assert.equal(text([logRow({ id: 1, Time: 0 })]), 'The save holds 1 event of the race, on 2000-01-01.')
+    assert.equal(text([]), 'The save holds no event of the race.')
+    assert.equal(/\b(?:five|5) years?\b|\b10,000\b/i.test(text([logRow({ Time: 0 })])), false)
+  }],
+  ['the archive list states its own stored span and count', (m) => {
+    const vm = pageOn(m, { data: { listSource: 'archive', archive: { status: 'ok', record: ARCHIVE_RECORD }, archiveNames: NAMES } })
+
+    assert.equal(vm.listEvents.length, 2)
+    assert.equal(vm.depthText, 'The archive holds 2 events of the race, from 2000-01-01 to 2000-01-03.')
+    assert.deepEqual(panelOn(m, ARCHIVE_RECORD).covers, { from: '2000-01-01', to: '2000-01-03' })
+    assert.equal(panelOn(m, { ...ARCHIVE_RECORD, increments: [] }).covers, null)
+  }],
+  ['the list marks the rows of the types the race hid in the game\'s Events window', async (m) => {
+    const queries = []
+    const rows = [logRow({ id: 1, EventType: 3, Time: 0 }), logRow({ id: 2, EventType: 4, Time: 60 })]
+    const database = databaseOf({ rows, hidden: [3], queries })
+    const vm = pageOn(m, { database })
+
+    await vm.runAsync('logEvents')
+    assert.ok(queries.some((sql) => /FCT_HideEvents/.test(sql) && /GameID = 1/.test(sql) && /RaceID = 2/.test(sql)), 'the hidden types are not read for the race and save')
+    assert.deepEqual(vm.logEvents.map((row) => vm.isHidden(row)), [true, false])
+    const unknown = pageOn(m, { database: databaseOf({ rows, failHidden: true }) })
+
+    await unknown.runAsync('logEvents')
+    assert.equal(unknown.hiddenTypes, null)
+    assert.deepEqual(unknown.logEvents.map((row) => unknown.isHidden(row)), [false, false], 'a hidden list that cannot be read marked rows')
+  }],
+]
+
+const LOG_VIEW_MUTANTS = [
+  { name: 'the list does not read the hidden types', load: { page: replacing('readHiddenTypes(this.database, this.GameID, this.RaceID)', 'Promise.resolve(null)') }, fails: ['the list marks the rows'] },
+  { name: 'every row is marked hidden', load: { page: replacing('!!this.hiddenTypes && this.hiddenTypes.has(Number(event.EventType))', 'true') }, fails: ['the list marks the rows'] },
+  { name: 'the depth is read from the first two rows only', load: { page: replacing('return logDepth(this.listEvents)', 'return logDepth(this.listEvents.slice(0, 2))') }, fails: ['the page states the log\'s span'] },
+  { name: 'the archive list is worded as the save', load: { page: replacing("const held = this.archiveListed ? 'The archive' : 'The save'", "const held = 'The save'") }, fails: ['the archive list states its own'] },
+  { name: 'the archive panel states no span', load: { panel: { find: 'const depth = recordDepth(this.record)', replace: 'const depth = null' } }, fails: ['the archive list states its own'] },
+]
+
+const failedOf = async (m, entries = gameMasterChecks) => {
   const failed = []
 
-  for (const [name, body] of gameMasterChecks) {
+  for (const [name, body] of entries) {
     try {
       await body(m)
     } catch (error) {
-      failed.push({ name, message: error.message })
+      failed.push({ name, error, message: error.message, valueFailure: kindOf(error) === 'assertion' && !isSubjectThrow(error) })
     }
   }
 
@@ -388,12 +472,24 @@ const run = async () => {
   passed += gameMasterChecks.length - realFailed.length
   realFailed.forEach(({ name, message }) => console.log(`FAIL ${name}\n     ${message.split('\n').join('\n     ')}`))
 
-  for (const mutant of mutating() ? GAME_MASTER_MUTANTS : []) {
+  const viewFailed = await failedOf(real, LOG_VIEW_CHECKS)
+
+  total += LOG_VIEW_CHECKS.length
+  passed += LOG_VIEW_CHECKS.length - viewFailed.length
+  viewFailed.forEach(({ name, message }) => console.log(`FAIL ${name}\n     ${message.split('\n').join('\n     ')}`))
+
+  for (const mutant of mutating() ? [...GAME_MASTER_MUTANTS, ...LOG_VIEW_MUTANTS] : []) {
     total++
 
     try {
-      const failed = await failedOf(await loadGameMaster(mutant.load))
-      const missing = mutant.fails.filter((start) => !failed.some(({ name }) => name.startsWith(start)))
+      const failed = await failedOf(await loadGameMaster(mutant.load), [...gameMasterChecks, ...LOG_VIEW_CHECKS])
+      const invalid = failed.find(({ valueFailure }) => !valueFailure)
+
+      if (invalid) {
+        throw invalid.error
+      }
+
+      const missing = mutant.fails.filter((start) => !failed.some(({ name, valueFailure }) => valueFailure && name.startsWith(start)))
 
       if (missing.length) {
         throw new Error(`the check does not fail: ${missing.join(', ')}`)

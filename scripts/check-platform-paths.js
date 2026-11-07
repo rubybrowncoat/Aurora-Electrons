@@ -3,11 +3,11 @@
 
   bun scripts/check-platform-paths.js [--no-mutations]
 
-  The utility is run on synthetic classes, yards and colonies worked by hand: the recipe is the class's cost and the sum of its components' minerals times their counts; a class is a station only when it is on the race's own list, not obsolete, without armour and without a prototype component (a known blocker beats an unknown flag, a class from another race is no blocker, and the structural shell every armourless class mounts is no armour); a colony without a spaceport cannot make it; a component the race has not researched must be in the colony's stock, for every platform for a yard and for one hull for the industry; the stored components credit each task in turn and once, so the tasks' build points add up to the build points of the hulls less what the stock covers, and a task left with none, or a zero shipbuilding output, makes no progress; a yard builds one platform per task, a task on each free slipway at a time, so the time is the finish of a list schedule at the colony's rate for the class, with a retool adding its days and a yard with no free slipway having no time; the industry takes the share the colony's projects out of the queue (paused ones too, queued ones not) leave of its construction capacity; a missing rate, capacity, stock, project list, installation or research read leaves the time unavailable and named, never 0; and `quicker` is only ever said of one colony, and only when both times are known and the stock covers the minerals of both routes.
+  The utility is run on synthetic classes, yards and colonies worked by hand: the recipe is the class's cost and the sum of its components' minerals times their counts; a class is a station only when it is on the race's own list, not obsolete, without armour and without a prototype component (a known blocker beats an unknown flag, a class from another race is no blocker, and the structural shell every armourless class mounts is no armour); a colony without a spaceport cannot make it; a component the race has not researched must be in the colony's stock for every platform of a yard task or of a station project; the stored components credit each task in turn and once, so the tasks' build points add up to the build points of the hulls less what the stock covers, and a task left with none, or a zero shipbuilding output, makes no progress; the industry takes the components the whole batch needs at once, a component only where the stock holds the whole batch of it, which lowers a platform's build points and minerals by what a hull mounts and holds the cost a platform at 1 BP; a yard builds one platform per task, a task on each free slipway at a time, so the time is the finish of a list schedule at the colony's rate for the class, with a retool adding its days and a yard with no free slipway having no time; the industry takes the share the colony's projects out of the queue (paused ones too, queued ones not) leave of its construction capacity; a missing rate, capacity, stock, project list, installation or research read leaves the time unavailable and named, never 0; and `quicker` is only ever said of one colony, and only when both times are known and the stock covers the minerals of both routes.
 
   The panel's script is run as a pseudo instance over scripts/lib/page-loader.js and its template and the Shipyards page's mount are read as text.
 
-  The loader is also run on an in-memory save built in this script, whether or not the saves are there. The saves (saves/AuroraDB.db and saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, read-only) give the real classes, yards, colonies and stored Space station projects: the loader is compared with raw counts, the class cost with the sum of its components', and the stored projects' build points and minerals with the recipe (a stored project made before its class was changed differs; those are reported, not failed). A save that is not there is skipped.
+  The loader is also run on an in-memory save built in this script, whether or not the saves are there. The save (the fixture of scripts/lib/fixtures.js, the migrated Galactic Shogunate save, game 141, race 784, read-only) gives the real classes, yards, colonies and stored Space station projects (it holds none): the loader is compared with raw counts, the class cost with the sum of its components', and the stored projects' build points and minerals with the recipe (a stored project made before its class was changed differs; those are reported, not failed). A save that is not there is skipped.
 
   Each mutation of the utility, the panel or the page must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -18,16 +18,15 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilityFile = path.join(root, 'src', 'renderer', 'utilities', 'platform-paths.js')
 const componentFile = path.join(root, 'src', 'renderer', 'components', 'shipyards', 'PlatformPaths.vue')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'shipyards.vue')
 const NAMES = ['platform-paths', 'refits', 'component-calc', 'workforce-demand', 'production', 'provenance', 'minerals']
-const SAVES = [
-  { file: 'saves/AuroraDB.db', game: 138, race: 785, stored: 3 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785, stored: 1 },
-]
+// `stored` is the least number of the save's stored Space station projects whose build points and minerals repeat the recipe: the fixture holds none, so none can match.
+const SAVES = [{ ...fixtureSave(), stored: 0 }]
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -102,7 +101,7 @@ const fixtures = (m) => {
   const cls = (id, over = {}) => ({ id, name: `Class ${id}`, sizeHS: 10, cost: 52, commercial: false, obsolete: false, shippingLine: false, otherRace: false, prototype: false, counts: { 1: 1, 2: 2, 3: 1 }, ...over })
   const PLAT = cls(100, { name: 'Platform' })
   const FAR = cls(101, { name: 'Far', sizeHS: 20, cost: 100, counts: { 1: 2, 2: 4 } })
-  const context = { classesById: { 100: PLAT, 101: FAR }, components, version: '2.7.1', cache: new Map() }
+  const context = { classesById: { 100: PLAT, 101: FAR }, components, version: '3.2.0', cache: new Map() }
   const capacity = (value) => m.provenance.ofRule({ rule: 'platformPaths.industry', value, inputs: { present: ['capacity'] }, units: 'BP/yr' })
   const unknownCapacity = m.provenance.unavailable({ rule: 'platformPaths.industry', missing: ['the colony\'s production modifiers'], units: 'BP/yr' })
   const MODIFIERS = { ShipyardBuildRate: 1000, ShipyardOperations: 1 }
@@ -127,9 +126,9 @@ const pure = (ctx) => {
   const statements = []
   const add = (name, test) => statements.push([name, test])
 
-  add('rules: the six rules are registered, 2.7.x, with the kind of check each is', () => {
+  add('rules: the six rules are registered with the versions they hold for, and the kind of check each is', () => {
     const expected = { 'platformPaths.recipe': 'confirmed', 'platformPaths.stationClass': 'estimated', 'platformPaths.spaceport': 'estimated', 'platformPaths.yard': 'estimated', 'platformPaths.industry': 'estimated', 'platformPaths.labour': 'confirmed' }
-    const bad = Object.entries(expected).filter(([id, verification]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes('2.7.x') || !rule.units }).map(([id]) => id)
+    const bad = Object.entries(expected).filter(([id, verification]) => { const rule = provenance.getRule(id); return !rule || rule.verification !== verification || !rule.versions.includes('3.2.x') || !rule.units }).map(([id]) => id)
 
     return bad.length ? `wrong or missing: ${bad.join(', ')}` : true
   })
@@ -214,10 +213,20 @@ const pure = (ctx) => {
 
     return same([covered.short, lacking.short, unread.short], [{}, { Corbomite: 11 }, null])
   })
-  add('industry: the stored components are not used: the build points are the platforms\' whole cost whatever the colony holds', () => {
-    const row = industry({ stock: { 1: 5, 2: 10, 3: 5 } })
+  add('industry: the stored components the whole batch covers lower a platform\'s build points and minerals, the batch taken at once', () => {
+    const row = industry({ stock: { 1: 2 } })
 
-    return row.bp === 104 && row.credit === null ? true : short(row)
+    return same([row.state, row.bp, row.credit.bp, row.minerals.Duranium, row.minerals.Boronide, row.minerals.Corbomite], ['capable', 84, 20, 22, 0, 12]) === true && near(row.firstDays, 42 / 1000 * DAY) && near(row.days, 84 / 1000 * DAY) ? true : short(row)
+  })
+  add('industry: a stock short of the whole batch takes nothing: a hull\'s worth of each component is no credit, so the platforms keep their whole cost and time', () => {
+    const row = industry({ stock: { 1: 1, 2: 3, 3: 1 } })
+
+    return row.state === 'capable' && row.bp === 104 && row.credit.bp === 0 && near(row.days, 104 / 1000 * DAY) ? true : short(row)
+  })
+  add('industry: a stock that covers every component leaves a platform at the game\'s 1 BP floor, never a free platform', () => {
+    const row = industry({ stock: { 1: 2, 2: 4, 3: 2 } })
+
+    return row.state === 'capable' && row.bp === 2 && row.credit.bp === 104 && same(row.minerals, mins()) === true && near(row.firstDays, 365 / 1000) && near(row.days, 2 / 1000 * DAY) ? true : short(row)
   })
   add('industry: a colony\'s capacity the save does not give leaves the time unavailable and named, never 0', () => {
     const row = industry({ capacity: unknownCapacity })
@@ -334,9 +343,15 @@ const pure = (ctx) => {
   })
   add('yardstates: a repair yard cannot build, an unsupported yard type is not covered, and neither has a time or minerals', () => {
     const repair = yardRow({}, {}, 2, { type: 3 })
-    const odd = yardRow({}, {}, 2, { type: 4 })
+    const odd = yardRow({}, {}, 2, { type: 5 })
 
     return repair.state === 'ineligible' && odd.state === 'unsupported' && [repair, odd].every((row) => row.days === null && row.minerals === null && row.bp === null && row.timeResult.status === 'unavailable') ? true : short([repair, odd])
+  })
+  add('yardstates: a light yard lists the class with no tooling, so it builds it where a naval yard tooled for another class retools, and its workers are the whole capacity over 4000', () => {
+    const light = yardRow({}, {}, 2, { type: 4, tooledId: 101 })
+    const naval = yardRow({}, {}, 2, { tooledId: 101 })
+
+    return naval.state === 'retool' && light.state === 'capable' && light.retoolDays === 0 && light.days !== null && near(light.labour.millions, 2 * 1000 / 4000) && near(light.labour.millions, naval.labour.millions) ? true : short([light, naval.state])
   })
   add('yardstates: a yard of a type the save does not give is unknown, naming it', () => {
     const row = yardRow({}, {}, 2, { type: null })
@@ -355,12 +370,12 @@ const pure = (ctx) => {
 
     return row.state === 'capable' && row.days === null && row.timeResult.status === 'unavailable' && row.timeResult.inputs.missing.some((text) => text.includes('rate')) && row.bp === 104 ? true : short(row)
   })
-  add('unread: a save with no component stock leaves the credit, the build points and the time of a yard unknown; the industry, which uses none, is not held up', () => {
+  add('unread: a save with no component stock leaves the credit, the build points and the time of both paths unknown and named, never a free platform', () => {
     const result = run({ colonies: { 7: colony({ stock: null }) } })
     const row = rowOf(result, 'yard')
     const industryRow = rowOf(result, 'industry')
 
-    return row.days === null && row.bp === null && row.minerals === null && row.timeResult.status === 'unavailable' && industryRow.state === 'capable' && industryRow.days !== null ? true : short([row, industryRow.state])
+    return row.days === null && row.bp === null && row.minerals === null && row.timeResult.status === 'unavailable' && industryRow.state === 'unknown' && industryRow.bp === null && industryRow.days === null && industryRow.timeResult.status === 'unavailable' && industryRow.missing.some((text) => text.includes('stock')) ? true : short([row, industryRow])
   })
   add('unread: a stored component of an amount the save leaves out makes the credit unknown, not 0 held', () => {
     const row = yardRow({}, { stock: { 1: null } })
@@ -416,12 +431,12 @@ const pure = (ctx) => {
 
     return [none, short1].every((row) => row.state === 'ineligible' && row.days === null && row.bp === null && row.reasons.some((text) => text.includes('Mining module') && text.includes('not researched'))) && short1.reasons.some((text) => text.includes('holds 3 of the 4')) && enough.state === 'capable' && enough.bp === 24 && enough.days !== null && one.state === 'capable' ? true : short([none, short1, enough, one])
   })
-  add('alien: the industry route needs one hull\'s alien components in the colony\'s stock whatever the quantity, and neither uses them up nor credits them', () => {
+  add('alien: the industry takes the alien components of the whole batch: a stock that covers one hull of several closes the route, and a batch covered is taken and credits the platforms', () => {
     const none = rowOf(withAlien(), 'industry')
-    const less = rowOf(withAlien({ stock: { 2: 1 } }), 'industry')
-    const hull = rowOf(withAlien({ stock: { 2: 2 } }, 5), 'industry')
+    const one = rowOf(withAlien({ stock: { 2: 2 } }, 5), 'industry')
+    const batch = rowOf(withAlien({ stock: { 2: 4 } }, 2), 'industry')
 
-    return [none, less].every((row) => row.state === 'ineligible' && row.days === null && row.reasons.some((text) => text.includes('Mining module') && text.includes('one hull'))) && hull.state === 'capable' && hull.bp === 260 && hull.credit === null && hull.days !== null ? true : short([none, less, hull])
+    return [none, one].every((row) => row.state === 'ineligible' && row.days === null && row.reasons.some((text) => text.includes('Mining module') && text.includes('not researched'))) && one.reasons.some((text) => text.includes('holds 2 of the 10 that 5 platforms need')) && batch.state === 'capable' && batch.bp === 24 && batch.credit.bp === 80 && batch.days !== null ? true : short([none, one, batch])
   })
   add('alien: a component the race has researched needs no stock, whatever the colony holds', () => {
     const result = run({ researched: { 1: 1, 2: 1, 3: 1 }, colonies: { 7: colony({ stock: {} }) } })
@@ -603,12 +618,14 @@ const saveStatements = async (ctx, save) => {
   const [{ n: componentCount }] = await rowsOf(database, `select count(distinct ComponentID) as n from FCT_ClassComponent where ClassID in (select ShipClassID from FCT_ShipClass where ${where})`, scope)
   const stations = await rowsOf(database, `select ShipClassID, Cost from FCT_ShipClass where ${where} and NoArmour = 1 and MiningModules > 0 and Obsolete = 0 order by Size desc`, scope)
   const classById = Object.fromEntries(classes.map((shipClass) => [shipClass.id, shipClass]))
-  const context = { classesById: classById, components, version: '2.7.1', cache: new Map() }
+  const context = { classesById: classById, components, version: '3.2.0', cache: new Map() }
   const modifiers = { ShipyardBuildRate: 1000, ShipyardOperations: 1 }
   const capacity = m.provenance.ofRule({ rule: 'platformPaths.industry', value: 1000, inputs: { present: ['capacity'] }, units: 'BP/yr' })
   const colonies = Object.fromEntries(Object.entries(read.colonies).map(([id, colony]) => [id, { ...colony, modifiers, capacity }]))
   const statements = []
   const add = (name, test, detail = '') => statements.push([name, test, detail])
+  // What the save cannot show, printed as needs tier b where the checks are listed and not counted.
+  const waiting = []
   const ids = (list) => list.map((row) => Number(row.PopID)).sort((a, b) => a - b)
 
   const mismatches = classes.filter((shipClass) => {
@@ -654,7 +671,11 @@ const saveStatements = async (ctx, save) => {
   })
   add(`save-researched: ${label}: every component of the race's classes is read once as researched, not researched or not known, as the raw rows count`, () => same([Object.keys(read.researched).length, Object.values(read.researched).every((value) => value === 1 || value === 0 || value === null)], [componentCount, true]))
   add(`save-recipe: ${label}: the class's stored cost is the sum of its components' costs times their counts, in every class`, () => (mismatches.length ? `${mismatches.length} of ${classes.length} differ, such as ${short(mismatches.slice(0, 2).map((shipClass) => shipClass.name))}` : true), `${classes.length} classes`)
-  add(`save-stored: ${label}: the stored Space station projects of unchanged classes repeat the recipe's build points and minerals exactly`, () => (matched.length >= save.stored ? true : `${matched.length} of ${stored.length} projects match, ${save.stored} expected`), `${matched.length} of ${stored.length} match; the rest were made before their class was changed`)
+  if (stored.length === 0) {
+    waiting.push(`save-stored: ${label}: needs tier b: the save holds no stored Space station project to compare with the recipe`)
+  } else {
+    add(`save-stored: ${label}: the stored Space station projects of unchanged classes repeat the recipe's build points and minerals exactly`, () => (matched.length >= save.stored ? true : `${matched.length} of ${stored.length} projects match, ${save.stored} expected`), `${matched.length} of ${stored.length} match; the rest were made before their class was changed`)
+  }
   add(`save-paths: ${label}: a mining platform class has a yard row for every yard and an industry row for every colony with a spaceport, factories or a yard, each with a real number or no time`, () => {
     if (!target) {
       return true
@@ -694,7 +715,7 @@ const saveStatements = async (ctx, save) => {
     return bad.length ? short(bad.map((line) => line.colony)) : true
   })
 
-  return { skipped: false, statements, database, close: () => database.close() }
+  return { skipped: false, statements, waiting, database, close: () => database.close() }
 }
 
 // ---------- the loader, on an in-memory save that is always there ----------
@@ -876,7 +897,7 @@ const panel = (ctx) => {
     return vm.paths.station.state === 'unknown' && vm.verdict.some((line) => line.text.includes('Not known')) && vm.tiles[0].value === 'Not known' ? true : short(vm.paths.station)
   })
   add('panel: each row has a status look, its reasons, what is not known, and a sort rank with the unknown ones last', () => {
-    const vm = mount(props({ yards: [yard({ id: 1 }), yard({ id: 2, tasks: 2 }), yard({ id: 3, type: 4 }), yard({ id: 4, type: null })], colonies: { 7: colony({ spaceports: 0 }) } }))
+    const vm = mount(props({ yards: [yard({ id: 1 }), yard({ id: 2, tasks: 2 }), yard({ id: 3, type: 5 }), yard({ id: 4, type: null })], colonies: { 7: colony({ spaceports: 0 }) } }))
     const byKey = Object.fromEntries(vm.rows.map((row) => [row.key, row]))
 
     return same([byKey['yard-1'].rank, byKey['yard-2'].rank, byKey['yard-3'].rank, byKey['yard-4'].rank, byKey['industry-7'].rank], [0, 1, 5, null, 4]) === true && byKey['yard-4'].gaps.length > 0 && byKey['industry-7'].reasons.some((text) => text.includes('spaceport')) && byKey['yard-1'].pathLabel !== byKey['industry-7'].pathLabel ? true : short(vm.rows.map((row) => [row.key, row.rank]))
@@ -1030,8 +1051,10 @@ const MUTATIONS = [
   { name: 'the stock credit left out', file: U, find: 'requirements({ parts, hulls: quantity, stock })', replace: 'requirements({ parts, hulls: quantity, stock: {} })', fails: ['stock'] },
   { name: 'the stock credit taken for every hull', file: U, find: 'const used = Math.min(left[part.componentId], part.count)', replace: 'const used = part.count', fails: ['stock'] },
   { name: 'the stock used again by the next task', file: U, find: 'left[part.componentId] -= used', replace: 'void used', fails: ['stock', 'schedule'] },
-  { name: 'the platforms\' build points not times the quantity', file: U, find: 'bp: isNumber(recipe.bp) ? recipe.bp * quantity : null', replace: 'bp: isNumber(recipe.bp) ? recipe.bp : null', fails: ['industry'] },
-  { name: 'the industry\'s minerals not times the quantity', file: U, find: 'recipe.minerals[name] * quantity]))', replace: 'recipe.minerals[name]]))', fails: ['industry'] },
+  { name: 'the platforms\' build points not times the quantity', file: U, find: 'const bp = perHull === null ? null : perHull * quantity', replace: 'const bp = perHull === null ? null : perHull', fails: ['industry'] },
+  { name: 'the industry\'s minerals not times the quantity', file: U, find: '(recipe.minerals[name] - batch.credit.minerals[name]) * quantity', replace: '(recipe.minerals[name] - batch.credit.minerals[name])', fails: ['industry'] },
+  { name: 'the industry\'s minerals not less the stored components', file: U, find: '(recipe.minerals[name] - batch.credit.minerals[name])', replace: 'recipe.minerals[name]', fails: ['industry'] },
+  { name: 'the industry\'s build points not less the stored components', file: U, find: 'creditedCost(recipe.bp, batch.credit.bp)', replace: 'recipe.bp', fails: ['industry'] },
   { name: 'the share not reduced by the projects held', file: U, find: 'const free = WHOLE_CAPACITY - held.held', replace: 'const free = WHOLE_CAPACITY', fails: ['industry', 'compare'] },
   { name: 'a yard needing a retool with no free slipway given a time', file: U, find: 'if (free <= 0) {', replace: 'if (false) {', fails: ['retool'] },
   { name: 'a busy colony given a time', file: U, find: 'if (free <= EPSILON) {', replace: 'if (false) {', fails: ['industry'] },
@@ -1050,6 +1073,7 @@ const MUTATIONS = [
   { name: 'projects not read taken as none held', file: U, find: '{ held: 0, missing: [\'the colony\\\'s industrial projects\'] }', replace: '{ held: 0, missing: [] }', fails: ['unread'] },
   { name: 'a stock amount not read taken as held', file: U, find: 'total.invalid || total.unknown ||', replace: 'total.invalid ||', fails: ['unread'] },
   { name: 'a yard\'s workers counted for one slipway', file: U, find: 'yardWorkers(yard.type, yard.capacity, yard.slipways)', replace: 'yardWorkers(yard.type, yard.capacity, 1)', fails: ['labour'] },
+  { name: 'a light yard\'s workers counted as a repair yard\'s', file: U, find: 'yardWorkers(yard.type, yard.capacity, yard.slipways)', replace: 'yardWorkers(yard.type === 4 ? 3 : yard.type, yard.capacity, yard.slipways)', fails: ['yardstates'] },
   { name: 'factories not read taken as none', file: U, find: 'isNumber(colony.factories.workers) ? colony.factories.workers : null', replace: 'isNumber(colony.factories.workers) ? colony.factories.workers : 0', fails: ['labour'] },
   { name: 'a quantity with a fraction accepted', file: U, find: 'if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_PLATFORMS) {', replace: 'if (quantity < 1 || quantity > MAX_PLATFORMS) {', fails: ['invalid'] },
   { name: 'a colony with factories and no spaceport left out', file: U, find: 'colonies[id].spaceports > 0 || (colonies[id].factories && colonies[id].factories.workers > 0)', replace: 'colonies[id].spaceports > 0', fails: ['rows'] },
@@ -1069,7 +1093,11 @@ const MUTATIONS = [
   { name: 'a colony with installations not stored in full left out of the industry rows', file: U, find: ' || colonies[id].installationUnknown === true', replace: '', fails: ['rows'] },
   { name: 'the yard\'s alien components not asked for', file: U, find: 'if (admission.blockers.length) {', replace: 'if (false) {', fails: ['alien'] },
   { name: 'the industry\'s alien components not asked for', file: U, find: 'blockers.push(...admission.blockers)', replace: 'void admission', fails: ['alien'] },
-  { name: 'the yard asked for one hull\'s alien components only', file: U, find: 'hulls: quantity, wording', replace: 'hulls: 1, wording', fails: ['alien'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the yard asked for one hull\'s alien components only', file: U, find: 'hulls: quantity, wording: (name, held, needed) => `the race has not researched ${name}, and the colony holds ${held} of the ${needed} that ${quantity} platforms need: a shipyard task', replace: 'hulls: 1, wording: (name, held, needed) => `the race has not researched ${name}, and the colony holds ${held} of the ${needed} that ${quantity} platforms need: a shipyard task', fails: ['alien'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the industry asked for one hull\'s alien components only', file: U, find: 'hulls: quantity, wording: (name, held, needed) => `the race has not researched ${name}, and the colony holds ${held} of the ${needed} that ${quantity} platforms need: a station project', replace: 'hulls: 1, wording: (name, held, needed) => `the race has not researched ${name}, and the colony holds ${held} of the ${needed} that ${quantity} platforms need: a station project', fails: ['alien'] },
+  { name: 'the industry credited a component the stock covers only for one hull', file: U, find: 'if (held < count * quantity) {', replace: 'if (held < count) {', fails: ['industry'] },
   { name: 'a research not known taken as an alien stock check', file: U, find: '    if (state !== 0) {', replace: '    if (state !== 0 && state !== null) {', fails: ['alien'] },
   { name: 'an alien stock not known taken as none held', file: U, find: '} else if (!Number.isFinite(held)) {', replace: '} else if (false) {', fails: ['alien'] },
   { name: 'a task with no build points given a time', file: U, find: 'if (sums.tasks.some((task) => task.bp <= EPSILON)) {', replace: 'if (false) {', fails: ['stock'] },
@@ -1182,6 +1210,7 @@ const statementsOf = async (ctx, withSaves, keys = null) => {
   const statements = [...pure(ctx), ...loader(ctx), ...panel(ctx), ...page(ctx)]
   const opened = []
   const skipped = []
+  const waiting = []
 
   if (withSaves) {
     for (const save of SAVES) {
@@ -1192,6 +1221,7 @@ const statementsOf = async (ctx, withSaves, keys = null) => {
         skipped.push(save.file)
       } else {
         statements.push(...read.statements)
+        waiting.push(...(read.waiting || []))
 
         if (read.close) {
           opened.push(read)
@@ -1200,17 +1230,21 @@ const statementsOf = async (ctx, withSaves, keys = null) => {
     }
   }
 
-  return { statements, opened, skipped }
+  return { statements, opened, skipped, waiting }
 }
 
 const checkHead = async () => {
   const ctx = await contextOf(sourcesOf(null))
-  const { statements, opened, skipped } = await statementsOf(ctx, true)
+  const { statements, opened, skipped, waiting } = await statementsOf(ctx, true)
 
   console.log('\nMining platform production paths, on classes, yards and colonies worked by hand, the panel, the page and the saves')
 
   for (const file of skipped) {
     console.log(`SKIP  ${file} is not there`)
+  }
+
+  for (const note of waiting) {
+    console.log(`SKIP  ${note}`)
   }
 
   for (const [name, result, detail] of await runStatements(statements)) {

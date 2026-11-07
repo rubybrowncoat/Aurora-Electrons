@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-hauling-gates.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The saved game is Falryx (artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db, game 141, race 791 with 81 repeating fleets). The check copies it into a folder of its own and adds one order of a repeating fleet to the first aether gate (the save holds no order to a gate). The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy: the orders the repeating fleets have, and the gate's stored place.
+  The saved game is the fixture (scripts/lib/fixtures.js, game 141, race 784 with 32 repeating fleets). The check copies it into a folder of its own, plants one aether gate (the save holds none) and adds one order of a repeating fleet to it. The page's script runs on the copy with the capability report that the real preflight gives for it (utilities/capabilities.js, run over the copy), and the expected figures come from SQL over the copy: the orders the repeating fleets have, and the gate's stored place.
 
   Every planted fault must fail the checks it names by a wrong value or by the read error the page reports (`loadErrors.orders`), never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -17,12 +17,16 @@ const { runSuite } = require('./lib/suite-runner')
 const { HarnessError } = require('./lib/browser-observe')
 const { assert, boundary, harnessOwn, subjectModule, isSubjectThrow, runChecks, judged, caughtAll, notCaught } = require('./lib/fault-credit')
 const { loadModule, loadPage, instantiate } = require('./lib/page-loader')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'artifacts/falryx-sequential-and-rollback/AuroraDB-2930673230.db'
-const GAME = 141
-const RACE = 791
+const SAVE = FIXTURE.file
+const GAME = FIXTURE.gameId
+const RACE = FIXTURE.raceId
 const ADDED_ORDER = 900000001
+const ADDED_GATE = 900000002
+// The stored place of the planted gate: a system the fleet's first order starts in and a place on no body.
+const GATE_PLACE = [1234567.5, -7654321.25]
 const DETAIL = process.argv.includes('--detail')
 const RENDERER = path.join(root, 'src', 'renderer')
 const FILES = {
@@ -53,13 +57,16 @@ const copies = () => {
   fs.copyFileSync(path.join(root, SAVE), intactFile)
 
   const edit = new Database(intactFile)
-  const [gate] = edit.query(`select AetherGateID, SystemID, Xcor, Ycor from FCT_AetherGates where GameID = ${GAME} order by AetherGateID limit 1`).all()
   const [fleet] = edit.query(`select FCT_Fleet.FleetID, max(FCT_MoveOrders.MoveOrder) as Last from FCT_Fleet inner join FCT_MoveOrders on FCT_MoveOrders.FleetID = FCT_Fleet.FleetID where FCT_Fleet.RaceID = ${RACE} and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 group by FCT_Fleet.FleetID order by FCT_Fleet.FleetID limit 1`).all()
+  const [first] = fleet ? edit.query(`select StartSystemID from FCT_MoveOrders where FleetID = ${fleet.FleetID} order by MoveOrder limit 1`).all() : []
 
-  if (!gate || !fleet) {
-    throw new HarnessError('the save holds no aether gate or no repeating fleet with orders to build the copies from')
+  if (!first) {
+    throw new HarnessError('the save holds no repeating fleet with orders to build the copies from')
   }
 
+  const gate = { AetherGateID: ADDED_GATE, SystemID: first.StartSystemID, Xcor: GATE_PLACE[0], Ycor: GATE_PLACE[1] }
+
+  edit.run(`insert into FCT_AetherGates (AetherGateID, GameID, SystemID, Xcor, Ycor, CreationTime, CooldownTime) values (${gate.AetherGateID}, ${GAME}, ${gate.SystemID}, ${gate.Xcor}, ${gate.Ycor}, 0, 0)`)
   edit.run(`insert into FCT_MoveOrders (MoveOrderID, GameID, RaceID, FleetID, MoveActionID, MoveOrder, StartSystemID, DestinationType, DestinationID, NewWarpPointID) values (${ADDED_ORDER}, ${GAME}, ${RACE}, ${fleet.FleetID}, 1, ${fleet.Last + 1}, ${gate.SystemID}, 14, ${gate.AetherGateID}, 0)`)
   edit.close()
   COPIES = { intact: new Database(intactFile, { readonly: true }), gate, fleet }

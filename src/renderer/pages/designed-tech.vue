@@ -96,6 +96,8 @@
                       <th>Class</th>
                       <th class="text-right">Mounted per ship<provenance-mark rule="designedTech.usage" /></th>
                       <th class="text-right">Ships in service</th>
+                      <th v-if="isOrdnanceModule(item)" class="text-right">Modules in the class<provenance-mark rule="ordnance.classModules" /></th>
+                      <th v-if="isOrdnanceModule(item)" class="text-right">Ordnance a year<provenance-mark rule="ordnance.classProduction" /></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -107,6 +109,12 @@
                       </td>
                       <td class="text-right text-no-wrap">{{ count(shipClass.perShip, 2) }}</td>
                       <td class="text-right text-no-wrap">{{ count(shipClass.ships) }}</td>
+                      <td v-if="isOrdnanceModule(item)" class="text-right text-no-wrap">
+                        {{ ordnanceText(shipClass, 'modules') }}
+                        <span v-if="ordnanceOf(shipClass).agrees === false" class="warning--text caption"> · its components add up to {{ count(ordnanceOf(shipClass).mounted) }}</span>
+                        <provenance-mark :result="ordnanceOf(shipClass).modules" />
+                      </td>
+                      <td v-if="isOrdnanceModule(item)" class="text-right text-no-wrap">{{ ordnanceText(shipClass, 'production') }}<provenance-mark :result="ordnanceOf(shipClass).production" /></td>
                     </tr>
                   </tbody>
                 </v-simple-table>
@@ -194,6 +202,7 @@ import { STANDING, beginRead, isCurrentRead, loadComponentStanding, loadMissileS
 import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, USAGE_COLUMNS, augmentComponent, augmentMissile, augmentSpecies, categoryNote, cellOf as designCell, classUsageByComponent, columnRule, columnsFor, compareMarks, designTiles, isUnused, obsoleteResult, sortRows, tagsOf, withUsage } from '../utilities/designed-tech'
 import { tracked } from '../utilities/load-tracking'
 import { MINERALS } from '../utilities/minerals'
+import { ORDNANCE_FACTORY_MODULE, classOrdnance } from '../utilities/ordnance-modules'
 import { describeResult, isAvailable } from '../utilities/provenance'
 import { sensorModeOf } from '../utilities/sensor-view'
 
@@ -531,6 +540,23 @@ export default {
     },
   },
   methods: {
+    // Whether a design is an Ordnance Factory Module, whose classes show the module count and the ordnance they make a year.
+    isOrdnanceModule(item) {
+      return item.ComponentTypeID === ORDNANCE_FACTORY_MODULE
+    },
+
+    // A class's Ordnance Factory totals as the stored class and the race's ordnance production give them (`classOrdnance`).
+    ordnanceOf(shipClass) {
+      return classOrdnance(shipClass.ordnance || { stored: null, rate: null })
+    },
+
+    // The class's module count or its ordnance in build points a year, a dash where it is not known.
+    ordnanceText(shipClass, key) {
+      const result = this.ordnanceOf(shipClass)[key]
+
+      return isAvailable(result) ? (key === 'production' ? `${this.count(result.value, result.value > 0 && result.value < 10 ? 1 : 0)} BP` : this.count(result.value)) : '—'
+    },
+
     // The Missile Designer's page of a saved missile, as a link to it; null for a row that is not a missile.
     missileLink(item) {
       return item.CategoryID === MISSILE_CATEGORY_ID ? linkTo.missileDesigner({ missile: item.MissileID, name: item.Name }) : null
@@ -706,14 +732,14 @@ export default {
       }),
       default: [],
     },
-    // One row per class and component it mounts, with the ships of the class still in service. The class table scopes it: a class component row's own game id isn't reliable.
+    // One row per class and component it mounts, with the ships of the class still in service, the class's stored Ordnance Factory Module count, the component's type and the race's ordnance production. The class table scopes it: a class component row's own game id isn't reliable.
     classUsage: {
       get: tracked('classUsage', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const [items] = await this.database.query(`select FCT_ClassComponent.ComponentID, FCT_ClassComponent.ClassID, FCT_ClassComponent.NumComponent, FCT_ShipClass.ClassName, FCT_ShipClass.Obsolete, coalesce(Fleet.Ships, 0) as Ships from FCT_ClassComponent inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ClassComponent.ClassID left join (select ShipClassID, count(*) as Ships from FCT_Ship where GameID = ${this.GameID} and RaceID = ${this.RaceID} and Destroyed = 0 group by ShipClassID) as Fleet on Fleet.ShipClassID = FCT_ShipClass.ShipClassID where FCT_ShipClass.GameID = ${this.GameID} and FCT_ShipClass.RaceID = ${this.RaceID}`)
+        const [items] = await this.database.query(`select FCT_ClassComponent.ComponentID, FCT_ClassComponent.ClassID, FCT_ClassComponent.NumComponent, FCT_ShipClass.ClassName, FCT_ShipClass.Obsolete, FCT_ShipClass.OrdnanceModules, FCT_ShipDesignComponents.ComponentTypeID, FCT_Race.OrdnanceProduction, coalesce(Fleet.Ships, 0) as Ships from FCT_ClassComponent inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ClassComponent.ClassID left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID left join FCT_Race on FCT_Race.RaceID = FCT_ShipClass.RaceID and FCT_Race.GameID = FCT_ShipClass.GameID left join (select ShipClassID, count(*) as Ships from FCT_Ship where GameID = ${this.GameID} and RaceID = ${this.RaceID} and Destroyed = 0 group by ShipClassID) as Fleet on Fleet.ShipClassID = FCT_ShipClass.ShipClassID where FCT_ShipClass.GameID = ${this.GameID} and FCT_ShipClass.RaceID = ${this.RaceID}`)
 
         return Object.freeze(items)
       }),

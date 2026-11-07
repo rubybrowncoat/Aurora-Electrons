@@ -6,20 +6,23 @@
   Groups (each check's name begins with its group):
   - pair: a search sensor and a missile fire control sized at every legal resolution, each member the smallest legal size that reaches the wanted range (the next smaller size falls short) against the target's cross-section, the resolution cut and a jammer; the totals, the reach of the pair as the shorter member, the best row (the fewest BP, then the fewest HS, then the higher resolution, a tie included), the resolution chosen, and an unknown target, range, jammer or tech giving an unavailable figure, never 0;
   - limiting: the member of a saved pair that falls short (and the one that is shorter when both do), a pair that meets and one with no target naming none, the alternative proposed at the saved resolution or the best overall, and the member of a sizing row that is beyond the largest size;
-  - minerals: the hardening is the Uridium and the ECCM the Corbomite of each level pair, the Uridium does not move with the ECCM, and the stored Uridium, cost and Corbomite of the saved active sensors rebuilt through the levels of the module;
-  - research: the planner's tech lines are registered tech types, a candidate is never researched, a hypothetical level marks the figures built on it and only those, an unresolved choice designs with the pick, a line with no level is unavailable, and the single weapon switch is offered only for a researched or chosen level;
+  - minerals: the Uridium is the size times the strength tech and the ECCM factor the Corbomite of each level pair, so the Uridium does not move with the hardening or the ECCM, and the stored Uridium, cost and Corbomite of the saved active sensors rebuilt through the levels of the module, but for the stored figures of designs made under the earlier rule, each pinned;
+  - research: the planner's tech lines are registered tech types, a candidate is never researched, a hypothetical level marks the figures built on it and only those, an unresolved choice designs with the pick, a line with no level is unavailable, a hardening tech row that stores no cost factor leaves every figure available while an ECCM tech row that stores none leaves the cost unavailable, and the single weapon switch is offered only for a researched or chosen level;
   - beam: the range and the tracking axes sized apart, the range cap, a single weapon control against an unrestricted one, the table of designs, and a saved control's limiting axis;
   - target: a size in tons, a missile and a saved class as the target, the floor of 0.3 HS, the cloak as a second scenario, and a blank or unreadable size unavailable;
   - loaders: the active sensors and the beam fire controls read as stored for the race and the game, a save without an optional column giving null figures, one without a required column refused by name, and the obsolete flag read only when the save has it;
-  - saves: the saved sensors and beam fire controls of every save in saves/ rebuilt from the tech levels of the module (read-only), the saved sensors sized at their own size and the beam controls of one modded save pinned; a save that is not there is reported as skipped, never as passed.
+  - saves: the saved sensors and beam fire controls of every save of the line in saves/ (`LINE_SAVE_FILES`) rebuilt from the tech levels of the module (read-only), the saved sensors sized at their own size, the beam controls of the migrated save pinned by their first figure that differs and by their stored and rebuilt range, tracking speed, size and cost (a copy of the migrated save in the temp folder with one stored figure moved must leave its control unexplained, in a run that plants faults), and the stored cost figures of its designs made under the earlier rule pinned by their exact figures (a pin of a save that is not in saves/ is not checked, a stale pin of one that is there is a failure); a save that is not there is reported as skipped, never as passed.
 
   Mutations: each deliberate fault planted in the source of a module (the module is loaded from its text, scripts/lib/utilities.js, with a registry of provenance rules of its own, so no fault reaches another) runs the checks it names and must fail them. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
-const assert = require('./lib/bounded-assert')
+const os = require('os')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { INTERIM, LINE_SAVE_FILES } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -43,6 +46,7 @@ const loadAll = async (mutation = null) => {
   const sources = {}
 
   if (mutation) {
+    refusePlanting(mutation.name || mutation.file)
     sources[mutation.file.replace(/\.js$/, '')] = patched(mutation.file, fs.readFileSync(path.join(utilitiesDirectory, mutation.file), 'utf8'), mutation.find, mutation.replace)
     sources.provenance = `${fs.readFileSync(path.join(utilitiesDirectory, 'provenance.js'), 'utf8')}\n// planted fault ${++planted}\n`
   }
@@ -149,7 +153,7 @@ const effectiveRange = ({ sizeHS, resolution, fireControl, signature, jammer, ec
 
 const meetsRange = (range, wanted) => range >= wanted * (1 - 1e-9)
 
-const costOf = (sizeHS) => roundTenth(sizeHS * 16 * 1.25) * 1.1
+const costOf = (sizeHS) => roundTenth(sizeHS * 16) * 1.1
 
 // ---------- pair ----------
 
@@ -265,7 +269,7 @@ check('pair: the totals are the sums of the members and the reach of the pair is
   assert.equal(sizing.tiles.rangeReached.value, row.reach.value)
   assert.equal(sizing.tiles.sizeNeeded.value, row.totalHS.value)
   assert.equal(sizing.tiles.cost.value, row.totalCost.value)
-  assert.equal(row.search.design.value.uridium, roundTenth(row.search.sizeHS * 16 * 1.25))
+  assert.equal(row.search.design.value.uridium, roundTenth(row.search.sizeHS * 16))
   assert.equal(row.search.design.value.eccm, 1)
   assert.equal(row.search.design.value.ctd, 50)
 })
@@ -540,7 +544,7 @@ check('limiting: a saved fire control of resolution 20 is not limiting against a
 
 // ---------- minerals ----------
 
-check('minerals: the hardening is the Uridium and the ECCM the Corbomite of each level pair, the Uridium keeps to the hardening', (m) => {
+check('minerals: the Uridium is the size times the strength tech and the ECCM factor the Corbomite of each level pair, the hardening level leaves the Uridium alone', (m) => {
   const { st } = planOf(m, { choices: { [HARDENING]: 2033, [ECCM]: 2043 } })
   const sizing = m.sp.activeSizing({ target: tonsTarget(m, 250), wantedRangeKm: 2e7, jammer: 5, tech: st })
   const tradeoff = m.sp.hardeningEccmTradeoff({ sizing, tech: st })
@@ -549,10 +553,9 @@ check('minerals: the hardening is the Uridium and the ECCM the Corbomite of each
   assert.equal(tradeoff.rows.length, 3 * 3, 'a row for each hardening and each ECCM level, the chosen hypothetical ones included')
 
   for (const row of tradeoff.rows) {
-    const factor = row.hardening.level.info2
     const eccmCost = row.eccm.level.info2
     const label = `${row.hardening.level.name} with ${row.eccm.level.name}`
-    const uridium = members.reduce((total, size) => total + roundTenth(size * 16 * factor), 0)
+    const uridium = members.reduce((total, size) => total + roundTenth(size * 16), 0)
 
     close(row.uridium.value, uridium, `${label}: Uridium`)
     close(row.cost.value, uridium * eccmCost, `${label}: BP`)
@@ -563,6 +566,8 @@ check('minerals: the hardening is the Uridium and the ECCM the Corbomite of each
   for (const entry of tradeoff.rows.filter((row) => row.eccm.level.info2 === 1)) {
     close(entry.corbomite.value, 0, `${entry.hardening.level.name}: no Corbomite at an ECCM factor of 1`)
   }
+
+  assert.equal(new Set(tradeoff.rows.map((row) => row.uridium.value)).size, 1, 'the Uridium moves with the hardening level')
 
   for (const hardening of [2031, 2032, 2033]) {
     const uridium = tradeoff.rows.filter((row) => row.hardening.level.id === hardening).map((row) => row.uridium.value)
@@ -647,6 +652,8 @@ check('research: the planner lines are registered tech types of the sensor famil
   const lines = m.rt.SENSOR_PLANNER_LINES
 
   assert.deepEqual(Object.keys(lines).sort(), ['distance', 'eccm', 'em', 'hardening', 'singleWeapon', 'speed', 'strength', 'thermal'])
+
+  assert.equal(lines.singleWeapon, 268, 'the single weapon line keeps its own tech type')
 
   for (const [role, typeId] of Object.entries(lines)) {
     assert.ok(m.rt.RACE_TECH_TYPES.includes(typeId), `${role} (${typeId}) is no registered tech type`)
@@ -779,11 +786,49 @@ check('research: an unresolved choice designs with the pick, and a line with no 
   unknown(m.sp.passiveProposal({ sizeHS: 0, kind: 'thermal', tech: plain }).design, 'a passive sensor of no size')
 })
 
+check('research: a hardening level that stores no cost factor supplies its figures, while an ECCM level that stores none leaves the cost unavailable', (m) => {
+  const noHardeningFactor = replaced(LEVELS, HARDENING, level(2032, HARDENING, 'Hardening 50', 300, 50, null, true))
+  const noEccmFactor = replaced(LEVELS, ECCM, level(2042, ECCM, 'ECCM 1', 300, 1, null, true))
+  const hard = planOf(m, { levels: noHardeningFactor }).st
+  const sizing = m.sp.activeSizing({ target: tonsTarget(m, 250), wantedRangeKm: 2e7, jammer: 2, tech: hard })
+  const tradeoff = m.sp.hardeningEccmTradeoff({ sizing, tech: hard })
+  const passive = m.sp.passiveProposal({ sizeHS: 2, tech: hard })
+  const beam = m.sp.beamSizing({ rangeKm: 200000, trackingKmS: 10000, tech: hard })
+
+  assert.equal(hard.hardening.info, 50, 'the hardening level stores its rating')
+  assert.equal(hard.hardening.info2, null, 'the hardening level stores no cost factor')
+  assert.ok(sizing.best, 'a pair with no hardening cost factor is sized')
+  assert.equal(sizing.best.search.cost.status !== 'unavailable' && sizing.best.fireControl.cost.status !== 'unavailable', true, 'the cost of a pair with no hardening cost factor')
+  assert.equal(sizing.tiles.cost.status !== 'unavailable', true, 'the cost tile with no hardening cost factor')
+  assert.ok(passive.design.status !== 'unavailable', 'a passive sensor with no hardening cost factor is designed')
+  close(passive.design.value.cost, 16, 'the passive sensor costs its sensitivity')
+  assert.ok(tradeoff.rows.length > 0 && tradeoff.rows.every((row) => row.cost.status !== 'unavailable'), 'every tradeoff row with no hardening cost factor has a cost')
+  assert.ok(beam.request.status !== 'unavailable' && beam.design.status !== 'unavailable', 'a beam control with no hardening cost factor is sized')
+
+  const eccmFree = planOf(m, { levels: noEccmFactor }).st
+  const eccmSizing = m.sp.activeSizing({ target: tonsTarget(m, 250), wantedRangeKm: 2e7, tech: eccmFree })
+  const eccmBeam = m.sp.beamSizing({ rangeKm: 200000, trackingKmS: 10000, tech: eccmFree })
+  const eccmTradeoff = m.sp.hardeningEccmTradeoff({ sizing, tech: eccmFree })
+  const noFactorRows = eccmTradeoff.rows.filter((row) => row.eccm.level.info2 === null)
+
+  assert.equal(eccmFree.eccm.info2, null, 'the ECCM level stores no cost factor')
+  assert.ok(eccmSizing.best, 'a pair whose ECCM level stores no cost factor is still sized')
+  unknown(eccmSizing.best.search.cost, 'the cost of a pair with no ECCM cost factor')
+  unknown(eccmSizing.best.fireControl.cost, 'the cost of the fire control with no ECCM cost factor')
+  unknown(eccmSizing.tiles.cost, 'the cost tile with no ECCM cost factor')
+  unknown(eccmBeam.request, 'a beam control whose ECCM level stores no cost factor')
+  assert.ok(eccmBeam.request.inputs.missing.some((text) => text.includes('eccm')), 'the beam request names the ECCM tech it lacks')
+  assert.ok(noFactorRows.length > 0 && noFactorRows.every((row) => row.cost.status === 'unavailable'), 'the tradeoff rows of an ECCM level with no cost factor have no cost')
+  assert.ok(eccmTradeoff.rows.filter((row) => row.eccm.level.info2 !== null).every((row) => row.cost.status !== 'unavailable'), 'the tradeoff rows of an ECCM level with a cost factor keep their cost')
+})
+
 check('research: the single weapon switch is offered only for a level the race has researched or chose', (m) => {
   const base = planOf(m).st
   const researched = planOf(m, { levels: researchedAlso(LEVELS, 2072) }).st
   const chosen = planOf(m, { choices: { [SINGLE]: 2072 } }).st
   const none = planOf(m, { levels: without(LEVELS, SINGLE) }).st
+
+  assert.equal(base.singleWeapon.typeId, 268, 'the single weapon choice reads its own tech type')
 
   assert.equal(base.singleWeapon.offersSingle, false)
   assert.equal(base.singleWeapon.weapons.single, null)
@@ -870,6 +915,8 @@ check('beam: a range above the cap claims no reach, a multiplier past the cap is
 check('beam: a single weapon control halves the size and the cost and carries special function 6, the two always told apart', (m) => {
   const levels = researchedAlso(LEVELS, 2072)
   const st = beamTech(m, { levels })
+  assert.equal(st.singleWeapon.typeId, 268, 'the beam control reads the single weapon tech type')
+
   const unrestricted = m.sp.beamSizing({ rangeKm: 200000, trackingKmS: 10000, tech: st })
   const single = m.sp.beamSizing({ rangeKm: 200000, trackingKmS: 10000, tech: st, singleWeapon: true })
 
@@ -884,8 +931,8 @@ check('beam: a single weapon control halves the size and the cost and carries sp
   assert.equal(unrestricted.design.value.specialFunction, 0)
   close(single.design.value.sizeHS, Math.round(3.13 * 2.5 / 2 * 0.5 * 100) / 100, 'the size of a single weapon control')
   close(unrestricted.design.value.sizeHS, Math.round(3.13 * 2.5 / 2 * 100) / 100, 'the size of an unrestricted control')
-  close(single.design.value.cost, roundTenth(3.13 * 64000 / 20000 * 10 * 1.25 * 0.5) * 1.1, 'the cost of a single weapon control')
-  close(unrestricted.design.value.cost, roundTenth(3.13 * 64000 / 20000 * 10 * 1.25) * 1.1, 'the cost of an unrestricted control')
+  close(single.design.value.cost, roundTenth(3.13 * 64000 / 20000 * 10 * 0.5) * 1.1, 'the cost of a single weapon control')
+  close(unrestricted.design.value.cost, roundTenth(3.13 * 64000 / 20000 * 10) * 1.1, 'the cost of an unrestricted control')
   assert.equal(single.range.multiplier, unrestricted.range.multiplier)
 
   const pointDefence = m.sp.beamSizing({ rangeKm: 200000, trackingKmS: 16000, tech: st })
@@ -1450,9 +1497,9 @@ check('loaders: a save without a column the read cannot do without is refused by
 // The saves of saves/ the checks read, each { file, database }, opened by `run`.
 const SAVES = []
 
-const openSave = (file) => new Promise((resolve, reject) => {
+const openSave = (file, directory = savesDirectory) => new Promise((resolve, reject) => {
   const sqlite3 = require('sqlite3')
-  const raw = new sqlite3.Database(path.join(savesDirectory, file), sqlite3.OPEN_READONLY, (error) => {
+  const raw = new sqlite3.Database(path.join(directory, file), sqlite3.OPEN_READONLY, (error) => {
     if (error) {
       reject(error)
 
@@ -1464,12 +1511,15 @@ const openSave = (file) => new Promise((resolve, reject) => {
 })
 
 const openSaves = async () => {
-  const files = fs.existsSync(savesDirectory) ? fs.readdirSync(savesDirectory).filter((name) => name.endsWith('.db')).sort() : []
+  const files = LINE_SAVE_FILES.filter((name) => fs.existsSync(path.join(savesDirectory, name)))
 
   for (const file of files) {
     SAVES.push(await openSave(file))
   }
 }
+
+// Whether a save a pin names is among those read: a pin of a save that is not there is not checked, never failed.
+const openedSave = (file) => SAVES.some((save) => save.file === file)
 
 const racesOf = async (save) => {
   const [rows] = await save.database.query('select distinct GameID, RaceID from FCT_RaceTech order by GameID, RaceID')
@@ -1477,13 +1527,26 @@ const racesOf = async (save) => {
   return rows
 }
 
-// The beam fire controls of one modded save the rules do not reproduce, by the first figure that differs: two whose Uridium and cost are a tenth of the rule's, six whose stored range is above the 1,400,000 km cap (their cost is a tenth of the rule's too) and six whose range or tracking speed no distance or speed level the race holds gives.
-const PINNED_BEAMS = Object.freeze({
-  file: 'AuroraDB_270_unknown.db',
-  game: 140,
-  race: 784,
-  ids: Object.freeze({ cost: [500213, 500265], range: [500389, 500390, 500391, 500392, 500810, 500811], level: [500238, 500240, 500380, 500598, 500599, 500809] }),
-})
+// The beam fire controls of the migrated save the rules do not reproduce, one pin each by the file, game, race and component, with the first figure that differs, the two multipliers the component stores, and its stored and rebuilt range, tracking speed, size and cost (`BEAM_FIGURES`; a rebuilt figure is null where nothing rebuilds it). A pin explains a control only while every one of these is still what was observed: a control that differs in another first figure, or with the same first figure but another stored or rebuilt figure, is a mismatch. In the migrated save (the owner's campaign before it was migrated): two whose stored size is a fraction of the size of their multipliers, and thirteen whose stored range, 1,600,000 km to 120,000,000 km, is no range a distance level the race holds gives at the multiplier the component stores, so the first figure to differ is the level (their rebuilt range and tracking speed are those of the nearest level the race holds at their multipliers, and their size and cost are not rebuilt). None is a formula of the line: the played save and the shipped saves reproduce every beam fire control they hold.
+const INTERIM_FILE = path.basename(INTERIM.file)
+const beamPin = (file, game, race, id, field, inputs, stored, rebuilt) => Object.freeze({ key: `${file}|${game}|${race}|${id}`, file, game, race, id, field, inputs: Object.freeze(inputs), stored: Object.freeze(stored), rebuilt: Object.freeze(rebuilt) })
+const PINNED_BEAMS = Object.freeze([
+  beamPin(INTERIM_FILE, 141, 784, 500352, 'size', [2, 3], [700000, 300000, 0.2, 1148.43], [700000, 300000, 3, 13125]),
+  beamPin(INTERIM_FILE, 141, 784, 500353, 'size', [2, 3], [700000, 300000, 0.1, 574.215], [700000, 300000, 1.5, 6562.5]),
+  beamPin(INTERIM_FILE, 141, 784, 500354, 'level', [1, 2], [1600000, 200000, 0.16, 875], [350000, 200000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500355, 'level', [1, 2], [1600000, 200000, 0.08, 437.5], [350000, 200000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500356, 'level', [1, 2], [2000000, 200000, 0.1, 546.875], [350000, 200000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500357, 'level', [1, 2], [2000000, 200000, 0.2, 1093.75], [350000, 200000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500370, 'level', [1, 1.5], [3200000, 150000, 0.24, 1312.48], [350000, 150000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500371, 'level', [1, 1.5], [3200000, 150000, 0.12, 656.24], [350000, 150000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500372, 'level', [1, 1.5], [5000000, 150000, 0.38, 2050.75], [350000, 150000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500373, 'level', [1, 1.5], [5000000, 150000, 0.19, 1025.375], [350000, 150000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500374, 'level', [1, 1.5], [4000000, 150000, 0.3, 1640.6], [350000, 150000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500375, 'level', [1, 1.5], [4000000, 150000, 0.15, 820.3], [350000, 150000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500397, 'level', [1, 0.75], [16000000, 75000, 0.6, 3281.2], [350000, 75000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500398, 'level', [1, 0.75], [16000000, 75000, 0.3, 1640.6], [350000, 75000, null, null]),
+  beamPin(INTERIM_FILE, 141, 784, 500422, 'level', [1, 1], [120000000, 100000, 0.075, 1367.25], [350000, 100000, null, null]),
+])
 
 const cache = new WeakMap()
 
@@ -1580,7 +1643,7 @@ const rebuildActive = (m, save) => once(m, `active ${save.file}`, async () => {
         if (design && design.status !== 'unavailable' && near(design.value.uridium, row.uridium) && near(design.value.cost, row.cost) && near(design.value.corbomite, row.corbomite)) {
           tally.mineralsOk++
         } else {
-          mismatches.minerals.push(`${label}: stored Uridium ${row.uridium}, cost ${row.cost}, Corbomite ${row.corbomite}; rebuilt ${design && design.value ? `${design.value.uridium}, ${design.value.cost}, ${design.value.corbomite}` : 'nothing'}`)
+          mismatches.minerals.push({ key: `${save.file}|${GameID}|${RaceID}|${row.id}`, label, stored: [row.uridium, row.cost, row.corbomite], rebuilt: design && design.value ? [design.value.uridium, design.value.cost, design.value.corbomite] : null, factor: saved.tech.hardening.info2 })
         }
       }
     }
@@ -1589,7 +1652,45 @@ const rebuildActive = (m, save) => once(m, `active ${save.file}`, async () => {
   return { tally, mismatches }
 })
 
-check('minerals (save): the Uridium, cost and Corbomite of every saved active sensor are rebuilt from the hardening and ECCM levels', async (m) => {
+// The saved sensors whose stored cost figures were made under the earlier rule, which multiplied the hardening tech's cost factor into the Uridium and so into the Cost and Corbomite; this rule does not, so each stored figure is the rebuilt one times the factor of the hardening level the row's CTD names (1.25 in the migrated save). 500400 of the migrated save stores a further tenth of that rule's figures (the rebuilt ones times 1.25, divided by 10), a difference of its own that this rule does not explain. The list is exact: a row that differs and is not here, a pinned row that no longer differs, and any move of a pinned row's stored or rebuilt figures is a change to look at. The stored figures are the designs' own and are kept as stored, never rewritten. A pinned row is only checked where the save it belongs to is among those read: with a save not there its rows cannot be observed, and reporting them as no longer differing would be a claim about a file no check opened.
+const premiumRow = (file, game, race, id, factor, stored, rebuilt, scale = 1) => Object.freeze({ key: `${file}|${game}|${race}|${id}`, file, factor, scale, stored: Object.freeze(stored), rebuilt: Object.freeze(rebuilt) })
+// The rows are the stored premiums of the interim fixture as recorded (INTERIM, not the default: the figures are of that very save and stay with it when `FIXTURE` moves).
+const PREMIUM_ROWS = Object.freeze([
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500351, 1.25, [10, 12.5, 2.5], [8, 10, 2]),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500363, 1.25, [450, 562.5, 112.5], [360, 450, 90]),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500394, 1.25, [1350, 1687.5, 337.5], [1080, 1350, 270]),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500400, 1.25, [14400, 18000, 3600], [115200, 144000, 28800], 0.1),
+  premiumRow(INTERIM_FILE, INTERIM.gameId, INTERIM.raceId, 500426, 1.25, [180, 225, 45], [144, 180, 36]),
+])
+
+// Why an active sensor's stored cost figures are not the rebuilt ones: the pinned row's figures and hardening factor must still match, both as observed and as the earlier rule's (the rebuilt figures times the factor, and times its scale where the row stores a tenth).
+const pinnedMineralFailure = (pin, mismatch) => {
+  const factor = pin.scale === 1 ? `${pin.factor}` : `${pin.factor} and a further ${pin.scale}`
+  const shown = `${mismatch.label}: stored Uridium, cost and Corbomite ${mismatch.stored.join(', ')}, rebuilt ${mismatch.rebuilt ? mismatch.rebuilt.join(', ') : 'nothing'}, at the hardening level's cost factor ${mismatch.factor}`
+
+  if (!mismatch.rebuilt) {
+    return `${shown}; the pinned row rebuilds ${pin.rebuilt.join(', ')} at ${factor}`
+  }
+
+  const expected = pin.rebuilt.map((value) => value * pin.scale * pin.factor)
+  const matches = near(mismatch.factor, pin.factor) && [0, 1, 2].every((index) => near(mismatch.stored[index], pin.stored[index]) && near(mismatch.rebuilt[index], pin.rebuilt[index]) && near(mismatch.stored[index], expected[index]))
+
+  return matches ? null : `${shown}; the pinned row is stored ${pin.stored.join(', ')} and rebuilt ${pin.rebuilt.join(', ')} at ${factor}, so the figures moved`
+}
+
+// Why a beam fire control that differs from the rules is not the pinned one: its first figure that differs, the two multipliers it stores and its stored and rebuilt range, tracking speed, size and cost must all still be the observed ones, and a figure that moved is named with the pinned one.
+const pinnedBeamFailure = (pin, mismatch) => {
+  const same = (pinned, found) => (pinned === null || found === null ? pinned === found : near(pinned, found))
+  const moved = [
+    ...(pin.field === mismatch.field ? [] : [`the first figure to differ is the ${mismatch.field}, pinned ${pin.field}`]),
+    ...pin.inputs.flatMap((pinned, index) => (same(pinned, mismatch.inputs[index]) ? [] : [`${['range', 'tracking'][index]} multiplier ${mismatch.inputs[index]}, pinned ${pinned}`])),
+    ...BEAM_FIGURES.flatMap((figure, index) => [['stored', pin.stored, mismatch.figures.stored], ['rebuilt', pin.rebuilt, mismatch.figures.rebuilt]].flatMap(([side, pinned, found]) => (same(pinned[index], found[index]) ? [] : [`${side} ${figure} ${found[index]}, pinned ${pinned[index]}`]))),
+  ]
+
+  return moved.length ? `${mismatch.file} game ${mismatch.game} race ${mismatch.race} ${mismatch.id} ${mismatch.name}: ${moved.join('; ')}` : null
+}
+
+check('minerals (save): the Uridium, cost and Corbomite of every saved active sensor are rebuilt from the ECCM cost factor, but for the stored figures of designs made under the earlier rule, each pinned', async (m) => {
   if (!SAVES.length) {
     return skipped('no save in saves/')
   }
@@ -1597,21 +1698,63 @@ check('minerals (save): the Uridium, cost and Corbomite of every saved active se
   const lines = []
   let rebuilt = 0
   let unmatched = 0
+  let pinned = 0
   const unexplained = []
+  const seen = new Set()
 
   for (const save of SAVES) {
     const { tally, mismatches } = await rebuildActive(m, save)
 
     rebuilt += tally.mineralsOk
     unmatched += tally.unmatched
-    unexplained.push(...mismatches.minerals)
+
+    for (const mismatch of mismatches.minerals) {
+      const pin = PREMIUM_ROWS.find((entry) => entry.key === mismatch.key)
+
+      if (!pin) {
+        unexplained.push(`${mismatch.label}: stored Uridium, cost and Corbomite ${mismatch.stored.join(', ')}, rebuilt ${mismatch.rebuilt ? mismatch.rebuilt.join(', ') : 'nothing'}, and no pinned row explains it`)
+        continue
+      }
+
+      const failure = pinnedMineralFailure(pin, mismatch)
+
+      if (failure) {
+        unexplained.push(failure)
+      } else {
+        seen.add(pin.key)
+        pinned++
+      }
+    }
+
     lines.push(`${save.file}: ${tally.rows} active sensors and fire controls in ${tally.races} races, ${tally.mineralsOk} rebuilt in Uridium, cost and Corbomite, ${tally.unmatched} naming no level of the race, ${tally.offLadder} of a size off the ladder, ${tally.unsized} beyond the largest size`)
   }
 
-  assert.deepEqual(unexplained.slice(0, 10), [], 'the stored minerals the levels do not reproduce')
+  for (const pin of PREMIUM_ROWS) {
+    if (seen.has(pin.key) || !openedSave(pin.file)) {
+      continue
+    }
+
+    unexplained.push(`${pin.key} no longer differs: its stored figures are the earlier rule's (${pin.rebuilt.join(', ')} at ${pin.factor}), not this rule's`)
+  }
+
+  const absent = [...new Set(PREMIUM_ROWS.filter((pin) => !openedSave(pin.file)).map((pin) => pin.file))]
+
+  if (absent.length) {
+    lines.push(`pinned rows of a save that is not in saves/, not checked: ${absent.join(', ')}`)
+  }
+
+  lines.push(...unexplained)
+
+  try {
+    assert.deepEqual(unexplained.slice(0, 40), [], 'the stored minerals the levels do not reproduce, but for the pinned rows of the earlier rule')
+  } catch (error) {
+    error.lines = lines
+    throw error
+  }
+
   assert.equal(unmatched, 0, 'saved sensors that name no EM, hardening or ECCM level the race holds')
   assert.ok(rebuilt > 0, 'no sensor was rebuilt')
-  lines.push(`${rebuilt} saved active sensors over ${SAVES.length} saves`)
+  lines.push(`${rebuilt} saved active sensors over ${SAVES.length} saves, ${pinned} of them with the stored cost figures of the earlier rule`)
 
   return { lines }
 })
@@ -1642,7 +1785,12 @@ check('saves: a saved active sensor is the smallest legal size that reaches its 
   return { lines }
 })
 
-// Every beam fire control of a save rebuilt through the planner's table at its own multipliers and the distance and speed levels that give its range and tracking speed: the mismatches by id and the first field that differs.
+// The four figures a beam fire control is compared by, in the order the pins list them: the range, the tracking speed, the size and the cost.
+const BEAM_FIGURES = Object.freeze(['range', 'tracking', 'size', 'cost'])
+
+const nearestTo = (target, values) => (values.length ? values.reduce((best, value) => (Math.abs(value - target) < Math.abs(best - target) ? value : best)) : null)
+
+// Every beam fire control of a save rebuilt through the planner's table at its own multipliers and the distance and speed levels that give its range and tracking speed: the mismatches by id and the first field that differs, each with the figures it stands on: `figures.stored` (range, tracking speed, size, cost as the save stores them) and `figures.rebuilt` (as the rules rebuild them, or for a control no held level gives, the range and tracking speed of the nearest held level at its multipliers and no size or cost), and `inputs`, the two multipliers it stores.
 const rebuildBeams = (m, save) => once(m, `beam ${save.file}`, async () => {
   const tally = { races: 0, rows: 0, rebuilt: 0, planner: 0 }
   const mismatches = []
@@ -1663,15 +1811,18 @@ const rebuildBeams = (m, save) => once(m, `beam ${save.file}`, async () => {
       const speeds = (tech.lines[m.rt.SENSOR_PLANNER_LINES.speed] || { levels: [] }).levels
       const distance = distances.find((item) => near(item.info * row.rangeMultiplier, row.rangeKm) || near(Math.min(1400000, item.info * row.rangeMultiplier), row.rangeKm))
       const speed = speeds.find((item) => near(m.dr.fireControlTracking(row.trackingMultiplier, item.info), row.trackingKmS))
-      const record = { file: save.file, game: GameID, race: RaceID, id: row.id, name: row.name }
+      const stored = [row.rangeKm, row.trackingKmS, row.sizeHS, row.cost]
+      const record = { file: save.file, game: GameID, race: RaceID, id: row.id, name: row.name, inputs: [row.rangeMultiplier, row.trackingMultiplier] }
 
       if (!hardening || !eccm || !(row.rangeMultiplier > 0) || !(row.trackingMultiplier > 0)) {
-        mismatches.push({ ...record, field: 'tech' })
+        mismatches.push({ ...record, field: 'tech', figures: { stored, rebuilt: [null, null, null, null] } })
         continue
       }
 
       if (!distance || !speed) {
-        mismatches.push({ ...record, field: 'level' })
+        const reach = (item) => Math.min(row.rangeKm > 1400000 ? Infinity : 1400000, item.info * row.rangeMultiplier)
+
+        mismatches.push({ ...record, field: 'level', figures: { stored, rebuilt: [nearestTo(row.rangeKm, distances.map(reach)), nearestTo(row.trackingKmS, speeds.map((item) => m.dr.fireControlTracking(row.trackingMultiplier, item.info))), null, null] } })
         continue
       }
 
@@ -1684,7 +1835,9 @@ const rebuildBeams = (m, save) => once(m, `beam ${save.file}`, async () => {
       const field = !design ? 'design' : !near(design.rangeKm, row.rangeKm) ? 'range' : !near(design.trackingKmS, row.trackingKmS) ? 'tracking' : !near(design.sizeHS, row.sizeHS) ? 'size' : !near(design.cost, row.cost) ? 'cost' : null
 
       if (field) {
-        mismatches.push({ ...record, field })
+        const figures = { stored, rebuilt: design ? [design.rangeKm, design.trackingKmS, design.sizeHS, design.cost] : [null, null, null, null] }
+
+        mismatches.push(field === 'cost' ? { ...record, field, stored: row.cost, rebuilt: design.cost, factor: hardening.level.info2, figures } : { ...record, field, figures })
       } else {
         tally.rebuilt++
         tally.planner += legal ? 1 : 0
@@ -1694,6 +1847,34 @@ const rebuildBeams = (m, save) => once(m, `beam ${save.file}`, async () => {
 
   return { tally, mismatches }
 })
+
+// Every mismatch of the beam fire controls of one save against the pins: the ones nothing explains (`unexplained`, as text), the pinned controls found differing (`seen`, as `file|id`) and how many of the mismatches a pin explains (`own`).
+const explainBeams = (mismatches) => {
+  const unexplained = []
+  const seen = new Set()
+  let own = 0
+
+  for (const mismatch of mismatches) {
+    const pinned = PINNED_BEAMS.find((entry) => entry.key === `${mismatch.file}|${mismatch.game}|${mismatch.race}|${mismatch.id}`)
+
+    if (pinned) {
+      const failure = pinnedBeamFailure(pinned, mismatch)
+
+      if (failure) {
+        unexplained.push(failure)
+      } else {
+        seen.add(`${mismatch.file}|${mismatch.id}`)
+        own++
+      }
+
+      continue
+    }
+
+    unexplained.push(`${mismatch.file} game ${mismatch.game} race ${mismatch.race} ${mismatch.id} ${mismatch.name}: ${mismatch.field}${mismatch.field === 'cost' ? `, stored ${mismatch.stored}, rebuilt ${mismatch.rebuilt} at the hardening level's cost factor ${mismatch.factor}` : ''}`)
+  }
+
+  return { unexplained, seen, own }
+}
 
 check('saves: the beam fire controls of every save are rebuilt from the distance, speed, hardening and ECCM levels, but for the pinned rows', async (m) => {
   if (!SAVES.length) {
@@ -1707,33 +1888,108 @@ check('saves: the beam fire controls of every save are rebuilt from the distance
 
   for (const save of SAVES) {
     const { tally, mismatches } = await rebuildBeams(m, save)
-    const own = mismatches.filter((mismatch) => {
-      const pinned = mismatch.file === PINNED_BEAMS.file && mismatch.game === PINNED_BEAMS.game && mismatch.race === PINNED_BEAMS.race && PINNED_BEAMS.ids[mismatch.field] && PINNED_BEAMS.ids[mismatch.field].includes(mismatch.id)
+    const explained = explainBeams(mismatches)
 
-      if (pinned) {
-        seen.add(mismatch.id)
-      }
-
-      return pinned
-    })
-
-    unexplained.push(...mismatches.filter((mismatch) => !own.includes(mismatch)).map((mismatch) => `${mismatch.file} game ${mismatch.game} race ${mismatch.race} ${mismatch.id} ${mismatch.name}: ${mismatch.field}`))
+    unexplained.push(...explained.unexplained)
+    explained.seen.forEach((key) => seen.add(key))
     rebuilt += tally.rebuilt
-    lines.push(`${save.file}: ${tally.rows} beam fire controls in ${tally.races} races, ${tally.rebuilt} rebuilt (${tally.planner} through the planner's table, the rest at a multiplier off the legal ladder), ${mismatches.length} differing, of which ${own.length} pinned`)
+    lines.push(`${save.file}: ${tally.rows} beam fire controls in ${tally.races} races, ${tally.rebuilt} rebuilt (${tally.planner} through the planner's table, the rest at a multiplier off the legal ladder), ${mismatches.length} differing, of which ${explained.own} pinned`)
   }
 
-  assert.deepEqual(unexplained.slice(0, 40), [], 'beam fire controls no pinned row explains')
+  const absent = [...new Set(PINNED_BEAMS.map((pin) => pin.file))].filter((file) => !openedSave(file))
 
-  const pinned = Object.values(PINNED_BEAMS.ids).flat()
+  if (absent.length) {
+    lines.push(`pinned rows of a save that is not in saves/, not checked: ${absent.join(', ')}`)
+  }
 
-  if (SAVES.some((save) => save.file === PINNED_BEAMS.file)) {
-    assert.deepEqual([...seen].sort(), [...pinned].sort(), 'every pinned control is still a mismatch')
+  lines.push(...unexplained)
+
+  try {
+    assert.deepEqual(unexplained.slice(0, 40), [], 'beam fire controls no pinned row explains')
+  } catch (error) {
+    error.lines = lines
+    throw error
+  }
+
+  for (const file of [...new Set(PINNED_BEAMS.map((pin) => pin.file))].filter(openedSave)) {
+    assert.deepEqual([...seen].filter((key) => key.startsWith(`${file}|`)).sort(), PINNED_BEAMS.filter((pin) => pin.file === file).map((pin) => `${pin.file}|${pin.id}`).sort(), `every pinned control of ${file} is still a mismatch`)
   }
 
   assert.ok(rebuilt > 0, 'no beam fire control was rebuilt')
   lines.push(`${rebuilt} beam fire controls rebuilt over ${SAVES.length} saves`)
 
   return { lines }
+})
+
+// A copy of the interim save in the temp folder, named as the save (the pins are of that file), altered by `statements`, opened read-only like the saves and rebuilt through a copy of the loaded modules (so that the rebuild of the real save is not reused); the folder is removed after `use`.
+const withAlteredInterim = async (statements, use) => {
+  const sqlite3 = require('sqlite3')
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'sensor-sizing-pins-'))
+  const file = path.join(folder, INTERIM_FILE)
+
+  try {
+    fs.copyFileSync(path.join(savesDirectory, INTERIM_FILE), file)
+
+    if (statements.length) {
+      const writer = await new Promise((resolve, reject) => {
+        const opened = new sqlite3.Database(file, sqlite3.OPEN_READWRITE, (error) => (error ? reject(error) : resolve(opened)))
+      })
+
+      await new Promise((resolve, reject) => writer.exec(statements.join(';\n'), (error) => (error ? reject(error) : resolve())))
+      await new Promise((resolve) => writer.close(resolve))
+    }
+
+    const altered = await openSave(INTERIM_FILE, folder)
+
+    try {
+      return await use(altered)
+    } finally {
+      altered.close()
+    }
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true })
+  }
+}
+
+const beamOfInterim = (id, set) => `update FCT_ShipDesignComponents set ${set} where SDComponentID = ${id} and GameID = ${INTERIM.gameId}`
+
+check('saves: a pinned beam fire control of the migrated save whose stored figures moved is explained by no pin, in the first figure that differs it had and in another', async (m) => {
+  if (!mutating()) {
+    return skipped('a quick run plants no altered copy of a save')
+  }
+
+  if (!openedSave(INTERIM_FILE)) {
+    return skipped(`${INTERIM_FILE} is not in saves/`)
+  }
+
+  const explainedBy = (statements) => withAlteredInterim(statements, async (altered) => explainBeams((await rebuildBeams({ ...m }, altered)).mismatches))
+  const own = await explainedBy([])
+  const migrated = PINNED_BEAMS.filter((pin) => pin.file === INTERIM_FILE)
+  const moves = [
+    ['the cost of a control pinned by its size', beamOfInterim(500352, 'Cost = 1148.5'), /500352 .*: stored cost 1148.5, pinned 1148.43/],
+    ['the size of a control pinned by its level', beamOfInterim(500354, 'Size = 0.17'), /500354 .*: stored size 0.17, pinned 0.16/],
+    ['the range of a control pinned by its level', beamOfInterim(500354, 'ComponentValue = 1700000'), /500354 .*: stored range 1700000, pinned 1600000/],
+    ['the tracking speed of a control pinned by its level', beamOfInterim(500355, 'TrackingSpeed = 200001'), /500355 .*: stored tracking 200001, pinned 200000/],
+    ['the cost of a control pinned by its level', beamOfInterim(500397, 'Cost = 3281.3'), /500397 .*: stored cost 3281.3, pinned 3281.2/],
+  ]
+
+  assert.deepEqual(own.unexplained, [], 'the migrated save is explained by its pins as it is')
+  assert.equal(own.seen.size, migrated.length, 'every pinned control of the migrated save differs')
+
+  for (const [what, statement, expected] of moves) {
+    const moved = await explainedBy([statement])
+
+    assert.equal(moved.unexplained.length, 1, `${what}: ${moved.unexplained.join('; ') || 'nothing is unexplained'}`)
+    assert.ok(expected.test(moved.unexplained[0]), `${what}: ${moved.unexplained[0]}`)
+    assert.equal(moved.seen.size, migrated.length - 1, `${what}: the moved control is not seen as pinned`)
+  }
+
+  const healed = await explainedBy([beamOfInterim(500352, 'Size = 3, Cost = 13125, Uridium = 10500, Corbomite = 2625, Crew = 12, HTK = 1')])
+
+  assert.equal(healed.seen.has(`${INTERIM_FILE}|500352`), false, 'a pinned control that no longer differs is not seen as pinned, so the pins of the save are no longer all found')
+  assert.deepEqual(healed.unexplained, [], 'a pinned control that no longer differs leaves nothing unexplained')
+
+  return { lines: [`${migrated.length} pinned controls of ${INTERIM_FILE} explained as they are; ${moves.length} moved figures each left one control unexplained; a control rebuilt in full is no longer found differing`] }
 })
 
 // ---------- the faults ----------
@@ -1774,8 +2030,10 @@ const MUTATIONS = [
   { name: 'the limiting member always the search sensor', file: 'sensor-planner.js', find: 'limiting: meets === false ? limitingOf(members.search, members.fireControl) : null', replace: "limiting: meets === false ? 'search' : null", fails: ['limiting: a saved pair'] },
   { name: 'the shorter of two members that fall short flipped', file: 'sensor-planner.js', find: "return falling[1][1].reach.value < falling[0][1].reach.value ? 'fireControl' : 'search'", replace: "return falling[1][1].reach.value > falling[0][1].reach.value ? 'fireControl' : 'search'", fails: ['limiting: a saved pair'] },
   { name: 'the alternative never at the saved resolution', file: 'sensor-planner.js', find: 'const atSaved = savedResolution === null ? null :', replace: 'const atSaved = true ? null :', fails: ['limiting: the alternative'] },
-  { name: 'the Uridium of the tradeoff the Corbomite', file: 'sensor-planner.js', find: "uridium: total('uridium', 'Uridium')", replace: "uridium: total('corbomite', 'Uridium')", fails: ['minerals: the hardening'] },
-  { name: 'the hardening and ECCM cost factors swapped', file: 'sensor-planner.js', find: 'hardeningCost: entryHardening.level.info2, eccmRating: entryEccm.level.info, eccmCost: entryEccm.level.info2, mode: member.mode', replace: 'hardeningCost: entryEccm.level.info2, eccmRating: entryEccm.level.info, eccmCost: entryHardening.level.info2, mode: member.mode', fails: ['minerals: the hardening', 'minerals (save)'] },
+  { name: 'the Uridium of the tradeoff the Corbomite', file: 'sensor-planner.js', find: "uridium: total('uridium', 'Uridium')", replace: "uridium: total('corbomite', 'Uridium')", fails: ['minerals: the Uridium'] },
+  { name: 'the hardening and ECCM cost factors swapped', file: 'sensor-planner.js', find: 'hardeningCost: entryHardening.level.info2, eccmRating: entryEccm.level.info, eccmCost: entryEccm.level.info2, mode: member.mode', replace: 'hardeningCost: entryEccm.level.info2, eccmRating: entryEccm.level.info, eccmCost: entryHardening.level.info2, mode: member.mode', fails: ['minerals: the Uridium', 'minerals (save)'] },
+  { name: 'the hardening cost factor required as a tech line', file: 'sensor-planner.js', find: "const COST_ROLES = Object.freeze(['eccm'])", replace: "const COST_ROLES = Object.freeze(['hardening', 'eccm'])", fails: ['research: a hardening level that stores no cost factor'] },
+  { name: 'the hardening cost factor required of a tradeoff row', file: 'sensor-planner.js', find: 'if (entryHardening.level.info === null) {', replace: 'if (entryHardening.level.info === null || entryHardening.level.info2 === null) {', fails: ['research: a hardening level that stores no cost factor'] },
   { name: 'the tradeoff reach at the ECCM of the race', file: 'sensor-planner.js', find: 'const eccm = entryEccm.level.info === null ? null : Math.trunc(entryEccm.level.info)', replace: 'const eccm = eccmOf(figures)', fails: ['minerals: the reach'] },
   { name: 'a candidate marked researched', file: 'sensor-planner.js', find: 'researched: false, hypothetical: true, current: Boolean(resolved && resolved.hypothetical', replace: 'researched: true, hypothetical: true, current: Boolean(resolved && resolved.hypothetical', fails: ['research: a candidate'] },
   { name: 'the design of a hypothetical level not marked', file: 'sensor-planner.js', find: 'marked(designOf({ sizeHS, resolution, mode: member.mode, tech, sizing }), marksOf(tech, DESIGN_ROLES))', replace: 'designOf({ sizeHS, resolution, mode: member.mode, tech, sizing })', fails: ['research: a hypothetical'] },
@@ -1785,7 +2043,7 @@ const MUTATIONS = [
   { name: 'the single weapon switch always offered', file: 'sensor-planner.js', find: 'offersSingle: weapons.single !== null', replace: 'offersSingle: true', fails: ['research: the single weapon'] },
   { name: 'the single weapon number taken from any level', file: 'sensor-planner.js', find: 'entry.level.info > 0 && entry.level.info < 1', replace: 'entry.level.info > 0', fails: ['research: the single weapon', 'beam: a single weapon'] },
   { name: 'the single weapon tech not of the sensor family', file: 'race-tech.js', find: "'Single Weapon Fire Control', 'sensor', 'none'", replace: "'Single Weapon Fire Control', 'armour', 'none'", fails: ['research: the planner lines'] },
-  { name: 'the single weapon line under another type', file: 'race-tech.js', find: 'family(SINGLE_WEAPON_TECH_TYPE, ', replace: 'family(SINGLE_WEAPON_TECH_TYPE + 1000, ', fails: ['research: the planner lines', 'research: the single weapon', 'beam: a single weapon'] },
+  { name: 'the single weapon line under another type', file: 'race-tech.js', find: 'singleWeapon: SINGLE_WEAPON_TECH_TYPE', replace: 'singleWeapon: FIRE_CONTROL_RANGE_TECH_TYPE', fails: ['research: the planner lines', 'research: the single weapon', 'beam: a single weapon'] },
   { name: 'the distance line read as the speed line', file: 'race-tech.js', find: 'distance: FIRE_CONTROL_RANGE_TECH_TYPE, speed: FIRE_CONTROL_SPEED_TECH_TYPE', replace: 'distance: FIRE_CONTROL_SPEED_TECH_TYPE, speed: FIRE_CONTROL_SPEED_TECH_TYPE', fails: ['research: the planner lines', 'beam: the range and the tracking'] },
   { name: 'the range cap not applied to the reach', file: 'sensor-planner.js', find: 'reachKm: sized ? (isRange ? Math.min(cap, value.multiplier * rating.info)', replace: 'reachKm: sized ? (isRange ? value.multiplier * rating.info', fails: ['beam: a range above the cap'] },
   { name: 'a range above the cap not beyond it', file: 'sensor-planner.js', find: 'const beyondCap = isRange && wanted !== null && wanted > cap', replace: 'const beyondCap = isRange && wanted !== null && wanted > cap * 2', fails: ['beam: a range above the cap'] },
@@ -1802,13 +2060,13 @@ const MUTATIONS = [
   { name: 'the active sensors of every race read', file: 'design-data.js', find: 'c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    kind', replace: 'c.GameID in (0, :game) and r.GameID = :game order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    kind', fails: ['loaders: the active'] },
   { name: 'the beam fire controls of every race read', file: 'design-data.js', find: 'c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    sizeHS', replace: 'c.GameID in (0, :game) and r.GameID = :game order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    sizeHS', fails: ['loaders: the beam'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the optional columns of an active sensor read by their table', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, ACTIVE_SENSOR_OPTIONAL)}", replace: 'c.Cost as Cost, c.Crew as Crew, c.Uridium as Uridium, c.Corbomite as Corbomite, c.ComponentValue as ComponentValue, c.ECCM as ECCM, c.ElectronicCTD as ElectronicCTD', fails: ['loaders: a save without the optional'] },
+  { name: 'the absent optional columns of an active sensor become 0', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, ACTIVE_SENSOR_OPTIONAL)}", replace: "${selectedColumns('c', componentColumns, ACTIVE_SENSOR_OPTIONAL).replace(/null as/g, '0 as')}", fails: ['loaders: a save without the optional'] },
   // eslint-disable-next-line no-template-curly-in-string
-  { name: 'the optional columns of a beam fire control read by their table', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, BEAM_FIRE_CONTROL_OPTIONAL)}", replace: 'c.Cost as Cost, c.Crew as Crew, c.Uridium as Uridium, c.Corbomite as Corbomite, c.FCRangeModifier as FCRangeModifier, c.FCSpeedModifier as FCSpeedModifier, c.SpecialFunction as SpecialFunction, c.ECCM as ECCM, c.ElectronicCTD as ElectronicCTD', fails: ['loaders: a save without the optional'] },
+  { name: 'the absent optional columns of a beam fire control become 0', file: 'design-data.js', find: "${selectedColumns('c', componentColumns, BEAM_FIRE_CONTROL_OPTIONAL)}", replace: "${selectedColumns('c', componentColumns, BEAM_FIRE_CONTROL_OPTIONAL).replace(/null as/g, '0 as')}", fails: ['loaders: a save without the optional'] },
   { name: 'a fire control read as a search sensor', file: 'design-data.js', find: "kind: row.ComponentTypeID === SENSOR_COMPONENT_TYPES.missileFireControl ? 'fireControl' : 'search'", replace: "kind: row.ComponentTypeID === SENSOR_COMPONENT_TYPES.missileFireControl ? 'search' : 'fireControl'", fails: ['loaders: the active'] },
   { name: 'the tracking speed read from the speed multiplier', file: 'design-data.js', find: 'trackingKmS: row.TrackingSpeed,', replace: 'trackingKmS: row.FCSpeedModifier,', fails: ['loaders: the beam', 'saves: the beam'] },
   { name: 'the sensor range no required column', file: 'design-data.js', find: "'Size', 'MaxSensorRange', 'Resolution'])", replace: "'Size', 'Resolution'])", fails: ['loaders: a save without a column'] },
-  { name: 'the obsolete flag never read', file: 'design-data.js', find: "const SENSOR_RACE_TECH_OPTIONAL = Object.freeze(['Obsolete'])", replace: 'const SENSOR_RACE_TECH_OPTIONAL = Object.freeze([])', fails: ['loaders: the active', 'loaders: the beam'] },
+  { name: 'every sensor obsolete flag is treated as set', file: 'design-data.js', find: 'const storedFlag = (value) => (value === null || value === undefined ? null : Boolean(value))', replace: 'const storedFlag = () => true', fails: ['loaders: the active', 'loaders: the beam'] },
   { name: 'the reach of a saved sensor table drops the design of a proposed one', file: 'sensor-planner.js', find: "...(source ? { 'sensor design': source } : {}) }", replace: '}', fails: ['target: a reach of a proposed sensor'] },
   { name: 'the curve drops the design of a proposed sensor', file: 'sensor-planner.js', find: "parts: { reach, 'sensor design': source }, compute: (values) => values.reach, units: 'km' }) : reach)", replace: "parts: { reach }, compute: (values) => values.reach, units: 'km' }) : reach)", fails: ['target: a reach of a proposed sensor'] },
   { name: 'a stored beam range above the cap is not marked', file: 'sensor-planner.js', find: 'const aboveCap = cap !== null && known !== null && known > cap', replace: 'const aboveCap = false', fails: ['beam: a stored range above the cap'] },
@@ -1817,7 +2075,7 @@ const MUTATIONS = [
 ]
 
 const parseArguments = (argv) => {
-  const options = { mutations: true }
+  const options = { mutations: mutating() }
 
   for (const argument of argv) {
     if (argument === '--no-mutations') {
@@ -1840,7 +2098,7 @@ const attempt = async (entry, m) => {
 
     return isSkip(result) ? { state: 'skip', reason: result.skipped } : { state: 'pass', lines: (result && result.lines) || [] }
   } catch (error) {
-    return { state: 'fail', reason: String(error.message).split('\n').join(' | ') }
+    return { state: 'fail', reason: String(error.message).split('\n').join(' | '), valueFailure: kindOf(error) === 'assertion' && !isSubjectThrow(error), lines: Array.isArray(error && error.lines) ? error.lines : [] }
   }
 }
 
@@ -1865,8 +2123,10 @@ const report = (state, name, detail = '') => {
   console.log(`${state === 'pass' ? 'PASS' : 'FAIL'}  ${name}${state === 'pass' ? '' : `  [${detail}]`}`)
 }
 
-// A planted fault: the checks it names run on the faulty copy, and each name must have a check that fails (or only skipped ones, which skip the fault as well).
+// A planted fault: every name must have a check that fails by an own value assertion; no missing fixture drops a mapping.
 const runMutation = async (mutation) => {
+  refusePlanting(mutation.name)
+
   let m
 
   try {
@@ -1891,9 +2151,21 @@ const runMutation = async (mutation) => {
       outcomes.push(await attempt(entry, m))
     }
 
-    if (outcomes.some((outcome) => outcome.state === 'fail')) {
+    const absentFixture = outcomes.find((outcome) => outcome.state === 'skip')
+
+    if (absentFixture) {
+      return { state: 'fail', reason: `a named check has no fixture: ${start}: ${absentFixture.reason}` }
+    }
+
+    const invalid = outcomes.find((outcome) => outcome.state === 'fail' && !outcome.valueFailure)
+
+    if (invalid) {
+      return { state: 'fail', reason: `a named check failed without an own value assertion: ${invalid.reason}` }
+    }
+
+    if (outcomes.some((outcome) => outcome.state === 'fail' && outcome.valueFailure)) {
       caught++
-    } else if (!outcomes.every((outcome) => outcome.state === 'skip')) {
+    } else {
       missed.push(start)
     }
   }
@@ -1902,7 +2174,7 @@ const runMutation = async (mutation) => {
     return { state: 'fail', reason: `these checks did not fail: ${missed.join('; ')}` }
   }
 
-  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'skip', reason: 'the checks it names read a save that is not there' }
+  return caught ? { state: 'pass', detail: `${caught} of the ${mutation.fails.length} names it gives fail` } : { state: 'fail', reason: 'no named check failed by an own value assertion' }
 }
 
 const run = async () => {

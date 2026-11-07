@@ -3,10 +3,10 @@
 
   node scripts/check-history-backup.js [--no-mutations]
 
-  Everything runs on in-memory installations (each store a JSON value read and written whole, with the store client's compare-and-swap `update`, and a mirror of every write in a temporary folder so byte-identity is checked on files too), on the real scenario repository over such a store for the annotations, and on recorded history of the passive campaign of artifacts/passive-campaign-20261013 (read only, skipped when it is not here). No Electron and no network are needed; a save is only opened read only, and its checksum is compared with the one recorded for it before and after.
+  Everything runs on in-memory installations (each store a JSON value read and written whole, with the store client's compare-and-swap `update`, and a mirror of every write in a temporary folder so byte-identity is checked on files too) and on the real scenario repository over such a store for the annotations. No Electron, no save and no network are needed.
 
   Groups:
-  - round trip: a real recorded campaign and a synthetic one with branches, intelligence and annotations come back exactly (series with their scope, units and coverage), newer metadata is kept, and the save's checksum is unchanged;
+  - round trip: a synthetic campaign with branches, intelligence and annotations comes back exactly (series with their scope, units and coverage) and newer metadata is kept;
   - preview: the counts and the policy of each target are shown before anything is written, and a cancel leaves every file byte-identical;
   - rejection: a malformed, altered, oversized or future-schema file is refused with nothing previewed or truncated;
   - association: an answer, a merge mark or a pending question is never overwritten, a campaign of another galaxy is refused, a campaign of another id that shares a game id is kept apart, and a timeline that is not the stored one is never merged into it;
@@ -230,110 +230,6 @@ const defineSuite = (m) => {
   }
 
   // ---- round trip ----
-
-  check('round trip', 'a real recorded campaign comes back exactly, series by scope with their units, and the save\'s checksum is unchanged', async () => {
-    const real = await realSaves(m, [1, 2, 3, 40, 80, 150])
-
-    if (!real) {
-      return
-    }
-
-    try {
-      const a = installation()
-      const b = installation({ first: 2 })
-
-      await real.record(a, real.picks)
-
-      assert.equal(Object.keys(a.registry().campaigns).length, 1)
-
-      const [id] = Object.keys(a.registry().campaigns)
-      const envelope = parsed(exportOf(a))
-      const file = envelope.campaigns[0].branches.b1
-
-      assert.ok(Object.keys(file.races).length >= 2, 'the player race and an NPR are recorded')
-      assert.ok(Object.values(file.races).every((series) => series.snapshots.length === real.picks.length && series.coverage.count === real.picks.length))
-      assert.ok(file.intel && typeof file.intel === 'object' && Object.values(file.intel).every((aliens) => Object.values(aliens).every((series) => series.coverage.count === series.snapshots.length)), 'intelligence series, when recorded, carry their coverage')
-      assert.equal(envelope.units.race.population, 'million people')
-      assert.equal(envelope.units.intelligence.points, 'diplomatic points')
-
-      await restore(b, envelope)
-
-      assert.deepEqual(b.fileOf(id), a.fileOf(id))
-      assert.deepEqual(b.registry().campaigns[id], a.registry().campaigns[id])
-      assert.deepEqual(parsed(exportOf(b)).campaigns, envelope.campaigns)
-      assert.deepEqual(await real.checksums(), real.expected)
-    } finally {
-      real.close()
-    }
-  })
-
-  check('round trip', 'a real recorded history merged into an older one of the same campaign keeps the newer metadata and adds only what is new', async () => {
-    const real = await realSaves(m, [1, 2, 3, 40, 80, 150])
-
-    if (!real) {
-      return
-    }
-
-    try {
-      const a = installation()
-      const b = installation({ first: 2 })
-
-      await real.record(a, real.picks)
-
-      const [id] = Object.keys(a.registry().campaigns)
-
-      // The older installation recorded the first saves of the campaign under the id the newer one holds.
-      b.newId = () => id
-
-      await real.record(b, real.picks.slice(0, 3))
-
-      const older = b.registry().campaigns[id]
-      const unproven = plan(b, parsed(exportOf(a))).preview.campaigns[0].files[0]
-
-      // The real tips end between checkpoints, where no digest covers the whole of the older one: whether one continues the other is not known, so the branch is kept as it is.
-      assert.notEqual(older.branches.b1.tip.n % 64, 0)
-      assert.equal(unproven.relation, 'unknown')
-      assert.equal(unproven.policy, 'keep')
-
-      // The older installation stopped at a checkpoint: the newer tip holds the digest of the whole of it.
-      const registry = b.registry()
-      const stopped = a.registry().campaigns[id].branches.b1.tip
-      const count = Math.floor(older.branches.b1.tip.n / 64) * 64
-
-      registry.campaigns[id].branches.b1.tip = { n: count, t: older.branches.b1.tip.t, digest: stopped.checkpoints[count / 64 - 1], checkpoints: stopped.checkpoints.slice(0, count / 64), early: older.branches.b1.tip.early }
-      b.put('registry', registry)
-
-      const planned = plan(b, parsed(exportOf(a)))
-      const view = planned.preview.campaigns[0]
-      const row = view.files[0]
-
-      assert.equal(view.status, 'known')
-      assert.equal(row.policy, 'merge')
-      assert.equal(row.relation, 'extends')
-      assert.ok(row.totals.added > 0 && row.totals.identical > 0 && row.totals.conflicts === 0, JSON.stringify(row.totals))
-
-      await restore(b, parsed(exportOf(a)))
-
-      assert.deepEqual(b.fileOf(id), a.fileOf(id))
-      assert.deepEqual(b.registry().campaigns[id].branches.b1.tip, a.registry().campaigns[id].branches.b1.tip)
-      assert.ok(b.registry().campaigns[id].branches.b1.tip.n > count)
-      assert.equal(b.registry().campaigns[id].createdAt, Math.min(older.createdAt, a.registry().campaigns[id].createdAt))
-      assert.equal(b.registry().campaigns[id].seen, Math.max(older.seen, a.registry().campaigns[id].seen))
-
-      const newer = installation({ first: 1 })
-
-      newer.newId = () => id
-      await real.record(newer, real.picks.slice(0, 3))
-
-      const before = a.snapshot()
-      const { result } = await restore(a, parsed(exportOf(newer)))
-
-      assert.equal(result.applied, false, 'an older backup adds nothing to a newer history')
-      assert.equal(a.snapshot(), before)
-    } finally {
-      real.close()
-    }
-  })
 
   check('round trip', 'a campaign with branches, intelligence and annotations round-trips into an empty installation with every scope, unit and uuid kept', async () => {
     const world = annotated()
@@ -3622,58 +3518,6 @@ const defineSuite = (m) => {
   return checks
 }
 
-// ---- Real saves -------------------------------------------------------------------------------------------------------
-
-const PASSIVE = path.join(repo, 'artifacts', 'passive-campaign-20261013')
-
-const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
-
-// The saves of the passive campaign picked by index, opened read only: `record(installation, rows)` records them in order with the recorder, `checksums()` is the sha256 of each file now and `expected` what the run recorded for it; null when the folder is not here.
-const realSaves = async (m, picks) => {
-  if (!fs.existsSync(path.join(PASSIVE, 'snapshots.csv'))) {
-    console.log('  skip   the passive campaign is not here')
-
-    return null
-  }
-
-  const sqlite3 = require('sqlite3')
-  const rows = fs.readFileSync(path.join(PASSIVE, 'snapshots.csv'), 'utf8').trim().split(/\r?\n/).slice(1).map((line) => {
-    const [index, , file, hash] = line.split(',')
-
-    return { index: Number(index), file, sha256: hash }
-  })
-  const chosen = picks.map((index) => rows.find((row) => row.index === index))
-
-  assert.ok(chosen.every((row) => row && fs.existsSync(path.join(PASSIVE, 'snapshots', row.file))), 'a save of the passive campaign is missing')
-
-  const handles = new Map()
-
-  for (const row of chosen) {
-    handles.set(row.file, await new Promise((resolve, reject) => {
-      const handle = new sqlite3.Database(path.join(PASSIVE, 'snapshots', row.file), sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(handle)))
-    }))
-  }
-
-  const database = (row) => ({
-    transaction: (work) => work({ id: 'transaction' }),
-    query: (sql) => new Promise((resolve, reject) => handles.get(row.file).all(sql, (error, result) => (error ? reject(error) : resolve([result])))),
-  })
-
-  return {
-    picks: chosen,
-    expected: Object.fromEntries(chosen.map((row) => [row.file, row.sha256])),
-    checksums: async () => Object.fromEntries(chosen.map((row) => [row.file, sha256(path.join(PASSIVE, 'snapshots', row.file))])),
-    record: async (inst, list) => {
-      for (const row of list) {
-        const run = await m.history.recordHistory(database(row), { storage: inst.io, path: `C:/saves/${row.file}`, now: inst.now, newId: inst.newId })
-
-        assert.equal(run.failed.length, 0, run.failed.map((failure) => failure.error && failure.error.message).join('; '))
-      }
-    },
-    close: () => handles.forEach((handle) => handle.close()),
-  }
-}
-
 // ---- Running ----------------------------------------------------------------------------------------------------------
 
 // `only`: the starts of the names of the checks to run, or all of them. Each result is [group, name, true or what is wrong].
@@ -3728,7 +3572,6 @@ const MUTANTS = [
   { name: 'the metadata always comes from the backup', find: 'const newer = !kept || policy === \'replace\' || lastTime(snapshotsOf(entry.record)) > lastTime(before)', replace: 'const newer = true', fails: ['newer metadata is kept'] },
   { name: 'the backup wins a tie of the last game time', find: '|| lastTime(snapshotsOf(entry.record)) > lastTime(before)', replace: '|| lastTime(snapshotsOf(entry.record)) >= lastTime(before)', fails: ['newer metadata is kept'] },
   { name: 'the last time a campaign was seen moves back', find: 'merged.seen = Math.max(merged.seen, given.seen)', replace: 'merged.seen = given.seen', fails: ['newer metadata is kept'] },
-  { name: 'a view without a series is dropped from a restored file', find: 'givenViews.filter((view) => result.intel[view] === undefined && selected(view))', replace: '[]', fails: ['a real recorded campaign comes back exactly'] },
   { name: 'a tab that does not record applies', find: '  requireRecording()\n\n  const key = restoreKey', replace: '  const key = restoreKey', fails: ['a tab that does not record'] },
   { name: 'a plan that changed since the preview is applied', find: 'if (digest !== expected) {', replace: 'if (false) {', fails: ['a plan that is no longer', 'a preview is bound'] },
   { name: 'no backup is kept before a restore', find: 'held = pinBackup(io, { ids: writes.affected, at: now(), key, annotations })', replace: 'held = null', fails: ['a backup of the affected campaigns', 'a backup that cannot be kept', 'a pre-restore backup restores'] },

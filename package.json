@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons-new",
-  "version": "2.7.11",
+  "version": "3.2.0",
   "description": "Aurora Electrons",
   "main": "./out/main/index.js",
   "scripts": {
@@ -12,7 +12,7 @@
     "lint": "node_modules/.bin/eslint --ext .js,.vue,.ts -f ./node_modules/eslint-friendly-formatter ./src",
     "lint:fix": "bun run lint --fix",
     "check": "bun scripts/check-all.js",
-    "check:quick": "bun scripts/check-all.js --quick",
+    "check:quick": "bun scripts/check-all.js --quick --scripts=2 --jobs=2",
     "preinstall": "node scripts/check-engines.js",
     "postinstall": "electron-builder install-app-deps"
   },

@@ -12,14 +12,14 @@ const HARVESTER = 32
 export const LOW_RATE_LPH = 20000
 export const LOW_RATE_RECIPIENT_HS = 20
 
-const FUEL_SERVICE_VERSIONS = ['2.7.x']
+const FUEL_SERVICE_VERSIONS = ['3.2.x']
 registerRule({
   id: 'fuelService.stored',
   versions: FUEL_SERVICE_VERSIONS,
   units: 'L',
   verification: 'confirmed',
   structure: ['FCT_Ship.Fuel', 'FCT_ShipClass.FuelCapacity'],
-  note: 'The fuel aboard now, as stored. It is inventory: a ship that cannot serve a recipient keeps every litre, and the figure never changes with permission.',
+  note: 'The fuel aboard now, as stored. It is inventory: a ship that cannot serve a recipient keeps every litre, and the figure never changes with permission. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -28,7 +28,7 @@ registerRule({
   units: 'L',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MinimumFuel'],
-  note: 'The class minimum fuel: the litres a donor keeps and never gives away. A stored class value, kept apart from the player\'s reserve.',
+  note: 'The class minimum fuel: the litres a donor keeps and never gives away. A stored class value, kept apart from the player\'s reserve. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -37,7 +37,7 @@ registerRule({
   units: 'L',
   verification: 'confirmed',
   structure: ['the scenario records of kind resource.reserve'],
-  note: 'A level the player chose to keep aboard a ship or a ship class, read from the player\'s own record: a ship\'s own reserve over that of its class. It is a local note and no game rule: it lowers the surplus offered for service and never changes the stored fuel, the class minimum or the game\'s permission.',
+  note: 'A level the player chose to keep aboard a ship or a ship class, read from the player\'s own record: a ship\'s own reserve over that of its class. It is a local note and no game rule: it lowers the surplus offered for service and never changes the stored fuel, the class minimum or the game\'s permission. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -46,7 +46,7 @@ registerRule({
   units: 'L',
   verification: 'estimated',
   structure: ['FCT_Ship.Fuel', 'FCT_ShipClass.FuelTanker, MinimumFuel, RefuellingRate', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent'],
-  note: 'The litres a donor can give a recipient: the whole litres aboard above the larger of the class minimum and the player\'s reserve, when every gate of the donor result passes; 0 when a gate fails, and no figure when a gate cannot be decided. The gates (a Tanker designation, an undamaged Transfer - Fuel system, a class rate above 0, litres above the class minimum and, for a rate under 20,000 LPH, a recipient of 20 HS or less) are the stated game rules; no save holds a damaged transfer system, so the damaged case is checked on constructed rows only.',
+  note: 'The litres a donor can give a recipient: the whole litres aboard above the larger of the class minimum and the player\'s reserve, when every gate of the donor result passes; 0 when a gate fails, and no figure when a gate cannot be decided. The gates (a Tanker designation, an undamaged Transfer - Fuel system, a class rate above 0, litres above the class minimum and, for a rate under 20,000 LPH, a recipient of 20 HS or less) are the stated game rules; no save holds a damaged transfer system, so the damaged case is checked on constructed rows only. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the throughput is the class\'s nominal rate whatever the number of undamaged systems', 'the per-ship refuel mode (stored as 0, 1 or 3) is not read: its meaning is not in the save'],
 })
 
@@ -56,7 +56,7 @@ registerRule({
   units: '',
   verification: 'estimated',
   structure: ['FCT_ShipClass.FuelTanker, MinimumFuel, RefuellingRate', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent'],
-  note: 'Whether the ship may serve fuel to a recipient: allowed, blocked or unknown, with the first gate that decides it. A gate that fails blocks the ship whatever an earlier gate could not decide; with no failing gate, a gate the save cannot decide leaves the permission unknown.',
+  note: 'Whether the ship may serve fuel to a recipient: allowed, blocked or unknown, with the first gate that decides it. A gate that fails blocks the ship whatever an earlier gate could not decide; with no failing gate, a gate the save cannot decide leaves the permission unknown. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the class rate is the nominal rate of one undamaged system, not scaled by the systems left'],
 })
 

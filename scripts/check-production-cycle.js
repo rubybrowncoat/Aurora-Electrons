@@ -3,7 +3,7 @@
 
   node scripts/check-production-cycle.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785). With --no-mutations it plants no fault, starts no mutant child and replays the stock save alone, the cheaper of the two.
+  With no options it runs on the migrated 3.1 fixture of scripts/lib/fixtures.js. With --no-mutations it plants no fault and starts no mutant child.
 
   The reference model is the game's rule for one colony's construction cycle, written out here from the rule and not from the app: each project that is out of the queue and not paused, in some order, is allocated its share of the colony's capacity times the years since the last cycle, builds that many units (the allocation over the build points a unit takes, at most the units it has left), cuts the build to what the colony's stock of each mineral covers (the stock the projects ahead of it left, in tonnes and fractions of a unit, the build rounded to 4 decimals), takes the minerals of what it built out of that stock, and adds the build to its partial completion, whole units delivered at once. A project that finishes lets the queued ones start in the next cycle.
 
@@ -36,12 +36,10 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const DEFAULT_SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [fixtureSave()]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
@@ -95,8 +93,8 @@ const diverges = (name, detail = '') => {
   console.log(`DIVERGES  ${name}${detail ? `  [${detail}]` : ''}`)
 }
 
-// A quick run replays the stock save alone: it has 64,779 candidates of the search to the modded save's 168,284 and takes the shorter replay, and the full run replays both.
-const defaultSaves = () => (mutating() ? DEFAULT_SAVES : DEFAULT_SAVES.filter((save) => save.game === 138))
+// The default save is the fixture alone, replayed by a quick run and by a full run.
+const defaultSaves = () => DEFAULT_SAVES
 
 const parseArguments = (argv) => {
   const saves = []
@@ -646,7 +644,12 @@ const ledger = ({ years, capacity, stock, projects, arrivals = [], cycles }) => 
         requested = ZERO_FRACTION
       }
 
-      state.needs.forEach(([name, need]) => (held[name] = minus(have(name), times(need, requested))))
+      // The game floors every mineral balance at 0 after the debit of an industrial project; the fuel is no mineral and a build is cut to it exactly.
+      state.needs.forEach(([name, need]) => {
+        const after = minus(have(name), times(need, requested))
+
+        held[name] = name !== 'fuel' && below(after, ZERO_FRACTION) ? ZERO_FRACTION : after
+      })
       state.built = plus(state.built, requested)
 
       if (same(requested, state.amount)) {
@@ -853,7 +856,7 @@ const engineCases = (engine, decimal) => {
 
   const inherited = against({ projects: [point(1, '100', '1', '1', { Duranium: '1000000' }), point(2, '100', '1', '1', { Duranium: '1' }, 1)], stock: { Duranium: '1000000.00035' }, capacity: '365', cycles: 6 })
 
-  holds('ledgerInherited', 'ENGINE the stock a project leaves is exact, with no error from the subtraction before it: 1000000.00035 t, 1000000 t taken by the project ahead, leaves 0.00035 t, which is a midpoint of the rounding, so the queued project builds 0.0004 (the even digit) and the stock goes to -0.00005 t, as the ledger oracle has it', agree(inherited) && close(inherited.figures.projects[2].firstBuild, 0.0004) && close(numberOf(inherited.model.states[1].built), 0.0004) && close(inherited.figures.left.Duranium, -0.00005))
+  holds('ledgerInherited', 'ENGINE the stock a project leaves is exact, with no error from the subtraction before it, and a balance is floored at 0 after a debit: 1000000.00035 t, 1000000 t taken by the project ahead, leaves 0.00035 t, which is a midpoint of the rounding, so the queued project builds 0.0004 (the even digit), which takes 0.0004 t of the 0.00035 t left, and the stock goes to 0, not -0.00005 t, as the ledger oracle has it', agree(inherited) && close(inherited.figures.projects[2].firstBuild, 0.0004) && close(numberOf(inherited.model.states[1].built), 0.0004) && inherited.figures.left.Duranium === 0)
 
   const remainders = ['1.00003', '1.00014'].map((fuel) => against({ projects: [point(1, '100', '3', '1', { fuel: '2' }), point(2, '100', '1', '1', {}, 1)], stock: { fuel }, arrivals: [{ resource: 'fuel', cycle: 2, quantity: '100' }], capacity: '365', cycles: 40 }))
 
@@ -1281,11 +1284,11 @@ const wrapperCases = ({ production, provenance, 'industry-cycle': engine }) => {
 const pageCases = async (pageOptions) => {
   const results = []
   const holds = (key, statement, condition) => results.push([statement, Boolean(condition), key])
-  const modifiers = { PopName: 'Test colony', ConstructionProduction: SYNTHETIC.capacity, OverallProductionModifier: 1, ConstructionPower: 1, EngineerProductionModifier: 0, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
+  const modifiers = { PopName: 'Test colony', ConstructionProduction: SYNTHETIC.capacity, OverallProductionModifier: 1, ConstructionPower: 1, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400 }
   const zeros = Object.fromEntries(MINERAL_NAMES.flatMap((name) => [[name, 0], [`Stock${name}`, 0]]))
   const row = (extra = {}) => ({ ID: 1, Name: `Project ${extra.ID || 1}`, ProductionType: 0, PopulationID: 7, Percentage: 100, Amount: 4, PartialCompletion: 0, ProdPerUnit: 2, Queue: 0, Paused: 0, FuelRequired: 0, StockFuel: 0, ConversionFrom: null, ConversionSource: null, ...zeros, ...extra })
   const arrival = (resource, day, quantity, populationId = 7) => ({ id: 1, PopulationID: populationId, resource, day, quantity, source: '' })
-  const page = (rows, arrivals = [], extra = {}) => instantiate(pageOptions, { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} }, data: { industry: rows, arrivals, populationProductionModifiers: { 7: modifiers, 8: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }), ...extra } })
+  const page = (rows, arrivals = [], extra = {}) => instantiate(pageOptions, { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: {}, dispatch: async () => {} }, data: { industry: rows, arrivals, populationProductionModifiers: { 7: modifiers, 8: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }), ...extra } })
 
   const forecasted = async (rows, arrivals = [], extra = {}) => {
     const vm = page(rows, arrivals, extra)
@@ -1796,12 +1799,13 @@ const structureChecks = async (database) => {
   check('the project table is keyed by its own integer ProjectID (a row id), so no save keeps the order the game visits projects in', key.length === 1 && key[0].name === 'ProjectID' && /^INTEGER$/i.test(key[0].type), `key ${key.map((column) => `${column.name} ${column.type}`).join(', ') || 'none'}`)
 }
 
-const instantiatePage = (options, database, game, race) => instantiate(options, { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} }, database, GameID: game, RaceID: race })
+const instantiatePage = (options, database, game, race) => instantiate(options, { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: {}, dispatch: async () => {} }, database, GameID: game, RaceID: race })
 
 // The mutants that run the engine's, the wrapper's and the page's cases again, each with one change; each must fail the case named with it.
 const mutantLists = () => {
   const ENGINE_MUTANTS = [
-    { name: 'an engine whose projects do not debit the stock they build from', from: 'left[resource] = subtract(left[resource] || ZERO, multiply(need, requested))', to: 'left[resource] = left[resource] || ZERO', fails: 'conserved' },
+    { name: 'an engine whose projects do not debit the stock they build from', from: 'const after = subtract(left[resource] || ZERO, multiply(need, requested))', to: 'const after = left[resource] || ZERO', fails: 'conserved' },
+    { name: 'an engine that leaves a negative mineral balance after a build rounded up past the stock', from: 'left[resource] = resource !== FUEL && negative(after) ? ZERO : after', to: 'left[resource] = after', fails: 'ledgerInherited' },
     { name: 'an engine that does not round a build to 4 decimals', from: 'requested = round(requested, BUILD_DECIMALS)', to: 'requested = requested', fails: 'rounded' },
     { name: 'an engine whose steady stretch runs one cycle past the finish', from: 'span = Math.min(span, ceilRatio(subtract(state.amount, reach), state.step), additions(', to: 'span = Math.min(span, ceilRatio(subtract(state.amount, reach), state.step) + 1, additions(', fails: 'stepwise' },
     { name: 'an engine whose steady stretch runs one cycle past the stock', from: 'positive(available) ? floorRatio(available, amount) : 0', to: 'positive(available) ? floorRatio(available, amount) + 1 : 0', fails: 'fuelJump' },

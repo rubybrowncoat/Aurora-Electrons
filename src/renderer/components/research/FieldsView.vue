@@ -30,7 +30,7 @@
           </template>
           <template #[`item.name`]="{ item }">
             <div class="font-weight-medium">{{ item.name }}</div>
-            <div class="caption text--secondary">{{ item.line }}</div>
+            <div class="caption text--secondary">{{ item.line }}<span v-if="item.category" data-category> · {{ item.category }}</span></div>
           </template>
           <template #[`item.remaining`]="{ item }">
             <span v-if="item.status === 'done'" class="text--secondary">—</span>
@@ -101,7 +101,7 @@
                 <template #[`item.remaining`]="{ item }">
                   <span v-if="item.remaining === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.remainingResult" /></span>
                   <span v-else class="text-no-wrap">{{ count(item.remaining) }} RP</span>
-                  <div v-if="item.banked > 0" class="caption text--secondary text-no-wrap">{{ count(item.banked) }} banked of {{ count(item.cost) }}</div>
+                  <div v-if="item.banked > 0" class="caption text--secondary text-no-wrap">{{ points(item.banked) }} banked of {{ count(item.cost) }}</div>
                 </template>
                 <template #[`item.unlocks`]="{ item }">
                   <span v-if="item.unlocks">{{ item.unlocks }}</span>
@@ -121,6 +121,8 @@
                 <template #[`item.name`]="{ item }">
                   <div class="font-weight-medium">{{ item.name }}</div>
                   <div class="caption text--secondary">{{ item.line }}</div>
+                  <div v-if="item.saved" class="caption text--secondary" data-saved>{{ item.saved }}</div>
+                  <div v-if="item.notResearchable" class="caption warning--text" data-not-researchable>Not researchable: {{ item.notResearchable }}</div>
                 </template>
                 <template #[`item.needs`]="{ item }">
                   <div v-for="need in item.needs" :key="need.id" class="need">
@@ -156,8 +158,13 @@
               <span class="panel-title">Out of reach <span class="panel-count">{{ group.blocked.length }}</span></span>
             </v-expansion-panel-header>
             <v-expansion-panel-content>
-              <div class="caption text--secondary mb-2">Techs the race has no way to research: found only in ruins, owned by another empire, or behind a technology the game doesn't provide.</div>
+              <div class="caption text--secondary mb-2">Techs the race has no way to research: found only in ruins, owned by another empire, or behind a technology the game doesn't provide. A tech with points saved from cancelled research stays in the game's list even so, and is shown here with those points, marked not researchable.</div>
               <v-data-table :headers="blockedHeaders" :items="blockedRows" item-key="id" dense :custom-sort="sortNullLast" :sort-by.sync="blockedTable.sortBy" :sort-desc.sync="blockedTable.sortDesc" :items-per-page.sync="blockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+                <template #[`item.name`]="{ item }">
+                  <div class="font-weight-medium">{{ item.name }}</div>
+                  <div v-if="item.saved" class="caption text--secondary" data-saved>{{ item.saved }}</div>
+                  <div v-if="item.notResearchable" class="caption warning--text" data-not-researchable>Not researchable: {{ item.notResearchable }}</div>
+                </template>
                 <template #[`item.cost`]="{ item }">
                   <span v-if="item.cost === null" class="text--secondary text-no-wrap">—<provenance-mark status="unavailable" /></span>
                   <span v-else class="text-no-wrap">{{ count(item.cost) }} RP</span>
@@ -180,7 +187,7 @@ import { linkTo } from '../../utilities/deep-links'
 import { isKnownNumber, UNKNOWN_TEXT } from '../../utilities/math'
 import { sortNullLast } from '../../utilities/production'
 import { isAvailable, unavailable } from '../../utilities/provenance'
-import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, pathRpResult, projectIdle, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
+import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, NOT_RESEARCHABLE_REASONS, pathRpResult, projectIdle, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
 import PageLink from '../page/PageLink.vue'
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 
@@ -303,7 +310,7 @@ export default {
       const rows = []
 
       this.research.graph.techs.forEach((tech) => {
-        if (this.research.shown.has(tech.fieldId) && (tech.name.toLowerCase().includes(needle) || tech.typeName.toLowerCase().includes(needle))) {
+        if (this.research.shown.has(tech.fieldId) && (tech.name.toLowerCase().includes(needle) || tech.typeName.toLowerCase().includes(needle) || (tech.categoryName && tech.categoryName.toLowerCase().includes(needle)))) {
           const status = this.research.info.get(tech.id).status
 
           rows.push({ ...this.row(tech), status, statusRank: STATUS_ORDER.indexOf(status), field: this.fieldAbbreviation(tech.fieldId) })
@@ -366,6 +373,10 @@ export default {
     share(part, whole) {
       return whole > 0 ? Math.min(100, (part / whole) * 100) : 0
     },
+    // Points as the save stores them: whole points as a count, a saved fraction with its two decimals (saved progress is decimal), never rounded to a whole number.
+    points(value) {
+      return this.count(value, Number.isInteger(value) ? 0 : 2)
+    },
     // The share of a project paid; none while its RP left or its cost is not known.
     progress(project) {
       return isKnownNumber(project.ResearchPointsRequired) && isKnownNumber(project.DevelopCost) ? this.share(project.DevelopCost - project.ResearchPointsRequired, project.DevelopCost) : 0
@@ -395,11 +406,14 @@ export default {
         id: tech.id,
         name: tech.name,
         line: tech.typeName,
+        category: tech.categoryName,
         cost: tech.cost,
         remaining: entry.remaining,
         remainingResult: remainingResult(entry),
         pathRpResult: pathRpResult(entry),
         banked: state.paused.has(tech.id) ? state.paused.get(tech.id) : 0,
+        saved: entry.hasSaved && entry.inList ? (isKnownNumber(entry.saved) ? `${this.points(entry.saved)} saved${isKnownNumber(tech.cost) ? ` of ${this.count(tech.cost)}` : ''}` : 'Saved points not stored') : '',
+        notResearchable: entry.notResearchable.map((reason) => NOT_RESEARCHABLE_REASONS[reason]).join('; '),
         unlocks: entry.unlocks,
         automatic: tech.automatic,
       }
@@ -448,14 +462,14 @@ export default {
       return !toBoolean(project.Pause) && project.CommanderID && !isAvailable(project.rateResult) ? project.rateResult : null
     },
 
-    // The landing date of a project or of an entry queued behind it, as { text, result }: a project that makes no progress for a reason the save states never lands, one whose pause flag, rate or RP left is not stored has no date (result names what is missing), and so has any when the game clock is not stored.
+    // The landing date of a project or of an entry queued behind it, as { text, result }: a project that makes no progress for a reason the save states never lands, one whose pause flag, rate or RP left is not stored has no date (result names what is missing), and so has any when the game clock is not stored. A date is the calendar day of the continuous landing time, worded "about" and carrying the landing result, whose note says the game lands a tech at the end of the first increment at or after it.
     landingOf(entry, project) {
       const { StartYear, GameTime } = this.research.game
 
       if (isKnownNumber(entry.years)) {
         const clock = [...(isKnownNumber(StartYear) ? [] : ['the game start year']), ...(isKnownNumber(GameTime) ? [] : ['the game time'])]
 
-        return clock.length ? { text: UNKNOWN_TEXT, result: unavailable({ rule: 'research.landing', missing: clock }) } : { text: gameTime(StartYear, GameTime + entry.years * SECONDS_PER_YEAR).format('YYYY-MM-DD'), result: null }
+        return clock.length ? { text: UNKNOWN_TEXT, result: unavailable({ rule: 'research.landing', missing: clock }) } : { text: `about ${gameTime(StartYear, GameTime + entry.years * SECONDS_PER_YEAR).format('YYYY-MM-DD')}`, result: entry.yearsResult }
       }
 
       return projectIdle(project) ? { text: 'Not progressing', result: null } : { text: UNKNOWN_TEXT, result: entry.yearsResult }

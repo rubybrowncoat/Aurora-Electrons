@@ -4,8 +4,8 @@
   Run: bun scripts/check-warning-idle-fleets.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   - Fixtures: an in-memory save of four systems with colonies (one with a deep space population on a body beside another body with a colony, one a rival's, one on a body with no stored position), a jump point, command types and idle fleets set at distances from them and from fleets of the race with maintenance and recreational modules: modules damaged, not counted, not stored, on a ship docked in a hangar, aboard the idle fleet itself, in another system, of another race, exactly 1 km and less than 1 km away, fleets under a Training command, under another command, under none stored and under one whose type is not stored, and fleets with no stored position. Each case is read back through the module's word tables and compared with what is written here.
-  - Saves, read only: AuroraDB.db (game 140, race 784), saves/AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db (game 138, race 785) and saves/AuroraDB_270_Falryx_date_issue.db (game 141, race 786): every idle fleet against SQL written here from the game's rules, with the option off and on.
-  - The page in a browser: scripts/lib/page-server.js serves a copy of saves/AuroraDB.db in which one idle fleet is put beside a fleet with a maintenance module, one on the position of a colony that its orbit does not name and one without a stored position. The Warnings page is opened on the check, every row shown, the screen read, and then the option switched on and read again. Rows are paired with SQL by the id of their fleet, never by their place; the figures are read whole in the grouping of the setting, the text from the text nodes drawn, and each element by whether it is on screen.
+  - Save, read only: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784): every idle fleet against SQL written here from the game's rules, with the option off and on.
+  - The page in a browser: scripts/lib/page-server.js serves a copy of the fixture save in which one idle fleet is put beside a fleet with a maintenance module, one on the position of a colony that its orbit does not name and one without a stored position. The Warnings page is opened on the check, every row shown, the screen read, and then the option switched on and read again. Rows are paired with SQL by the id of their fleet, never by their place; the figures are read whole in the grouping of the setting, the text from the text nodes drawn, and each element by whether it is on screen.
   - Planted faults in copies of the module, the shared module and the page, each of which must make a check named for it fail by a value, never by a throw of the code under test; benign rewrites, one of each family, that must leave every check passing; controls of the harness.
 
   The word tables of the module (LOCATION_WORDS, PARKED_GAPS, PARKED_PLACES and the shared SEPARATOR_WORDS) are reviewed prose: a check reads a line back through them and never asks for a wording. Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. It needs Playwright's Chromium (`bunx playwright install chromium` once).
@@ -21,6 +21,7 @@ const { observe, validate, failureLine, describe, HarnessError, installScreen, G
 const { caughtBy, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
+const { FIXTURE, fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILE = {
@@ -51,7 +52,7 @@ const CHECK = 'idle-fleets'
 const RULE = 'warnings.idleFleets'
 const READ = 'readIdleFleets'
 const ROUTE = `/warnings?check=${CHECK}`
-const NAMES = { game: 'EggSample', race: 'EggSample' }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 
 const short = (value) => {
   const text = JSON.stringify(value)
@@ -218,7 +219,7 @@ const fixtureSql = () => {
     'create table FCT_RaceSysSurvey (GameID integer, SystemID integer, RaceID integer, Name text);',
     'create table FCT_SystemBody (SystemBodyID integer, StarID integer, BodyClass integer, PlanetNumber integer, OrbitNumber integer, Xcor real, Ycor real);',
     'create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);',
-    'create table FCT_Star (StarID integer, Component integer);',
+    'create table FCT_Star (StarID integer, ComponentNumber integer);',
     'create table FCT_JumpPoint (WarpPointID integer, GameID integer, SystemID integer, Xcor real, Ycor real);',
     'create table FCT_FleetStandingOrder (FleetID integer);',
     'create table FCT_FleetConditionalOrder (FleetID integer, GameID integer);',
@@ -230,7 +231,7 @@ const fixtureSql = () => {
     'create table FCT_DamagedComponent (ShipID integer, GameID integer, ComponentID integer, Number real);',
     'create table FCT_NavalAdminCommand (NavalAdminCommandID integer, AdminCommandTypeID integer);',
     'create table DIM_NavalAdminCommandType (CommandTypeID integer, Description text);',
-    insert('FCT_Star', { StarID: 1, Component: 1 }),
+    insert('FCT_Star', { StarID: 1, ComponentNumber: 1 }),
     insert('FCT_JumpPoint', { WarpPointID: JUMP_POINT[0], GameID: 1, SystemID: JUMP_POINT[1], Xcor: JUMP_POINT[2], Ycor: JUMP_POINT[3] }),
   ]
 
@@ -294,12 +295,9 @@ const openFixture = async () => {
 // ---------- the saves, and what SQL written here says of them ----------
 
 const SAVES = [
-  { id: 'save-modded', file: 'AuroraDB.db', GameID: 140, RaceID: 784 },
-  { id: 'save-egg', file: 'saves/AuroraDB.db', GameID: 138, RaceID: 785 },
-  { id: 'save-stock', file: 'saves/AuroraDB_271_skoormit_saved.db', GameID: 138, RaceID: 785 },
-  { id: 'save-falryx', file: 'saves/AuroraDB_270_Falryx_date_issue.db', GameID: 141, RaceID: 786 },
+  { id: 'save-fixture', file: fixtureSave().file, GameID: fixtureSave().game, RaceID: fixtureSave().race },
 ]
-const PAGE_SAVE = SAVES[1]
+const PAGE_SAVE = SAVES[0]
 
 // One row for each idle fleet by the game's rules: the fleet is mobile and military, follows no fleet, has no move order and a ship that is neither in maintenance nor carried; it is parked at a colony of the race in its system whose body lies less than 1 km away on both axes, or at another fleet of the race in its system less than 1 km away on both axes with an undamaged maintenance module (type 48) on an undocked ship, or one with a recreational module (type 57) when the fleet is not under a Training command. The name is the colony on the body the fleet orbits, else the largest colony there; failing a colony, the first fleet by name.
 const truthSql = ({ GameID: g, RaceID: r }) => `with idle as (select f.FleetID, f.FleetName, f.SystemID, f.Xcor, f.Ycor, f.OrbitBodyID, f.RaceID, f.GameID, case when f.ParentCommandID = 0 then 0 else coalesce((select t.Description = 'Training' from FCT_NavalAdminCommand c join DIM_NavalAdminCommandType t on t.CommandTypeID = c.AdminCommandTypeID where c.NavalAdminCommandID = f.ParentCommandID), 0) end as Training from FCT_Fleet f where f.GameID = ${g} and f.RaceID = ${r} and f.ShippingLine = 0 and f.CivilianFunction = 0 and f.Speed > 1 and f.AnchorFleetID = 0 and not exists (select 1 from FCT_MoveOrders m where m.FleetID = f.FleetID) and exists (select 1 from FCT_Ship s where s.FleetID = f.FleetID and s.GameID = f.GameID and s.RaceID = f.RaceID and s.MaintenanceState <> 2 and s.MothershipID = 0)), working as (select s.FleetID, d.ComponentTypeID as Type, sum(max(c.NumComponent - coalesce((select sum(x.Number) from FCT_DamagedComponent x where x.ShipID = s.ShipID and x.GameID = s.GameID and x.ComponentID = c.ComponentID), 0), 0)) as Modules from FCT_Ship s join FCT_ClassComponent c on c.ClassID = s.ShipClassID join FCT_ShipDesignComponents d on d.SDComponentID = c.ComponentID and d.ComponentTypeID in (48, 57) where s.GameID = ${g} and s.RaceID = ${r} and s.MothershipID = 0 group by s.FleetID, d.ComponentTypeID) select i.FleetID, i.FleetName, i.SystemID, i.Xcor, i.Ycor, i.OrbitBodyID, i.Training, (select count(*) from FCT_Ship s where s.FleetID = i.FleetID and s.GameID = i.GameID and s.RaceID = i.RaceID) as Ships, (select p.PopName from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = i.GameID and p.RaceID = i.RaceID and p.SystemID = i.SystemID and abs(i.Xcor - b.Xcor) < 1 and abs(i.Ycor - b.Ycor) < 1 order by (p.SystemBodyID = i.OrbitBodyID) desc, p.Population desc, p.PopulationID limit 1) as Colony, (select count(*) from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = i.GameID and p.RaceID = i.RaceID and p.SystemID = i.SystemID and abs(i.Xcor - b.Xcor) < 1 and abs(i.Ycor - b.Ycor) < 1) as Colonies, (select g.FleetName from FCT_Fleet g join working w on w.FleetID = g.FleetID where g.GameID = i.GameID and g.RaceID = i.RaceID and g.FleetID <> i.FleetID and g.SystemID = i.SystemID and abs(i.Xcor - g.Xcor) < 1 and abs(i.Ycor - g.Ycor) < 1 and w.Modules > 0 and (w.Type = 48 or (w.Type = 57 and i.Training = 0)) order by g.FleetName, g.FleetID limit 1) as Station, (select count(*) from FCT_Fleet g join working w on w.FleetID = g.FleetID where g.GameID = i.GameID and g.RaceID = i.RaceID and g.FleetID <> i.FleetID and g.SystemID = i.SystemID and abs(i.Xcor - g.Xcor) < 1 and abs(i.Ycor - g.Ycor) < 1 and w.Modules > 0 and (w.Type = 48 or (w.Type = 57 and i.Training = 0))) as Stations, (select n.Name from FCT_SystemBodyName n where n.SystemBodyID = i.OrbitBodyID and n.RaceID = i.RaceID limit 1) as BodyName, (select v.Name from FCT_RaceSysSurvey v where v.SystemID = i.SystemID and v.RaceID = i.RaceID and v.GameID = i.GameID limit 1) as SystemName, (select count(*) from FCT_JumpPoint j where j.GameID = i.GameID and j.SystemID = i.SystemID and j.Xcor = i.Xcor and j.Ycor = i.Ycor) as OnJump from idle i order by i.FleetID`
@@ -503,7 +501,7 @@ const MODULE_CHECKS = [
     return wrong.length === 0 || short(wrong)
   }],
   ...SAVES.map((save, index) => [save.id, `${save.file} (game ${save.GameID}, race ${save.RaceID}): every idle fleet is left out, listed or not evaluated as SQL says, with the option on each is listed under its place`, (o, t) => againstTruth(o, o.saves[index], t.saves[index], save.file)]),
-  ['save-copy', 'the copy of saves/AuroraDB.db the page serves, with an idle fleet put beside a fleet with a maintenance module, one on the position of a colony its orbit does not name and one with no stored position, as SQL says', (o, t) => againstTruth(o, o.copy, t.copy, 'the copy the page serves')],
+  ['save-copy', 'the copy of the fixture save the page serves, with an idle fleet put beside a fleet with a maintenance module, one on the position of a colony its orbit does not name and one with no stored position, as SQL says', (o, t) => againstTruth(o, o.copy, t.copy, 'the copy the page serves')],
 ]
 
 // ---------- the page ----------
@@ -706,13 +704,13 @@ const PAGE_CHECKS = [
 // [name, edits [[file, from, to]], the ids of the checks one of which must fail by a value, whether the page is read too]. Anchors are code, keys and attributes.
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
-  ['a colony counts only on the body the fleet orbits', [['fleets', '({ population, verdict: atPlace(fleet, population) })', '({ population, verdict: Number(population.SystemBodyID === fleet.OrbitBodyID) })']], ['colonies', 'names', 'save-modded', 'save-egg', 'save-copy', 'page-off'], true],
+  ['a colony counts only on the body the fleet orbits', [['fleets', '({ population, verdict: atPlace(fleet, population) })', '({ population, verdict: Number(population.SystemBodyID === fleet.OrbitBodyID) })']], ['colonies', 'names', 'save-fixture', 'save-copy', 'page-off'], true],
   ['a fleet exactly 1 km away is at the place', [['fleets', 'Math.abs(Number(fleet[axis]) - Number(other[axis])) < NEAR', 'Math.abs(Number(fleet[axis]) - Number(other[axis])) <= NEAR']], ['distance']],
   ['the system is not compared', [['fleets', 'allOf(isKnownNumber(fleet.SystemID) && isKnownNumber(other.SystemID) ? Number(fleet.SystemID) === Number(other.SystemID) : null, ...AXES.map(', 'allOf(...AXES.map(']], ['away', 'stations']],
   ['only the x axis is compared', [['fleets', '...AXES.map((axis) =>', '...AXES.slice(0, 1).map((axis) =>']], ['distance']],
   ['only the y axis is compared', [['fleets', '...AXES.map((axis) =>', '...AXES.slice(1).map((axis) =>']], ['away']],
   ['a position that is not stored is 0', [['fleets', 'isKnownNumber(fleet[axis]) && isKnownNumber(other[axis]) ? Math.abs(Number(fleet[axis]) - Number(other[axis])) < NEAR : null', 'Math.abs(Number(fleet[axis]) - Number(other[axis])) < NEAR']], ['unevaluated']],
-  ['the colonies of every race are read', [['fleets', ' and FCT_Population.RaceID = ${RaceID} order by', ' order by']], ['away', 'save-copy', 'save-egg']],
+  ['the colonies of every race are read', [['fleets', ' and FCT_Population.RaceID = ${RaceID} order by', ' order by']], ['away', 'save-copy', 'save-fixture']],
   ['the fleets of every race are read as fleets with modules', [['fleets', ' and FCT_Fleet.RaceID = ${RaceID} and ${UNDOCKED} and (', ' and ${UNDOCKED} and (']], ['stations']],
   ['only maintenance modules count', [['fleets', 'in (${MAINTENANCE_MODULE}, ${RECREATIONAL_MODULE})', 'in (${MAINTENANCE_MODULE})']], ['stations']],
   ['only recreational modules count', [['fleets', 'in (${MAINTENANCE_MODULE}, ${RECREATIONAL_MODULE})', 'in (${RECREATIONAL_MODULE})']], ['stations']],
@@ -742,7 +740,7 @@ const FAULTS = [
   ['a fleet with no stored position is not evaluated only while a place it could be at is unknown', [['fleets', 'Parked: placeKnown(fleet) ? anyOf(', 'Parked: true ? anyOf(']], ['unevaluated']],
   ['a fleet at a jump point is said to be in deep space', [['fleets', '} else if (fleet.JumpPointID) {', '} else if (false) {']], ['away']],
   ['a fleet in orbit is said to be in deep space', [['fleets', '} else if (fleet.OrbitBodyID > 0) {', '} else if (false) {']], ['away']],
-  ['a row counts one ship', [['fleets', 'ships: ctx.count(fleet.Ships)', 'ships: ctx.count(1)']], ['rows', 'save-modded', 'save-egg', 'page-off'], true],
+  ['a row counts one ship', [['fleets', 'ships: ctx.count(fleet.Ships)', 'ships: ctx.count(1)']], ['rows', 'save-fixture', 'page-off'], true],
   ['a ship with no stored class or one that names no class is not read for a station', [['fleets', ' or ${SHIP_CLASS_UNKNOWN} or ${COMPONENT_TYPE_UNKNOWN}) group by', ' or ${COMPONENT_TYPE_UNKNOWN}) group by']], ['unevaluated']],
   ['a ship with no stored class is a ship with no modules', [['fleets', "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is null or FCT_ShipClass.ShipClassID is null)'", "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is not null and FCT_ShipClass.ShipClassID is null)'"]], ['unevaluated']],
   ['a class that names no class is a class with no modules', [['fleets', "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is null or FCT_ShipClass.ShipClassID is null)'", "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is null)'"]], ['unevaluated']],
@@ -752,8 +750,8 @@ const FAULTS = [
   ['a ship whose class is not stored outweighs a module known to work', [['fleets', 'return modules && modules.Working > 0 ? 1 :', 'return station.Unclassed > 0 ? null : modules && modules.Working > 0 ? 1 :']], ['stations']],
   ['the missing class of a ship is counted only while the ship has no module line of a known type', [['fleets', 'count(distinct case when ${SHIP_CLASS_UNKNOWN} then FCT_Ship.ShipID end) as Unclassed', 'count(distinct case when ${SHIP_CLASS_UNKNOWN} and FCT_ShipDesignComponents.ComponentTypeID is null then FCT_Ship.ShipID end) as Unclassed']], ['unevaluated']],
   ['a component line with no stored component is a line with no module', [['fleets', '(FCT_ClassComponent.ClassID is not null and FCT_ShipDesignComponents', '(FCT_ClassComponent.ComponentID is not null and FCT_ShipDesignComponents']], ['unevaluated']],
-  ['the option does not list the fleets parked', [['fleets', 'ctx.options.idleFleetsAtColonies ? fleet.Verdict : allOf(', 'false ? fleet.Verdict : allOf(']], ['option', 'save-modded', 'save-egg', 'page-on'], true],
-  ['the caption of a parked fleet is the place it orbits', [['fleets', 'if (fleet.ParkedName) {', 'if (false) {']], ['names', 'save-egg', 'page-on'], true],
+  ['the option does not list the fleets parked', [['fleets', 'ctx.options.idleFleetsAtColonies ? fleet.Verdict : allOf(', 'false ? fleet.Verdict : allOf(']], ['option', 'save-fixture', 'page-on'], true],
+  ['the caption of a parked fleet is the place it orbits', [['fleets', 'if (fleet.ParkedName) {', 'if (false) {']], ['names', 'save-fixture', 'page-on'], true],
   ['the title names the places with the option on too', [['fleets', 'options.idleFleetsAtColonies ? \'\' : ', 'false ? \'\' : ']], ['page-title'], true],
   ['the rule\'s structure leaves out the ships\' mothership', [['fleets', '\'FCT_Ship.MaintenanceState, MothershipID, ShipClassID\'', '\'FCT_Ship.MaintenanceState, ShipClassID\'']], ['structure']],
   ['the rule\'s structure leaves out the class table of a ship', [['fleets', ', \'FCT_ShipClass.ShipClassID\'', '']], ['structure']],
@@ -923,7 +921,7 @@ const checkEveryBenign = async () => {
   report('variant passes: every benign rewrite together', wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
 }
 
-// A copy of saves/AuroraDB.db the page serves and SQL here reads, with three idle fleets away from every colony and anchorage put elsewhere: one beside a fleet with an undamaged maintenance module on a ship that is not docked and no colony within 1 km of it, one on the position of a colony its orbit does not name (orbit 0), and one in the system of that colony with no stored position and no orbit.
+// A copy of the fixture save the page serves and SQL here reads. The first fleet of the race with an undamaged maintenance module on a ship that is not docked is put 1,000,000 km from where it was, so that no colony is within 1 km of it, and three idle fleets away from every colony and anchorage are put elsewhere: one beside that fleet, one on the position of a colony its orbit does not name (orbit 0), and one in the system of that colony with no stored position and no orbit.
 const copyOfSave = async () => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-idle-fleets-'))
   const file = path.join(folder, 'save.db')
@@ -936,15 +934,26 @@ const copyOfSave = async () => {
   cleanups.push(() => closeRaw(raw))
 
   const database = standIn(raw)
+  const [holder] = await allRows(raw, `select g.FleetID, g.FleetName, g.SystemID, g.Xcor, g.Ycor from FCT_Fleet g where g.GameID = ${PAGE_SAVE.GameID} and g.RaceID = ${PAGE_SAVE.RaceID} and exists (select 1 from FCT_Ship s join FCT_ClassComponent c on c.ClassID = s.ShipClassID join FCT_ShipDesignComponents d on d.SDComponentID = c.ComponentID and d.ComponentTypeID = 48 where s.FleetID = g.FleetID and s.MothershipID = 0 and c.NumComponent > coalesce((select sum(x.Number) from FCT_DamagedComponent x where x.ShipID = s.ShipID and x.ComponentID = c.ComponentID), 0)) order by g.FleetID limit 1`)
+
+  assert.ok(holder, 'the save holds a fleet with an undamaged maintenance module on a ship that is not docked')
+
+  const station = { ...holder, Xcor: holder.Xcor + 1000000 }
+
+  await runSql(raw, `update FCT_Fleet set Xcor = ${station.Xcor}, OrbitBodyID = 0 where FleetID = ${station.FleetID}`)
+
+  const [near] = await allRows(raw, `select count(*) as Colonies from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = ${PAGE_SAVE.GameID} and p.RaceID = ${PAGE_SAVE.RaceID} and p.SystemID = ${station.SystemID} and abs(${station.Xcor} - b.Xcor) < 1 and abs(${station.Ycor} - b.Ycor) < 1`)
+
+  assert.equal(near.Colonies, 0, 'no colony of the race is within 1 km of the fleet with the maintenance module')
+
   const before = await truthOf(database, PAGE_SAVE)
 
   assert.ok(before.nulls.length === 0, `the save stores ${before.nulls.join(', ')}`)
 
   const away = [...before.fleets.values()].filter((fleet) => !fleet.parked).map((fleet) => fleet.id)
-  const [station] = await allRows(raw, `select g.FleetID, g.FleetName, g.SystemID, g.Xcor, g.Ycor from FCT_Fleet g where g.GameID = ${PAGE_SAVE.GameID} and g.RaceID = ${PAGE_SAVE.RaceID} and exists (select 1 from FCT_Ship s join FCT_ClassComponent c on c.ClassID = s.ShipClassID join FCT_ShipDesignComponents d on d.SDComponentID = c.ComponentID and d.ComponentTypeID = 48 where s.FleetID = g.FleetID and s.MothershipID = 0 and c.NumComponent > coalesce((select sum(x.Number) from FCT_DamagedComponent x where x.ShipID = s.ShipID and x.ComponentID = c.ComponentID), 0)) and not exists (select 1 from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = g.GameID and p.RaceID = g.RaceID and p.SystemID = g.SystemID and abs(g.Xcor - b.Xcor) < 1 and abs(g.Ycor - b.Ycor) < 1) order by g.FleetID limit 1`)
   const [colony] = await allRows(raw, `select p.PopName, p.SystemID, b.Xcor, b.Ycor from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = ${PAGE_SAVE.GameID} and p.RaceID = ${PAGE_SAVE.RaceID} order by p.PopulationID limit 1`)
 
-  assert.ok(station && colony && away.filter((id) => id !== station.FleetID).length >= 3, 'the save holds a fleet with a maintenance module away from every colony, a colony, and three idle fleets away from every colony and anchorage')
+  assert.ok(colony && away.filter((id) => id !== station.FleetID).length >= 3, 'the save holds a colony and three idle fleets away from every colony and anchorage')
 
   const [beside, onColony, unplaced] = away.filter((id) => id !== station.FleetID)
   const moves = [

@@ -3,7 +3,7 @@
 import { roundHalfEven } from './design-rules'
 import { ofRule, registerRule, unavailable } from './provenance'
 
-const TIME_VERSIONS = ['2.7.x']
+const TIME_VERSIONS = ['3.2.x']
 const SECONDS_PER_DAY = 86400
 
 // The delay each ship draws at a standard transit is (120 + a roll of 1 to 60) seconds times the crew multiplier.
@@ -32,7 +32,7 @@ export const RETRY_ASSUMPTION = 'a blocked transit is retried at the start of ea
 
 registerRule({
   id: 'route.jumpShock',
-  versions: TIME_VERSIONS,
+  versions: ['2.7.x'],
   units: 's',
   verification: 'estimated',
   structure: ['FCT_Ship.GradePoints, CrewMorale, OverhaulFactor, SensorDelay, MothershipID'],
@@ -42,7 +42,7 @@ registerRule({
 
 registerRule({
   id: 'route.jumpWait',
-  versions: TIME_VERSIONS,
+  versions: ['2.7.x'],
   units: 's',
   verification: 'estimated',
   structure: ['route.jumpShock', 'the flight to the next jump point', 'the handling between two jumps'],
@@ -61,7 +61,7 @@ registerRule({
 
 registerRule({
   id: 'route.elapsedTime',
-  versions: TIME_VERSIONS,
+  versions: ['2.7.x'],
   units: 'days',
   verification: 'estimated',
   structure: ['route.jumpWait', 'transport.fleetSpeed', 'the explored jump points'],

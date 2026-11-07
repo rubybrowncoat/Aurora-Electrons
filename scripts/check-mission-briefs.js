@@ -12,8 +12,8 @@
   - the record: a brief is a typed record of the campaign and race, seen on every branch, written only when the tab holds the file, and a brief made at a later game time is listed, flagged and not applied until moved; a stale save is refused unless asked to write over;
   - the page: its list, its draft, its preview, its saves and its notices on a pseudo instance (scripts/lib/page-loader.js);
   - the panel: the real component (its script loaded as the pages' are, its template compiled and rendered by Vue without a document): text that is not a figure is reported to the page and never given as a value, unfinished text stays through an update of the same brief and starts over when another is opened, and a range is drawn with its number in billions of km and the unit bn km beside it, each cell of a requirement read by its role (`data-brief-cell`);
-  - the browser: the page and panel together in the real renderer, served over a copy of AuroraDB.db (game and race Aurelian Empire, scripts/lib/page-server.js) and driven in Chromium (scripts/lib/browser-observe.js `observe`): text that is not a figure shows its error in place of the field's hint, marks the brief as changed and leaves Save doing nothing (a click on it draws no message), New asks before it drops such text (the text stays until Discard) and the text and its error do not carry over, and a range cell is drawn in bn km. The screen is read the way every page check reads it (`installScreen`, `hooked`, `readFigure`, `rolesRead`, `labelKey`): the hooks only find the elements, a state is read back through the module's own words (the hints of REQUIREMENTS, FIELD_ERRORS, BRIEF_WORDS), a figure is read whole in the grouping of the app's setting, and a cell by its role; every wait is on the operation the check started. Nothing is saved to the save;
-  - each save: a cargo hold stores 50 per HS, a class's cargo and hangar capacity equal the sum of its holds' and hangars', the ships docked in a mother ship never total more than its hangar capacity, no fighter class is as big as 10 HS, no commercial class mounts a military engine, and the loader's figures equal SQL of its own.
+  - the browser: the page and panel together in the real renderer, served over a copy of the fixture of scripts/lib/fixtures.js (game Galactic Shogunate, race Shogunate, scripts/lib/page-server.js) and driven in Chromium (scripts/lib/browser-observe.js `observe`): text that is not a figure shows its error in place of the field's hint, marks the brief as changed and leaves Save doing nothing (a click on it draws no message), New asks before it drops such text (the text stays until Discard) and the text and its error do not carry over, and a range cell is drawn in bn km. The screen is read the way every page check reads it (`installScreen`, `hooked`, `readFigure`, `rolesRead`, `labelKey`): the hooks only find the elements, a state is read back through the module's own words (the hints of REQUIREMENTS, FIELD_ERRORS, BRIEF_WORDS), a figure is read whole in the grouping of the app's setting, and a cell by its role; every wait is on the operation the check started. Nothing is saved to the save;
+  - each save: a cargo hold stores 50 per HS, a class's cargo and hangar capacity equal the sum of its holds' and hangars', the ships docked in a mother ship never total more than its hangar capacity, no light naval unit is over 20 HS, no commercial class mounts a military engine, and the loader's figures equal SQL of its own.
 
   The checks run through scripts/lib/fault-credit.js: a check's body is the call of the code under test, so a check that throws fails as a call that threw, and a verdict other than true is the check's own failure by value; the browser checks only read what the page showed, so one that throws is a defect of the harness, a failure over the real sources and a stop when a fault or a rewrite is judged (`judged`). Mutants: each deliberate fault in a copy of the utilities, of the page's script, of the panel or of the panel served to the browser is run with the checks it names and must fail each of them by a value, never by a throw (`caughtBy`, which stops the run when only checks that threw would credit a fault); each benign rewrite served to the browser must fail none, and a variant whose page does not get through is a defect of the harness, as nothing may be credited with it. The parts (`groups`, `page`, `panel`, `browser`, each mutant by its id such as `utility:3`, `page:0`, `panel:1`, `browser:0` or `browser-benign:0`, and each save by its label) run through scripts/lib/suite-runner.js, each with a deadline and a record that --resume continues: those in memory in a process each, those served to the browser one after another in a worker that starts one page server and one Chromium and warms them first, with the control `control:warm-reset`, which runs `browser:0` and then `browser` on the same server; `--variants=<key>,...` runs exactly the parts named. Prints `N of N checks passed`; exit code 1 when a check fails, 2 for a defect of the harness.
 */
@@ -30,6 +30,7 @@ const { patched } = require('./lib/mutant-source')
 const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rolesRead, labelKey } = require('./lib/browser-observe')
 const { failure, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
+const { FIXTURE, fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -533,6 +534,13 @@ const presetChecks = (m) => {
 
       return out.every(Boolean) ? true : short(out)
     }],
+    ['presets: no preset, requirement, axis, preference, field error or word of the brief names a ground pod, a pod of ground troops being no part of a missile the game designs', () => {
+      const named = { presets: mb.PRESETS, requirements: mb.REQUIREMENTS, axes: mb.AXES, words: mb.BRIEF_WORDS, errors: mb.FIELD_ERRORS }
+      const found = Object.entries(named).filter(([, value]) => /ground[ -]?pod|groundshots|ground troop/i.test(JSON.stringify(value))).map(([key]) => key)
+      const noted = mb.PRESET_KEYS.flatMap((key) => mb.PRESETS[key].unmodelled.map((note) => note.key))
+
+      return Object.keys(named).every((key) => JSON.stringify(named[key]).length > 2) && noted.length >= 4 && !noted.some((key) => /pod/i.test(key)) && found.length === 0 ? true : short(found)
+    }],
     ['presets: a blank name is filled and a name given is kept, and a preset is never applied to the draft by previewing it', () => {
       const blankName = mb.previewPreset(blank(), 'survey')
       const named = mb.previewPreset({ ...blank(), name: 'Mine' }, 'survey')
@@ -600,6 +608,17 @@ const alternativeChecks = (m) => {
       const read = (alternative) => ['cargoTons', 'hangarHS', 'deploymentMonths', 'classification', 'sizeHS'].map((key) => mb.figureOf(alternative, key, {}).value)
 
       return equal(read(military), [100, 20, 24, 'military', 40]) && equal(read(commercial), [100, 20, 24, 'commercial', 40]) && military.pinned && mb.figureOf(military, 'cargoTons', {}).status === 'confirmed' ? true : short([read(military), read(commercial)])
+    }],
+    ['alternative: the game-tied brief figures are registered for the supported line', () => {
+      const ids = ['brief.setSize', 'brief.setPayloadSpace', 'brief.classSize', 'brief.classPayloadSpace', 'brief.rangeKm', 'brief.cruiseEndurance', 'brief.classCargo', 'brief.classHangar', 'brief.classDeployment', 'brief.classClassification', 'brief.engineClassification']
+      const versions = ids.map((id) => pv.getRule(id).versions.join())
+
+      return versions.every((version) => version === '3.2.x') && ids.every((id) => pv.ruleSupports(id, '3.2.0') === true && pv.ruleSupports(id, '2.7.1') === false) ? true : short(versions)
+    }],
+    ['alternative: an unmodelled figure is registered independently of the save', () => {
+      const id = 'brief.notModelled'
+
+      return equal(pv.getRule(id).versions, ['x']) && pv.ruleSupports(id, '3.2.0') === true && pv.ruleSupports(id, '2.7.1') === true ? true : short(pv.getRule(id).versions)
     }],
     ['alternative: a saved class is unknown for what the save lacks, never 0', () => {
       const none = mb.propulsionAlternative(rowOf(m, 'class', { pinned: true }), null)
@@ -1322,7 +1341,7 @@ const PANEL_MUTATIONS = [
 // ---------- the browser ----------
 
 // The panel inside the page in a real browser (scripts/lib/page-server.js over a copy of the save, Chromium through scripts/lib/browser-observe.js `observe`): the wiring between the two and the drawn cells, which the pseudo instance and the render without a document cannot show. Nothing is saved.
-const BROWSER_SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire' }
+const BROWSER_SAVE = { file: FIXTURE.file, game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 90000
 
 // What the brief panel draws, read through the shared readers (`window.__screen`); runs in the page. Each part of the panel by its hook (`data-brief`) with the text it draws and whether it is on screen; the text the speed field shows and the line under it (its hint, or the error drawn in the hint's place); given the id of an alternative, the cells of its range requirement by their roles (`data-brief-cell`); and the "Thousands Separator" setting the figures are grouped by.
@@ -1587,6 +1606,9 @@ const MUTATIONS = [
   { name: 'the draft changed in place by a preset', find: 'export const applyPreview = (draft, preview, accepted) => {\n  const brief = copyOf(normaliseBrief(draft))', replace: 'export const applyPreview = (draft, preview, accepted) => {\n  const brief = draft', file: 'mission-briefs.js', fails: ['presets: only the ticked fields are applied'] },
   { name: 'a preset recorded on a draft it changed nothing in', find: 'if (applied.length) {\n    brief.preset = preview.preset', replace: 'if (true) {\n    brief.preset = preview.preset', file: 'mission-briefs.js', fails: ['presets: nothing ticked changes nothing'] },
   { name: 'the fighter preset the same as the survey one', find: 'requirements: Object.freeze({ maxSizeHS: 10, minSpeedKmS: 8000, minEnduranceDays: 2, minPayloadHS: 3, classification: \'military\' })', replace: 'requirements: Object.freeze({ maxSizeHS: 200, minSpeedKmS: 3000, minRangeKm: 20 * KM_PER_BN, minEnduranceDays: 90, minDeploymentMonths: 24 })', file: 'mission-briefs.js', fails: ['presets: survey and fighter give different visible requirements'] },
+  { name: 'a note of the fighter preset naming a ground pod', find: "note: 'The weapons and fire control a fighter carries are not part of a propulsion set or read from a saved class here, so they are not evaluated.'", replace: "note: 'A ground pod on a fighter missile is not part of a propulsion set, so it is not evaluated.'", file: 'mission-briefs.js', fails: ['presets: no preset, requirement, axis'] },
+  { name: 'a ground pod preset note key', find: "key: 'carrierHangar', label: 'Hangar space on a carrier'", replace: "key: 'groundPod', label: 'Hangar space on a carrier'", file: 'mission-briefs.js', fails: ['presets: no preset, requirement, axis'] },
+  { name: 'a word of the brief naming a ground pod', find: "unsaved: 'Unsaved changes',", replace: "unsaved: 'Unsaved ground pod changes',", file: 'mission-briefs.js', fails: ['presets: no preset, requirement, axis'] },
   { name: 'the notes of a preset made requirements', find: 'preset.unmodelled.filter((note) => !current.unmodelled.some((have) => have.key === note.key)).forEach((note) => items.push({ key: `note:$' + '{note.key}`, label: note.label, from: null, to: note.note, kind: \'add\' }))', replace: '', file: 'mission-briefs.js', fails: ['presets: what a preset cannot model stays an unknown note'] },
   { name: 'a name given overwritten by a preset', find: 'if (!isText(current.name)) {', replace: 'if (true) {', file: 'mission-briefs.js', fails: ['presets: a blank name is filled'] },
   { name: 'a set passing cargo', find: 'unknownFigure(SET_WITHOUT.cargoTons, \'tons\')', replace: 'ofRule({ rule: \'brief.classCargo\', value: 1e9, units: \'tons\', inputs: { present: [\'assumed\'] } })', file: 'mission-briefs.js', fails: ['alternative: a propulsion set is unknown for cargo', 'alternative: a cargo capacity equal to the requirement passes'] },
@@ -1595,6 +1617,9 @@ const MUTATIONS = [
   { name: 'a designed set taking the figures of a class', find: 'cargoTons: pinned ? stored(', replace: 'cargoTons: classFigures ? stored(', file: 'mission-briefs.js', fails: ['alternative: the class figures of a set that is not pinned are ignored', 'alternative: a propulsion set is unknown for cargo'] },
   { name: 'every set with a commercial engine military', find: 'else if (row.type === \'Military\') {', replace: 'else if (true) {', file: 'mission-briefs.js', fails: ['alternative: the classification of a set'] },
   { name: 'a commercial class read as military', find: 'value: commercial ? \'commercial\' : \'military\'', replace: 'value: commercial ? \'military\' : \'commercial\'', file: 'mission-briefs.js', fails: ['alternative: a saved class gives its cargo'] },
+  { name: 'the game-tied brief figures labelled for the earlier line', find: "const VERSIONS = ['3.2.x']", replace: "const VERSIONS = ['2.7.x']", file: 'mission-briefs.js', fails: ['alternative: the game-tied brief figures are registered'] },
+  { name: 'the game-tied brief figures labelled independently of the save', find: "const VERSIONS = ['3.2.x']", replace: "const VERSIONS = ['x']", file: 'mission-briefs.js', fails: ['alternative: the game-tied brief figures are registered'] },
+  { name: 'an unmodelled figure restricted to the supported line', find: "'A figure this alternative does not give: it is unknown, never 0', '', [], ['x'])", replace: "'A figure this alternative does not give: it is unknown, never 0', '', [], ['3.2.x'])", file: 'mission-briefs.js', fails: ['alternative: an unmodelled figure is registered independently'] },
   { name: 'a class figure the save lacks read as 0', find: 'cargoCapacity: numberOrNull(row.CargoCapacity),', replace: 'cargoCapacity: Number(row.CargoCapacity) || 0,', file: 'mission-briefs.js', fails: ['class figures: the loader reads what the save stores'] },
   { name: 'a class figure that is not stored read as 0 in the alternative', find: 'return value === null ? unavailable({ rule, units, missing: [`The save stores no $' + '{words} for this class`] })', replace: 'return value === null ? ofRule({ rule, value: 0, units, inputs: { present: [name] } })', file: 'mission-briefs.js', fails: ['alternative: a saved class is unknown for what the save lacks'] },
   { name: 'a hypothetical level not carried into the size', find: ': envelope({ value: row.totalHS, status: stateOf(STATUS.ASSUMED), rule: \'brief.setSize\', units: \'HS\', inputs: { present: [\'hull\', \'engines\', \'fuel tanks\'] }, assumptions: basis.assumptions })', replace: ': envelope({ value: row.totalHS, status: STATUS.ASSUMED, rule: \'brief.setSize\', units: \'HS\', inputs: { present: [\'hull\', \'engines\', \'fuel tanks\'] } })', file: 'mission-briefs.js', fails: ['alternative: a hypothetical tech level carries'] },
@@ -1632,7 +1657,7 @@ const mutatedCopy = (file, from, to) => {
 
 // The script's own arguments (those of scripts/lib/suite-runner.js taken out by `runnerArgs`).
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { mutations: true }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1646,7 +1671,7 @@ const parseArguments = (argv) => {
     }
   }
 
-  return options
+  return !options.modded && !options.stock ? { ...options, fixture: fixtureTriple() } : options
 }
 
 const openSave = (file) => new Promise((resolve, reject) => {
@@ -1704,9 +1729,9 @@ const saveChecks = async (m, database, { GameID, RaceID }, label) => {
 
   add(`the ships docked in a mother ship never total more than its hangar capacity (${docked.length} mother ships)`, docked.every((row) => row.held <= row.capacity + 1e-6) ? true : short(docked.find((row) => row.held > row.capacity + 1e-6)))
 
-  const fighters = await rowsOf(database, 'select count(*) as n, max(Size) as biggest from FCT_ShipClass where GameID = :GameID and FighterClass = 1', { GameID })
+  const lightNaval = await rowsOf(database, 'select count(*) as n, max(Size) as biggest from FCT_ShipClass where GameID = :GameID and LightNavalUnit = 1', { GameID })
 
-  add(`no fighter class is as big as 10 HS (${fighters[0].n} fighter classes, the biggest ${fighters[0].biggest === null ? 'none' : Number(fighters[0].biggest).toFixed(3)} HS)`, fighters[0].n > 0 && fighters[0].biggest < 10 ? true : short(fighters))
+  add(`no light naval unit is over 20 HS (${lightNaval[0].n} light naval units, the biggest ${lightNaval[0].biggest === null ? 'none' : Number(lightNaval[0].biggest).toFixed(3)} HS)`, lightNaval[0].n > 0 && lightNaval[0].biggest <= 20 + 1e-6 ? true : short(lightNaval))
 
   const engines = await rowsOf(database, 'select c.Commercial as commercial, d.MilitarySystem as military, count(distinct c.ShipClassID) as n from FCT_ShipClass c inner join FCT_ClassComponent cc on cc.ClassID = c.ShipClassID and cc.GameID = c.GameID inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where c.GameID = :GameID and d.ComponentTypeID = 1 group by c.Commercial, d.MilitarySystem', { GameID })
   const both = engines.filter((row) => row.commercial === 1 && row.military === 1)
@@ -1773,7 +1798,10 @@ const MUTANTS = [
   ...BROWSER_BENIGN.map((rewrite, index) => ({ kind: 'browser-benign', id: `browser-benign:${index}`, ...rewrite })),
 ]
 
-const SAVE_LABELS = ['modded', 'stock']
+const SAVE_LABELS = ['fixture', 'modded', 'stock']
+
+// The saves a run reads: the fixture unless `--modded` or `--stock` names others.
+const savesOf = (options) => SAVE_LABELS.filter((label) => options[label])
 
 // The verdict on a fault over the checks it names (`named`, `[name, test]`): each start of `fails` must begin a check that failed by a value (`caughtBy`, which stops the run when only checks that threw would credit the fault, unless the fault declares `throws`). Returns [verdict, detail], the detail naming each check that failed and how.
 const faultVerdict = async (named, { name, fails, throws = false }, began) => {
@@ -1886,16 +1914,16 @@ const variantsOf = (options) => [
   { key: 'groups', name: 'the mission brief: units, evaluation, ranking, presets, alternatives and the record', head: true, heading: 'The mission brief: units, evaluation, ranking, presets, alternatives and the record', deadline: DEADLINES.part, run: () => runPart('groups', options) },
   { key: 'page', name: 'the propulsion page', head: true, heading: '\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)', deadline: DEADLINES.part, run: () => runPart('page', options) },
   { key: 'panel', name: 'the panel', head: true, heading: '\nThe panel (its script, template and Vue, without a document)', deadline: DEADLINES.part, run: () => runPart('panel', options) },
-  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the page and the panel over a copy of AuroraDB.db, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser', options) },
+  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the page and the panel over a copy of the fixture, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser', options) },
   ...(options.mutations ? MUTANTS.map((mutant) => ({ key: mutant.id, name: `${mutant.kind} ${mutant.kind === 'browser-benign' ? 'rewrite' : 'mutation'}: ${mutant.name}`, heading: MUTATIONS_HEADING, pool: mutant.kind.startsWith('browser') ? 'browser' : null, deadline: mutant.kind.startsWith('browser') ? DEADLINES.browser : DEADLINES.mutant, run: () => runPart(mutant.id, options) })) : []),
-  ...SAVE_LABELS.map((label) => ({ key: label, name: `the ${label} save`, head: true, deadline: DEADLINES.save, run: () => runPart(label, options) })),
+  ...savesOf(options).map((label) => ({ key: label, name: `the ${label} save`, head: true, deadline: DEADLINES.save, run: () => runPart(label, options) })),
 ]
 
 const run = async () => {
   const options = parseArguments(runnerArgs().rest)
   const totals = await runSuite({
     script: __filename,
-    inputs: [options.modded[0], options.stock[0]],
+    inputs: savesOf(options).map((label) => options[label][0]),
     variants: variantsOf(options),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

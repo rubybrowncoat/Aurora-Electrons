@@ -3,14 +3,16 @@
 
   node scripts/check-components.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--pair <save.db> <GameID> <RaceID>]
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a copy of that stock save read with one anchor system altered, which shares its game and race but is another campaign, and another copy read without FCT_Game.AncientRelics; a save that is not there is reported as not run.
+  With no options it runs on the fixture of scripts/lib/fixtures.js (the migrated Galactic Shogunate save, game 141, race 784, standing for the modded save), a copy of the fixture read with one anchor system altered, which shares its game and race but is another campaign, another copy read without FCT_Game.LostColonies (a column of the line's signature, so the formula version is not stated), two temporary copies of the fixture made here for the same campaign in other files (one byte-identical, one with its last increments removed), and the shipped 3.1 save in saves/ (AuroraDB_310_shipped.db, game 160, race 903) for the template game; a stock save is read only when --stock names one; a save that is not there is reported as not run.
 
   It proves, on real rows and on synthetic manual components: the fixed-part and own-component loaders return the rows an independent query gives (the race's research through FCT_RaceTech TechID = SDComponentID, stock rows of game 0 included, fixed parts not researched left out) with every stored figure carried over, and loadStockTanks still returns what the old tank query returned; imported and manual additive components give equal basic totals and keep different provenance; a figure the save lacks stays unknown and cannot satisfy a constraint; components of other races, saves or revisions are not combined silently; and a size converts between HS and MSP only for the family the component declares. Any failed check sets exit code 1.
 */
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FIXED_TYPES = [2, 3, 31, 47, 48]
@@ -21,8 +23,27 @@ const OLD_TANKS_SQL = 'select FCT_ShipDesignComponents.SDComponentID, FCT_ShipDe
 let failures = 0
 let checks = 0
 
-// The files that hold the open modded save's campaign: the first is a byte-identical copy, the others earlier points of the same campaign (the same game and race, fewer increments).
-const REVISION_FILES = ['AuroraDB_271_massively_modded.db', 'AuroraDB_270_spookyerol_constructs.db', 'AuroraDB_270_spookyerol_advanced_tn.db']
+// The shipped 3.1 save, a game of too few systems to tell campaigns apart, for the template check.
+const TEMPLATE = { file: 'saves/AuroraDB_310_shipped.db', game: 160, race: 903 }
+
+// The same campaign in other files, made from the open save in the temp folder: the first is a byte-identical copy, the other an earlier point of the same campaign (the same game and race, its last three increments removed).
+const revisionCopies = (file, game) => {
+  const { Database } = require('bun:sqlite')
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-components-'))
+  const files = [path.join(folder, 'AuroraDB_identical.db'), path.join(folder, 'AuroraDB_earlier.db')]
+
+  files.forEach((copy) => fs.copyFileSync(path.resolve(root, file), copy))
+
+  const earlier = new Database(files[1])
+
+  try {
+    earlier.exec(`delete from FCT_Increments where GameID = ${game} and IncrementID in (select IncrementID from FCT_Increments where GameID = ${game} order by IncrementID desc limit 3)`)
+  } finally {
+    earlier.close()
+  }
+
+  return { folder, files }
+}
 
 const fail = (message) => {
   console.error(message)
@@ -41,9 +62,9 @@ const check = (name, ok, detail = '') => {
 
 const parseArguments = (argv) => {
   const defaults = {
-    stock: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-    modded: { file: 'AuroraDB.db', game: 140, race: 784 },
-    pair: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+    stock: null,
+    modded: fixtureSave(),
+    pair: fixtureSave(),
   }
   const options = { ...defaults }
 
@@ -98,7 +119,7 @@ const resultStatuses = (totals) => Object.fromEntries(Object.entries(totals.resu
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities(['design-data', 'design-rules', 'provenance'])
+  const utilities = await loadUtilities(['capabilities', 'design-data', 'design-rules', 'provenance'])
   const data = utilities['design-data']
   const { packTanks } = utilities['design-rules']
   const { STATUS, exportFields, isAvailable, passes, ruleSupports } = utilities.provenance
@@ -117,9 +138,13 @@ const run = async () => {
     const [[gameRow]] = await database.query('select GameTime from FCT_Game where GameID = :GameID', { replacements: { GameID: game } })
     const [ledger] = (await database.query('select count(*) as n, max(IncrementID) as tip from FCT_Increments where GameID = :GameID', { replacements: { GameID: game } }))[0]
     const [tip] = (await database.query('select GameTime from FCT_Increments where IncrementID = :Tip', { replacements: { Tip: ledger.tip } }))[0]
-    const shaped = (await database.query("select count(*) as n from pragma_table_info('FCT_Game') where name = 'AllowCMC'"))[0][0].n > 0
+    const shaped = (await Promise.all(utilities.capabilities.LINE_SIGNATURE.map(async (field) => {
+      const [table, column] = field.split('.')
 
-    check('source: ids, formula version and revision match independent queries', source.gameId === game && source.raceId === race && (source.formulaVersion === '2.7.x') === shaped && source.revision.gameTime === gameRow.GameTime && source.revision.increments === ledger.n && source.revision.tipIncrementId === ledger.tip && source.revision.tipGameTime === tip.GameTime && /^[0-9a-f]{32,}$/.test(source.revision.ledgerDigest) && /^[0-9a-f]{32,}$/.test(source.componentState), `formula ${source.formulaVersion}, ${source.revision.increments} increments, ${source.fingerprint ? source.fingerprint.length : 0} anchor systems, ledger ${source.revision.ledgerDigest.slice(0, 8)}, components ${source.componentState.slice(0, 8)}`)
+      return (await database.query(`select count(*) as n from pragma_table_info('${table}') where name = '${column}'`))[0][0].n > 0
+    }))).every(Boolean)
+
+    check('source: ids, formula version and revision match independent queries', source.gameId === game && source.raceId === race && (source.formulaVersion === '3.2.x') === shaped && source.revision.gameTime === gameRow.GameTime && source.revision.increments === ledger.n && source.revision.tipIncrementId === ledger.tip && source.revision.tipGameTime === tip.GameTime && /^[0-9a-f]{32,}$/.test(source.revision.ledgerDigest) && /^[0-9a-f]{32,}$/.test(source.componentState), `formula ${source.formulaVersion}, ${source.revision.increments} increments, ${source.fingerprint ? source.fingerprint.length : 0} anchor systems, ledger ${source.revision.ledgerDigest.slice(0, 8)}, components ${source.componentState.slice(0, 8)}`)
 
     const eligibleSql = (types, scope) => `select SDComponentID from FCT_ShipDesignComponents where ${scope === 'stock' ? 'GameID = 0' : 'GameID in (0, :GameID)'}${types ? ` and ComponentTypeID in (${types.join(', ')})` : ''} and SDComponentID in (select TechID from FCT_RaceTech where GameID = :GameID and RaceID = :RaceID) order by SDComponentID`
     const idsOf = async (sql) => (await database.query(sql, { replacements: { GameID: game, RaceID: race } }))[0].map((row) => row.SDComponentID)
@@ -339,7 +364,10 @@ const run = async () => {
     console.log(`\n== ${label}: missile engine size, revision evidence, source binding, set order, recomputed rules ==`)
 
     // a missile engine stores its size in MSP
-    const missileEngines = own.filter((component) => component.type.id === 56)
+    // the race of the game that holds missile engines: the open race when it does, else the one that holds the most (the fixture's player holds none; a rival does)
+    const [[holder]] = await database.query('select t.RaceID as RaceID, count(*) as n from FCT_RaceTech t inner join FCT_ShipDesignComponents c on c.SDComponentID = t.TechID where t.GameID = :GameID and c.ComponentTypeID = 56 group by t.RaceID order by (t.RaceID = :RaceID) desc, n desc limit 1', { replacements: context })
+    const missileOwn = holder && holder.RaceID !== context.RaceID ? await data.loadOwnComponents(database, { GameID: context.GameID, RaceID: holder.RaceID }) : own
+    const missileEngines = missileOwn.filter((component) => component.type.id === 56)
     const rows = new Map()
 
     for (const engine of missileEngines) {
@@ -452,10 +480,11 @@ const run = async () => {
     check(`component ${mine.id} (${mine.name}) of ${a.database.file} game ${a.source.gameId} race ${a.source.raceId} and of ${b.database.file} game ${b.source.gameId} race ${b.source.raceId} is not combined`, mine.id === theirs.id && ['other-race', 'other-save'].includes(crossed.conflicts[0].reason) && crossed.results.cost.status === STATUS.UNAVAILABLE, crossed.conflicts[0] ? crossed.results.cost.inputs.missing[0] : '')
   }
 
-  const checkRevisions = async (saved, { game, race }) => {
+  const checkRevisions = async (saved, { file: savedFile, game, race }) => {
     const context = { GameID: game, RaceID: race }
     const mine = saved.fixed.find((part) => part.id === 600) || saved.fixed.find((part) => part.type.id === 3)
     const rows = []
+    const { folder, files: REVISION_FILES } = revisionCopies(savedFile, game)
 
     console.log('\n== the same campaign in other files: byte-identical copy and earlier revisions ==')
 
@@ -476,8 +505,10 @@ const run = async () => {
     rows.forEach(({ file, part, relation, shared, totals }) => {
       const identical = file === REVISION_FILES[0]
 
-      check(`${file}: component ${part.id} is ${identical ? 'combined' : 'refused'} with the open save's (fingerprints ${shared}, sources ${relation}, ${part.source.revision.increments} against ${mine.source.revision.increments} increments)`, identical ? relation === 'same' && totals.conflicts.length === 0 : relation === 'other-revision' && totals.conflicts[0].reason === 'other-revision' && totals.results.sizeHS.value === null)
+      check(`${path.basename(file)}: component ${part.id} is ${identical ? 'combined' : 'refused'} with the open save's (fingerprints ${shared}, sources ${relation}, ${part.source.revision.increments} against ${mine.source.revision.increments} increments)`, identical ? relation === 'same' && totals.conflicts.length === 0 : relation === 'other-revision' && totals.conflicts[0].reason === 'other-revision' && totals.results.sizeHS.value === null)
     })
+
+    fs.rmSync(folder, { recursive: true, force: true })
 
     const altered = { ...mine.source, fingerprint: mine.source.fingerprint.map((system, index) => (index === 3 ? { ...system, Stars: system.Stars + 1 } : system)), openId: -1 }
     const forged = data.manualComponent({ id: 'forged', sizeHS: 1 }, altered)
@@ -488,7 +519,7 @@ const run = async () => {
   const checkPair = async ({ file, game, race }) => {
     const first = await openSave(file)
     const second = await openSave(file, (sql, rows) => (sql.includes('from FCT_System') && sql.includes('limit 16') ? rows.map((row, index) => (index === 3 ? { ...row, Stars: row.Stars + 1 } : row)) : rows))
-    const lacking = await openSave(file, (sql, rows) => (sql.includes("pragma_table_xinfo('FCT_Game')") ? rows.filter((row) => row.name !== 'AncientRelics') : rows))
+    const lacking = await openSave(file, (sql, rows) => (sql.includes("pragma_table_xinfo('FCT_Game')") ? rows.filter((row) => row.name !== 'LostColonies') : rows))
 
     console.log('\n== the same GameID and RaceID in a copy whose anchor systems differ: another campaign ==')
 
@@ -506,14 +537,18 @@ const run = async () => {
 
     const c = (await data.loadFixedParts(lacking, context, { types: [3] }))[0]
 
-    check('a save without FCT_Game.AncientRelics reads as estimated, not confirmed, while the save with it is confirmed', c.source.formulaVersion === null && a.source.formulaVersion !== null && data.quantityOf(c, 'cost').status === STATUS.ESTIMATED && data.quantityOf(a, 'cost').status === STATUS.CONFIRMED && data.quantityOf(c, 'cost').assumptions.some((text) => text.includes('not verified')))
+    check('a save without FCT_Game.LostColonies reads as estimated, not confirmed, while the save with it is confirmed', c.source.formulaVersion === null && a.source.formulaVersion !== null && data.quantityOf(c, 'cost').status === STATUS.ESTIMATED && data.quantityOf(a, 'cost').status === STATUS.CONFIRMED && data.quantityOf(c, 'cost').assumptions.some((text) => text.includes('not verified')))
     first.close()
     second.close()
     lacking.close()
   }
 
   const modded = await checkSave('modded save', options.modded)
-  const stock = await checkSave('stock save', options.stock)
+  const stock = options.stock ? await checkSave('stock save', options.stock) : null
+
+  if (!options.stock) {
+    console.log('SKIP  stock save: none is named (--stock <save.db> <GameID> <RaceID>); the checks that need a second 3.1 game with enough systems to tell it from the fixture (the stock save\'s own checks, the same id in two saves and the tank catalogues) need tier b')
+  }
 
   for (const [label, saved, spec] of [['modded save', modded, options.modded], ['stock save', stock, options.stock]]) {
     if (saved) {
@@ -525,9 +560,7 @@ const run = async () => {
     }
   }
 
-  if (stock) {
-    await checkTemplate('stock save', options.stock, 137, 775)
-  }
+  await checkTemplate('shipped save', TEMPLATE, TEMPLATE.game, TEMPLATE.race)
 
   if (modded && stock) {
     await checkCrossSave('same component id in two different saves', modded, stock)

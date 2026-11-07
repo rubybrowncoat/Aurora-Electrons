@@ -9,7 +9,8 @@ const crypto = require('crypto')
 const { Model } = require('sequelize')
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..')
-const STORAGE_PATH = path.resolve(PROJECT_ROOT, process.env.AURORA_DB || 'AuroraDB.db')
+// The save the server starts on: AURORA_DB, else the fixture of scripts/lib/fixtures.js, the one default save of the scripts.
+const STORAGE_PATH = path.resolve(PROJECT_ROOT, process.env.AURORA_DB || require('../lib/fixtures').FIXTURE.file)
 // The saves the page may switch to, besides the one the server started on: AURORA_DB_SAVES lists more, separated as PATH is. The server runs real SQL on whatever it opens, so it opens only these.
 const ALLOWED_SAVES = [STORAGE_PATH, ...String(process.env.AURORA_DB_SAVES || '').split(path.delimiter).filter(Boolean).map((file) => path.resolve(PROJECT_ROOT, file))]
 const MODEL_METHODS = new Set(['findAll', 'findOne', 'findByPk', 'count', 'findAndCountAll'])

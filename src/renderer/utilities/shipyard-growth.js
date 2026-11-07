@@ -1,10 +1,11 @@
-// What it costs, in build points, and how long it takes to grow a shipyard: add a slipway, add one of the fixed capacity steps, or raise the capacity continually to a target; and the labels of the work a yard does (its tasks and its upgrade activities). The prices are pure arithmetic on a yard record (utilities/refits.js `loadYards`) and the race's shipyard operations, every figure a result of a registered rule (utilities/provenance.js) so an input the save lacks gives an unavailable result that names it, never a price of 0. The time of each is the Production Recap's own: the shared rate and finish functions of utilities/production.js are called, not copied.
+// What it costs, in build points, and how long it takes to grow a shipyard: add a slipway, add one of the fixed capacity steps, or raise the capacity continually to a target (a Light yard is offered the slipway alone); and the labels of the work a yard does (its tasks and its upgrade activities). The prices are pure arithmetic on a yard record (utilities/refits.js `loadYards`) and the race's shipyard operations, every figure a result of a registered rule (utilities/provenance.js) so an input the save lacks gives an unavailable result that names it, never a price of 0. The time of each is the Production Recap's own: the shared rate and finish functions of utilities/production.js are called, not copied.
 
-import { finishDays, shipRate, shipyardContinualDays, shipyardFinish, shipyardUpgradeRate } from './production'
+import { commercialSizeFactor, shipRate, shipTaskFinish, shipyardContinualDays, shipyardFinish, shipyardUpgradeRate } from './production'
 import { isAvailable, registerRule, unavailable } from './provenance'
-import { SHIPYARD_TYPE, figure } from './refits'
+import { REFIT_TASK_TYPES, figure } from './refits'
+import { SHIPYARD_TYPE, growsInCapacity, isFullCapacityYard } from './shipyard-types'
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 const UNVERIFIED_STEPS = 'No yard activity of this step is stored in any save checked, so its price follows the pattern of the steps that are: the slipways times the same unit price times the step\'s multiple.'
 
 // The labels of the work a yard does. A shipyard task (`FCT_ShipyardTask.TaskTypeID`) is a ship made, repaired, refitted or scrapped; an upgrade activity (`FCT_Shipyard.TaskType`) is what the yard itself is being modified with, 0 being nothing.
@@ -36,7 +37,7 @@ export const CONTINUAL_ACTIVITY = 8
 export const OPERATIONS_TECH_TYPE = 158
 export const SHIPYARD_TECH_VIEWS = Object.freeze({ 30: 'yards', [OPERATIONS_TECH_TYPE]: 'growth' })
 
-// Build points to add one slipway to a naval yard are the capacity over 500 tons times this; a capacity step is the slipways times this times the step's multiple of 500 tons. A commercial or repair yard pays a tenth.
+// Build points to add one slipway to a naval or light yard are the capacity over 500 tons times this; a capacity step is the slipways times this times the step's multiple of 500 tons. A commercial or repair yard pays a tenth.
 export const UPGRADE_UNIT_COST = 120
 export const UPGRADE_UNIT_TONS = 500
 export const COMMERCIAL_UPGRADE_FACTOR = 0.1
@@ -71,7 +72,7 @@ registerRule({
   units: 'BP',
   verification: 'confirmed',
   structure: STRUCTURE,
-  note: 'The build points to add a slipway: the yard\'s capacity over 500 tons times 120 times the race\'s shipyard operations, a tenth of it at a commercial or repair yard. It reproduces the stored cost of every add-slipway activity of the saves checked, naval and commercial.',
+  note: 'The build points to add a slipway: the yard\'s capacity over 500 tons times 120 times the race\'s shipyard operations, a tenth of it at a commercial or repair yard (a light yard pays the whole). It reproduces the stored cost of every add-slipway activity of the saves checked, naval and commercial.',
 })
 
 registerRule({
@@ -80,7 +81,7 @@ registerRule({
   units: 'BP',
   verification: 'confirmed',
   structure: STRUCTURE,
-  note: 'The build points to add 1,000, 5,000 or 10,000 tons of capacity: the yard\'s slipways times 120 times the race\'s shipyard operations times 2, 10 or 20, a tenth of it at a commercial or repair yard. It reproduces the stored cost of every such activity of the saves checked.',
+  note: 'The build points to add 1,000, 5,000 or 10,000 tons of capacity: the yard\'s slipways times 120 times the race\'s shipyard operations times 2, 10 or 20, a tenth of it at a commercial or repair yard. It reproduces the stored cost of every such activity of the saves checked. A light yard is offered no capacity step.',
 })
 
 registerRule({
@@ -99,7 +100,7 @@ registerRule({
   units: 'BP',
   verification: 'estimated',
   structure: STRUCTURE,
-  note: 'The build points of a continual upgrade to a target capacity: the tons added over 500 times the slipways times 120 times the race\'s shipyard operations, a tenth of it at a commercial or repair yard, which is the price per ton of the fixed steps. The game adds capacity each construction period until the target is passed, so the last period may overshoot. A stored continual activity carries no price to compare with.',
+  note: 'The build points of a continual upgrade to a target capacity: the tons added over 500 times the slipways times 120 times the race\'s shipyard operations, a tenth of it at a commercial or repair yard, which is the price per ton of the fixed steps. The game adds capacity each construction period until the target is passed, so the last period may overshoot. A stored continual activity carries no price to compare with. A light yard is offered no continual upgrade.',
   assumptions: ['The price per ton is the fixed steps\'; the game\'s own continual activity stores none.'],
 })
 
@@ -127,11 +128,11 @@ export const shipyardOperations = (held, version = null) => {
 // What a price lacks at a yard that belongs to a ship: the game does not let a ship-based yard be modified.
 export const SHIP_BASED_GAP = 'a yard that belongs to no ship (a ship-based yard cannot be modified)'
 
-// The scale an upgrade price takes from the yard's type: 1 at a naval yard, a tenth at a commercial or repair yard, null for a type the rules do not cover.
-const factorOf = (type) => (type === SHIPYARD_TYPE.NAVAL ? 1 : type === SHIPYARD_TYPE.COMMERCIAL || type === SHIPYARD_TYPE.REPAIR ? COMMERCIAL_UPGRADE_FACTOR : null)
+// The scale an upgrade price takes from the yard's type: 1 at a naval or a light yard, a tenth at a commercial or repair yard, null for a type the rules do not cover.
+const factorOf = (type) => (isFullCapacityYard(type) ? 1 : type === SHIPYARD_TYPE.COMMERCIAL || type === SHIPYARD_TYPE.REPAIR ? COMMERCIAL_UPGRADE_FACTOR : null)
 
-// A price of `rule`: unavailable, naming each input the yard or the operations factor lacks, else `compute(factor, operations)` as a figure of the rule. A yard that belongs to a ship cannot be modified, so it has no price, and one whose ship link is not stored names that. `uses` is which of the yard's capacity and slipways the price reads.
-const priced = ({ rule, yard, operations, version, uses, compute, present, assumptions = [] }) => {
+// A price of `rule`: unavailable, naming each input the yard or the operations factor lacks, else `compute(factor, operations)` as a figure of the rule. A yard that belongs to a ship cannot be modified, so it has no price, and one whose ship link is not stored names that. `uses` is which of the yard's capacity and slipways the price reads; `capacityGrowth` marks a price of growing the capacity, which a light yard is not offered.
+const priced = ({ rule, yard, operations, version, uses, compute, present, assumptions = [], capacityGrowth = false }) => {
   const missing = []
 
   if (yard.shipBased === true) {
@@ -144,6 +145,8 @@ const priced = ({ rule, yard, operations, version, uses, compute, present, assum
     missing.push('the yard\'s type')
   } else if (factorOf(yard.type) === null) {
     missing.push(`the rules for yard type ${yard.type}`)
+  } else if (capacityGrowth && !growsInCapacity(yard.type)) {
+    missing.push('a yard whose capacity can grow (a light yard adds slipways only)')
   }
 
   if (uses.includes('capacity') && !isNumber(yard.capacity)) {
@@ -183,6 +186,7 @@ export const capacityStepPrice = ({ yard, step, operations, version = null }) =>
   operations,
   version,
   uses: ['slipways'],
+  capacityGrowth: true,
   present: ['the yard\'s slipways and type', 'the race\'s shipyard operations'],
   assumptions: step.pattern ? [UNVERIFIED_STEPS] : [],
   compute: (factor, factorOps) => yard.slipways * UPGRADE_UNIT_COST * factorOps * step.units * factor,
@@ -197,6 +201,7 @@ export const continualPrice = ({ yard, target, operations, version = null }) => 
     operations,
     version,
     uses: ['capacity', 'slipways'],
+    capacityGrowth: true,
     present: ['the yard\'s capacity, slipways and type', 'the target capacity', 'the race\'s shipyard operations'],
     assumptions: ['The price per ton is the fixed steps\'; the game\'s own continual activity stores none.'],
     compute: (factor, factorOps) => ((isNumber(target) ? target : 0) - yard.capacity) / UPGRADE_UNIT_TONS * yard.slipways * UPGRADE_UNIT_COST * factorOps * factor,
@@ -211,10 +216,10 @@ export const continualPrice = ({ yard, target, operations, version = null }) => 
   return price
 }
 
-// The rows of the fixed upgrades of `yard`, the slipway first and the capacity steps after it: [{ key, taskType, label, tons (null for the slipway), price }].
+// The rows of the fixed upgrades of `yard`, the slipway first and the capacity steps after it (a light yard is offered the slipway alone): [{ key, taskType, label, tons (null for the slipway), price }].
 export const upgradePrices = ({ yard, operations, version = null }) => [
   { key: 'slipway', taskType: SLIPWAY_ACTIVITY, label: SHIPYARD_UPGRADE_TYPES[SLIPWAY_ACTIVITY], tons: null, price: slipwayPrice({ yard, operations, version }) },
-  ...CAPACITY_STEPS.map((step) => ({ key: `step-${step.tons}`, taskType: step.taskType, label: SHIPYARD_UPGRADE_TYPES[step.taskType], tons: step.tons, price: capacityStepPrice({ yard, step, operations, version }) })),
+  ...(yard.type === SHIPYARD_TYPE.LIGHT ? [] : CAPACITY_STEPS.map((step) => ({ key: `step-${step.tons}`, taskType: step.taskType, label: SHIPYARD_UPGRADE_TYPES[step.taskType], tons: step.tons, price: capacityStepPrice({ yard, step, operations, version }) }))),
 ]
 
 // The shape of a yard that the Production Recap's shipyard functions read: its type, capacity, slipways and the activity (a type, the build points left, whether it is paused and the capacity target).
@@ -252,11 +257,12 @@ export const continualTime = (modifiers, yard, target, price) => {
   return shipyardContinualDays(modifiers, shapeOf(yard, { taskType: CONTINUAL_ACTIVITY, paused: false, remaining: null, target }))
 }
 
-// A shipyard task's time left as { rate, result, idle }: the Production Recap's, which is the colony's build rate for the task's class (its size, with a quarter of the weight at a yard that is not naval) over the task's remaining build points. `task` is one of a yard's `taskRows`.
-export const taskFinish = (modifiers, yard, task) => {
-  const rate = shipRate(modifiers, { Size: task.size, CommercialModifier: yard.type === SHIPYARD_TYPE.NAVAL ? 1 : isNumber(yard.type) ? 0.25 : null })
+// A shipyard task's time left as { rate, result, idle }: the Production Recap's, which is the colony's build rate for the task's class (its size, with a quarter of the weight for a commercial class) over the build points the task has left over all its hulls (`shipTaskFinish`). A refit dates by its target class, as the game's own date does, so its row takes that class's size and flag. `task` is one of a yard's `taskRows`.
+export const taskFinish = (modifiers, task) => {
+  const refit = REFIT_TASK_TYPES.includes(task.taskType)
+  const rate = shipRate(modifiers, { Size: refit ? task.targetSize : task.size, CommercialModifier: commercialSizeFactor(refit ? task.targetCommercial : task.commercial) })
 
-  return { rate, ...finishDays({ rule: 'production.shipFinish', rate, remaining: task.remaining, remainingName: 'the task\'s remaining build points', paused: task.paused }) }
+  return { rate, ...shipTaskFinish({ rate, task: { remaining: task.remaining, totalBP: task.totalBP, hulls: task.hulls }, paused: task.paused }) }
 }
 
 // A yard's own activity (the upgrade or retool its `taskType` names) as { rate, result, idle }: the Recap's finish. Nothing for a yard whose activity is 0.

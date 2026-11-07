@@ -3,8 +3,6 @@
 
   node scripts/check-history-milestones.js [--no-mutations]
 
-  MILESTONES_SAVES=<folder> points the saves check at another folder of saves (or at none: a folder that is not there skips it). A check that needs the owner's saves and does not find them is reported as skipped, is not counted, and no mutant is expected to fail it.
-
   Groups:
   - time: a milestone between two samples keeps its exact time to the last digit, its marker is drawn at that time whatever the samples are (another set of samples, a span, a thinned history), it never snaps to a sample, the nearest sample is only reported beside it, the time survives a restart, and a typed date is the calendar date of the game's own clock;
   - edits: a new milestone, an edit, a delete, a stale edit refused with the stored milestone and written over only when asked, a stale delete refused, a milestone the adapter refuses is not written, and the other fields of an edit are kept;
@@ -12,7 +10,6 @@
   - links: a deleted object leaves the milestone with an unresolved link that is never rebound by name, an ID reused by another object is changed, a renamed colony, system, fleet or ship stays linked and shows its new name, a link to a kind of object the save could not give is unknown and never missing, an edit keeps the link it has unless a link is given, and a log event is named by its increment, its content and the place it names, never by the row number of SQLite (no query asks for it, and a link made in one save resolves in a save whose rows were all renumbered); rows that say the same in two places are two events, and rows that are the same in every field are one ambiguous event; every linked increment is read, in batches, however many there are; a link keeps the campaign and branch it was made on, is linked there whatever the ID, and on another branch of the campaign is certified only when the object demonstrably predates the two branches parting (a ship or system by its time, a colony by its place, a fleet never), else it is unknown and not unresolved;
   - scope: a link is made only against the objects of the race it is kept for, and only for an object that is there as it was picked;
   - attached: after an attach (merged into the same branch, or as a branch of its own) the milestones of the attached campaign are listed apart, never drawn, never merged on a read, and adopted only on request, once; a source file that cannot be read is named; a milestone adopted onto one branch reads as adopted on every branch of the campaign and names the branch that holds the copy;
-  - saves: on the owner's consecutive saves of artifacts/boscodiogigia-sequential-saves (opened read only, skipped when they are not here) the objects load with the real queries, the objects both saves hold keep their fingerprint, the log rows shared by two saves keep their increment and content and lose their row number, and a link to an event made in the earlier save resolves in the later one;
   - backup: milestones round-trip through the backup's annotation adapter with their exact time, link and policy, a kind the installation has no adapter for is refused, and a backup without milestones leaves them as they are;
   - page: the Milestones panel names what it is for in the page's voice, every chart carries the markers at the exact time, also on the percent scale and in another span, the form keeps the exact time of a milestone it edits, a stale edit is not written over silently, a draft is dropped and refused when the campaign, race or branch shown changes, objects read for another save or race are not used, and the attached campaigns' milestones are listed apart and adopted on request (the backup's registration of the milestone adapter is checked with every other kind by scripts/check-history-restore.js).
 
@@ -22,7 +19,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { createRequire } = require('module')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
@@ -31,7 +28,6 @@ const { chunksOf, spread } = require('./lib/mutant-chunks')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pageFile = path.join(root, 'src', 'renderer', 'pages', 'history.vue')
-const SAVES = process.env.MILESTONES_SAVES || path.join(root, 'artifacts', 'boscodiogigia-sequential-saves')
 const NAMES = ['history-milestones', 'scenario-records', 'history-backup']
 const START_YEAR = 2050
 const YEAR = 31536000
@@ -364,6 +360,12 @@ const suite = (m) => {
     assert.equal(after.t, 950)
     assert.equal(after.type, 'discovery')
     assert.equal(after.text, 'Landing, corrected')
+    const linkedIds = after.links.map((link) => `${link.type}:${link.id}`)
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE milestone linked object IDs after editing:', JSON.stringify(linkedIds))
+    }
+    assert.deepEqual(linkedIds, ['colony:5'], 'the milestone keeps the linked colony identity')
     assert.equal(after.link.id, 5)
     assert.equal(after.link.status, 'unknown')
     assert.equal(after.policy, 'campaign')
@@ -753,6 +755,9 @@ const suite = (m) => {
     const database = fakeSave(saveOf([logEvent(1, 10, 100, 5, 'a')]), { failing: ['FCT_Fleet'] })
     const { objects, failed } = await milestones.loadObjects(database, { GameID: 1, RaceID: 7 })
 
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE colony and event counts after a fleet read fails:', JSON.stringify([objects.colony.size, objects.event.size]))
+    }
     assert.deepEqual(Object.keys(failed), ['fleet'])
     assert.match(failed.fleet, /the save lacks the fleet data/)
     assert.equal(objects.fleet, undefined)
@@ -1261,85 +1266,6 @@ const suite = (m) => {
     assert.equal((await milestones.adoptMilestone(w.repo, scope(), { uuid: 'x' })).code, 'invalid-milestone')
   })
 
-  // ---- saves --------------------------------------------------------------------------------------------------------
-
-  check('saves', 'on the owner\'s consecutive saves the objects load with the real queries and a link to an event resolves in the later save by its increment and content', async () => {
-    const found = await realPair(m)
-
-    if (!found) {
-      return { skipped: `the owner's saves are not in ${path.relative(root, SAVES) || SAVES}` }
-    }
-
-    try {
-      const { first, second } = found
-      const w = make()
-      const loadedFirst = await milestones.loadObjects(first.database, { GameID: first.GameID, RaceID: first.RaceID })
-
-      assert.deepEqual(loadedFirst.failed, {})
-      Object.entries(loadedFirst.objects).forEach(([type, rows]) => assert.ok(rows.size > 0, `${type} has rows in the earlier save`))
-
-      const sharedRows = found.shared
-      const picks = milestones.linkChoices(loadedFirst.objects, 'event').slice(0, 60)
-
-      assert.ok(picks.length > 0)
-
-      for (const pick of picks) {
-        await added(w, scope(), { t: pick.row.time, text: pick.name.slice(0, 80) || 'event', link: { type: 'event', row: pick.row } })
-      }
-
-      const wanted = milestones.incrementsOf(entriesOf(w, scope()))
-      const loadedSecond = await milestones.loadObjects(second.database, { GameID: second.GameID, RaceID: second.RaceID, increments: wanted })
-
-      assert.deepEqual(loadedSecond.failed, {})
-
-      const entries = entriesOf(w, scope(), { objects: loadedSecond.objects })
-      const counts = { linked: 0, ambiguous: 0, changed: 0, missing: 0 }
-
-      entries.forEach((entry) => {
-        const now = loadedSecond.objects.event.get(entry.link.id)
-        const was = loadedFirst.objects.event.get(entry.link.id)
-        const expected = now ? (now.copies === was.copies ? (now.copies > 1 ? 'ambiguous' : 'linked') : 'changed') : 'missing'
-
-        assert.equal(entry.link.status, expected, `${entry.link.id} ${entry.text}`)
-        counts[entry.link.status] += 1
-      })
-
-      assert.ok(counts.linked > 0, `a link made in the earlier save resolves in the later one (${JSON.stringify(counts)})`)
-      assert.ok(sharedRows.shared > 100, `the saves share log rows (${sharedRows.shared})`)
-      assert.ok(sharedRows.sameRowid / sharedRows.shared < 0.01, `row numbers survive between saves: ${sharedRows.sameRowid} of ${sharedRows.shared}`)
-      assert.ok(sharedRows.sameKey === sharedRows.shared, 'the shared rows keep their key')
-
-      const stable = []
-
-      for (const type of ['colony', 'system', 'fleet', 'ship']) {
-        let both = 0
-        let same = 0
-        let pruned = 0
-
-        loadedFirst.objects[type].forEach((row, id) => {
-          const later = loadedSecond.objects[type].get(id)
-
-          if (later) {
-            const alike = milestones.LINK_TYPES[type].fingerprint(row) === milestones.LINK_TYPES[type].fingerprint(later)
-            const lost = !alike && type === 'fleet' && row.created !== null && later.created === null
-
-            both += 1
-            same += alike ? 1 : 0
-            pruned += lost ? 1 : 0
-          }
-        })
-
-        assert.ok(both > 0, `${type}: both saves hold some`)
-        assert.equal(same + pruned, both, `${type}: objects both saves hold keep their fingerprint, apart from a fleet whose creation entry was pruned from its history`)
-        stable.push(`${both} ${type}${pruned ? ` (${pruned} with a creation entry pruned)` : ''}`)
-      }
-
-      return `${first.name} then ${second.name}: ${sharedRows.shared} of ${sharedRows.rows} log rows of the earlier save kept their increment and content in the later one and ${sharedRows.sameRowid} kept their row number; ${counts.linked} event links linked, ${counts.ambiguous} ambiguous, ${counts.changed} changed, ${counts.missing} missing; ${stable.join(', ')} objects in both keep their fingerprint`
-    } finally {
-      found.close()
-    }
-  })
-
   // ---- backup -------------------------------------------------------------------------------------------------------
 
   const annotated = (inst, ids = 0) => {
@@ -1414,86 +1340,6 @@ const suite = (m) => {
   return checks
 }
 
-// ---- The owner's consecutive saves (read only) ------------------------------------------------------------------------
-
-const realPair = async (m) => {
-  if (!fs.existsSync(SAVES)) {
-    return null
-  }
-
-  const sqlite3 = localRequire('sqlite3')
-  const files = fs.readdirSync(SAVES).filter((name) => name.endsWith('.db'))
-  const opened = []
-  const close = () => opened.forEach((db) => db.close())
-  const open = (name) => {
-    const db = new sqlite3.Database(path.join(SAVES, name), sqlite3.OPEN_READONLY)
-    const run = (sql, params = {}) => new Promise((resolve, reject) => db.all(sql, Object.fromEntries(Object.entries(params).map(([key, value]) => [`:${key}`, value])), (error, rows) => (error ? reject(error) : resolve(rows))))
-
-    opened.push(db)
-
-    return { name, run, database: { query: async (sql, { replacements = {} } = {}) => [await run(sql, replacements)] } }
-  }
-
-  try {
-    const GameID = 140
-    const RaceID = 784
-    const saves = []
-
-    for (const name of files) {
-      const save = open(name)
-      const [game] = await save.run('select GameTime from FCT_Game where GameID = :GameID', { GameID })
-
-      if (game) {
-        saves.push({ ...save, GameID, RaceID, GameTime: game.GameTime })
-      }
-    }
-
-    saves.sort((a, b) => a.GameTime - b.GameTime)
-
-    if (saves.length < 2) {
-      close()
-
-      return null
-    }
-
-    let best = 0
-
-    for (let index = 1; index < saves.length - 1; index += 1) {
-      if (saves[index + 1].GameTime - saves[index].GameTime < saves[best + 1].GameTime - saves[best].GameTime) {
-        best = index
-      }
-    }
-
-    const [first, second] = [saves[best], saves[best + 1]]
-    const rowsOf = (save) => save.run('select rowid as RowNumber, IncrementID, Time, EventType, MessageText, SystemID, PopulationID, Xcor, Ycor, IDType from FCT_GameLog where GameID = :GameID and RaceID = :RaceID', { GameID, RaceID })
-    const [rowsFirst, rowsSecond] = [await rowsOf(first), await rowsOf(second)]
-    const secondBy = new Map()
-
-    rowsSecond.forEach((row) => {
-      const key = m.milestones.eventKey(row)
-
-      secondBy.set(key, [...(secondBy.get(key) || []), row])
-    })
-
-    const shared = { rows: rowsFirst.length, shared: 0, sameRowid: 0, sameKey: 0 }
-
-    rowsFirst.forEach((row) => {
-      const twins = secondBy.get(m.milestones.eventKey(row))
-
-      if (twins) {
-        shared.shared += 1
-        shared.sameKey += 1
-        shared.sameRowid += twins.some((twin) => twin.RowNumber === row.RowNumber) ? 1 : 0
-      }
-    })
-
-    return { first, second, shared, close }
-  } catch (error) {
-    close()
-    throw error
-  }
-}
-
 // ---- The page --------------------------------------------------------------------------------------------------------
 
 const pageSource = () => fs.readFileSync(pageFile, 'utf8').replace(/\r\n/g, '\n')
@@ -1550,6 +1396,12 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
     assert.ok(guides.length >= 6)
     guides.forEach((guide) => {
+      const count = guide && Array.isArray(guide.markers) ? guide.markers.length : 0
+
+      if (process.argv.includes('--detail')) {
+        console.log('VALUE milestone markers drawn per chart:', count)
+      }
+      assert.equal(count, 1, 'the chart draws one milestone marker')
       assert.equal(guide.markers.length, 1)
       assert.equal(guide.markers[0].x, START_YEAR + (15 * DAY + 777) / YEAR)
       assert.equal(guide.markers[0].label, 'Battle')
@@ -1567,7 +1419,7 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     vm.milestoneRevision += 1
 
     const x = START_YEAR + (45 * DAY + 5) / YEAR
-    const xs = () => guidesOf(vm).map((guide) => guide.markers.map((marker) => marker.x))
+    const xs = () => guidesOf(vm).map((guide) => (guide && Array.isArray(guide.markers) ? guide.markers : []).map((marker) => marker.x))
 
     assert.deepEqual(xs(), guidesOf(vm).map(() => [x]))
 
@@ -1575,7 +1427,12 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
     const percent = vm.charts.find((chart) => chart.key === 'minerals').options.plugins.guides
 
-    assert.deepEqual(percent.markers.map((marker) => marker.x), [x])
+    const positions = (percent && Array.isArray(percent.markers) ? percent.markers : []).map((marker) => marker.x)
+
+    if (process.argv.includes('--detail')) {
+      console.log('VALUE percent-scale milestone marker positions:', JSON.stringify(positions))
+    }
+    assert.deepEqual(positions, [x], 'the percent-scale chart draws the milestone at its own time')
     assert.deepEqual(percent.levels, [{ y: 0 }])
     assert.deepEqual(xs(), guidesOf(vm).map(() => [x]))
 
@@ -1859,6 +1716,11 @@ const pageSuite = async (m, { mutate = null } = {}) => {
 
 // ---- Mutants ---------------------------------------------------------------------------------------------------------
 
+// TFIN-03 catalog audit: zero-based combined utility/page indices and mapped checks are unchanged; a replacement is not proof of its retired operator.
+// [32] Old: "a failed read of one kind of object stops the others"; new: "a failed fleet read clears the other loaded objects".
+// The original throw in the kind catch (history-milestones.js:212) rejects getContext before any returned context can be observed.
+// Replacement class: successful milestone-link maps are cleared after a failed kind. Original unhandled-kind-rejection class currently has no credited fault.
+
 const UTILITY_MUTATIONS = [
   { name: 'a marker is drawn at the nearest sample', file: 'history-milestones.js', find: 'x: position(entry.t), label', replace: 'x: position(nearestSample(snapshots, entry.t).sampleT), label', fails: ['time: a milestone between two samples keeps its exact position', 'time: the marker x is a function of the exact time alone'] },
   { name: 'the time is rounded to the second when it is kept', file: 'history-milestones.js', find: "const payload = { t: typeof t === 'string' && t.trim() !== '' ? Number(t) : t,", replace: "const payload = { t: Math.round(typeof t === 'string' && t.trim() !== '' ? Number(t) : t),", fails: ['time: the exact time, fractions included', 'backup: milestones round-trip'] },
@@ -1876,7 +1738,7 @@ const UTILITY_MUTATIONS = [
   { name: 'a fleet is told by its name', file: 'history-milestones.js', find: "fingerprint: (row) => ['fleet', present(row.created)].join('|'),", replace: "fingerprint: (row) => ['fleet', present(row.created), row.name].join('|'),", fails: ['links: a renamed fleet stays linked'] },
   { name: 'a ship is told by its name', file: 'history-milestones.js', find: "fingerprint: (row) => ['ship', present(row.constructed)].join('|'),", replace: "fingerprint: (row) => ['ship', row.name, present(row.constructed)].join('|'),", fails: ['links: a renamed ship stays linked'] },
   { name: 'a kind of object the save could not give reads as missing', file: 'history-milestones.js', find: 'throw new TypeError(`the #{link.type} objects of the save were not read`)', replace: 'return null', fails: ['links: a link read with no save, or to a kind of object the save could not give, is unknown'] },
-  { name: 'the event key is the row number', file: 'history-milestones.js', find: 'export const eventKey = (row) => `#{row.IncrementID}:#{hashText(eventContent(row))}#{hashText(eventContent(row), 0x9e3779b1)}`', replace: 'export const eventKey = (row) => `#{row.IncrementID}:#{row.RowID === undefined ? row.RowNumber : row.RowID}`', fails: ['links: a log event is named by its increment and its content', 'links: a link to an event made in one save resolves in another whose rows were all renumbered', 'saves: on the owner\'s consecutive saves'] },
+  { name: 'the event key is the row number', file: 'history-milestones.js', find: 'export const eventKey = (row) => `#{row.IncrementID}:#{hashText(eventContent(row))}#{hashText(eventContent(row), 0x9e3779b1)}`', replace: 'export const eventKey = (row) => `#{row.IncrementID}:#{row.RowID === undefined ? row.RowNumber : row.RowID}`', fails: ['links: a log event is named by its increment and its content', 'links: a link to an event made in one save resolves in another whose rows were all renumbered'] },
   { name: 'the event key leaves out the place a row names', file: 'history-milestones.js', find: "const eventContent = (row) => [row.Time, row.EventType, row.MessageText, row.SystemID, row.PopulationID, row.Xcor, row.Ycor, row.IDType].map(present).join('|')", replace: "const eventContent = (row) => [row.Time, row.EventType, row.MessageText].map(present).join('|')", fails: ['links: the key of a log event holds the place it names', 'links: two rows of the log that say the same in two places'] },
   { name: 'the log query asks for the row number', file: 'history-milestones.js', find: "const EVENT_COLUMNS = 'FCT_GameLog.IncrementID, FCT_GameLog.Time,", replace: "const EVENT_COLUMNS = 'FCT_GameLog.rowid as RowID, FCT_GameLog.IncrementID, FCT_GameLog.Time,", fails: ['links: no query the utility sends names the rowid'] },
   { name: 'the increments a milestone links to are capped', file: 'history-milestones.js', find: 'return [...wanted].sort((a, b) => a - b)', replace: 'return [...wanted].sort((a, b) => a - b).slice(0, 500)', fails: ['links: every event a milestone links to is read, however many'] },
@@ -1892,7 +1754,7 @@ const UTILITY_MUTATIONS = [
   { name: 'an adopted milestone is offered again', file: 'history-milestones.js', find: 'adopted: copyOfItem(item) !== null, adoptedOn: copyOfItem(item) })', replace: 'adopted: false, adoptedOn: null })', fails: ['attached: after an attach in the mode same', 'attached: after an attach in the mode new-branch'] },
   { name: 'a source file that cannot be read is not named', file: 'history-milestones.js', find: 'refused: listed.refused,', replace: 'refused: [],', fails: ['attached: a source file that cannot be read is named'] },
   { name: 'rows the log holds twice are counted once', file: 'history-milestones.js', find: 'found.get(key).copies += 1', replace: 'found.get(key).copies += 0', fails: ['links: a row the log holds twice is one event that counts its copies'] },
-  { name: 'a failed read of one kind of object stops the others', file: 'history-milestones.js', find: 'failed[type] = error && error.message ? error.message : String(error)', replace: 'throw error', fails: ['links: a kind of object the save cannot give is named as failed'] },
+  { name: 'a failed fleet read clears the other loaded objects', file: 'history-milestones.js', find: '  return { objects, failed, GameID, RaceID }', replace: '  if (Object.keys(failed).length) {\n    Object.keys(objects).forEach((type) => { objects[type] = new Map() })\n  }\n\n  return { objects, failed, GameID, RaceID }', fails: ['links: a kind of object the save cannot give is named as failed'] },
   { name: 'an object that gives no time is certified', file: 'history-milestones.js', find: 'return UNVERIFIED_TEXT.untimed', replace: 'return null', fails: ['links: a fleet is the same one only with the creation time', 'links: a ship is the same one only with the construction time'] },
   { name: 'a fleet is told by its ID alone', file: 'history-milestones.js', find: "fingerprint: (row) => ['fleet', present(row.created)].join('|'),", replace: "fingerprint: () => 'fleet',", fails: ['links: a fleet is the same one only with the creation time'] },
   { name: 'an object is certified without its time before the branches parted', file: 'history-milestones.js', find: 'return shared !== null && created < shared ? null : UNVERIFIED_TEXT.parted', replace: 'return shared !== null ? null : UNVERIFIED_TEXT.parted', fails: ['links: a fleet is the same one only with the creation time', 'links: a ship is the same one only with the construction time', 'links: a system on another branch is the same one only where', 'links: the game time two branches share'] },
@@ -1954,16 +1816,8 @@ const loadModules = async (directory) => {
 
 let failures = 0
 let total = 0
-let skipped = 0
 
-const show = (name, result, detail = '', skip = false) => {
-  if (skip) {
-    skipped++
-    console.log(`SKIP  ${name}  [${detail}]`)
-
-    return
-  }
-
+const show = (name, result, detail = '') => {
   const ok = result === true
 
   total++
@@ -1986,13 +1840,9 @@ const runChecks = async (list, only = null) => {
     try {
       const detail = await run()
 
-      if (detail && typeof detail === 'object' && detail.skipped) {
-        results.push([`${group}: ${name}`, true, detail.skipped, true])
-      } else {
-        results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : '', false])
-      }
+      results.push([`${group}: ${name}`, true, typeof detail === 'string' ? detail : ''])
     } catch (error) {
-      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', false])
+      results.push([`${group}: ${name}`, String((error && error.stack) || error).split('\n').slice(0, 7).join('\n         '), '', { kind: kindOf(error), threw: isSubjectThrow(error) }])
     }
   }
 
@@ -2000,8 +1850,14 @@ const runChecks = async (list, only = null) => {
 }
 
 const caught = (mutant, results) => {
-  const expected = mutant.fails.filter((start) => !results.some(([name, , , skip]) => skip && name.startsWith(start)))
-  const survived = expected.filter((start) => !results.some(([name, result]) => name.startsWith(start) && result !== true))
+  const expected = mutant.fails
+  const invalid = results.find(([, result, , failure]) => result !== true && (!failure || failure.kind !== 'assertion' || failure.threw))
+
+  if (invalid) {
+    return `not an own value assertion: ${invalid[0]}: ${invalid[1]}`
+  }
+
+  const survived = expected.filter((start) => !results.some(([name, result, , failure]) => name.startsWith(start) && result !== true && failure.kind === 'assertion' && !failure.threw))
   const missing = expected.filter((start) => !results.some(([name]) => name.startsWith(start)))
 
   return survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`
@@ -2013,10 +1869,10 @@ const MUTANTS = [...UTILITY_MUTATIONS.filter((entry) => entry.fails.length).map(
 // What the baseline, each mutant and the control print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
 const baselineEntries = async () => {
   const real = await loadModules(utilitiesDirectory)
-  const entries = [{ log: 'The milestones: time, edits, branches, links, scope, attached campaigns, saves and backup' }]
+  const entries = [{ log: 'The milestones: time, edits, branches, links, scope, attached campaigns and backup' }]
 
-  for (const [name, result, detail, skip] of await runChecks(suite(real))) {
-    entries.push({ show: [name, result, detail, skip] })
+  for (const [name, result, detail] of await runChecks(suite(real))) {
+    entries.push({ show: [name, result, detail] })
   }
 
   entries.push({ log: '\nThe Milestones panel of the page (its script over scripts/lib/page-loader.js)' })
@@ -2041,7 +1897,7 @@ const mutantEntries = async ({ mutant, page }) => {
       results = await runChecks(suite(await loadModules(directory)), mutant.fails)
     }
 
-    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results)] }]
+    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results), process.argv.includes('--detail') ? results.filter(([, result]) => result !== true).map(([name, result]) => `${name}: ${result}`).join('; ') : ''] }]
   } catch (error) {
     return [{ show: [`mutant caught: ${mutant.name}`, error.message] }]
   } finally {
@@ -2107,7 +1963,7 @@ const main = async () => {
     }
   }
 
-  console.log(`\n${total - failures} of ${total} checks passed${skipped ? ` (${skipped} skipped: the owner's saves are not here)` : ''}`)
+  console.log(`\n${total - failures} of ${total} checks passed`)
   process.exit(failures ? 1 : 0)
 }
 

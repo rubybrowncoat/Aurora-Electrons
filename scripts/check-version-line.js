@@ -3,12 +3,12 @@
 
   bun scripts/check-version-line.js [--no-mutations] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]] [--detail]
 
-  A release is numbered <Aurora major>.<Aurora minor>.<count of releases for that line> (2.7.10 is the first of the 2.7 line), so the first two numbers of the version in package.json and the first two of the line the app states for the saves it reads (STATED_FORMULA_VERSION of utilities/capabilities.js, `2.7.x`) are one statement made in two places. The head reads both as the app does (package.json as JSON, the constant from the module) and proves:
+  A release is numbered <Aurora major>.<Aurora minor>.<count of releases for that line> (3.2.0 is the first of the 3.2 line), so the first two numbers of the version in package.json and the first two of the line the app states for the saves it reads (STATED_FORMULA_VERSION of utilities/capabilities.js, `3.2.x` on `3.2`) are one statement made in two places. The head reads both as the app does (package.json as JSON, the constant from the module) and proves:
   - version-form: the package version is a plain three-part version (numbers without a leading zero) and the stated one a line `major.minor.x`;
-  - version-line: from 2.7.10 on, the major.minor of the package version is the stated line's. A version before 2.7.10 is numbered the old way (0.x) and states no line, so it passes with a note; the check applies from the bump commit that makes the version 2.7.10 or later.
-  Planted faults are states of the two files, never a change of this script's own logic, each naming both values so that a move of the real line changes none of them: a package version one minor or one major ahead of the line, the stated line moved to 3.0.x or 2.8.x with the package left at 2.7.10, a package version of two parts or with a leading zero, a stated line that names a patch. Each must fail the check named for it by a wrong value. The rewrites that must pass: the next count of the line (2.7.11), the 3.0 line once both move (3.0.0 against 3.0.x), and the old numbering (0.11.0).
+  - version-line: the major.minor of the package version is the stated line's.
+  Planted faults are states of the two files, never a change of this script's own logic, each naming both values so that a move of the real line changes none of them: a package version one minor or one major ahead of the line, the stated line moved to 3.0.x or 3.3.x with the package left at 3.2.0, a package version of two parts or with a leading zero, a stated line that names a patch. Each must fail the check named for it by a wrong value. The rewrites that must pass: the next count of the line (3.2.1) and the 3.3 line once both move (3.3.0 against 3.3.x).
 
-  The About page (src/renderer/pages/about.vue) is served by scripts/lib/page-server.js over a copy of AuroraDB.db and read in Chromium as a player sees it (the shared readers of scripts/lib/browser-observe.js): a `data-aurora-line` hook only finds the element. Each page is read at its usual size twice, with the stated line as it is and with the constant of the served module moved to another line (3.0.x, or 4.1.x when the real line is 3.0.x), so a line that does not come from the constant fails by a value:
+  The About page (src/renderer/pages/about.vue) is served by scripts/lib/page-server.js over a copy of the fixture save (scripts/lib/fixtures.js) and read in Chromium as a player sees it (the shared readers of scripts/lib/browser-observe.js): a `data-aurora-line` hook only finds the element. Each page is read at its usual size twice, with the stated line as it is and with the constant of the served module moved to another line (3.0.x, or 4.1.x when the real line is 3.0.x), so a line that does not come from the constant fails by a value:
   - about-line: the line on screen reads "For Aurora <stated line> saves", the sentence the release notes and the refusal notice repeat, with the line the served constant holds;
   - about-beside: the line is on screen, on the row of the version chip and right of it;
   - about-version: the version chip reads v<package version>, the text the launch check of a release waits for;
@@ -25,18 +25,18 @@ const { observe, validate, describe, HarnessError, installScreen } = require('./
 const { assert, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
+const { refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const PACKAGE_FILE = 'package.json'
 const CAPABILITIES_FILE = 'src/renderer/utilities/capabilities.js'
 const ABOUT_FILE = 'src/renderer/pages/about.vue'
-const SAVE = 'AuroraDB.db'
+const SAVE = FIXTURE.file
 const TIMEOUT = 90000
 // The line the served constant is moved to, so that a page which does not read it shows the line it was built with: the first of these the real line is not.
 const MOVED = ['3.0.x', '4.1.x']
-// The first version of the rule: a package version before it is numbered the old way (0.x) and states no line.
-const RULE_STARTS = [2, 7, 10]
 const NUMBER = '(0|[1-9]\\d*)'
 const PACKAGE_FORM = new RegExp(`^${NUMBER}\\.${NUMBER}\\.${NUMBER}$`)
 const STATED_FORM = new RegExp(`^${NUMBER}\\.${NUMBER}\\.x$`)
@@ -48,12 +48,6 @@ const partsOf = (version, form) => {
   const match = typeof version === 'string' ? form.exec(version) : null
 
   return match ? match.slice(1).map(Number) : null
-}
-
-const before = (version, start) => {
-  const at = version.findIndex((part, index) => part !== start[index])
-
-  return at !== -1 && version[at] < start[at]
 }
 
 // ---------- the two statements of the line ----------
@@ -80,11 +74,11 @@ const VERSION_CHECKS = [
     assert.ok(partsOf(packageVersion, PACKAGE_FORM) !== null, `the package version ${JSON.stringify(packageVersion)} is not major.minor.patch`)
     assert.ok(partsOf(stated, STATED_FORM) !== null, `the stated version ${JSON.stringify(stated)} is not a line major.minor.x`)
   }),
-  check('version-line', 'from 2.7.10 on, the major.minor of the package version is the stated line\'s', ({ packageVersion, stated }) => {
+  check('version-line', 'the major.minor of the package version is the stated line\'s', ({ packageVersion, stated }) => {
     const own = partsOf(packageVersion, PACKAGE_FORM)
     const line = partsOf(stated, STATED_FORM)
 
-    if (own === null || line === null || before(own, RULE_STARTS)) {
+    if (own === null || line === null) {
       return
     }
 
@@ -94,20 +88,19 @@ const VERSION_CHECKS = [
 
 // States of the two files that break the rule, each with the checks that name it, and states that keep it. Each names both values, so that a move of the real line (the 3.0 trunk) changes none of them.
 const VERSION_FAULTS = [
-  { name: 'the package version is a minor ahead of the stated line (2.8.0 against 2.7.x)', state: { version: '2.8.0', constant: '2.7.x' }, fails: ['version-line'] },
-  { name: 'the package version is a major ahead of the stated line (3.7.10 against 2.7.x)', state: { version: '3.7.10', constant: '2.7.x' }, fails: ['version-line'] },
-  { name: 'the stated line moves to 3.0.x and the package version stays 2.7.10', state: { version: '2.7.10', constant: '3.0.x' }, fails: ['version-line'] },
-  { name: 'the stated line moves to 2.8.x and the package version stays 2.7.10', state: { version: '2.7.10', constant: '2.8.x' }, fails: ['version-line'] },
-  { name: 'the package version has two parts (2.7)', state: { version: '2.7', constant: '2.7.x' }, fails: ['version-form'] },
-  { name: 'the package version has a leading zero (2.07.10)', state: { version: '2.07.10', constant: '2.7.x' }, fails: ['version-form'] },
-  { name: 'the stated version names a patch (2.7.1)', state: { version: '2.7.10', constant: '2.7.1' }, fails: ['version-form'] },
+  { name: 'the package version is a minor ahead of the stated line (3.3.0 against 3.2.x)', state: { version: '3.3.0', constant: '3.2.x' }, fails: ['version-line'] },
+  { name: 'the package version is a major ahead of the stated line (4.7.10 against 3.2.x)', state: { version: '4.7.10', constant: '3.2.x' }, fails: ['version-line'] },
+  { name: 'the stated line moves to 3.0.x and the package version stays 3.2.0', state: { version: '3.2.0', constant: '3.0.x' }, fails: ['version-line'] },
+  { name: 'the stated line moves to 3.3.x and the package version stays 3.2.0', state: { version: '3.2.0', constant: '3.3.x' }, fails: ['version-line'] },
+  { name: 'the package version has two parts (3.2)', state: { version: '3.2', constant: '3.2.x' }, fails: ['version-form'] },
+  { name: 'the package version has a leading zero (3.02.0)', state: { version: '3.02.0', constant: '3.2.x' }, fails: ['version-form'] },
+  { name: 'the stated version names a patch (3.2.1)', state: { version: '3.2.0', constant: '3.2.1' }, fails: ['version-form'] },
 ]
 
 const VERSION_BENIGN = [
-  { name: 'the next count of the line (2.7.11 against 2.7.x)', state: { version: '2.7.11', constant: '2.7.x' } },
-  { name: 'the first count of the line (2.7.10 against 2.7.x)', state: { version: '2.7.10', constant: '2.7.x' } },
-  { name: 'both move to the 3.0 line (3.0.0 against 3.0.x)', state: { version: '3.0.0', constant: '3.0.x' } },
-  { name: 'the old numbering (0.11.0 against 2.7.x)', state: { version: '0.11.0', constant: '2.7.x' } },
+  { name: 'the next count of the line (3.2.1 against 3.2.x)', state: { version: '3.2.1', constant: '3.2.x' } },
+  { name: 'the first count of the line (3.2.0 against 3.2.x)', state: { version: '3.2.0', constant: '3.2.x' } },
+  { name: 'both move to the 3.3 line (3.3.0 against 3.3.x)', state: { version: '3.3.0', constant: '3.3.x' } },
 ]
 
 // ---------- the About page, as a player sees it ----------
@@ -136,7 +129,7 @@ const readAbout = () => {
 const NARROW = { viewport: { width: 960, height: 720 }, stored: { appearanceFont: { family: 'verdana', scale: 1.25 } } }
 
 // The About page open, read and left; one record of `observe`. `narrow` opens it as NARROW says.
-const observeAbout = (browser, url, narrow = false) => observe(browser, async ({ page, step }) => {
+const observeAbout = (browser, url, narrow = false, waitUntil = 'commit') => observe(browser, async ({ page, step }) => {
   step('opening the app')
 
   if (narrow) {
@@ -151,7 +144,7 @@ const observeAbout = (browser, url, narrow = false) => observe(browser, async ({
   }
 
   await installScreen(page)
-  await page.goto(url, { timeout: TIMEOUT })
+  await page.goto(url, { timeout: TIMEOUT, waitUntil })
   await page.waitForFunction(() => Boolean(window.$app && window.$app.$store), null, { timeout: TIMEOUT })
   step('opening About')
   await page.evaluate(() => window.$app.$router.push('/about', () => {}, () => {}))
@@ -161,6 +154,60 @@ const observeAbout = (browser, url, narrow = false) => observe(browser, async ({
 
   return page.evaluate(readAbout)
 }, narrow ? { viewport: NARROW.viewport } : {})
+
+// An unrelated load remains pending until About arrives. Once the app is ready, the fixture allows ten seconds for navigation (over five times the measured 1.7 s opening); at that bound it releases the resource normally and records the blocked route. Thus a restored load barrier finishes with a wrong observed ordering, rather than receiving credit for a timeout or crash.
+const OPENING_NAVIGATION_MS = 10000
+const loadGateBrowser = (browser, gate) => ({
+  async newContext (options) {
+    const context = await browser.newContext(options)
+    const create = context.newPage.bind(context)
+
+    context.newPage = async () => {
+      const page = await create()
+
+      await page.route('**/__check-version-line-load-gate', async (route) => {
+        gate.requested = true
+        gate.asset = route.request().url()
+        gate.resource = route.request().resourceType()
+
+        try {
+          if (gate.asset !== gate.expectedAsset || gate.resource !== 'image') {
+            throw new Error(`the fixture intercepted another request: ${gate.resource} ${gate.asset}`)
+          }
+          await page.waitForFunction(() => Boolean(window.$app && window.$app.$store), null, { timeout: TIMEOUT })
+          gate.appReady = await page.evaluate(() => Boolean(window.$app && window.$app.$store))
+
+          try {
+            await page.waitForFunction(() => window.$app.$route.path === '/about', null, { timeout: OPENING_NAVIGATION_MS })
+          } catch (error) {
+            if (error.name !== 'TimeoutError') {
+              throw error
+            }
+
+            gate.blocked = true
+            gate.route = await page.evaluate(() => window.$app.$route.path)
+          }
+
+          await route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+          gate.released = true
+        } catch (error) {
+          gate.error = String(error.message).split('\n')[0]
+        }
+      })
+      await page.addInitScript(() => document.addEventListener('DOMContentLoaded', () => {
+        const image = document.createElement('img')
+
+        image.src = '/__check-version-line-load-gate'
+        image.hidden = true
+        document.body.appendChild(image)
+      }, { once: true }))
+
+      return page
+    }
+
+    return context
+  },
+})
 
 // The runs of the page at its usual size, one for each serving of the constant.
 const aboutRuns = (ctx) => {
@@ -343,13 +390,7 @@ const judgeAbout = async (change, what) => {
 }
 
 const checkVersionHead = async () => {
-  const state = await stateOf({})
-
-  if (before(partsOf(state.packageVersion, PACKAGE_FORM) || [0, 0, 0], RULE_STARTS)) {
-    console.log(`INFO  the package version ${state.packageVersion} is numbered the old way, so the line check starts at 2.7.10`)
-  }
-
-  reportResults(await runChecks(VERSION_CHECKS, state))
+  reportResults(await runChecks(VERSION_CHECKS, await stateOf({})))
 }
 
 const checkVersionFault = async (fault) => {
@@ -364,6 +405,39 @@ const checkVersionBenign = async (variant) => {
 
 const checkAboutHead = async () => {
   reportResults(await judgeAbout(null, 'the page'))
+}
+
+const OPENING_FAULT = { name: 'opening waits for the window load event while an unrelated resource is held', waitUntil: 'load', fails: ['about-opening'] }
+
+const judgeOpening = async (waitUntil = 'commit') => {
+  const gate = { expectedAsset: new URL('/__check-version-line-load-gate', ENV.server.url).href, asset: null, resource: null, requested: false, appReady: false, released: false, blocked: false, route: null, error: null }
+  const observation = told('About with an unrelated resource held until navigation', await observeAbout(loadGateBrowser(ENV.chrome, gate), ENV.server.url, false, waitUntil))
+
+  validate(observation, 'About with an unrelated resource held until navigation')
+
+  if (gate.error || unobserved(observation) || observation.failed.length || observation.unexpected.length) {
+    throw new HarnessError(`the opening fixture did not get through: ${gate.error || observation.error || observation.failed.join('; ')}`)
+  }
+
+  return runChecks([check('about-opening', 'About opens while an unrelated resource still holds the window load event', () => {
+    assert.equal(gate.requested, true, 'the unrelated resource was never requested')
+    assert.equal(gate.asset, gate.expectedAsset, 'the held resource was not the fixture image')
+    assert.equal(gate.resource, 'image')
+    assert.equal(gate.appReady, true, 'the app/store were not witnessed ready before the blocked observation')
+    assert.equal(gate.released, true, 'the unrelated resource was not released')
+    assert.equal(gate.blocked, false, `About was blocked at route ${gate.route} while the ready app waited for the unrelated resource`)
+    assert.deepEqual(observation.unexpected, [], 'the page raised errors')
+    assert.deepEqual(observation.value.line.filter((line) => line.on).map((line) => line.text), [`For Aurora ${ENV.stated} saves`])
+  })], {})
+}
+
+const checkOpeningHead = async () => {
+  reportResults(await judgeOpening())
+}
+
+const checkOpeningFault = async () => {
+  refusePlanting(OPENING_FAULT.name)
+  reportFault(OPENING_FAULT, judged(await judgeOpening(OPENING_FAULT.waitUntil), OPENING_FAULT.name))
 }
 
 const checkAboutFault = async (fault) => {
@@ -384,6 +458,8 @@ const variantsOf = (mutating) => [
   { key: 'head', name: 'the head: the package version and the stated line', head: true, heading: 'The version of the app and the Aurora line it states (package.json, utilities/capabilities.js)', pool: 'suite', deadline: DEADLINES.version, run: checkVersionHead },
   ...(mutating ? VERSION_FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the version and the line', pool: 'suite', deadline: DEADLINES.version, run: () => checkVersionFault(fault) })) : []),
   ...(mutating ? VERSION_BENIGN.map((variant, index) => ({ key: `benign:${index}`, name: `variant passes: ${variant.name}`, heading: '\nversions that keep the rule', pool: 'suite', deadline: DEADLINES.version, run: () => checkVersionBenign(variant) })) : []),
+  { key: 'opening', name: 'the head: About before the window load event', head: true, browser: true, heading: '\nOpening About while an unrelated resource is pending', pool: 'suite', deadline: DEADLINES.about, run: checkOpeningHead },
+  ...(mutating ? [{ key: 'opening-fault', name: `fault caught: ${OPENING_FAULT.name}`, browser: true, heading: '\nThe opening check rejects a restored window load barrier', pool: 'suite', deadline: DEADLINES.about, run: checkOpeningFault }] : []),
   { key: 'about', name: 'the head: the About page as it is', head: true, browser: true, heading: '\nThe About page in a browser (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.about, run: checkAboutHead },
   ...(mutating ? ABOUT_FAULTS.map((fault, index) => ({ key: `about-fault:${index}`, name: `fault caught: ${fault.name}`, browser: true, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.about, run: () => checkAboutFault(fault) })) : []),
   ...(mutating ? ABOUT_BENIGN.map((variant, index) => ({ key: `about-benign:${index}`, name: `variant passes: ${variant.name}`, browser: true, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.about, run: () => checkAboutBenign(variant) })) : []),

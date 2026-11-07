@@ -6,8 +6,8 @@ const finite = (value) => typeof value === 'number' && Number.isFinite(value)
 // The tenth the modded saves store of the Uridium of a component and, mostly, of its other cost figures: the Uridium is the anchor that must agree at a tenth, and a cost figure that does not stays unexplained.
 const COST_SCALE_TENTH = 0.1
 
-// The roles whose tech row holds two figures: the rating and the cost factor.
-const COST_ROLES = ['hardening', 'eccm']
+// The roles whose tech row holds two figures: the rating and the cost factor. Only the ECCM tech's cost factor is a cost input of this rule; the hardening tech's factor is not read by any figure, its rating being the CTD.
+const COST_ROLES = ['eccm']
 
 // The reconciliation of the owned active sensors, missile fire controls, passive sensors and beam fire controls of a fixture (`loadSensorFixture`).
 export const createSensorReconciler = ({ rules, data, basis }) => {
@@ -19,9 +19,9 @@ export const createSensorReconciler = ({ rules, data, basis }) => {
   const ACTIVE_FIELDS = Object.freeze([
     field('Strength', 'ComponentValue', 'decimal', ['size', 'strength'], (design) => design.strength, { source: 'strength' }),
     field('Range', 'MaxSensorRange', 'decimal', ['size', 'resolution', 'strength', 'em'], (design) => design.rangeKm),
-    field('Cost', 'Cost', 'decimal', ['size', 'strength', 'hardeningCost', 'eccmCost'], (design) => design.cost, { cost: true }),
-    field('Uridium', 'Uridium', 'decimal', ['size', 'strength', 'hardeningCost'], (design) => design.uridium, { cost: true, anchor: true }),
-    field('Corbomite', 'Corbomite', 'decimal', ['size', 'strength', 'hardeningCost', 'eccmCost'], (design) => design.corbomite, { cost: true }),
+    field('Cost', 'Cost', 'decimal', ['size', 'strength', 'eccmCost'], (design) => design.cost, { cost: true }),
+    field('Uridium', 'Uridium', 'decimal', ['size', 'strength'], (design) => design.uridium, { cost: true, anchor: true }),
+    field('Corbomite', 'Corbomite', 'decimal', ['size', 'strength', 'eccmCost'], (design) => design.corbomite, { cost: true }),
     field('Crew', 'Crew', 'integer', ['size'], (design) => design.crew),
     field('HTK', 'HTK', 'integer', ['size'], (design) => design.htk),
     field('ECCM', 'ECCM', 'integer', ['eccm'], (design) => design.eccm),
@@ -30,21 +30,21 @@ export const createSensorReconciler = ({ rules, data, basis }) => {
 
   const PASSIVE_FIELDS = Object.freeze([
     field('Sensitivity', 'ComponentValue', 'decimal', ['size', 'sensitivity'], (design) => design.sensitivity, { source: 'sensitivity' }),
-    field('Cost', 'Cost', 'decimal', ['size', 'sensitivity', 'hardeningCost'], (design) => design.cost, { cost: true }),
-    field('Uridium', 'Uridium', 'decimal', ['size', 'sensitivity', 'hardeningCost'], (design) => design.uridium, { cost: true, anchor: true }),
+    field('Cost', 'Cost', 'decimal', ['size', 'sensitivity'], (design) => design.cost, { cost: true }),
+    field('Uridium', 'Uridium', 'decimal', ['size', 'sensitivity'], (design) => design.uridium, { cost: true, anchor: true }),
     field('Crew', 'Crew', 'integer', ['size'], (design) => design.crew),
     field('HTK', 'HTK', 'integer', ['size'], (design) => design.htk),
     field('CTD', 'ElectronicCTD', 'integer', ['hardening'], (design) => design.ctd),
   ])
 
-  const FIRE_CONTROL_NEEDS = ['rangeMultiplier', 'trackingMultiplier', 'distance', 'speed', 'singleWeapon', 'hardeningCost', 'eccmCost']
+  const FIRE_CONTROL_NEEDS = ['rangeMultiplier', 'trackingMultiplier', 'distance', 'speed', 'singleWeapon', 'eccmCost']
 
   const BEAM_FIELDS = Object.freeze([
     field('Range', 'ComponentValue', 'decimal', ['rangeMultiplier', 'distance'], (design) => design.rangeKm, { source: 'distance' }),
     field('Tracking', 'TrackingSpeed', 'integer', ['trackingMultiplier', 'speed'], (design) => design.trackingKmS, { source: 'speed' }),
     field('Size', 'Size', 'decimal', ['rangeMultiplier', 'trackingMultiplier', 'singleWeapon'], (design) => design.sizeHS),
     field('Cost', 'Cost', 'decimal', FIRE_CONTROL_NEEDS, (design) => design.cost, { cost: true }),
-    field('Uridium', 'Uridium', 'decimal', ['rangeMultiplier', 'trackingMultiplier', 'distance', 'speed', 'singleWeapon', 'hardeningCost'], (design) => design.uridium, { cost: true, anchor: true }),
+    field('Uridium', 'Uridium', 'decimal', ['rangeMultiplier', 'trackingMultiplier', 'distance', 'speed', 'singleWeapon'], (design) => design.uridium, { cost: true, anchor: true }),
     field('Corbomite', 'Corbomite', 'decimal', FIRE_CONTROL_NEEDS, (design) => design.corbomite, { cost: true }),
     field('Crew', 'Crew', 'integer', ['rangeMultiplier', 'trackingMultiplier', 'singleWeapon'], (design) => design.crew),
     field('HTK', 'HTK', 'integer', ['rangeMultiplier', 'trackingMultiplier', 'singleWeapon'], (design) => design.htk),
@@ -109,7 +109,7 @@ export const createSensorReconciler = ({ rules, data, basis }) => {
     return inputs
   }
 
-  // The techs of a component by role, each found by the tech type among its slots: { resolved, info, info2, id, slot, reason }. A tech the component does not name, names twice or names by an id the save does not hold has `resolved` false and `info` NaN, never 0; a tech row that stores no number in AdditionalInfo (`info`) is unresolved the same way, and one that stores none in AdditionalInfo2 (`info2`) has `info2` NaN. The hardening and ECCM techs carry two figures, the rating (`info`) and the cost factor (`info2`), so each also has a role of its own for the factor (`hardeningCost`, `eccmCost`): a missing factor makes only the figures that need it unknown.
+  // The techs of a component by role, each found by the tech type among its slots: { resolved, info, info2, id, slot, reason }. A tech the component does not name, names twice or names by an id the save does not hold has `resolved` false and `info` NaN, never 0; a tech row that stores no number in AdditionalInfo (`info`) is unresolved the same way, and one that stores none in AdditionalInfo2 (`info2`) has `info2` NaN. The ECCM tech carries two figures, the rating (`info`) and the cost factor (`info2`), so it also has a role of its own for the factor (`eccmCost`): a missing factor makes only the figures that need it unknown.
   const techsOf = (fixture, row, spec) => {
     const techs = {}
 

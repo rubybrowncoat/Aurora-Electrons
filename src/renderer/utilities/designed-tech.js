@@ -1,5 +1,6 @@
 import { isKnownNumber, UNKNOWN_TEXT } from './math'
 import { MINERALS } from './minerals'
+import { ORDNANCE_FACTORY_MODULE } from './ordnance-modules'
 import { STATUS, envelope, getRule, isAvailable, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
 
 // The Designed page's component tables: which columns each research category shows, the figures derived from a component's stored values, and the tags a name carries. Columns are { text, value, numeric, format(item, f), note?(item, f), title?(item, f), none?(item), hint?, perHS?, compareOnly?, better?, skipZero?, showZero?, needs?, rule? }: `value` is the item key the table sorts by, `format` the cell's text and `note` a second line under it, `title` a tooltip, `none` marks a cell that reads "—" because the design has no such figure, `perHS` a column the table shows only when the page's per-hull-space toggle is on (Compare always has it), `compareOnly` a figure only Compare shows, `better` the side of the figure that is the better one (`'high'` or `'low'`, left out when neither is), `skipZero` that a zero is no value, so it takes no part in best and worst, `showZero` that a zero is a figure and reads 0, `needs` the other item keys the cell's text reads (a missing one makes the cell unknown), and `rule` the registered rule of a conversion the whole column makes, which its header marks. A cell whose figure or input is not stored reads "—" with an unavailable mark, which tells it from a design that has none. `f` is `{ count }`, the page's number formatter.
@@ -25,7 +26,7 @@ const COMMERCIAL_JUMP_FUNCTION = 2
 
 const PROTOTYPES = { 1: 'Prototype', 2: 'Future prototype', 3: 'Research prototype' }
 
-const DESIGNED_VERSIONS = ['2.7.x']
+const DESIGNED_VERSIONS = ['3.2.x']
 const STORED = 'designedTech.stored'
 const MEASURE = 'designedTech.measure'
 const PER_SPACE = 'designedTech.perSpace'
@@ -200,7 +201,7 @@ registerRule({
 
 registerRule({
   id: 'designedTech.reload',
-  versions: DESIGNED_VERSIONS,
+  versions: ['2.7.x'],
   units: 'min or h',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.RateOfFire'],
@@ -218,7 +219,7 @@ registerRule({
 
 registerRule({
   id: COMPARE_VERDICT,
-  versions: DESIGNED_VERSIONS,
+  versions: ['2.7.x'],
   units: 'designs ranked',
   verification: 'confirmed',
   structure: ['the figures of the designs picked'],
@@ -380,13 +381,13 @@ const activeSensorColumns = [
   plain('Resolution', 'Resolution'),
   plain('Strength', 'ComponentValue', 2, { better: HIGH, hint: 'The sensor strength of the whole component, its strength per hull space times its size.' }),
   perSpace('Strength / HS', 'MeasurePerHS', 2, 'Sensor strength per hull space: the strength of the sensor tech, the same at every size.'),
-  perCost('Strength / BP', 'MeasurePerCost', 'Sensor strength per build point: what the electronic hardening and ECCM a design carries cost it.'),
+  perCost('Strength / BP', 'MeasurePerCost', 'Sensor strength per build point, from the stored cost: under the current design rule the ECCM a design carries is what raises the cost, and electronic hardening adds nothing. A design stored under an older rule keeps the cost it was stored with.'),
 ]
 
 const passiveSensorColumns = [
   plain('Sensitivity', 'ComponentValue', 2, { better: HIGH }),
   perSpace('Sensitivity / HS', 'MeasurePerHS', 2, 'Sensitivity per hull space: the sensitivity of the sensor tech, the same at every size.'),
-  perCost('Sensitivity / BP', 'MeasurePerCost', 'Sensitivity per build point: what the electronic hardening a design carries costs it.'),
+  perCost('Sensitivity / BP', 'MeasurePerCost', 'Sensitivity per build point, from the stored cost: under the current design rule a passive sensor costs its sensitivity in build points, and electronic hardening adds nothing. A design stored under an older rule keeps the cost it was stored with.'),
   ...SIGNATURES.map((signature) => column(`Range vs ${signature} (mKm)`, `Range${signature}`, (item, f) => f.count(item[`Range${signature}`] / 1e6, 2), { better: HIGH, hint: `Range against a target whose signature is ${signature}.` })),
 ]
 
@@ -460,7 +461,6 @@ export const categoryColumnsMap = {
     ...reloadColumns,
     ...sizeCostCrewHTK,
   ],
-  49: [plain('Pod size', 'ComponentValue'), ...reloadColumns, ...sizeCostCrewHTK],
   34: [...passiveSensorColumns, ...sizeCostCrewHTK],
   14: [...passiveSensorColumns, ...sizeCostCrewHTK],
   7: [
@@ -578,10 +578,10 @@ export const columnsFor = (categoryId) => [nameColumn, ...(categoryColumnsMap[ca
 // What the rules say under a category's table, besides the general line.
 const CATEGORY_NOTES = {
   1: 'A ship\'s armour takes its armour volume divided by the strength of the armour, in hull spaces, so strength per hull space is the strength itself and strength per BP is how much armour a build point buys.',
-  13: 'An active sensor sees a target of Resolution × 50 tons or larger out to its range; a smaller one only closer in. Strength is the sensor tech\'s strength per hull space times the size, so strength per hull space is the same at every size of one tech. Range grows with the square root of strength, so range per hull space is not shown; a lower resolution sees smaller targets and a higher one holds its range on larger ones, so neither is better. Strength per BP prices the electronic hardening and ECCM a design carries.',
+  13: 'An active sensor sees a target of Resolution × 50 tons or larger out to its range; a smaller one only closer in. Strength is the sensor tech\'s strength per hull space times the size, so strength per hull space is the same at every size of one tech. Range grows with the square root of strength, so range per hull space is not shown; a lower resolution sees smaller targets and a higher one holds its range on larger ones, so neither is better. Strength per BP prices the ECCM a design carries; under the current design rule electronic hardening adds nothing, and a design stored under an older rule shows the cost it was stored with.',
   24: 'A missile fire control has twice the range of an active sensor of the same strength and size. Its range is for a target of Resolution × 50 tons or larger. Strength per hull space and per BP are worked out as for an active sensor, and resolution has no better side.',
-  34: 'A passive sensor sees a signature out to √(sensitivity × signature) × 250,000 km. Sensitivity is the sensor tech\'s sensitivity per hull space times the size, so sensitivity per hull space is the same at every size of one tech. Range grows with the square root of sensitivity, so range per hull space is not shown. Sensitivity per BP prices the electronic hardening a design carries.',
-  14: 'A passive sensor sees a signature out to √(sensitivity × signature) × 250,000 km. Sensitivity is the sensor tech\'s sensitivity per hull space times the size, so sensitivity per hull space is the same at every size of one tech. Range grows with the square root of sensitivity, so range per hull space is not shown. Sensitivity per BP prices the electronic hardening a design carries.',
+  34: 'A passive sensor sees a signature out to √(sensitivity × signature) × 250,000 km. Sensitivity is the sensor tech\'s sensitivity per hull space times the size, so sensitivity per hull space is the same at every size of one tech. Range grows with the square root of sensitivity, so range per hull space is not shown. Sensitivity per BP is the sensitivity over the stored cost of the sensor: under the current design rule electronic hardening does not raise it, and a design stored under an older rule shows the cost it was stored with.',
+  14: 'A passive sensor sees a signature out to √(sensitivity × signature) × 250,000 km. Sensitivity is the sensor tech\'s sensitivity per hull space times the size, so sensitivity per hull space is the same at every size of one tech. Range grows with the square root of sensitivity, so range per hull space is not shown. Sensitivity per BP is the sensitivity over the stored cost of the sensor: under the current design rule electronic hardening does not raise it, and a design stored under an older rule shows the cost it was stored with.',
   7: 'Engine power is the engine tech times its size times its thrust modifier, so power per hull space is the tech and the thrust modifier together. The explosion chance is 10% per point of thrust modifier, and the largest explosion is a quarter of its power. An engine\'s cost is half its power, less with a thrust modifier under 1 and more with thermal signature reduction, so power per BP shows what a design pays for those. Fuel per engine-power-hour rises with the thrust modifier and falls as the engine grows.',
   5: 'Power per hull space is the power output over the size in hull spaces. A designed reactor\'s output is its tech times its size times √size times its boost, so a larger reactor gives more per hull space. Its cost is three times its output, so power per BP would not tell designed reactors apart and is not shown.',
   42: 'Capacity per hull space is the magazine capacity over its size in hull spaces. A magazine gives up capacity to its internal armour, which also adds cost; capacity per BP prices that.',
@@ -642,7 +642,7 @@ export const augmentComponent = (component) => {
     derive(item, 'ShieldPerSecondPerHS', () => item.ShieldPerSecond / item.Size)
   }
 
-  if (categoryId === 51 || categoryId === 49 || categoryId === 3) {
+  if (categoryId === 51 || categoryId === 3) {
     derive(item, 'HangarReload', () => item.RateOfFire / 60)
     derive(item, 'MFReload', () => item.RateOfFire / 360)
   }
@@ -805,6 +805,7 @@ export const sortRows = (items, sortBy, sortDesc) => {
 export const classUsageByComponent = (rows) => {
   const byComponent = new Map()
   let unattributed = 0
+  const ordnanceByClass = new Map()
 
   rows.forEach((row) => {
     if (row.ComponentID == null || row.ClassID == null) {
@@ -820,6 +821,11 @@ export const classUsageByComponent = (rows) => {
       byComponent.set(row.ComponentID, classes)
     }
 
+    const ordnance = ordnanceByClass.get(row.ClassID) || { stored: isKnownNumber(row.OrdnanceModules) ? row.OrdnanceModules : null, mounted: 0, rate: isKnownNumber(row.OrdnanceProduction) ? row.OrdnanceProduction : null }
+
+    ordnance.mounted = ordnance.mounted === null || !isKnownNumber(row.NumComponent) || !isKnownNumber(row.ComponentTypeID) ? null : ordnance.mounted + (row.ComponentTypeID === ORDNANCE_FACTORY_MODULE ? row.NumComponent : 0)
+    ordnanceByClass.set(row.ClassID, ordnance)
+
     const perShip = isKnownNumber(row.NumComponent) ? row.NumComponent : null
     const existing = classes.get(row.ClassID)
 
@@ -830,7 +836,11 @@ export const classUsageByComponent = (rows) => {
     }
   })
 
-  return { byComponent, unattributed }
+  byComponent.forEach((classes) => classes.forEach((entry) => {
+    entry.ordnance = ordnanceByClass.get(entry.id)
+  }))
+
+  return { byComponent, unattributed, ordnanceByClass }
 }
 
 // A design with its usage: the classes that mount it, most ships first with a class whose ships are unknown last, and the class and ship counts. A design a class cannot mount has none; counts are null, never 0, where a class mount could not be attributed or a class has no ship count, and `usageGaps` names what is missing.

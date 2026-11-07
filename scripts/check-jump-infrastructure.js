@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-jump-infrastructure.js [--no-mutations] [--no-lacking] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  The fixture is a copy of a save (artifacts/boscodiogigia-sequential-saves, the race Axis) into which the cases the save does not hold are written by SQL here: queued, running and arrived stabilisation orders, a point with two fleets and a fleet with two orders at one point, an order of another race and an order of another kind, gates built by another race and by none recorded, stationary contacts of the race (current, earlier, twice for one object, of its own salvo, moving, of another kind, of another race, in another system, beyond a kilometre) and objects at a point the race has not charted. Every expected figure is read from the save with SQL written here, never from the module.
+  One dataset, with its oracle, read from the save by SQL written here and never from the module. The fixture (scripts/lib/fixtures.js `FIXTURE`, the race Shogunate of game 141, a save of the present line) is run as it is (a copy of the file, which is never written): the system with gates and the points of the cases are chosen from it by SQL (a gate whose far side the race has charted, a point whose far side is not charted, a point of a known system that the race has not charted), and every case the fixture can exercise runs on it: the rows of the charted points with their numbers, systems, far sides and gates (the race's own), the stabilisation, the minefield and buoy counts and the objects detected as the save has them (none), the probe figure, the whole list once the system is cleared, the link to the map, the side panel, the System view, a point a link names that its system lacks, and the two saves lacking a column. What the fixture cannot exercise is printed as SKIP, with what the save holds counted by SQL (needs tier b): it holds no stabilisation order (move action 64), no salvo of any race, no stationary contact of the race, no gate built by another race or by none recorded and no explored point whose far side is not charted; the cases that need one, and the planted faults that need them, are not run on the page and are judged by the small save written here alone where they name a check of it. The rules of the module wait on AE-303-04 and list the earlier line only: the fixture gives them no case of their own for the stabilisation, the objects of the race and the objects detected.
   - module: the rows of every charted point of the race hold the figures SQL gives (the number of the point, its gate, its orders, each count once for each observed object id), a point the race has not charted has no row, a figure the save cannot support is unknown and never 0, and the probe count is never given; the same on a small save written here for the cases of duplicate rows, a salvo of no known design, a point with no position, a missing game time and an order with no time;
   - page: the table of /lagrange?system=<id> draws a row for each charted point of the system and for no other, each row's number, system, far side, gate, stabilisation with its fleets, minefield and buoy counts, probe figure and detected objects as the oracle says (words read back through the module's own tables), gate and stabilisation apart, and the whole list once the system is cleared; a row's link opens the map with the system and the point in the route, the side panel naming that point, and the System view opened from it is told that point;
   - a save lacking a column the infrastructure reads (the speed of the salvos, or the builder of the gates) still draws every point, a gate whose builder is not read as built by none recorded, and every figure that rests on the missing column reads as unknown, never 0;
@@ -16,17 +16,15 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
 const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, failureLine, describe, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
+const { FIXTURE, fixturePath, fixtureRows } = require('./lib/fixtures')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
-const SAVE = 'artifacts/boscodiogigia-sequential-saves/AuroraDB 21.06.1973.db'
-const IDS = { GameID: 140, RaceID: 784 }
-const NAMES = { game: 'Nazi Era', race: 'Axis' }
 const TIMEOUT = 120000
 const STEP = 45000
 const PAGE = 'src/renderer/pages/lagrange.vue'
@@ -36,15 +34,7 @@ const MODULE = 'src/renderer/utilities/jump-infrastructure.js'
 const PLACES = 'src/renderer/utilities/places.js'
 const DETAIL = process.argv.includes('--detail')
 
-// The points of the fixture. In system 21756 four gates: 59876 (the race's own, a queued order, an object of its own at it that a contact names), 59879 (a gate with no builder recorded, a contact), 59877 (the race's own, two contacts of one object and one of an earlier time, an order of another race), 59878 (built by another race, an order of another kind). 59907 of system 21768 holds no gate and an order that has arrived with nothing left to do. 60143 of system 21858 holds two fleets and a fleet with two orders. Of system 21792 the point 59967 is not charted by the race.
-// 60144 of system 21858 is charted by the race with its far side not charted, and has no name for the system beyond.
-const POINT = { queued: 59876, unrecorded: 59879, contacts: 59877, other: 59878, awaiting: 59907, fleets: 60143, unexplored: 60144, uncharted: 59967 }
-const SYSTEMS = { gates: 21756, awaiting: 21768, fleets: 21858, uncharted: 21792 }
-const SHOWN = [SYSTEMS.gates, SYSTEMS.awaiting, SYSTEMS.fleets, SYSTEMS.uncharted]
 const STABILISE = 64
-const FLEET = { first: 460100, second: 460101, third: 459992, fourth: 459993 }
-const GAME_TIME = 1277161332
-const EARLIER = GAME_TIME - 86400
 
 const short = (value) => {
   const text = JSON.stringify(value)
@@ -61,73 +51,12 @@ const all = (raw, sql) => new Promise((resolve, reject) => raw.all(sql, (error, 
 const run = (raw, sql) => new Promise((resolve, reject) => raw.run(sql, (error) => (error ? reject(error) : resolve())))
 const adapter = (raw) => ({ query: async (sql) => [await all(raw, sql)] })
 
-// The columns of a table but its primary key, for the rows written by copying one.
-const columnsOf = async (raw, table) => (await all(raw, `pragma table_info(${table})`)).filter((column) => !column.pk).map((column) => column.name)
-
-// An INSERT of a copy of the row of `table` that `where` names, with the columns of `over` (SQL values) put in place.
-const copyOf = (table, columns, where, over) => `insert into ${table} (${columns.join(', ')}) select ${columns.map((column) => (column in over ? over[column] : column)).join(', ')} from ${table} where ${where}`
-
-// The statements that write the cases the save does not hold, from what the save says of its own points.
-const fixtureStatements = async (file) => {
-  const raw = await open(file)
-
-  try {
-    const place = async (id) => (await all(raw, `select SystemID as system, Xcor as x, Ycor as y from FCT_JumpPoint where GameID = ${IDS.GameID} and WarpPointID = ${id}`))[0]
-    const at = {}
-
-    for (const [key, id] of Object.entries(POINT)) {
-      at[key] = await place(id)
-      assert.ok(at[key], `the save holds the point ${id}`)
-    }
-
-    const orderColumns = await columnsOf(raw, 'FCT_MoveOrders')
-    const contactColumns = await columnsOf(raw, 'FCT_Contacts')
-    const salvoColumns = await columnsOf(raw, 'FCT_MissileSalvo')
-    const [orderOf] = await all(raw, `select MoveOrderID as id from FCT_MoveOrders where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and MoveActionID = ${STABILISE}`)
-    const [contactOf] = await all(raw, `select UniqueID as id from FCT_Contacts where GameID = ${IDS.GameID} and DetectRaceID = ${IDS.RaceID} and ContactType = 1`)
-    const [salvoOf] = await all(raw, `select MissileSalvoID as id from FCT_MissileSalvo where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and MissileSpeed = 0`)
-    const [own] = await all(raw, `select m.MissileSalvoID as id from FCT_MissileSalvo m inner join FCT_JumpPoint p on p.WarpPointID = ${POINT.queued} where m.GameID = ${IDS.GameID} and m.RaceID = ${IDS.RaceID} and m.MissileSpeed = 0 and m.SystemID = p.SystemID and abs(m.Xcor - p.Xcor) < 1 and abs(m.Ycor - p.Ycor) < 1 order by m.MissileSalvoID`)
-
-    assert.ok(orderOf && contactOf && salvoOf && own, 'the save holds an order, a contact and a stationary salvo of the race to copy, and a salvo of the race at the queued point')
-
-    const order = (point, fleet, arrived, time, over = {}) => copyOf('FCT_MoveOrders', orderColumns, `MoveOrderID = ${orderOf.id}`, { DestinationID: point, FleetID: fleet, Arrived: arrived, TimeRequired: time, MoveActionID: STABILISE, DestinationType: 1, ...over })
-    // A contact of the race of the kind a salvo gives, standing still, at `where`'s place or 0.5 km from it; `over` changes the rest.
-    const contact = (id, where, over = {}) => copyOf('FCT_Contacts', contactColumns, `UniqueID = ${contactOf.id}`, { ContactID: id, SystemID: where.system, Xcor: where.x + (over.shift || 0), Ycor: where.y, ContactType: 3, Speed: 0, LastUpdate: GAME_TIME, DetectRaceID: IDS.RaceID, ...Object.fromEntries(Object.entries(over).filter(([key]) => key !== 'shift')) })
-
-    return [
-      order(POINT.fleets, FLEET.second, 0, 0),
-      order(POINT.queued, FLEET.first, 0, 0),
-      order(POINT.awaiting, FLEET.third, 1, 0),
-      order(POINT.fleets, FLEET.fourth, 1, 5000),
-      order(POINT.contacts, FLEET.first, 1, 7000, { RaceID: 786 }),
-      order(POINT.other, FLEET.first, 1, 7000, { MoveActionID: 1 }),
-      `update FCT_JumpPoint set JumpGateRaceID = 786 where GameID = ${IDS.GameID} and WarpPointID = ${POINT.other}`,
-      `update FCT_JumpPoint set JumpGateRaceID = 0 where GameID = ${IDS.GameID} and WarpPointID = ${POINT.unrecorded}`,
-      contact(9000001, at.contacts, { ContactMethod: 2 }),
-      contact(9000001, at.contacts, { ContactMethod: 3 }),
-      contact(9000002, at.contacts, { LastUpdate: EARLIER }),
-      contact(9000003, at.unrecorded, { shift: 0.5 }),
-      contact(9000004, { ...at.unrecorded, system: SYSTEMS.awaiting }),
-      contact(9000005, at.unrecorded, { shift: 5 }),
-      contact(own.id, at.queued),
-      contact(9000007, at.uncharted),
-      contact(9000008, at.other, { DetectRaceID: 787 }),
-      contact(9000009, at.queued, { Speed: 5 }),
-      contact(9000010, at.contacts, { ContactType: 4 }),
-      copyOf('FCT_MissileSalvo', salvoColumns, `MissileSalvoID = ${salvoOf.id}`, { SystemID: at.uncharted.system, Xcor: at.uncharted.x, Ycor: at.uncharted.y }),
-      copyOf('FCT_MissileSalvo', salvoColumns, `MissileSalvoID = ${salvoOf.id}`, { SystemID: at.queued.system, Xcor: at.queued.x + 50, Ycor: at.queued.y }),
-    ]
-  } finally {
-    raw.close()
-  }
-}
-
 // A copy of the save in a folder of its own, with `statements` run on it.
-const saveCopy = async (prefix, statements) => {
+const saveCopy = async (prefix, statements, from) => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
   const file = path.join(folder, 'save.db')
 
-  fs.copyFileSync(path.join(root, SAVE), file)
+  fs.copyFileSync(from, file)
 
   const raw = await open(file, sqlite3.OPEN_READWRITE)
 
@@ -142,17 +71,79 @@ const saveCopy = async (prefix, statements) => {
   return { folder, file }
 }
 
-const { GameID: G, RaceID: R } = IDS
-const OWN = `select MissileSalvoID from FCT_MissileSalvo where GameID = ${G} and RaceID = ${R} and MissileSpeed = 0`
-const CONTACTS = `GameID = ${G} and DetectRaceID = ${R} and ContactType = 3 and Speed = 0`
-const NOW = `(select GameTime from FCT_Game where GameID = ${G})`
-const CHARTED = `from FCT_JumpPoint p inner join FCT_RaceJumpPointSurvey s on s.GameID = p.GameID and s.WarpPointID = p.WarpPointID and s.RaceID = ${R} where p.GameID = ${G} and s.Charted = 1 and p.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${G} and RaceID = ${R})`
-const NEAR = (alias) => `${alias}.SystemID = p.SystemID and abs(${alias}.Xcor - p.Xcor) < 1 and abs(${alias}.Ycor - p.Ycor) < 1`
-const SALVOS = (test) => `(select count(distinct m.MissileSalvoID) from FCT_MissileSalvo m inner join FCT_MissileType t on t.GameID = m.GameID and t.MissileID = m.MissileID where m.GameID = ${G} and m.RaceID = ${R} and m.MissileSpeed = 0 and ${NEAR('m')} and ${test})`
+// ---------- the dataset ----------
+
+// What the checks read of the dataset: `ids` (GameID, RaceID), `names` (the game and the race as the Empires page lists them), `point` (the points of the cases: queued, contacts, awaiting, unexplored, uncharted), `systems` (gates, awaiting, fleets, uncharted), `shown` (the systems the page is shown), `source` (the file the copy the browser reads is made from), `cases` (which of the cases the oracle tells apart the save holds: the checks assert the whole spread of states and counts only where it does) and `missing` (the cases printed as skipped: { name, checks, reason }).
+// The fixture, as it is: the system, the points and the cases it lacks are found in it by SQL, so that the check holds on the save the fixture stands for and says so when it does not.
+const fixtureDataset = () => {
+  const ids = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+  const { GameID, RaceID } = ids
+  const { CHARTED } = sqlOf(ids)
+  const first = (sql, what) => {
+    const [row] = fixtureRows(sql)
+
+    if (!row) {
+      throw new HarnessError(`the fixture holds no ${what}`)
+    }
+
+    return row
+  }
+  const count = (sql) => fixtureRows(sql)[0].n
+  const charted = (test) => `${CHARTED} and ${test}`
+  const farCharted = `p.WPLink in (select WarpPointID from FCT_RaceJumpPointSurvey where GameID = ${GameID} and RaceID = ${RaceID} and Charted = 1)`
+  const gates = first(`select p.SystemID as system ${CHARTED} group by p.SystemID having sum(p.JumpGateStrength > 0) > 0 and count(*) >= 4 order by sum(p.JumpGateStrength > 0) desc, count(*) desc, p.SystemID limit 1`, 'system where the race has charted four points or more, one of them with a gate')
+  const contacts = first(`select p.WarpPointID as id ${charted(`p.SystemID = ${gates.system} and p.JumpGateStrength > 0 and s.Explored = 1 and ${farCharted} and (select SystemID from FCT_JumpPoint where GameID = ${GameID} and WarpPointID = p.WPLink) in (select SystemID from FCT_RaceSysSurvey where GameID = ${GameID} and RaceID = ${RaceID})`)} order by p.Distance desc, p.WarpPointID desc limit 1`, 'point with a gate in that system, explored, whose far side the race has charted in a system it knows')
+  const queued = first(`select p.WarpPointID as id ${charted(`p.SystemID = ${gates.system} and p.WarpPointID <> ${contacts.id}`)} order by p.Distance, p.WarpPointID limit 1`, 'second charted point in that system')
+  const unexplored = first(`select p.WarpPointID as id, p.SystemID as system ${charted(`s.Explored = 0 and p.SystemID <> ${gates.system}`)} order by p.SystemID, p.WarpPointID limit 1`, 'charted point whose far side is not charted, in another system')
+  const awaiting = first(`select p.WarpPointID as id, p.SystemID as system ${charted(`p.JumpGateStrength = 0 and s.Explored = 1 and p.SystemID not in (${gates.system}, ${unexplored.system})`)} order by p.SystemID, p.WarpPointID limit 1`, 'charted point with no gate, in a third system')
+  const uncharted = first(`select u.WarpPointID as id, u.SystemID as system from FCT_JumpPoint u left join FCT_RaceJumpPointSurvey v on v.GameID = u.GameID and v.WarpPointID = u.WarpPointID and v.RaceID = ${RaceID} where u.GameID = ${GameID} and coalesce(v.Charted, 0) = 0 and u.SystemID in (select p.SystemID ${CHARTED}) and u.SystemID not in (${gates.system}, ${unexplored.system}, ${awaiting.system}) order by u.SystemID, u.WarpPointID limit 1`, 'point the race has not charted, in a system where it has charted another')
+  const orders = count(`select count(*) as n from FCT_MoveOrders where GameID = ${GameID} and RaceID = ${RaceID} and MoveActionID = ${STABILISE} and DestinationType = 1`)
+  const salvos = count(`select count(*) as n from FCT_MissileSalvo where GameID = ${GameID} and RaceID = ${RaceID} and (MissileSpeed = 0 or LurkerMode = 1)`)
+  const objects = count(`select count(*) as n from FCT_Contacts where GameID = ${GameID} and DetectRaceID = ${RaceID} and ContactType = 3 and Speed = 0`)
+  const [gateCounts] = fixtureRows(`select count(*) as charted, coalesce(sum(p.JumpGateStrength > 0), 0) as gates, coalesce(sum(p.JumpGateStrength > 0 and p.JumpGateRaceID = ${RaceID}), 0) as own, coalesce(sum(p.JumpGateStrength > 0 and p.JumpGateRaceID > 0 and p.JumpGateRaceID <> ${RaceID}), 0) as other, coalesce(sum(p.JumpGateStrength > 0 and coalesce(p.JumpGateRaceID, 0) = 0), 0) as unrecorded ${CHARTED}`)
+  const farUncharted = count(`select count(*) as n ${charted(`s.Explored = 1 and not ${farCharted}`)}`)
+  const cases = { orders: orders > 0, salvos: salvos > 0, contacts: objects > 0, builders: gateCounts.other > 0 && gateCounts.unrecorded > 0, farUncharted: farUncharted > 0 }
+  const missing = [
+    !cases.orders && { name: 'a stabilisation order', checks: ['m-orders', 'stabilisation', 'distinct'], reason: `the fixture holds ${orders} stabilisation orders of the race (move action ${STABILISE}), so no point is queued, running or awaiting and no fleet is named under one` },
+    !cases.salvos && { name: 'a stationary salvo', checks: ['m-counts', 'counts'], reason: `the fixture holds ${salvos} stationary salvos of the race, so every minefield and buoy count is 0` },
+    !cases.contacts && { name: 'a contact of a salvo', checks: ['m-detected', 'detected'], reason: `the race holds ${objects} stationary contacts of a salvo in the fixture (it holds contacts of other kinds only), so no object is detected and no earlier contact is counted` },
+    !cases.builders && { name: 'a gate built by another race or by none recorded', checks: ['m-gate', 'gate', 'lacking-builders'], reason: `${gateCounts.own} of the ${gateCounts.gates} gates at the ${gateCounts.charted} charted points are built by the race (${gateCounts.other} by another race, ${gateCounts.unrecorded} by none recorded)` },
+    !cases.farUncharted && { name: 'a far side explored but not charted', checks: ['name'], reason: `${farUncharted} of the explored points have a far side the race has not charted` },
+  ].filter(Boolean)
+
+  return {
+    label: 'the fixture',
+    source: fixturePath(),
+    ids,
+    names: { game: FIXTURE.gameName, race: FIXTURE.raceName },
+    point: { queued: queued.id, contacts: contacts.id, awaiting: awaiting.id, unexplored: unexplored.id, uncharted: uncharted.id },
+    systems: { gates: gates.system, awaiting: awaiting.system, fleets: unexplored.system, uncharted: uncharted.system },
+    shown: [...new Set([gates.system, awaiting.system, unexplored.system, uncharted.system])],
+    cases,
+    missing,
+  }
+}
+
+// The pieces of SQL the oracle is written from, for the game and the race of a dataset.
+const sqlOf = ({ GameID: G, RaceID: R }) => {
+  const NEAR = (alias) => `${alias}.SystemID = p.SystemID and abs(${alias}.Xcor - p.Xcor) < 1 and abs(${alias}.Ycor - p.Ycor) < 1`
+
+  return {
+    G,
+    R,
+    NEAR,
+    OWN: `select MissileSalvoID from FCT_MissileSalvo where GameID = ${G} and RaceID = ${R} and (MissileSpeed = 0 or LurkerMode = 1)`,
+    CONTACTS: `GameID = ${G} and DetectRaceID = ${R} and ContactType = 3 and Speed = 0`,
+    NOW: `(select GameTime from FCT_Game where GameID = ${G})`,
+    CHARTED: `from FCT_JumpPoint p inner join FCT_RaceJumpPointSurvey s on s.GameID = p.GameID and s.WarpPointID = p.WarpPointID and s.RaceID = ${R} where p.GameID = ${G} and s.Charted = 1 and p.SystemID in (select SystemID from FCT_RaceSysSurvey where GameID = ${G} and RaceID = ${R})`,
+    SALVOS: (test) => `(select count(distinct m.MissileSalvoID) from FCT_MissileSalvo m inner join FCT_MissileType t on t.GameID = m.GameID and t.MissileID = m.MissileID where m.GameID = ${G} and m.RaceID = ${R} and (m.MissileSpeed = 0 or m.LurkerMode = 1) and ${NEAR('m')} and ${test})`,
+  }
+}
 
 // What the save says of each charted point of the race: { points: Map(WarpPointID -> row), systemNames, charted }, one row each with its system, its number among the charted points of the system, the system beyond it, its gate, the state of the orders, the names of the fleets, the stationary salvos of the race by kind and the contacts of the race, the current and the earlier.
-const truthOf = async (file) => {
+const truthOf = async (file, dataset) => {
   const raw = await open(file)
+  const { G, R, NEAR, OWN, CONTACTS, NOW, CHARTED, SALVOS } = sqlOf(dataset.ids)
 
   try {
     const points = await all(raw, `select p.WarpPointID as id, p.SystemID as system, p.WPLink as link, p.JumpGateStrength as strength, p.JumpGateRaceID as builder, s.Explored as explored, row_number() over (partition by p.SystemID order by p.Distance, p.WarpPointID) as number,
@@ -190,7 +181,7 @@ const truthOf = async (file) => {
       })
     })
 
-    return { points: rows, systemNames, charted: points.length }
+    return { points: rows, systemNames, charted: points.length, dataset }
   } finally {
     raw.close()
   }
@@ -222,13 +213,15 @@ const SMALL = [
   'create table FCT_Fleet (FleetID integer, FleetName text)',
   'create table FCT_MoveOrders (MoveOrderID integer, GameID integer, RaceID integer, FleetID integer, MoveActionID integer, DestinationType integer, DestinationID integer, Arrived integer, TimeRequired real)',
   'create table FCT_MissileType (MissileID integer, GameID integer, SecondStageID integer)',
-  'create table FCT_MissileSalvo (MissileSalvoID integer, GameID integer, RaceID integer, MissileID integer, MissileSpeed real, SystemID integer, Xcor real, Ycor real)',
+  'create table FCT_MissileSalvo (MissileSalvoID integer, GameID integer, RaceID integer, MissileID integer, MissileSpeed real, SystemID integer, Xcor real, Ycor real, LurkerMode integer default 0, OrbitLagrangeID integer default 0)',
   'create table FCT_Contacts (ContactID integer, GameID integer, DetectRaceID integer, ContactType integer, Speed real, SystemID integer, Xcor real, Ycor real, LastUpdate real)',
   'insert into FCT_Game values (1, 1000)',
   "insert into FCT_Fleet values (10, 'Alpha'), (11, 'Bravo')",
   'insert into FCT_MoveOrders values (1, 1, 2, 10, 64, 1, 1, 1, 500), (1, 1, 2, 10, 64, 1, 1, 1, 500), (2, 1, 2, 10, 64, 1, 1, 0, 0), (3, 1, 2, 11, 64, 1, 2, 0, 0), (4, 1, 2, 11, 64, 1, 2, 1, 0), (5, 1, 3, 10, 64, 1, 1, 1, 500), (6, 1, 2, 10, 217, 1, 1, 1, 500), (7, 1, 2, 10, 64, 2, 1, 1, 500), (8, 1, 2, 11, 64, 1, 4, 1, NULL), (9, 1, 2, 11, 64, 1, 6, NULL, 500)',
   'insert into FCT_MissileType values (70, 1, 7), (71, 1, 0)',
-  'insert into FCT_MissileSalvo values (501, 1, 2, 70, 0, 10, 100.5, 100), (501, 1, 2, 70, 0, 10, 100.5, 100), (502, 1, 2, 70, 0, 10, 100, 100.9), (503, 1, 2, 71, 0, 10, 99.2, 100), (504, 1, 2, 71, 0, 10, 101, 100), (505, 1, 2, 70, 5, 10, 100, 100), (506, 1, 3, 70, 0, 10, 100, 100), (507, 1, 2, 70, 0, 11, 100, 100), (508, 1, 2, 70, 0, 10, 5000, 5000), (509, 1, 2, 99, 0, 10, 5000.2, 5000), (510, 1, 2, 70, 0, 13, NULL, 200)',
+  'insert into FCT_MissileSalvo (MissileSalvoID, GameID, RaceID, MissileID, MissileSpeed, SystemID, Xcor, Ycor) values (501, 1, 2, 70, 0, 10, 100.5, 100), (501, 1, 2, 70, 0, 10, 100.5, 100), (502, 1, 2, 70, 0, 10, 100, 100.9), (503, 1, 2, 71, 0, 10, 99.2, 100), (504, 1, 2, 71, 0, 10, 101, 100), (505, 1, 2, 70, 5, 10, 100, 100), (506, 1, 3, 70, 0, 10, 100, 100), (507, 1, 2, 70, 0, 11, 100, 100), (508, 1, 2, 70, 0, 10, 5000, 5000), (509, 1, 2, 99, 0, 10, 5000.2, 5000), (510, 1, 2, 70, 0, 13, NULL, 200)',
+  'insert into FCT_MissileSalvo (MissileSalvoID, GameID, RaceID, MissileID, MissileSpeed, SystemID, Xcor, Ycor, LurkerMode) values (511, 1, 2, 71, 5, 10, 100.2, 100.2, 1), (511, 1, 2, 71, 5, 10, 100.2, 100.2, 1), (513, 1, 3, 71, 5, 10, 100, 100.1, 1), (514, 1, 2, 70, 5, 10, 100.1, 99.9, 1), (515, 1, 2, 71, 5, 10, 100.1, 99.9, 0)',
+  'insert into FCT_MissileSalvo (MissileSalvoID, GameID, RaceID, MissileID, MissileSpeed, SystemID, Xcor, Ycor, LurkerMode, OrbitLagrangeID) values (516, 1, 2, 70, 0, 10, 100, 100, 0, 7), (517, 1, 2, 71, 5, 10, 100.1, 100, 1, 7), (518, 1, 2, 70, 0, 10, 9000, 9000, 0, 8), (519, 1, 2, 71, 5, 10, 9000, 9000, 1, 8)',
   'insert into FCT_Contacts values (601, 1, 2, 3, 0, 10, 100, 100, 1000), (601, 1, 2, 3, 0, 10, 100, 100, 1000), (602, 1, 2, 3, 0, 10, 100.2, 100, 500), (503, 1, 2, 3, 0, 10, 99.2, 100, 1000), (603, 1, 3, 3, 0, 10, 100, 100, 1000), (604, 1, 2, 3, 7, 10, 100, 100, 1000), (605, 1, 2, 4, 0, 10, 100, 100, 1000), (606, 1, 2, 3, 0, 10, 5000, 5000, 1000), (607, 1, 2, 3, 0, 10, 100, 100, 1000), (607, 1, 2, 3, 0, 10, 100, 100, 400), (608, 1, 2, 3, 0, 13, NULL, 200, 1000), (609, 1, 2, 3, 0, 15, 400, 400, NULL), (610, 1, 2, 3, 0, 16, 500, 500, NULL), (610, 1, 2, 3, 0, 16, 500, 500, 1000)',
 ]
 const SMALL_POINTS = [
@@ -250,10 +243,11 @@ const observeModule = async (changes) => {
 
   try {
     const database = adapter(real)
-    const points = await graph.loadJumpPoints(database, IDS)
-    const facts = await infrastructure.loadJumpInfrastructure(database, IDS)
-    const builders = await infrastructure.loadJumpBuilders(database, IDS)
-    const rows = infrastructure.infrastructureRows(points, facts, { RaceID: R, builders })
+    const { ids } = ENV.dataset
+    const points = await graph.loadJumpPoints(database, ids)
+    const facts = await infrastructure.loadJumpInfrastructure(database, ids)
+    const builders = await infrastructure.loadJumpBuilders(database, ids)
+    const rows = infrastructure.infrastructureRows(points, facts, { RaceID: ids.RaceID, builders })
     const small = await open(':memory:', sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE)
 
     try {
@@ -277,8 +271,6 @@ const observeModule = async (changes) => {
   }
 }
 
-const byId = (rows) => Object.fromEntries(rows.map((row) => [row.WarpPointID, row]))
-
 // The problems of `rows` set against the oracle's rows by the identity of the point.
 const sameRows = (rows, truth) => {
   const { pairs, problems } = pairedBy('the rows', rows, [...truth.points.values()], (row) => String(row.WarpPointID), (row) => String(row.id))
@@ -290,7 +282,7 @@ const MODULE_CHECKS = [
   ['m-charted', 'the rows are the points the race has charted in systems it knows, one each, and a point it has not charted has none', (o, t) => {
     const { problems } = sameRows(o.rows, t)
 
-    return problems.length === 0 && !o.rows.some((row) => row.WarpPointID === POINT.uncharted) && o.points.includes(POINT.queued) ? true : short({ problems, rows: o.rows.length, charted: t.charted })
+    return problems.length === 0 && (!t.dataset.point.uncharted || !o.rows.some((row) => row.WarpPointID === t.dataset.point.uncharted)) && (!t.dataset.point.queued || o.points.includes(t.dataset.point.queued)) ? true : short({ problems, rows: o.rows.length, charted: t.charted })
   }],
   ['m-number', 'each row has the number of its point among the charted points of its system, its system, and the system beyond it when its far side is charted too', (o, t) => {
     const wrong = sameRows(o.rows, t).pairs.filter(([truth, row]) => row.number !== truth.number || row.SystemID !== truth.system || (row.beyondSystemID ? t.systemNames.get(row.beyondSystemID) : null) !== truth.beyond).map(([truth, row]) => [truth.id, row.number, truth.number, row.beyondSystemID])
@@ -300,30 +292,29 @@ const MODULE_CHECKS = [
   ['m-gate', 'the gate of each row is the one the save gives: none, built by the race, built by another race, or built by none recorded, and a builder 0 is never the race\'s own', (o, t) => {
     const wrong = sameRows(o.rows, t).pairs.filter(([truth, row]) => row.gate !== truth.gate).map(([truth, row]) => [truth.id, row.gate, truth.gate])
 
-    return (wrong.length === 0 && o.rows.some((row) => row.gate === 'unrecorded') && o.rows.some((row) => row.gate === 'other')) || short(wrong.slice(0, 3))
+    return (wrong.length === 0 && (!t.dataset.cases.builders || (o.rows.some((row) => row.gate === 'unrecorded') && o.rows.some((row) => row.gate === 'other')))) || short(wrong.slice(0, 3))
   }],
   ['m-orders', 'the stabilisation of each row is the furthest state of the orders of the race at the point, its fleets named once each, and no order of another race or another kind counts', (o, t) => {
     const wrong = sameRows(o.rows, t).pairs.filter(([truth, row]) => valueOf(row.stabilisation) !== truth.state || JSON.stringify(row.fleets.map((fleet) => `${fleet.FleetName}:${fleet.state}`).sort()) !== JSON.stringify(truth.fleetStates)).map(([truth, row]) => [truth.id, valueOf(row.stabilisation), truth.state, row.fleets.map((fleet) => `${fleet.FleetName}:${fleet.state}`), truth.fleetStates])
     const states = new Set(o.rows.map((row) => valueOf(row.stabilisation)))
 
-    return (wrong.length === 0 && ['none', 'queued', 'running', 'awaiting'].every((state) => states.has(state))) || short({ wrong: wrong.slice(0, 3), states: [...states] })
+    return (wrong.length === 0 && (!t.dataset.cases.orders || ['none', 'queued', 'running', 'awaiting'].every((state) => states.has(state)))) || short({ wrong: wrong.slice(0, 3), states: [...states] })
   }],
   ['m-counts', 'the mines and the buoys of each row are the distinct stationary salvos of the race within a kilometre of the point, by the design\'s second stage, and 0 where there are none', (o, t) => {
     const wrong = sameRows(o.rows, t).pairs.filter(([truth, row]) => valueOf(row.minefields) !== truth.mines || valueOf(row.buoys) !== truth.buoys).map(([truth, row]) => [truth.id, valueOf(row.minefields), truth.mines, valueOf(row.buoys), truth.buoys])
 
-    return (wrong.length === 0 && o.rows.some((row) => valueOf(row.minefields) > 0) && o.rows.some((row) => valueOf(row.buoys) > 0)) || short(wrong.slice(0, 3))
+    return (wrong.length === 0 && (!t.dataset.cases.salvos || (o.rows.some((row) => valueOf(row.minefields) > 0) && o.rows.some((row) => valueOf(row.buoys) > 0)))) || short(wrong.slice(0, 3))
   }],
   ['m-detected', 'the objects detected of each row are the distinct stationary salvos the race holds a contact of, once for each object however many contacts, those of its own salvos left out, the earlier ones counted apart', (o, t) => {
     const wrong = sameRows(o.rows, t).pairs.filter(([truth, row]) => valueOf(row.detected) !== truth.detected || row.earlier !== truth.earlier).map(([truth, row]) => [truth.id, valueOf(row.detected), truth.detected, row.earlier, truth.earlier])
-    const at = byId(o.rows)
 
-    return (wrong.length === 0 && valueOf(at[POINT.contacts].detected) === 1 && at[POINT.contacts].earlier === 1 && valueOf(at[POINT.queued].detected) === 0) || short(wrong.slice(0, 3))
+    return wrong.length === 0 || short(wrong.slice(0, 3))
   }],
   ['m-probes', 'the probe count of every row is unknown, as the save marks no probe', (o) => o.rows.concat(o.small).every((row) => row.probes.status === 'unavailable' && row.probes.value === null) || short(o.rows.filter((row) => row.probes.status !== 'unavailable').slice(0, 2).map((row) => row.probes))],
-  ['m-small-counts', 'on the small save each salvo counts once however many rows, a salvo or a contact a kilometre away or more, moving, of another race, in another system or of another kind counts nowhere, and a count of nothing is 0', (o) => {
+  ['m-small-counts', 'coincident anchored salvos count by saved location and distant anchored salvos count nowhere: each stationary or lurking salvo counts once within a kilometre, while moving salvos, other races and systems do not', (o) => {
     const [a, b, , d] = o.small
     const got = [valueOf(a.minefields), valueOf(a.buoys), valueOf(a.detected), a.earlier, valueOf(d.minefields), valueOf(d.buoys), valueOf(d.detected), d.earlier, valueOf(b.detected), b.earlier]
-    const want = [2, 1, 2, 1, 0, 0, 0, 0, 1, 0]
+    const want = [4, 3, 2, 1, 0, 0, 0, 0, 1, 0]
 
     return JSON.stringify(got) === JSON.stringify(want) || short({ got, want })
   }],
@@ -337,10 +328,10 @@ const MODULE_CHECKS = [
   ['m-small-unknown', 'on the small save a figure the save cannot give is unknown and never 0: a salvo of no known design, a point with no position, a missing game time, and every figure when the save is withheld', (o) => {
     const [a, b, c, d] = o.small
     const got = [valueOf(b.minefields), valueOf(b.buoys), valueOf(c.minefields), valueOf(c.buoys), valueOf(c.detected), c.earlier, valueOf(o.timeless[0].detected), o.timeless[0].earlier, valueOf(o.timeless[0].minefields), ...o.withheld.flatMap((row) => [valueOf(row.stabilisation), valueOf(row.minefields), valueOf(row.buoys), valueOf(row.detected), row.earlier])]
-    const want = ['unknown', 'unknown', 'unknown', 'unknown', 'unknown', null, 'unknown', null, 2, ...o.withheld.flatMap(() => ['unknown', 'unknown', 'unknown', 'unknown', null])]
+    const want = ['unknown', 'unknown', 'unknown', 'unknown', 'unknown', null, 'unknown', null, 4, ...o.withheld.flatMap(() => ['unknown', 'unknown', 'unknown', 'unknown', null])]
     const named = o.withheld.every((row) => row.minefields.inputs.missing.includes('the save lacks FCT_Contacts.Speed'))
 
-    return (JSON.stringify(got) === JSON.stringify(want) && named && valueOf(a.minefields) === 2 && valueOf(d.stabilisation) === 'unknown') || short({ got, want, named })
+    return (JSON.stringify(got) === JSON.stringify(want) && named && valueOf(a.minefields) === 4 && valueOf(d.stabilisation) === 'unknown') || short({ got, want, named })
   }],
   ['m-small-gates', 'on the small save the gate is read from the strength and the builders alone, a missing strength is not a gate, a gate whose builder is not read is built by none recorded, and the far side of a point is known only when it is explored', (o) => {
     const got = [...o.small.map((row) => row.gate), ...o.withheld.map((row) => row.gate), ...o.unbuilt.map((row) => row.gate), ...o.small.map((row) => row.beyondSystemID)]
@@ -354,7 +345,7 @@ const MODULE_CHECKS = [
     const want = ['unknown', 'unknown', 'unknown', null]
     const reasoned = [e.minefields, e.buoys, e.detected].every((result) => result.inputs.missing.length > 0)
 
-    return (JSON.stringify(got) === JSON.stringify(want) && reasoned && valueOf(o.small[0].minefields) === 2 && valueOf(o.small[0].detected) === 2) || short({ got, want, reasoned })
+    return (JSON.stringify(got) === JSON.stringify(want) && reasoned && valueOf(o.small[0].minefields) === 4 && valueOf(o.small[0].detected) === 2) || short({ got, want, reasoned })
   }],
   ['m-small-arrival', 'on the small save an order with no arrival flag is not a queued one: its point has an unknown stabilisation with a reason given, and the counts there stay known', (o) => {
     const f = o.small[5]
@@ -406,7 +397,7 @@ const readMap = () => {
   return { path: window.$app.$route.path, query: { ...window.$app.$route.query }, name: part('[data-map-point-name]'), label: part('[data-map-point-label]'), far: part('[data-map-point-far]'), mark: part('[data-map-point-mark]'), system: part('[data-map-system-name]'), detail: part('[data-map-point-detail]'), title: part('[data-system-title]'), pointLabel: part('[data-system-point-label]'), pointFar: part('[data-system-point-far]'), pointMark: part('[data-system-point-mark]'), systemName: part('[data-system-name]'), told: view && view.__vue__ ? view.__vue__.jumpPointId : null }
 }
 
-const openApp = async (page, url, step) => {
+const openApp = async (page, url, step, names) => {
   step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
   await installScreen(page)
@@ -414,11 +405,11 @@ const openApp = async (page, url, step) => {
   const picker = page.locator('.empire-list').first()
 
   step('picking the game')
-  await picker.locator('.empire-list__game').filter({ hasText: `${NAMES.game} ·` }).first().click({ timeout: TIMEOUT })
+  await picker.locator('.empire-list__game').filter({ hasText: `${names.game} ·` }).first().click({ timeout: TIMEOUT })
 
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
     step('picking the race')
-    await picker.getByText(NAMES.race, { exact: true }).last().click({ timeout: TIMEOUT })
+    await picker.getByText(names.race, { exact: true }).last().click({ timeout: TIMEOUT })
   }
 
   step('waiting for the save of the race')
@@ -445,8 +436,10 @@ const showSystem = async (page, step, system, name, read) => {
 }
 
 // Everything a player does on the page, and what the screen shows after each step: { systems: { [SystemID]: table }, cleared, map, view }.
-const observePage = (browser, url, truth, { map = true, read = true, systems = SHOWN } = {}) => observe(browser, async ({ page, step }) => {
-  await openApp(page, url, step)
+const observePage = (browser, url, truth, { map = true, read = true, systems = truth.dataset.shown } = {}) => observe(browser, async ({ page, step }) => {
+  const { point, systems: where } = truth.dataset
+
+  await openApp(page, url, step, truth.dataset.names)
 
   const seen = { systems: {} }
 
@@ -462,24 +455,24 @@ const observePage = (browser, url, truth, { map = true, read = true, systems = S
 
   if (map) {
     step('a link names a point that is not in its system')
-    await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), `/map?system=${SYSTEMS.gates}&point=${POINT.awaiting}`)
+    await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), `/map?system=${where.gates}&point=${point.awaiting}`)
     await page.waitForFunction(() => window.$app.$route.path === '/map', null, { timeout: TIMEOUT })
     await page.waitForFunction(() => { const view = window.$app.$route.matched[0].instances.default; return Boolean(view && view.ready) }, null, { timeout: TIMEOUT })
     await page.waitForFunction(`!(${pageLoading})()`, null, { timeout: TIMEOUT })
-    await page.waitForFunction((system) => window.$app.$route.query.system === system && (!window.$app.$route.query.point || Boolean(document.querySelector('[data-map-point-name]'))), String(SYSTEMS.gates), { timeout: STEP }).catch(() => {})
+    await page.waitForFunction((system) => window.$app.$route.query.system === system && (!window.$app.$route.query.point || Boolean(document.querySelector('[data-map-point-name]'))), String(where.gates), { timeout: STEP }).catch(() => {})
     await rendered(page)
 
     const before = await page.evaluate(readMap)
 
     step('the system the point belongs to is picked on the map')
-    await page.evaluate((id) => { const view = window.$app.$route.matched[0].instances.default; view.graph.nodes(':selected').unselect(); view.graph.getElementById(id).select() }, String(SYSTEMS.awaiting))
-    await page.waitForFunction((system) => window.$app.$route.query.system === system, String(SYSTEMS.awaiting), { timeout: TIMEOUT })
+    await page.evaluate((id) => { const view = window.$app.$route.matched[0].instances.default; view.graph.nodes(':selected').unselect(); view.graph.getElementById(id).select() }, String(where.awaiting))
+    await page.waitForFunction((system) => window.$app.$route.query.system === system, String(where.awaiting), { timeout: TIMEOUT })
     await rendered(page)
     seen.rejected = { before, after: await page.evaluate(readMap) }
 
-    await showSystem(page, step, SYSTEMS.gates, truth.systemNames.get(SYSTEMS.gates), read)
+    await showSystem(page, step, where.gates, truth.systemNames.get(where.gates), read)
     step('the row of a point is opened on the map')
-    await page.locator(`[data-jump-cell="map"][data-jump="${POINT.contacts}"]`).first().click({ timeout: STEP })
+    await page.locator(`[data-jump-cell="map"][data-jump="${point.contacts}"]`).first().click({ timeout: STEP })
     await page.waitForFunction(() => window.$app.$route.path === '/map', null, { timeout: TIMEOUT })
     await page.waitForFunction(() => { const view = window.$app.$route.matched[0].instances.default; return Boolean(view && view.ready) }, null, { timeout: TIMEOUT })
     await page.waitForFunction(`!(${pageLoading})()`, null, { timeout: TIMEOUT })
@@ -496,8 +489,8 @@ const observePage = (browser, url, truth, { map = true, read = true, systems = S
     }
 
     step('a point whose far side is not charted is opened on the map')
-    await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), `/map?system=${SYSTEMS.fleets}&point=${POINT.unexplored}`)
-    await page.waitForFunction((point) => window.$app.$route.query.point === point && Boolean(document.querySelector('[data-map-point-name]')), String(POINT.unexplored), { timeout: STEP }).catch(() => {})
+    await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), `/map?system=${where.fleets}&point=${point.unexplored}`)
+    await page.waitForFunction((id) => window.$app.$route.query.point === id && Boolean(document.querySelector('[data-map-point-name]')), String(point.unexplored), { timeout: STEP }).catch(() => {})
     await rendered(page)
     seen.unexplored = await page.evaluate(readMap)
   }
@@ -568,7 +561,7 @@ const rowProblems = (table, rows) => pairedBy('the rows', table.cells.filter((en
 const eachRow = (o, t, test) => {
   const wrong = []
 
-  SHOWN.filter((system) => o.systems[system]).forEach((system) => wanted(t, system).forEach((row) => {
+  t.dataset.shown.filter((system) => o.systems[system]).forEach((system) => wanted(t, system).forEach((row) => {
     const problem = test(o.systems[system], row)
 
     if (problem !== true) {
@@ -583,10 +576,11 @@ const verdict = (wrong) => (wrong.length === 0 ? true : short(wrong.slice(0, 4))
 
 const PAGE_CHECKS = [
   ['rows', 'the table of a system has a row for each point the race has charted there and for no other, and nothing is drawn for a point it has not charted', (o, t) => {
-    const problems = SHOWN.flatMap((system) => rowProblems(o.systems[system], wanted(t, system)).map((problem) => [system, ...problem]))
-    const stray = SHOWN.filter((system) => o.systems[system].cells.some((entry) => entry.on && entry.id === String(POINT.uncharted)))
+    const { point, systems } = t.dataset
+    const problems = t.dataset.shown.flatMap((system) => rowProblems(o.systems[system], wanted(t, system)).map((problem) => [system, ...problem]))
+    const stray = t.dataset.shown.filter((system) => o.systems[system].cells.some((entry) => entry.on && entry.id === String(point.uncharted)))
 
-    return (problems.length === 0 && stray.length === 0 && o.systems[SYSTEMS.gates].panel && wanted(t, SYSTEMS.gates).length >= 4) || short({ problems, stray })
+    return (problems.length === 0 && stray.length === 0 && o.systems[systems.gates].panel && wanted(t, systems.gates).length >= 4) || short({ problems, stray })
   }],
   ['name', 'each row names its point by the number the game gives it among the charted points of the system, the system by its name and the far side by the name of the system beyond', (o, t) => verdict(eachRow(o, t, (table, row) => {
     const name = oneText(table, row.id, 'name')
@@ -616,8 +610,14 @@ const PAGE_CHECKS = [
 
       return { gate: labelKey(oneText(table, id, 'gate') || '', ENV.words.gate), state: labelKey(oneText(table, id, 'stabilisation') || '', ENV.words.stabilisation) }
     }
-    const got = [read(POINT.contacts), read(POINT.awaiting)]
-    const want = [{ gate: 'own', state: 'none' }, { gate: 'none', state: 'awaiting' }]
+    const { point } = t.dataset
+    const got = [read(point.contacts)]
+    const want = [{ gate: 'own', state: 'none' }]
+
+    if (t.dataset.cases.orders) {
+      got.push(read(point.awaiting))
+      want.push({ gate: 'none', state: 'awaiting' })
+    }
 
     return JSON.stringify(got) === JSON.stringify(want) || short({ got, want })
   }],
@@ -645,43 +645,43 @@ const PAGE_CHECKS = [
     return (total !== null && total === t.charted && o.cleared.chip === null) || short({ total: o.cleared.total, chip: o.cleared.chip, charted: t.charted })
   }],
   ['map-select', 'the link of a row opens the map on its system with the point named in the route, and the side panel names that point by its number, its far side and its system, not another point of the system', (o, t) => {
-    const row = t.points.get(POINT.contacts)
+    const row = t.points.get(t.dataset.point.contacts)
     const map = o.map
 
     return (row.beyond !== null && Boolean(map) && map.path === '/map' && map.query.system === String(row.system) && map.query.point === String(row.id) && map.label !== null && map.label.on && map.label.text === ENV.words.label(row.number) && map.far !== null && map.far.on && map.far.text === row.beyond && (markOf(map.mark) !== '') === (row.gate !== 'none') && map.system !== null && map.system.on && map.system.text === row.systemName && map.name !== null && map.name.on && map.detail !== null && map.detail.on) || short({ map, number: row.number })
   }],
   ['map-view', 'the System view opened from the side panel is titled with the point and is told the point', (o, t) => {
-    const row = t.points.get(POINT.contacts)
+    const row = t.points.get(t.dataset.point.contacts)
     const view = o.view
 
     return (Boolean(view) && view.pointLabel !== null && view.pointLabel.on && view.pointLabel.text === ENV.words.label(row.number) && view.pointFar !== null && view.pointFar.on && view.pointFar.text === row.beyond && (markOf(view.pointMark) !== '') === (row.gate !== 'none') && markOf(view.pointMark) === markOf(o.map && o.map.mark) && view.systemName !== null && view.systemName.on && view.systemName.text === row.systemName && Number(view.told) === row.id) || short({ title: view && view.title, label: view && view.pointLabel, far: view && view.pointFar, mark: view && view.pointMark, system: view && view.systemName, told: view && view.told })
   }],
   ['map-unexplored', 'the side panel of a point whose far side is not charted names the unexplored marker of the places module as its far side and no system', (o, t) => {
-    const row = t.points.get(POINT.unexplored)
+    const row = t.points.get(t.dataset.point.unexplored)
     const map = o.unexplored
 
     return (row.beyond === null && Boolean(map) && map.path === '/map' && map.query.system === String(row.system) && map.query.point === String(row.id) && map.label !== null && map.label.on && map.label.text === ENV.words.label(row.number) && map.far !== null && map.far.on && map.far.text === ENV.words.farUnknown) || short({ map, beyond: row.beyond })
   }],
   ['map-reject', 'a point a link names that its system does not have is dropped from the route once the map has settled, and does not come back when the point\'s own system is picked on the map afterwards', (o, t) => {
-    const row = t.points.get(POINT.awaiting)
+    const row = t.points.get(t.dataset.point.awaiting)
     const { before, after } = o.rejected
 
-    return (before.path === '/map' && before.query.system === String(SYSTEMS.gates) && before.query.point === undefined && before.name === null && after.query.system === String(row.system) && after.query.point === undefined && after.name === null) || short({ before, after })
+    return (before.path === '/map' && before.query.system === String(t.dataset.systems.gates) && before.query.point === undefined && before.name === null && after.query.system === String(row.system) && after.query.point === undefined && after.name === null) || short({ before, after })
   }],
   ['no-errors', 'the page raises no error', (o) => (o.unexpected.length === 0 ? true : short(o.unexpected.slice(0, 3)))],
 ]
 
 // The save lacking a column the infrastructure reads (`read`: what the page is waited for, see showSystem): the points are drawn and every figure that rests on the missing column is as the save can say it.
 const observeLacking = (browser, url, truth, read) => observe(browser, async ({ page, step }) => {
-  await openApp(page, url, step)
+  await openApp(page, url, step, truth.dataset.names)
 
-  return { table: await showSystem(page, step, SYSTEMS.gates, truth.systemNames.get(SYSTEMS.gates), read) }
+  return { table: await showSystem(page, step, truth.dataset.systems.gates, truth.systemNames.get(truth.dataset.systems.gates), read) }
 })
 
 const LACKING_CHECKS = [
   ['lacking-unknown', 'a save lacking a column the salvos need still draws every point with its gate, and its stabilisation, minefields, buoys and detected objects read as unknown, never 0', (o, t) => {
     const table = o.table
-    const rows = wanted(t, SYSTEMS.gates)
+    const rows = wanted(t, t.dataset.systems.gates)
     const wrong = rows.filter((row) => {
       const figures = ['stabilisation', 'minefields', 'buoys', 'probes', 'detected'].map((cell) => oneText(table, row.id, cell))
 
@@ -695,9 +695,9 @@ const LACKING_CHECKS = [
 const BUILDER_CHECKS = [
   ['lacking-builders', 'a save lacking the column of the gate builder still draws every point: a gate reads as built by none recorded, no gate as no gate, and the stabilisation and the counts are the ones SQL gives', (o, t) => {
     const table = o.table
-    const rows = wanted(t, SYSTEMS.gates)
+    const rows = wanted(t, t.dataset.systems.gates)
     const wrong = rows.filter((row) => labelKey(oneText(table, row.id, 'gate') || '', ENV.words.gate) !== (row.gate === 'none' ? 'none' : 'unrecorded') || labelKey(oneText(table, row.id, 'stabilisation') || '', ENV.words.stabilisation) !== row.state || countOf(oneText(table, row.id, 'minefields')) !== row.mines || countOf(oneText(table, row.id, 'buoys')) !== row.buoys).map((row) => [row.id, oneText(table, row.id, 'gate'), row.gate])
-    const distinct = rows.some((row) => row.gate === 'own') && rows.some((row) => row.gate === 'other')
+    const distinct = !t.dataset.cases.builders || (rows.some((row) => row.gate === 'own') && rows.some((row) => row.gate === 'other'))
 
     return (rowProblems(table, rows).length === 0 && wrong.length === 0 && distinct) || short({ problems: rowProblems(table, rows), wrong: wrong.slice(0, 2), distinct })
   }],
@@ -705,12 +705,18 @@ const BUILDER_CHECKS = [
 
 // ---------- the faults and the rewrites ----------
 
-const swap = (from, to, count = 1) => (text) => {
-  if (text.split(from).length !== count + 1) {
-    throw new Error(`The variant must apply ${count === 1 ? 'exactly once' : `${count} times`} to the file: ${from}`)
+const swap = (from, to, count = 1) => {
+  const change = (text) => {
+    if (text.split(from).length !== count + 1) {
+      throw new Error(`The variant must apply ${count === 1 ? 'exactly once' : `${count} times`} to the file: ${from}`)
+    }
+
+    return text.split(from).join(to)
   }
 
-  return text.split(from).join(to)
+  change.patches = [{ from, to, count }]
+
+  return change
 }
 
 /* eslint-disable no-template-curly-in-string */
@@ -734,6 +740,9 @@ const MODULE_FAULTS = [
   { name: 'an order not yet at the point is being stabilised', file: MODULE, change: swap("!arrived ? 'queued' : order.TimeRequired > 0", "!arrived ? 'running' : order.TimeRequired > 0"), fails: ['m-orders', 'm-small-orders'] },
   { name: 'the orders of every race are read', file: MODULE, change: swap(' and FCT_MoveOrders.RaceID = ${RaceID}', ''), fails: ['m-orders'] },
   { name: 'the salvos of every race are read', file: MODULE, change: swap('FCT_MissileSalvo.RaceID = ${RaceID} and ', ''), fails: ['m-small-counts'] },
+  { name: 'a salvo that lurks is read as moving', file: MODULE, change: swap(' or FCT_MissileSalvo.LurkerMode = 1)', ')'), fails: ['m-small-counts', 'm-small-unknown', 'm-small-positions'] },
+  { name: 'a salvo that moves is read as lurking', file: MODULE, change: swap('FCT_MissileSalvo.LurkerMode = 1)', 'FCT_MissileSalvo.MissileSpeed > 0)'), fails: ['m-small-counts', 'm-small-unknown', 'm-small-positions'] },
+  { name: 'a coincident anchored salvo is excluded from its saved jump-point location', file: MODULE, change: swap('FCT_MissileSalvo.LurkerMode = 1)`', 'FCT_MissileSalvo.LurkerMode = 1) and coalesce(FCT_MissileSalvo.OrbitLagrangeID, 0) <= 0`'), fails: ['m-small-counts'] },
   { name: 'the contacts of every kind are read', file: MODULE, change: swap('and FCT_Contacts.ContactType = 3 and ', 'and '), fails: ['m-detected', 'm-small-counts'] },
   { name: 'the contacts that move are read', file: MODULE, change: swap(' and FCT_Contacts.Speed = 0`', '`'), fails: ['m-detected', 'm-small-counts'] },
   { name: 'the points the race has not charted are read', file: GRAPH, change: swap(' and FCT_RaceJumpPointSurvey.Charted = 1\ninner join FCT_RaceSysSurvey', '\ninner join FCT_RaceSysSurvey'), fails: ['m-charted'] },
@@ -800,6 +809,8 @@ const PAGE_BENIGN = [
   { name: 'the words for a far side with no system in other words', file: MODULE, words: true, change: swap("unexplored: 'Unexplored',", "unexplored: 'Not yet explored',") },
 ]
 
+const PAGE_COMPOSITE_A = { key: 'benign:composite-a', name: 'the composed page rewrites with the map still structurally the same', rewrites: PAGE_BENIGN.filter((_, index) => [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12].includes(index)), map: true, words: true }
+
 const MODULE_BENIGN = [
   { name: 'the time condition of the module parenthesised', file: MODULE, change: swap('const timeKnown = Boolean(facts) && Number.isFinite(facts.gameTime)', 'const timeKnown = (Boolean(facts) && Number.isFinite(facts.gameTime))') },
   { name: 'the builder test of the gate in two conditions', file: MODULE, change: swap("return builder > 0 ? (builder === RaceID ? 'own' : 'other') : 'unrecorded'", "return builder > 0 && builder === RaceID ? 'own' : builder > 0 ? 'other' : 'unrecorded'") },
@@ -821,6 +832,35 @@ const LACKS = {
   builders: { key: 'lacking-builders', drop: 'alter table FCT_JumpPoint drop column JumpGateRaceID', read: 'facts', label: 'FCT_JumpPoint.JumpGateRaceID', checks: BUILDER_CHECKS, faults: BUILDER_FAULTS },
 }
 /* eslint-enable no-template-curly-in-string */
+
+// The cases a planted fault is only told from the page as it is where the dataset holds them: the figure the fault changes is the same with it and without it when the save holds none of the case. A fault that needs a case the fixture lacks is judged by its checks of the small save written here alone, and is not run when it names none, and the head of the fixture says so.
+const NEEDS = {
+  orders: ['the order that is further along gives way to the earlier', 'an order not yet at the point is being stabilised', 'the orders of every race are read', 'an order on its way draws as being stabilised', 'the fleets of a point list one fleet twice and leave another out'],
+  salvos: ['a buoy counts as a mine', 'an object 100 km away is at the point', 'the minefields cell draws the buoys'],
+  contacts: ['a contact is counted once for each of its rows', "the contacts of the race's own salvos count as detected objects", 'every contact counts as current', 'the contacts of every kind are read', 'the contacts that move are read', 'the objects detected count the earlier contacts too', 'the earlier contacts are not drawn', 'the earlier contacts draw one more than there are'],
+  builders: ["a gate with no builder recorded is the race's own"],
+  farUncharted: ['a far side explored but not charted draws as not explored'],
+}
+
+// Puts the cases of NEEDS on the faults that name them: `needs` is the list of cases of a fault.
+const applyNeeds = () => {
+  const faults = [...MODULE_FAULTS, ...PAGE_FAULTS, ...LACKING_FAULTS, ...BUILDER_FAULTS]
+
+  for (const [key, names] of Object.entries(NEEDS)) {
+    for (const name of names) {
+      const named = faults.filter((fault) => fault.name === name)
+
+      if (named.length !== 1) {
+        throw new HarnessError(`the fault "${name}" that needs the case ${key} is not exactly one of the planted faults`)
+      }
+
+      named[0].needs = [...(named[0].needs || []), key]
+    }
+  }
+}
+
+// The checks a fault is judged by on a dataset with the cases `cases`: all it names when the dataset holds the cases it needs, else its checks of the small save written here alone (they are the same on every dataset), none when it names no such check.
+const failsOn = (fault, cases) => ((fault.needs || []).every((key) => cases[key]) ? fault.fails : fault.fails.filter((id) => id.startsWith('m-small-')))
 
 // ---------- the results ----------
 
@@ -871,8 +911,11 @@ const report = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `\n         ${typeof result === 'string' ? result : 'false'}`}`)
 }
 
+// What a report says of the dataset it ran on: its label.
+const datasetNote = () => ` (on ${ENV.dataset.label})`
+
 const reportFault = (fault, results) => {
-  report(`fault caught: ${fault.name}`, caughtAll(results, { name: fault.name }) ? true : notCaught(results), `fails ${fault.fails.join(', ')}`)
+  report(`fault caught: ${fault.name}${datasetNote()}`, caughtAll(results, { name: fault.name }) ? true : notCaught(results), `fails ${fault.fails.join(', ')}`)
 
   if (DETAIL) {
     results.forEach(({ id, result }) => console.log(`         ${id}: ${result === true ? 'holds' : result}`))
@@ -904,11 +947,8 @@ const view = async (fault, options = {}) => {
 
 const moduleView = (fault) => observeModule(fault ? { [fault.file]: fault.change } : {})
 
-const checkHead = async () => {
-  const o = await observeModule({})
-
-  judge(o, ENV.truth, MODULE_CHECKS).forEach(({ name, result }) => report(name, result))
-
+// The controls of the readers the checks use: they hold whatever the dataset.
+const checkControls = (o) => {
   const control = judge(o, ENV.truth, [['planted', 'a check that fails by its own value', () => 'what was seen']])
 
   report('control: a check that fails by its own verdict credits a fault named for it, and one that holds does not', caughtAll(control) && !caughtAll(judge(o, ENV.truth, [['holds', 'a check that holds', () => true]])) ? true : 'the credit of a fault does not follow the verdict')
@@ -932,23 +972,49 @@ const checkHead = async () => {
   const fleets = [fleetsRead('Alpha, Bravo', ['Alpha', 'Bravo']), fleetsRead('Bravo; Alpha', ['Alpha', 'Bravo']), fleetsRead('Alpha, Alpha', ['Alpha', 'Bravo']), fleetsRead('Bravo, Bravo', ['Alpha', 'Bravo']), fleetsRead('Alpha', ['Alpha', 'Bravo']), fleetsRead('Alpha 2, Alpha', ['Alpha', 'Alpha 2']), fleetsRead('Alpha, Alpha', ['Alpha', 'Alpha'])]
 
   report('control: the reader of the fleets under a stabilisation takes each expected name the number of times it is expected, whatever the separators, and no other text', JSON.stringify(fleets) === JSON.stringify([['Alpha', 'Bravo'], ['Alpha', 'Bravo'], ['Alpha, Alpha'], ['Bravo, Bravo'], ['Alpha'], ['Alpha', 'Alpha 2'], ['Alpha', 'Alpha']]) ? true : `read ${JSON.stringify(fleets)}`)
+}
+
+// What the fixture cannot exercise, printed as skipped: each case the save does not hold with the checks left without it, and the planted faults that need a case it does not hold.
+const printSkips = (dataset, where) => {
+  for (const lack of dataset.missing) {
+    console.log(`SKIP  ${where}: ${lack.name}: needs tier b: ${lack.reason}; no case of it for the checks ${lack.checks.join(', ')}, which still compare each figure with SQL`)
+  }
+
+  const faults = [...MODULE_FAULTS, ...PAGE_FAULTS, ...LACKING_FAULTS, ...BUILDER_FAULTS]
+  const needing = faults.filter((fault) => (fault.needs || []).some((key) => !dataset.cases[key]))
+  const unjudged = needing.filter((fault) => failsOn(fault, dataset.cases).length === 0)
+
+  console.log(`SKIP  ${where}: ${needing.length} of the ${faults.length} planted faults need a case this save does not hold (${[...new Set(needing.flatMap((fault) => fault.needs.filter((key) => !dataset.cases[key])))].join(', ')}): ${unjudged.length} of them are not run and ${needing.length - unjudged.length} are judged on the small save written here alone`)
+}
+
+const checkHead = async () => {
+  const { dataset } = ENV.truth
+  const where = `on ${dataset.label}`
+  const o = await observeModule({})
+
+  judge(o, ENV.truth, MODULE_CHECKS).forEach(({ name, result }) => report(`${name} (${where})`, result))
+  checkControls(o)
 
   const seen = await view(null)
 
-  pageResults(seen, ENV.truth, { strict: false, label: 'the page' }).forEach(({ name, result }) => report(name, result))
+  pageResults(seen, ENV.truth, { strict: false, label: `the page ${where}` }).forEach(({ name, result }) => report(`${name} (${where})`, result))
+  console.log(`INFO  ${where}: the tables are read for the systems ${dataset.shown.join(', ')} (the system ${dataset.systems.gates} holds ${wanted(ENV.truth, dataset.systems.gates).length} charted points, ${wanted(ENV.truth, dataset.systems.gates).filter((row) => row.gate !== 'none').length} with a gate); the map cases use the points ${dataset.point.contacts} (a gate whose far side is charted), ${dataset.point.unexplored} (far side not charted) and ${dataset.point.awaiting} (no gate, in another system), and ${dataset.point.uncharted} is a point of a known system that the race has not charted (${ENV.truth.charted} charted points in all)`)
+  printSkips(dataset, where)
 }
 
 const checkModuleFault = async (fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, judge(await moduleView(fault), ENV.truth, MODULE_CHECKS, fault.fails))
 }
 
 const checkModuleBenign = async (rewrite) => {
   const wrong = judge(await moduleView(rewrite), ENV.truth, MODULE_CHECKS).filter(({ result }) => result !== true).map(({ id }) => id)
 
-  report(`variant passes: ${rewrite.name}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
+  report(`variant passes: ${rewrite.name}${datasetNote()}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
 }
 
 const checkFault = async (fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, pageResults(await view(fault, { map: Boolean(fault.map) }), ENV.truth, { ids: fault.fails, label: `the page with the fault "${fault.name}"` }))
 }
 
@@ -974,7 +1040,138 @@ const checkBenign = async (rewrite) => {
   const shape = (value) => JSON.stringify(Object.values(value.systems).map((table) => table.cells.map((entry) => [entry.id, entry.cell, entry.on])))
   const same = rewrite.words ? shape(seen.value) === shape(ENV.baseline.value) : JSON.stringify(seen.value) === JSON.stringify(ENV.baseline.value)
 
-  report(`variant passes: ${rewrite.name}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the screen it draws is not the page\'s')
+  report(`variant passes: ${rewrite.name}${datasetNote()}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the screen it draws is not the page\'s')
+}
+
+const composeBenign = (rewrites) => {
+  const byFile = new Map()
+
+  for (const rewrite of rewrites) {
+    const sourceText = ENV.original[rewrite.file]
+    const patches = rewrite.change.patches
+
+    if (!Array.isArray(patches) || !patches.length) {
+      throw new HarnessError(`the benign rewrite "${rewrite.name}" has no source patch catalog`)
+    }
+
+    const individual = patches.reduce((text, patch) => {
+      const count = text.split(patch.from).length - 1
+
+      if (count !== patch.count) {
+        throw new HarnessError(`the anchor of "${rewrite.name}" occurs ${count} times, expected ${patch.count}: ${patch.from}`)
+      }
+
+      return text.split(patch.from).join(patch.to)
+    }, sourceText)
+
+    if (individual !== rewrite.change(sourceText)) {
+      throw new HarnessError(`the patch catalog for "${rewrite.name}" differs from its original rewrite`)
+    }
+
+    byFile.set(rewrite.file, [...(byFile.get(rewrite.file) || []), ...patches.map((patch) => ({ ...patch, name: rewrite.name }))])
+  }
+
+  const sources = {}
+
+  for (const [file, patches] of byFile) {
+    const sourceText = ENV.original[file]
+    const edits = []
+
+    for (const patch of patches) {
+      const starts = []
+      let at = 0
+
+      while ((at = sourceText.indexOf(patch.from, at)) !== -1) {
+        starts.push(at)
+        at += patch.from.length
+      }
+
+      if (starts.length !== patch.count) {
+        throw new HarnessError(`the anchor of "${patch.name}" occurs ${starts.length} times, expected ${patch.count}: ${patch.from}`)
+      }
+
+      starts.forEach((start) => edits.push({ start, end: start + patch.from.length, to: patch.to, name: patch.name }))
+    }
+
+    const ordered = edits.sort((a, b) => a.start - b.start)
+
+    for (let index = 1; index < ordered.length; index++) {
+      if (ordered[index].start < ordered[index - 1].end) {
+        throw new HarnessError(`the benign source patches "${ordered[index - 1].name}" and "${ordered[index].name}" overlap in ${file}`)
+      }
+    }
+
+    sources[file] = [...ordered].reverse().reduce((text, edit) => `${text.slice(0, edit.start)}${edit.to}${text.slice(edit.end)}`, sourceText)
+    require('./lib/mutant-source').assertParses(file, sources[file])
+  }
+
+  return sources
+}
+
+const viewWithSources = async (sources, options = {}) => {
+  const applied = []
+  const problems = []
+  let seen
+  let failure = null
+
+  try {
+    for (const [file, text] of Object.entries(sources)) {
+      applied.push(file)
+      ENV.server.replace(file, text)
+    }
+
+    seen = told('the page with composed benign rewrites', await observePage(ENV.chrome, ENV.server.url, ENV.truth, options))
+  } catch (error) {
+    failure = error
+  } finally {
+    for (const file of applied.reverse()) {
+      try {
+        ENV.server.replace(file, null)
+      } catch (error) {
+        problems.push(`${file}: ${error && error.message ? error.message : error}`)
+      }
+    }
+  }
+
+  if (failure && problems.length) {
+    throw new HarnessError(`composed benign observation failed: ${failure && failure.message ? failure.message : failure}; cleanup failed: ${problems.join(' | ')}`)
+  }
+
+  if (failure) {
+    throw failure
+  }
+
+  if (problems.length) {
+    throw new HarnessError(`composed benign cleanup failed: ${problems.join(' | ')}`)
+  }
+
+  return seen
+}
+
+const checkPageComposite = async () => {
+  if (unobserved(ENV.baseline)) {
+    throw new HarnessError(`the page as it is was not observed, so the rewrite has no screen to be set against: ${failureLine(ENV.baseline)}`)
+  }
+
+  const rewrites = PAGE_COMPOSITE_A.rewrites
+  const sources = composeBenign(rewrites)
+  const moduleChanges = Object.fromEntries(Object.entries(sources).filter(([file]) => MODULE_FILES.includes(file)).map(([file, text]) => [file, () => text]))
+  const words = ENV.words
+  let seen
+  let wrong
+
+  try {
+    ENV.words = wordsOf(await loadModules(moduleChanges))
+    seen = await viewWithSources(sources, { map: true })
+    wrong = pageResults(seen, ENV.truth, { label: `the page with ${PAGE_COMPOSITE_A.name}`, list: PAGE_CHECKS }).filter(({ result }) => result !== true).map(({ id }) => id)
+  } finally {
+    ENV.words = words
+  }
+
+  const shape = (value) => JSON.stringify(Object.values(value.systems).map((table) => table.cells.map((entry) => [entry.id, entry.cell, entry.on])))
+  const same = shape(seen.value) === shape(ENV.baseline.value)
+
+  report(`variant passes: ${PAGE_COMPOSITE_A.name}${datasetNote()}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the page and map structure differs from the head')
 }
 
 // A save lacking a column: served from now until the reset after the variant.
@@ -982,7 +1179,7 @@ const lackingView = async (kind, fault) => {
   const lack = LACKS[kind]
 
   if (!ENV.lackingFiles[kind]) {
-    const lacking = await saveCopy(`ae-jump-infrastructure-lacking-${kind}-`, [...ENV.statements, lack.drop])
+    const lacking = await saveCopy(`ae-jump-infrastructure-lacking-${kind}-`, [lack.drop], ENV.dataset.source)
 
     cleanups.push(async () => fs.rmSync(lacking.folder, { recursive: true, force: true }))
     ENV.lackingFiles[kind] = lacking.file
@@ -1004,22 +1201,22 @@ const lackingView = async (kind, fault) => {
 }
 
 const checkLackingHead = async (kind) => {
-  pageResults(await lackingView(kind, null), ENV.truth, { strict: false, label: `the save lacking ${LACKS[kind].label}`, list: LACKS[kind].checks }).forEach(({ name, result }) => report(name, result))
+  pageResults(await lackingView(kind, null), ENV.truth, { strict: false, label: `the save lacking ${LACKS[kind].label}`, list: LACKS[kind].checks }).forEach(({ name, result }) => report(`${name}${datasetNote()}`, result))
 }
 
 const checkLackingFault = async (kind, fault) => {
+  refusePlanting(fault.name)
   reportFault(fault, pageResults(await lackingView(kind, fault), ENV.truth, { ids: fault.fails, label: `the save lacking ${LACKS[kind].label} with the fault "${fault.name}"`, list: LACKS[kind].checks }))
 }
 
-// What a worker sets up once before its first variant: the copy of the save with the cases written into it, the oracle's reading of it, the words of the module's tables, the texts of the files a variant may change, and one page server over the copy, warmed, with one Chromium.
-const setUp = async () => {
+// What a worker sets up once before its first variant: the copy of the save of its dataset, the oracle's reading of it, the words of the module's tables, the texts of the files a variant may change, and one page server over the copy, warmed, with one Chromium.
+const setUp = async (dataset) => {
   const { startPageServer } = require('./lib/page-server')
-  const statements = await fixtureStatements(path.join(root, SAVE))
-  const copy = await saveCopy('ae-jump-infrastructure-', statements)
+  const copy = await saveCopy('ae-jump-infrastructure-', [], dataset.source)
 
   cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
 
-  const env = { statements, copy, truth: await truthOf(copy.file), words: wordsOf(await loadModules()), original: {}, lackingFiles: {}, baseline: null }
+  const env = { dataset, copy, truth: await truthOf(copy.file, dataset), words: wordsOf(await loadModules()), original: {}, lackingFiles: {}, baseline: null }
 
   for (const file of [PAGE, MAP, GRAPH, MODULE, PLACES]) {
     env.original[file] = source(file)
@@ -1032,34 +1229,51 @@ const setUp = async () => {
 
   const warmed = await env.server.warm(env.chrome, { routes: ['/lagrange'] })
 
-  console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
+  console.log(`INFO  the page server warmed on ${dataset.label} in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
 
   return env
 }
 
 // The deadlines, in seconds.
 const DEADLINES = { head: 300, module: 120, view: 240, setup: 900 + 180 }
-const CONTROL_FAULT = 'the minefields cell draws the buoys'
+const CONTROL_FAULT = 'the minefields cell is hidden with v-show'
 
-const variantsOf = (mutating, lacking) => [
-  { key: 'head', name: 'the head: the module and the table on the page as they are', head: true, heading: 'The jump point infrastructure table (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.head, run: checkHead },
-  ...(mutating ? MODULE_FAULTS.map((fault, index) => ({ key: `module-fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the module', pool: 'suite', deadline: DEADLINES.module, run: () => checkModuleFault(fault) })) : []),
-  ...(mutating ? MODULE_BENIGN.map((rewrite, index) => ({ key: `module-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nrewrites of the module that say the same thing', pool: 'suite', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })) : []),
-  ...(mutating ? PAGE_FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults of the page', pool: 'suite', deadline: DEADLINES.view, run: () => checkFault(fault) })) : []),
-  ...(mutating ? PAGE_BENIGN.map((rewrite, index) => ({ key: `benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: '\nvariants that say the same thing', pool: 'suite', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(rewrite) })) : []),
-  ...(lacking ? Object.entries(LACKS).map(([kind, lack]) => ({ key: lack.key, name: `the head: a save lacking ${lack.label}`, head: true, heading: `\nA save lacking ${lack.label}`, pool: 'suite', deadline: DEADLINES.view, run: () => checkLackingHead(kind) })) : []),
-  ...(lacking && mutating ? Object.entries(LACKS).flatMap(([kind, lack]) => lack.faults.map((fault, index) => ({ key: `${lack.key}-fault:${index}`, name: `fault caught: ${fault.name}`, heading: `\nA save lacking ${lack.label}`, pool: 'suite', deadline: DEADLINES.view, run: () => checkLackingFault(kind, fault) }))) : []),
-]
+// A variant on the dataset `key`: the dataset is its pool, so that a worker (which keeps one page server, for the one save the page-server middleware is loaded for) runs the variants of one dataset.
+const on = (key, variant) => ({ ...variant, pool: key })
+
+const variantsOf = (doMutations, lacking, explicitSelection) => {
+  applyNeeds()
+
+  const cases = doMutations ? fixtureDataset().cases : null
+  // The faults of a list that the fixture's run judges, each with the checks it is judged by there and the place it has in its list.
+  const there = (list) => list.map((fault, index) => ({ fault, index, fails: failsOn(fault, cases) })).filter(({ fails }) => fails.length > 0)
+  const benign = (rewrite, index) => on('fixture', { key: `fixture-benign:${index}`, name: `variant passes: ${rewrite.name} (on the fixture)`, heading: '\nvariants that say the same thing, on the fixture', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(rewrite) })
+  const pageBenign = doMutations ? (explicitSelection ? PAGE_BENIGN.map(benign) : [benign(PAGE_BENIGN[4], 4)]) : []
+  const moduleBenign = doMutations ? MODULE_BENIGN : []
+
+  return [
+    on('fixture', { key: 'head:fixture', name: 'the head on the fixture: the module and the table on the page as they are', head: true, heading: 'The jump point infrastructure table on the fixture (scripts/lib/page-server.js over a copy of the save of scripts/lib/fixtures.js)', deadline: DEADLINES.head, run: checkHead }),
+    ...(doMutations ? there(MODULE_FAULTS).map(({ fault, index, fails }) => on('fixture', { key: `fixture-module-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: '\nplanted faults of the module, on the fixture', deadline: DEADLINES.module, run: () => checkModuleFault({ ...fault, fails }) })) : []),
+    ...moduleBenign.map((rewrite, index) => on('fixture', { key: `fixture-module-benign:${index}`, name: `variant passes: ${rewrite.name} (on the fixture)`, heading: '\nrewrites of the module that say the same thing, on the fixture', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })),
+    ...(doMutations ? there(PAGE_FAULTS).map(({ fault, index, fails }) => on('fixture', { key: `fixture-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: '\nplanted faults of the page, on the fixture', deadline: DEADLINES.view, run: () => checkFault({ ...fault, fails }) })) : []),
+    ...(doMutations ? [on('fixture', { key: `fixture-${PAGE_COMPOSITE_A.key}`, name: `variant passes: ${PAGE_COMPOSITE_A.name} (on the fixture)`, heading: '\ncomposed variants that say the same thing, on the fixture', deadline: DEADLINES.view, baseline: true, run: checkPageComposite })] : []),
+    ...pageBenign,
+    ...(lacking ? Object.entries(LACKS).map(([kind, lack]) => on('fixture', { key: `fixture-${lack.key}`, name: `the head on the fixture: a save lacking ${lack.label}`, head: true, heading: `\nA save lacking ${lack.label}, on the fixture`, deadline: DEADLINES.view, run: () => checkLackingHead(kind) })) : []),
+    ...(lacking && doMutations ? Object.entries(LACKS).flatMap(([kind, lack]) => there(lack.faults).map(({ fault, index, fails }) => on('fixture', { key: `fixture-${lack.key}-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: `\nA save lacking ${lack.label}, on the fixture`, deadline: DEADLINES.view, run: () => checkLackingFault(kind, { ...fault, fails }) }))) : []),
+  ]
+}
 
 const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+  const doMutations = mutating()
+  const explicitSelection = process.argv.some((argument) => argument.startsWith('--variants=') || argument.startsWith('--only=') || argument.startsWith('--worker='))
   const totals = await runSuite({
     script: __filename,
-    inputs: [SAVE],
-    variants: variantsOf(mutating, !process.argv.includes('--no-lacking')),
+    workers: 4,
+    inputs: [FIXTURE.file],
+    variants: variantsOf(doMutations, !process.argv.includes('--no-lacking'), explicitSelection),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
-      ENV = await setUp()
+      ENV = await setUp(fixtureDataset())
 
       if (queue.some((variant) => variant.baseline)) {
         ENV.baseline = await view(null, { map: false })
@@ -1081,7 +1295,7 @@ const main = async () => {
         throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
     },
-    control: mutating ? { fault: `fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
+    control: doMutations ? { fault: `fixture-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head:fixture', heading: '\nthe control of the warm page server' } : null,
     setup: DEADLINES.setup,
   })
 

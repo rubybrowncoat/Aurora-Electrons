@@ -418,6 +418,9 @@ export const WARHEAD_BP_DIVISOR = 4
 export const ECCM_MSP = 0.25
 export const TERMINAL_GUIDANCE_MSP = 0.25
 export const RETARGETING_MSP = 0.5
+// A lurker missile (the game's `FCT_MissileType.Lurker`, set from the designer's Lurker Mode box) stays dormant where it is launched or deployed: it adds 0.5 to the size, 0.5 to the cost and 0.5 to the Boronide, once, whatever the stages.
+export const LURKER_MSP = 0.5
+export const LURKER_BP = 0.5
 export const LASER_WARHEAD_MSP = 0.25
 export const EXTRA_WARHEAD_MSP = 0.1
 export const DECOY_MSP = 0.5
@@ -438,7 +441,7 @@ export const MISSILE_UNSTORED_MINERALS = Object.freeze(['Corundium', 'Vendarite'
 export const MISSILE_MINERALS = Object.freeze([...MISSILE_STORED_MINERALS, ...MISSILE_UNSTORED_MINERALS])
 
 // The options of a missile, in the order the game adds their sizes: each has an MSP, a BP and a mineral amount.
-export const MISSILE_OPTIONS = Object.freeze({ engine: 'Engine', fuel: 'Fuel', warhead: 'Warhead', reactor: 'Sensor reactor', active: 'Active sensor', thermal: 'Thermal sensor', em: 'EM sensor', geo: 'Geo sensor', decoys: 'ECM decoys', extraWarheads: 'Extra warheads', secondStage: 'Second stage', eccm: 'ECCM', terminal: 'Terminal guidance', retarget: 'Retargeting', laser: 'Laser warhead' })
+export const MISSILE_OPTIONS = Object.freeze({ engine: 'Engine', fuel: 'Fuel', warhead: 'Warhead', reactor: 'Sensor reactor', active: 'Active sensor', thermal: 'Thermal sensor', em: 'EM sensor', geo: 'Geo sensor', decoys: 'ECM decoys', extraWarheads: 'Extra warheads', secondStage: 'Second stage', eccm: 'ECCM', terminal: 'Terminal guidance', retarget: 'Retargeting', lurker: 'Lurker', laser: 'Laser warhead' })
 export const CONTRIBUTIONS = Object.freeze(Object.keys(MISSILE_OPTIONS))
 
 // Whether two figures reproduce one another: 1e-9 of the larger, and never closer than 1e-12 absolute, so two zeros agree.
@@ -558,7 +561,7 @@ const STAGE_MISSING = 'the second stage design is not in the save'
 //   warheadMsp, warheads (the count, 1 or more; each warhead after the first adds 0.1 MSP to the size and to the Tritanium and cost), shipDecoy (whether the decoy tech was held and chosen), decoys (ECM decoys), fuelMsp, activeMsp, thermalMsp, emMsp, geoMsp, sizeLimit (0 for none: the designer's limit on the missile's size, which a save does not store);
 //   engine ({ sizeMsp, cost, power, fuelEfficiency } of the engine component; { missing: true, storedMsp, reason } for an engine the design has but the figures of which are not known, `storedMsp` its size or null where that is not known; null for no engine) and engines (the count);
 //   stage ({ size, cost, fuelRequired, totalFlightTime, minerals } of the second-stage design, { missing: true, reason } for one not known, or null) and stages (its count);
-//   options { eccm, terminal, retarget, laser } as the values the design stored (`eccm` the ECCM level, `terminal` the guidance multiplier, `retarget` the retargeting level, `laser` whether a laser warhead is fitted);
+//   options { eccm, terminal, retarget, lurker, laser } as the values the design stored (`eccm` the ECCM level, `terminal` the guidance multiplier, `retarget` the retargeting level, `lurker` whether the lurker is fitted, `laser` whether a laser warhead is fitted);
 //   tech { warhead, laserEfficiency, reactor, active, thermal, em, geo } the levels' figures, null where the level is not known;
 //   unsupported { [option]: { reason, size } } the options whose accounting the rules do not cover: the option's cost and minerals are unknown, and its size too when `size` is true.
 // Returns { contributions: { name: { msp, bp, minerals, unknown } }, figures }. A figure that depends on an unknown input is null and the contribution that lacks it says why; the size of a contribution can be known while its cost is not (a sensor's MSP is the designer's, its cost needs its tech).
@@ -628,6 +631,7 @@ export const missileAccounting = (input) => {
   contributions.eccm = contribution(options.eccm > 0 ? ECCM_MSP : 0, options.eccm / ECCM_BP_DIVISOR, { Corbomite: options.eccm / ECCM_BP_DIVISOR })
   contributions.terminal = options.terminal > 1 ? contribution(TERMINAL_GUIDANCE_MSP, options.terminal - 1, { Uridium: options.terminal - 1 }) : contribution(0, 0, {})
   contributions.retarget = contribution(options.retarget > 0 ? RETARGETING_MSP : 0, options.retarget === 1 ? 0.5 : 0, { Uridium: options.retarget === 1 ? 0.5 : 0 })
+  contributions.lurker = options.lurker ? contribution(LURKER_MSP, LURKER_BP, { Boronide: LURKER_BP }) : contribution(0, 0, {})
 
   if (!options.laser) {
     contributions.laser = contribution(0, 0, {})
@@ -686,7 +690,7 @@ const GROUND_POD_REASON = 'a ground pod\'s size, cost and Vendarite are not cove
 const ENHANCED_RADIATION_REASON = 'the cost of a warhead with an enhanced radiation share is not covered by the missile accounting rules'
 const RETARGETING_REASON = `a retargeting level above ${VALIDATED_RETARGETING} has no saved design to check its size and cost against`
 const MULTIPLE_WARHEADS_ASSUMPTION = 'Each warhead after the first adds 0.1 MSP, which the size floor or limit of some saved designs hides'
-const STAGED_FLIGHT_ASSUMPTION = 'The flight time and the endurance of a design with second stages reproduce for every saved design but one (design 154678 of the stock sample, 0.08% under, the cause not identified), so they are not confirmed'
+const STAGED_FLIGHT_ASSUMPTION = 'The flight time and the endurance of a design with second stages reproduce for every saved design checked but one (0.08% under, the cause not identified), so they are not confirmed'
 
 // The quantities the cost and mineral formulas read, each { id, label, read(input, raw) }: the value in a candidate, null where the candidate does not give it (an unknown tech) or the quantity does not apply. The ids are those of MISSILE_COST_DOMAIN.
 const COST_QUANTITIES = Object.freeze([
@@ -713,7 +717,7 @@ const COST_QUANTITIES = Object.freeze([
 ])
 
 const CANDIDATE_FIELDS = Object.freeze(['engine', 'engines', 'fuelMsp', 'warheadMsp', 'warheads', 'shipDecoy', 'decoys', 'activeMsp', 'thermalMsp', 'emMsp', 'geoMsp', 'sizeLimit', 'stage', 'stages', 'options', 'tech', 'sensor', 'groundPod', 'enhancedRadiation'])
-const OPTION_FIELDS = Object.freeze(['eccm', 'terminal', 'retarget', 'laser'])
+const OPTION_FIELDS = Object.freeze(['eccm', 'terminal', 'retarget', 'lurker', 'laser'])
 const TECH_FIELDS = Object.freeze(['warhead', 'laserEfficiency', 'reactor', 'active', 'thermal', 'em', 'geo'])
 const BUDGET_FIELDS = Object.freeze(['maxMsp', 'maxBp', 'minerals'])
 
@@ -862,7 +866,7 @@ export const normaliseMissileCandidate = (candidate) => {
     sizeLimit: amountOf(optional(candidate.sizeLimit, 0), 'sizeLimit'),
     stage: normaliseMissileStage(candidate.stage),
     stages,
-    options: { eccm: amountOf(optional(options.eccm, 0), 'options.eccm'), terminal: amountOf(optional(options.terminal, 1), 'options.terminal'), retarget: countOf(optional(options.retarget, 0), 'options.retarget'), laser: Boolean(options.laser) },
+    options: { eccm: amountOf(optional(options.eccm, 0), 'options.eccm'), terminal: amountOf(optional(options.terminal, 1), 'options.terminal'), retarget: countOf(optional(options.retarget, 0), 'options.retarget'), lurker: Boolean(options.lurker), laser: Boolean(options.laser) },
     tech: Object.fromEntries(TECH_FIELDS.map((name) => [name, techOf(tech[name], `tech.${name}`)])),
     sensor: { resolution: techOf(sensor.resolution, 'sensor.resolution'), emSensitivity: techOf(sensor.emSensitivity, 'sensor.emSensitivity') },
     groundPod: Boolean(candidate.groundPod),
@@ -949,6 +953,7 @@ export const MISSILE_EFFECTS = Object.freeze([
   { id: 'terminalHit', option: 'terminal', label: 'Hit chance with terminal guidance', units: '%', rule: HIT_RULES.raw, applies: ({ input, scenario }) => input.options.terminal > 1 && scenario !== null, read: ({ hit }) => readResult(hit.raw) },
   { id: 'warheadHits', option: 'extraWarheads', label: 'Expected warhead hits', units: 'hits', rule: HIT_RULES.hits, applies: ({ input, scenario }) => input.warheads > 1 && scenario !== null, read: ({ hit }) => readResult(hit.hitsCapped) },
   { id: 'retargeting', option: 'retarget', label: 'Retargeting', units: '', rule: null, applies: ({ input }) => input.options.retarget > 0, read: () => ({ value: null, reason: null }) },
+  { id: 'lurker', option: 'lurker', label: 'Lurker', units: '', rule: null, applies: ({ input }) => input.options.lurker, read: () => ({ value: null, reason: null }) },
   { id: 'shipDecoy', option: 'warhead', label: 'Ship decoy', units: '', rule: null, applies: ({ input }) => input.shipDecoy, read: () => ({ value: null, reason: null }) },
   { id: 'ecmDecoys', option: 'decoys', label: 'ECM decoys', units: '', rule: null, applies: ({ input }) => input.decoys > 0, read: () => ({ value: null, reason: null }) },
   { id: 'secondStageHit', option: 'secondStage', label: 'Hit of the second stage', units: '', rule: null, applies: ({ input }) => input.stages > 0, read: () => ({ value: null, reason: null }) },
@@ -1115,11 +1120,11 @@ export const missileSignature = ({ sizeMsp }) => Math.max(sizeMsp / MSP_PER_HS, 
 // The size a missile fire control sees a missile target by, set against the fire control's resolution: the missile's size in MSP, never below 0.33. It is not the search signature, and no jammer term applies to it (docs/plans/planners/mechanics-sensors.md).
 export const missileFireControlSignature = ({ sizeMsp }) => Math.max(sizeMsp, MISSILE_FIRE_CONTROL_SIGNATURE_MIN)
 
-// An active sensor, or a missile fire control (`mode` 'missileFireControl'), as the game designs it from the active sensor strength tech (`strengthTech` per HS), the EM sensitivity tech, the resolution, and the hardening and ECCM techs (`hardeningRating` the CTD, `hardeningCost` the cost factor, `eccmRating`, `eccmCost` the cost factor). Returns { strength, rangeKm, searchRangeKm, cost, uridium, corbomite, crew, htk, eccm, ctd, sizeHS, tons }: `searchRangeKm` is the range of the same sensor as a search sensor, `rangeKm` twice that for a fire control. The cost is the size times the strength tech times the hardening factor to 1 decimal (the Uridium) times the ECCM factor; the Corbomite is the rest.
-export const activeSensorDesign = ({ sizeHS, resolution, strengthTech, emTech, hardeningRating, hardeningCost, eccmRating, eccmCost, mode = SENSOR_MODES.search }) => {
+// An active sensor, or a missile fire control (`mode` 'missileFireControl'), as the game designs it from the active sensor strength tech (`strengthTech` per HS), the EM sensitivity tech, the resolution, and the hardening and ECCM techs (`hardeningRating` the CTD, `eccmRating`, `eccmCost` the cost factor). Returns { strength, rangeKm, searchRangeKm, cost, uridium, corbomite, crew, htk, eccm, ctd, sizeHS, tons }: `searchRangeKm` is the range of the same sensor as a search sensor, `rangeKm` twice that for a fire control. The cost is the size times the strength tech to 1 decimal (the Uridium) times the ECCM factor; the Corbomite is the rest. Electronic hardening gives the CTD and the chance of destruction, never a cost premium.
+export const activeSensorDesign = ({ sizeHS, resolution, strengthTech, emTech, hardeningRating, eccmRating, eccmCost, mode = SENSOR_MODES.search }) => {
   const strength = strengthTech * sizeHS
   const searchRangeKm = Math.sqrt(strength * emTech * resolution ** SENSOR_RESOLUTION_EXPONENT / SENSOR_PI) * SENSOR_RANGE_UNIT_KM
-  const uridium = roundHalfEven(sizeHS * strengthTech * hardeningCost, 1)
+  const uridium = roundHalfEven(sizeHS * strengthTech, 1)
   const cost = uridium * eccmCost
 
   return {
@@ -1138,10 +1143,10 @@ export const activeSensorDesign = ({ sizeHS, resolution, strengthTech, emTech, h
   }
 }
 
-// A thermal or EM sensor as the game designs it from the sensitivity tech and the hardening tech. Returns { sensitivity, cost, uridium, crew, htk, ctd, sizeHS, tons }: the sensitivity is the size times the tech, the cost that times the hardening factor to 1 decimal, all of it Uridium.
-export const passiveSensorDesign = ({ sizeHS, sensitivityTech, hardeningRating, hardeningCost }) => {
+// A thermal or EM sensor as the game designs it from the sensitivity tech and the hardening tech. Returns { sensitivity, cost, uridium, crew, htk, ctd, sizeHS, tons }: the sensitivity is the size times the tech, the cost is that rounded to 1 decimal, all of it Uridium; the hardening tech gives the CTD and does not change the cost.
+export const passiveSensorDesign = ({ sizeHS, sensitivityTech, hardeningRating }) => {
   const sensitivity = sizeHS * sensitivityTech
-  const cost = roundHalfEven(sensitivity * hardeningCost, 1)
+  const cost = roundHalfEven(sensitivity, 1)
 
   return { sensitivity, cost, uridium: cost, crew: roundHalfEven(sizeHS * SENSOR_CREW_PER_HS), htk: sizeHS < 1 ? 0 : 1, ctd: Math.trunc(hardeningRating), sizeHS, tons: sizeHS * TONS_PER_HS }
 }
@@ -1149,13 +1154,13 @@ export const passiveSensorDesign = ({ sizeHS, sensitivityTech, hardeningRating, 
 // The tracking speed a beam fire control stores: the tracking multiplier times the speed rating, rounded to the nearest km/s (ties to even).
 export const fireControlTracking = (trackingMultiplier, speedRating) => roundHalfEven(trackingMultiplier * speedRating)
 
-// A beam fire control as the game designs it from the distance and speed rating techs, a range and a tracking multiplier, the single weapon tech's number (1, or under 1 for a single weapon control) and the hardening and ECCM techs. Returns { rangeKm, uncappedRangeKm, rangeCapped, trackingKmS, sizeHS, roundedSizeHS, sizeFloored, cost, uridium, corbomite, crew, htk, eccm, ctd, specialFunction }. The range is the multiplier times the distance rating, never above `maxRangeKm` (1,400,000 km unless a save is read that applies another limit); the tracking is the multiplier times the speed rating, rounded; the size is half the product of the multipliers times the weapon number, rounded to 2 decimals and never below 0.01 HS; the crew is four a HS of the rounded size, before the floor. The Uridium is the capped range over 20,000 times the tracking over 1,000 cut to a whole number (not rounded, not kept fractional) times the hardening factor and the weapon number, to 1 decimal; the cost is that times the ECCM factor and the Corbomite the rest.
-export const beamFireControlDesign = ({ rangeMultiplier, trackingMultiplier, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost, maxRangeKm = BEAM_FIRE_CONTROL_MAX_RANGE_KM }) => {
+// A beam fire control as the game designs it from the distance and speed rating techs, a range and a tracking multiplier, the single weapon tech's number (1, or under 1 for a single weapon control) and the hardening and ECCM techs. Returns { rangeKm, uncappedRangeKm, rangeCapped, trackingKmS, sizeHS, roundedSizeHS, sizeFloored, cost, uridium, corbomite, crew, htk, eccm, ctd, specialFunction }. The range is the multiplier times the distance rating, never above `maxRangeKm` (1,400,000 km unless a save is read that applies another limit); the tracking is the multiplier times the speed rating, rounded; the size is half the product of the multipliers times the weapon number, rounded to 2 decimals and never below 0.01 HS; the crew is four a HS of the rounded size, before the floor. The Uridium is the capped range over 20,000 times the tracking over 1,000 cut to a whole number (not rounded, not kept fractional) times the weapon number, to 1 decimal; the cost is that times the ECCM factor and the Corbomite the rest. Electronic hardening gives the CTD and never a cost premium.
+export const beamFireControlDesign = ({ rangeMultiplier, trackingMultiplier, distanceRating, speedRating, weaponNumber, hardeningRating, eccmRating, eccmCost, maxRangeKm = BEAM_FIRE_CONTROL_MAX_RANGE_KM }) => {
   const uncappedRangeKm = rangeMultiplier * distanceRating
   const rangeKm = Math.min(maxRangeKm, uncappedRangeKm)
   const trackingKmS = fireControlTracking(trackingMultiplier, speedRating)
   const roundedSizeHS = roundHalfEven(rangeMultiplier * trackingMultiplier / 2 * weaponNumber, 2)
-  const uridium = roundHalfEven(rangeKm / BEAM_FIRE_CONTROL_KM_PER_COST_UNIT * Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP) * hardeningCost * weaponNumber, 1)
+  const uridium = roundHalfEven(rangeKm / BEAM_FIRE_CONTROL_KM_PER_COST_UNIT * Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP) * weaponNumber, 1)
   const sizeHS = Math.max(BEAM_FIRE_CONTROL_MIN_SIZE_HS, roundedSizeHS)
   const cost = uridium * eccmCost
 
@@ -1343,7 +1348,7 @@ const multiplierFor = (exactMultiplier, meets) => {
 }
 
 // The beam fire control that reaches `rangeKm` and tracks `trackingKmS` from the race's distance and speed rating techs, with the smallest legal multipliers that do. The value is { range, tracking, design }: `range` and `tracking` are each { status, multiplier, exactMultiplier, smaller } (statuses as in `sensorSizeForRange`: 'sized' with the next smaller legal multiplier falling short, 'minimum-bound' at 0.1, 'beyond-largest' above 4), and `design` is `beamFireControlDesign` at those multipliers, null when an axis is beyond the largest. A range above 1,400,000 km is beyond what any multiplier gives, since the game caps it there. The tracking axis is searched on the tracking the game stores (the multiplier times the speed rating, rounded), not on the unrounded ratio, so the multiplier chosen gives the tracking asked for. The request is an estimate: it asks the confirmed forward rule for the smallest multipliers, under a range cap no save evidences and a window of legal multipliers taken from the design window; the confirmed forward `design` is carried as its own part.
-export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost }) => {
+export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating, speedRating, weaponNumber, hardeningRating, eccmRating, eccmCost }) => {
   const rule = SENSOR_RULES.sizing
   const { present, missing } = sensorInputs([
     ['wanted range', rangeKm, POSITIVE, 'the range wanted, above zero'],
@@ -1352,7 +1357,6 @@ export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating
     ['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],
     ['single weapon number', weaponNumber, POSITIVE, 'the single weapon fire control tech\'s number above zero'],
     ['hardening', hardeningRating, NON_NEGATIVE, 'the hardening tech\'s rating'],
-    ['hardening cost factor', hardeningCost, NON_NEGATIVE, 'the hardening tech\'s cost factor'],
     ['ECCM', eccmRating, NON_NEGATIVE, 'the ECCM tech\'s rating'],
     ['ECCM cost factor', eccmCost, NON_NEGATIVE, 'the ECCM tech\'s cost factor'],
   ])
@@ -1363,7 +1367,7 @@ export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating
 
   const range = rangeKm > BEAM_FIRE_CONTROL_MAX_RANGE_KM ? { status: 'beyond-largest', multiplier: null, exactMultiplier: rangeKm / distanceRating, smaller: null } : multiplierFor(rangeKm / distanceRating, (multiplier) => multiplier * distanceRating >= rangeKm * (1 - SENSOR_RANGE_TOLERANCE))
   const tracking = multiplierFor(trackingKmS / speedRating, (multiplier) => fireControlTracking(multiplier, speedRating) >= trackingKmS * (1 - SENSOR_RANGE_TOLERANCE))
-  const design = range.multiplier === null || tracking.multiplier === null ? null : beamFireControlDesign({ rangeMultiplier: range.multiplier, trackingMultiplier: tracking.multiplier, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost })
+  const design = range.multiplier === null || tracking.multiplier === null ? null : beamFireControlDesign({ rangeMultiplier: range.multiplier, trackingMultiplier: tracking.multiplier, distanceRating, speedRating, weaponNumber, hardeningRating, eccmRating, eccmCost })
   const sizing = ofRule({ rule, value: { range, tracking }, inputs: { present }, assumptions: ['the multipliers are those the design window offers (0.1 to 3.99 in hundredths, and 4)'] })
   const limits = ofRule({ rule: SENSOR_RULES.limits, value: { maxRangeKm: BEAM_FIRE_CONTROL_MAX_RANGE_KM }, inputs: { present: ['range limit'] } })
   const parts = { sizing, limits }
@@ -1376,7 +1380,7 @@ export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating
 }
 
 // The rule registry: each rule above registered once, with the game versions it is known for and how far it is checked. `scripts/check-design-rules.js` reads these entries and reports each check under its rule id. The planners' results carry the id (utilities/provenance.js); a rule whose evidence changes is edited here, once.
-const DESIGN_VERSIONS = ['2.7.x']
+const DESIGN_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'design.engineDesign',
@@ -1384,7 +1388,7 @@ registerRule({
   units: 'EP, L/EPH, HS, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.EnginePowerMod', 'FCT_ShipDesignComponents.BGTech1..3', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
-  note: 'Reproduces the power, fuel per engine-power hour, cost, crew, HTK, explosion figures, thermal share and military flag of every stored engine of a stock sample save and a modded save; the modded rows it cannot reproduce are set outside the rule.',
+  note: 'Reproduces the power, fuel per engine-power hour, cost, crew, HTK, explosion figures, thermal share and military flag of every stored engine of the saves it was checked on, a played save of the line, a modded save and a migrated one among them; the rows of the modded and migrated saves it cannot reproduce are set outside the rule.',
 })
 
 registerRule({
@@ -1393,7 +1397,7 @@ registerRule({
   units: 'km/s',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.EnginePower, Size, MaxSpeed', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue'],
-  note: 'Reproduces the stored top speed of every class of both sample saves. A class without engines keeps the game\'s starting speed of 1, which this formula does not give.',
+  note: 'Reproduces the stored top speed of every class of the saves it was checked on. A class without engines keeps the game\'s starting speed of 1, which this formula does not give.',
 })
 
 registerRule({
@@ -1425,7 +1429,7 @@ registerRule({
 
 registerRule({
   id: 'design.thermalSignature',
-  versions: DESIGN_VERSIONS,
+  versions: ['2.7.x'],
   units: 'thermal signature',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.StealthRating, ComponentValue', 'FCT_ClassComponent.NumComponent', 'FCT_ShipClass.ClassThermal, EnginePower, Size'],
@@ -1489,7 +1493,7 @@ registerRule({
   units: 'HS, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, BGTech1..4', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
-  note: 'Reproduces the size, cost, crew, HTK and capacity of every stored jump drive of a modded save. The one commercial drive of the stock sample save was designed under an older rule that kept the size to 1 decimal, and is explained, not reproduced.',
+  note: 'Reproduces the size, cost, crew, HTK and capacity of every stored jump drive of a modded save. The one commercial drive of a save it was checked on was designed under an older rule that kept the size to 1 decimal, and is explained, not reproduced.',
 })
 
 registerRule({
@@ -1545,7 +1549,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size, Cost, MaintSupplies', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
-  note: 'Half the class cost over the coverage factor (size x 0.04 over the engineering), cut to a whole number. Reproduced with the storage rule in every stored maintenance supplies of a stock sample save and a modded save, bar the rows explained as set outside the rule.',
+  note: 'Half the class cost over the coverage factor (size x 0.04 over the engineering), cut to a whole number. Reproduced with the storage rule in every stored maintenance supplies of two saves it was checked on, one of them modded, bar the rows explained as set outside the rule.',
 })
 
 registerRule({
@@ -1563,7 +1567,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MaintSupplies', 'design.engineeringMsp', 'design.maintenanceStorage'],
-  note: 'Engineering MSP plus storage; a class without engineering holds its storage alone. Compared with the stored maintenance supplies of every class of both sample saves.',
+  note: 'Engineering MSP plus storage; a class without engineering holds its storage alone. Compared with the stored maintenance supplies of every class of the saves it was checked on.',
   assumptions: ['The class is a stored or designed class whose cost, size and component rows are final'],
 })
 
@@ -1573,7 +1577,7 @@ registerRule({
   units: '% a year',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size, BaseFailureChance', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
-  note: 'Half the size times size x 0.04 over the engineering, in percent at a clock of one year; a class without engineering fails at 10% a year per HS. Compared with the stored base failure chance of every class of both sample saves.',
+  note: 'Half the size times size x 0.04 over the engineering, in percent at a clock of one year; a class without engineering fails at 10% a year per HS. Compared with the stored base failure chance of every class of the saves it was checked on.',
 })
 
 registerRule({
@@ -1582,12 +1586,12 @@ registerRule({
   units: 'damage roll',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MaxDACRoll', 'FCT_ClassComponent.ChanceToHit, NumComponent', 'FCT_ShipDesignComponents.Size, ComponentTypeID 11'],
-  note: 'Each component other than armour takes size times count rounded up of the roll; the thresholds are the running total and damage allocation roll the sum. Compared with every stored damage allocation roll and chance to hit of both sample saves.',
+  note: 'Each component other than armour takes size times count rounded up of the roll; the thresholds are the running total and damage allocation roll the sum. Compared with every stored damage allocation roll and chance to hit of the saves it was checked on.',
 })
 
 registerRule({
   id: 'design.averageRepairCost',
-  versions: DESIGN_VERSIONS,
+  versions: ['2.7.x'],
   units: 'MSP',
   verification: 'estimated',
   structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost'],
@@ -1596,7 +1600,7 @@ registerRule({
 
 registerRule({
   id: 'design.maintenanceLifeSeries',
-  versions: DESIGN_VERSIONS,
+  versions: ['2.7.x'],
   units: 'years, MSP',
   verification: 'estimated',
   structure: ['FCT_ShipClass.BaseFailureChance, MaintSupplies, Commercial'],
@@ -1629,8 +1633,8 @@ registerRule({
   versions: DESIGN_VERSIONS,
   units: 'MSP, BP, minerals',
   verification: 'confirmed',
-  structure: ['FCT_MissileType.Size, Cost, MSPFuel, MSPWarhead, MSPActive, MSPThermal, MSPEM, MSPGeo, MSPReactor, NumDecoys, MultipleWarheads, NumEngines, NumSS, ECCM, ATG, Retargeting, LaserWarhead, Speed, Endurance, MaxRange, FuelRequired, TotalFlightTime', 'FCT_MissileType.Corbomite, Tritanium, Boronide, Uridium, Gallicite', 'FCT_TechSystem.AdditionalInfo of the warhead, sensor, power plant and laser efficiency techs'],
-  note: `The size, cost and minerals of a missile as the sum of its options (engine, fuel, warhead, sensor reactor, four sensors, ECM decoys, extra warheads, second stage, ECCM, terminal guidance, retargeting, laser warhead), with the speed, endurance and range they give. Compared with every stored design of six saves: the rows it does not reproduce are explained, or unknown where a tech level is not held. An option the rules do not cover (a ground pod, an enhanced radiation warhead, a retargeting level above ${VALIDATED_RETARGETING}) is unavailable, never 0.`,
+  structure: ['FCT_MissileType.Size, Cost, MSPFuel, MSPWarhead, MSPActive, MSPThermal, MSPEM, MSPGeo, MSPReactor, NumDecoys, MultipleWarheads, NumEngines, NumSS, ECCM, ATG, Retargeting, Lurker, LaserWarhead, Speed, Endurance, MaxRange, FuelRequired, TotalFlightTime', 'FCT_MissileType.Corbomite, Tritanium, Boronide, Uridium, Gallicite', 'FCT_TechSystem.AdditionalInfo of the warhead, sensor, power plant and laser efficiency techs'],
+  note: `The size, cost and minerals of a missile as the sum of its options (engine, fuel, warhead, sensor reactor, four sensors, ECM decoys, extra warheads, second stage, ECCM, terminal guidance, retargeting, lurker, laser warhead), with the speed, endurance and range they give. Compared with every stored design of the saves compared (the recorded fixtures of earlier saves, the migrated save and the played save of the line): the rows it does not reproduce are explained, or unknown where a tech level is not held. No saved design holds a lurker, so the lurker is held to the figures the game adds for it (0.5 size, 0.5 BP and 0.5 Boronide) on a design planted to those figures. An option the rules do not cover (a ground pod, an enhanced radiation warhead, a retargeting level above ${VALIDATED_RETARGETING}) is unavailable, never 0.`,
   assumptions: ['The techs are the levels the race held at the highest development cost', 'The sensor, warhead, laser and reactor figures are read from the tech level the stored figure resolves to'],
 })
 
@@ -1669,8 +1673,8 @@ registerRule({
   versions: DESIGN_VERSIONS,
   units: 'HS, km, BP, minerals',
   verification: 'confirmed',
-  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, MaxSensorRange, Resolution, ECCM, ElectronicCTD, Uridium, Corbomite of an active sensor or a missile fire control', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the active sensor strength, EM sensitivity, hardening and ECCM techs'],
-  note: 'An active sensor or missile fire control from its size, resolution and techs: the strength is the size times the strength tech, the range the square root of strength times the EM sensitivity times the resolution to the power of two thirds over pi (3.1416), in millions of km, doubled for a missile fire control. The Uridium is the strength times the hardening cost factor to 1 decimal, the cost that times the ECCM cost factor. Reproduces the strength, range, cost, minerals, crew, HTK, ECCM and CTD of every owned sensor of the stock saves, and of the modded save but for the rows set outside the rule.',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, MaxSensorRange, Resolution, ECCM, ElectronicCTD, Uridium, Corbomite of an active sensor or a missile fire control', 'FCT_TechSystem.AdditionalInfo of the active sensor strength, EM sensitivity and hardening techs, and AdditionalInfo and AdditionalInfo2 of the ECCM tech'],
+  note: 'An active sensor or missile fire control from its size, resolution and techs: the strength is the size times the strength tech, the range the square root of strength times the EM sensitivity times the resolution to the power of two thirds over pi (3.1416), in millions of km, doubled for a missile fire control. The Uridium is the strength to 1 decimal, the cost that times the ECCM cost factor; the hardening tech gives the CTD and the chance of destruction, not a cost premium. Reproduces the strength, range, cost, minerals, crew, HTK, ECCM and CTD of every owned sensor of the stock saves, and of the played save of the line, and of the modded and migrated saves but for the rows set outside the rule.',
   assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type', 'The pi of the range is 3.1416'],
 })
 
@@ -1679,8 +1683,8 @@ registerRule({
   versions: DESIGN_VERSIONS,
   units: 'HS, sensitivity, BP',
   verification: 'confirmed',
-  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, ElectronicCTD, Uridium of a thermal or EM sensor', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the sensitivity and hardening techs'],
-  note: 'A thermal or EM sensor from its size and techs: the sensitivity is the size times the sensitivity tech, the cost that times the hardening cost factor to 1 decimal, all of it Uridium. Reproduces every owned passive sensor of the stock saves, and of the modded save but for the rows set outside the rule.',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, ElectronicCTD, Uridium of a thermal or EM sensor', 'FCT_TechSystem.AdditionalInfo of the sensitivity and hardening techs'],
+  note: 'A thermal or EM sensor from its size and techs: the sensitivity is the size times the sensitivity tech, the cost is that rounded to 1 decimal, all of it Uridium; the hardening tech gives the CTD and not a cost premium. Reproduces every owned passive sensor of the stock saves, and of the played save of the line, and of the modded and migrated saves but for the rows set outside the rule.',
   assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type'],
 })
 
@@ -1689,8 +1693,8 @@ registerRule({
   versions: DESIGN_VERSIONS,
   units: 'km, km/s, HS, BP, minerals',
   verification: 'confirmed',
-  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, TrackingSpeed, FCRangeModifier, FCSpeedModifier, SpecialFunction, ECCM, ElectronicCTD, Uridium, Corbomite of a beam fire control', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the fire control distance, speed, single weapon, hardening and ECCM techs'],
-  note: 'A beam fire control from its range and tracking multipliers and techs: the range is the range multiplier times the distance rating tech, the tracking the tracking multiplier times the speed rating tech, the size half the product of the multipliers times the single weapon number, to 2 decimals, the crew four a HS. The Uridium is the range over 20,000 times the tracking over 1,000 cut to a whole number times the hardening cost factor and the weapon number, to 1 decimal; the cost is that times the ECCM cost factor. Reproduces range, tracking, size, crew, cost and minerals of every owned fire control of the stock saves, and of the modded save but for the rows set outside the rule.',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, TrackingSpeed, FCRangeModifier, FCSpeedModifier, SpecialFunction, ECCM, ElectronicCTD, Uridium, Corbomite of a beam fire control', 'FCT_TechSystem.AdditionalInfo of the fire control distance, speed, single weapon and hardening techs, and AdditionalInfo and AdditionalInfo2 of the ECCM tech'],
+  note: 'A beam fire control from its range and tracking multipliers and techs: the range is the range multiplier times the distance rating tech, the tracking the tracking multiplier times the speed rating tech, the size half the product of the multipliers times the single weapon number, to 2 decimals, the crew four a HS. The Uridium is the range over 20,000 times the tracking over 1,000 cut to a whole number times the weapon number, to 1 decimal; the cost is that times the ECCM cost factor, and the hardening tech gives the CTD and not a cost premium. Reproduces range, tracking, size, crew, cost and minerals of every owned fire control of the stock saves, and of the played save of the line, and of the modded and migrated saves but for the rows set outside the rule.',
   assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type', 'The single weapon tech\'s number is 1 for a full fire control and under 1 for a single weapon one'],
 })
 

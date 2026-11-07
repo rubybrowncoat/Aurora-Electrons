@@ -21,6 +21,7 @@ const { observe, validate, HarnessError, settled, installScreen, pairedBy, label
 const { assert, through, subjectModule, runChecks, judged, caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
+const { FIXTURE } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const MODULE = 'fuel-donors'
@@ -28,9 +29,9 @@ const MODULE_FILE = `src/renderer/utilities/${MODULE}.js`
 const PAGE_FILE = 'src/renderer/pages/logistics.vue'
 const FIGURES_FILE = 'src/renderer/components/logistics/FuelFigures.vue'
 const RESERVES_FILE = 'src/renderer/components/logistics/FuelReserves.vue'
-const SAVE = 'saves/AuroraDB_270_Falryx_date_issue.db'
-const IDS = { GameID: 141, RaceID: 785 }
-const NAMES = { game: 'Orphean Concord', race: 'Meacham Clan' }
+const SAVE = FIXTURE.file
+const IDS = { GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
+const NAMES = { game: FIXTURE.gameName, race: FIXTURE.raceName }
 const TIMEOUT = 120000
 // The deadline of a header to announce the sort a click asked for.
 const SORT_TIMEOUT = 10000
@@ -213,7 +214,7 @@ const reportChecks = {
   id: 'report',
   name: 'the tanker totals are the fuel aboard of the counted tankers even when no surplus exists, and the ships that cannot serve are listed and not dropped',
   run: ({ mod }) => {
-    const report = mod.tankerReport(REPORT_SHIPS, { version: '2.7.x' })
+    const report = mod.tankerReport(REPORT_SHIPS, { version: '3.2.x' })
     const counted = report.rows.filter((row) => row.counted).map((row) => row.ShipID)
     const listed = report.rows.filter((row) => row.listed).map((row) => row.ShipID)
 
@@ -389,9 +390,10 @@ const loadedFrom = async (mod, options) => {
 // The reconciliation of scripts/check-harvesters.js (`checkFuelService`, the one run over the saves, with the independent reading of scripts/lib/fuel-service-oracle.js) over a constructed save, with the module under test as the page's own: its report of mismatches, and the independent reading itself.
 const reconciledFrom = async (mod, options) => {
   const raw = await constructedSave(options)
+  const { capabilities } = await loadUtilities(['capabilities'])
 
   try {
-    const report = await through('checkFuelService', () => checkFuelService(raw, { race: { GameID: 1, RaceID: 1 }, ships: [], shape: '2.7' }, { fuelDonors: mod }))
+    const report = await through('checkFuelService', () => checkFuelService(raw, { race: { GameID: 1, RaceID: 1 }, ships: [], formulaVersion: capabilities.STATED_FORMULA_VERSION }, { fuelDonors: mod }))
 
     return { report, truth: await fuelServiceTruth((sql) => all(raw, sql), { GameID: 1, RaceID: 1 }) }
   } finally {
@@ -523,7 +525,7 @@ const KINDS = {
   tankless: { permission: 'blocked', reason: 'not-designated', surplus: 'none', listed: false, counted: false },
 }
 
-// The statements that make the copy of the save: classes cloned from the save's own (a Lynx, a tanker with one system, and a Hermes, a harvester tanker with one system), ships moved into them, fuel and damage planted. Each cloned class gets an id above the largest.
+// The statements that make the copy of the save: classes cloned from the save's own (the tanker class with one system and the most ships, and the harvester tanker with one system and at least six, chosen by SQL below), ships moved into them, fuel and damage planted. Each cloned class gets an id above the largest.
 const cloneClass = (source, id, name, changes, dropTransfer, extra = []) => [
   'drop table if exists temp.VIR_Clone',
   `create temp table VIR_Clone as select * from FCT_ShipClass where ShipClassID = ${source}`,
@@ -535,14 +537,13 @@ const cloneClass = (source, id, name, changes, dropTransfer, extra = []) => [
 ]
 
 const plan = async (raw) => {
-  const classId = async (name) => (await all(raw, `select ShipClassID as id from FCT_ShipClass where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and ClassName = '${name}'`))[0].id
-  const shipsOf = async (id) => (await all(raw, `select ShipID as id from FCT_Ship where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and ShipClassID = ${id} order by ShipID`)).map((row) => row.id)
-  const lynx = await classId('Lynx')
-  const hermes = await classId('Hermes')
+  const [{ id: lynx }] = await all(raw, `select c.ShipClassID as id from FCT_ShipClass c inner join FCT_Ship s on s.ShipClassID = c.ShipClassID where c.GameID = ${IDS.GameID} and c.RaceID = ${IDS.RaceID} and s.ShippingLineID = 0 and c.FuelTanker = 1 and c.RefuellingRate > 0 and c.Harvesters = 0 and (select count(*) from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = c.ShipClassID and d.ComponentTypeID = 61) = 1 group by c.ShipClassID having count(*) >= 3 order by count(*) desc, c.ShipClassID limit 1`)
+  const [{ id: hermes }] = await all(raw, `select c.ShipClassID as id from FCT_ShipClass c inner join FCT_Ship s on s.ShipClassID = c.ShipClassID where c.GameID = ${IDS.GameID} and c.RaceID = ${IDS.RaceID} and s.ShippingLineID = 0 and c.FuelTanker = 1 and c.RefuellingRate > 0 and c.Harvesters > 0 and (select count(*) from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = c.ShipClassID and d.ComponentTypeID = 61) = 1 group by c.ShipClassID having count(*) >= 6 order by count(*) desc, c.ShipClassID limit 1`)
+  const shipsOf = async (id) => (await all(raw, `select ShipID as id from FCT_Ship where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID} and ShipClassID = ${id} and ShippingLineID = 0 order by ShipID`)).map((row) => row.id)
   const [l1, l2, l3] = await shipsOf(lynx)
   const [h1, h2, h3, h4, h5, h6] = await shipsOf(hermes)
   const [{ top }] = await all(raw, 'select max(ShipClassID) as top from FCT_ShipClass')
-  const [{ component }] = await all(raw, `select cc.ComponentID as component from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = ${hermes} and d.ComponentTypeID = 61`)
+  const [{ component, systems }] = await all(raw, `select cc.ComponentID as component, cc.NumComponent as systems from FCT_ClassComponent cc inner join FCT_ShipDesignComponents d on d.SDComponentID = cc.ComponentID where cc.ClassID = ${hermes} and d.ComponentTypeID = 61`)
   const classes = { noSystem: top + 1, noDesignation: top + 2, site: top + 3, oneModule: top + 4, tankless: top + 5 }
   const moves = (id, ids) => ids.map((shipId) => `update FCT_Ship set ShipClassID = ${id} where ShipID = ${shipId}`)
   const statements = [
@@ -559,7 +560,7 @@ const plan = async (raw) => {
     ...moves(classes.tankless, [h6]),
     `update FCT_Ship set Fuel = 0 where ShipID = ${h6}`,
     `update FCT_Ship set Fuel = 0 where ShipID = ${l3}`,
-    `insert into FCT_DamagedComponent (ShipID, ComponentID, GameID, Number) values (${h1}, ${component}, ${IDS.GameID}, 1)`,
+    `insert into FCT_DamagedComponent (ShipID, ComponentID, GameID, Number) values (${h1}, ${component}, ${IDS.GameID}, ${systems})`,
     `insert into FCT_DamagedComponent (ShipID, ComponentID, GameID, Number) values (${h2}, ${component}, ${IDS.GameID}, null)`,
     `update FCT_Ship set Fuel = (select MinimumFuel from FCT_ShipClass where ShipClassID = FCT_Ship.ShipClassID) - 1000 where ShipID = ${h3}`,
     `update FCT_Ship set Fuel = (select MinimumFuel from FCT_ShipClass where ShipClassID = FCT_Ship.ShipClassID) + 500.75 where ShipID = ${h4}`,
@@ -1420,6 +1421,8 @@ const main = async () => {
   const mutating = !process.argv.includes('--no-mutations')
   const totals = await runSuite({
     script: __filename,
+    // These variants are independent; CHECK_JOBS divides the machine between scripts run side by side.
+    workers: 4,
     inputs: [SAVE],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),

@@ -511,9 +511,11 @@ const SHELL_INPUTS = [
   ['flyout', 'the flyout lines', 'utilities/peeks.js', 'peeks'],
 ]
 
-// { [route]: { [input key]: { label, reads } } } for every page file, the Empires page and the shell under the key 'shell'.
-const scanReads = (routes) => {
-  const models = modelsOf(fileOf(path.join(root, 'utilities', 'database.js'), {}).ast)
+// { [route]: { [input key]: { label, reads } } } for every page file, the Empires page and the shell under the key 'shell'. `options.database` names another copy of utilities/database.js, so a check can read the pages against a model that gained an attribute without them changing. A parsed file keeps the reads it collected against the models it was read with, so every scan starts from a fresh parse.
+const scanReads = (routes, { database = path.join(root, 'utilities', 'database.js') } = {}) => {
+  files.clear()
+
+  const models = modelsOf(fileOf(database, {}).ast)
   const reports = {}
 
   routes.forEach((route) => {

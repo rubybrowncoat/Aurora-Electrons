@@ -3,7 +3,7 @@
 
   node scripts/check-orbital-mining.js [--save <save.db> <GameID> <RaceID>]... [--increments <n>]
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785). --increments sets how many production increments of the ledger the window of a flat deposit covers (default 5).
+  With no options it runs on the migrated 3.1 fixture of scripts/lib/fixtures.js. --increments sets how many production increments of the ledger the window of a flat deposit covers (default 5).
 
   What is compared. The game's ledger logs, once per production increment, the tonnes each colony mined of each mineral (MineralDataType 1), and that amount is the colony's whole mining output that increment (mines and orbital miners together, civilian complexes apart) times the deposit's accessibility times the years the increment covers. So for each colony with orbital miners the check works out, from the save's rows and with the app's own functions, the t/yr the page would show (the sum over the colony's ships, with the naval admin chain, plus the colony's own mines), multiplies it by the years between two production increments of the race's ledger (365-day years, as the page annualises) and sets it against the ledger amount of that increment: expected, observed, residual and the window it covers, per colony and mineral.
 
@@ -17,12 +17,10 @@ const path = require('path')
 const fs = require('fs')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const DEFAULT_SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const DEFAULT_SAVES = [fixtureSave()]
 const DEFAULT_INCREMENTS = 5
 const WINDOW_DAYS = 40
 const SECONDS_PER_YEAR = 365 * 86400
@@ -145,6 +143,7 @@ const worked = (app) => {
   check('SYNTHETIC an admin chain the save does not settle is unknown (null), never 1', value(syntheticRow(), syntheticAdmins({ Unknown: 'ranks not in the save', Eligible: null })) === null)
   check('SYNTHETIC a commander bonus that is not a number is unknown, never 1', value(syntheticRow({ CommanderBonus: null })) === null)
   check('SYNTHETIC a ship with no recorded crew is unknown, never full', value(syntheticRow({ CurrentCrew: null })) === null)
+  check('the orbital and the colony mine rates are registered for the line of the played saves', ['mineral.orbitalRate', 'mineral.surfaceRate'].every((id) => provenance.getRule(id).versions.join() === '3.2.x'), ['mineral.orbitalRate', 'mineral.surfaceRate'].map((id) => `${id} ${provenance.getRule(id).versions.join()}`).join(', '))
 
   const first = outlook.orbitalRateResult(syntheticRow(), syntheticAdmins())
   const second = outlook.orbitalRateResult(syntheticRow({ MiningModules: 1, CommanderBonus: 1.5 }), syntheticAdmins())

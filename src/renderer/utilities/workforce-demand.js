@@ -4,6 +4,7 @@ import { WORKER_TOLERANCE, workerSplit } from './colonies'
 import { FUEL } from './industry-cycle'
 import { combine, isAvailable, registerRule, unavailable } from './provenance'
 import { flagOf, shipyardFinish, shipyardUpgradeRate } from './production'
+import { isFullCapacityYard } from './shipyard-types'
 
 const RULE = 'colonies.committedWorkers'
 const DAYS_PER_YEAR = 365
@@ -14,13 +15,14 @@ const EPSILON = 1e-9
 const BUILD_ROUNDING = 0.00005
 const NPR_GAP = 'the stock of the capital, which a spied empire\'s colony builds from'
 
+// The workforce breakdown. The split is repaired; queued completion dates still erase the retained B13 industrial-cycle primitive (family 8).
 registerRule({
   id: RULE,
   versions: ['2.7.x'],
   units: 'M workers',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.ProductionID, ProductionType, Amount, PartialCompletion', 'DIM_PlanetaryInstallation.Workers, ConversionFrom', 'FCT_Shipyard.TaskType, SYType, Capacity, Slipways, CapacityTarget, RequiredBP, CompletedBP, PauseActivity, ParentShipID', 'FCT_Population.Duranium, Neutronium', 'the production cycle forecast rules', 'the worker and population projection rules'],
-  note: 'The workers a colony needs month by month once its queued installations are built and its shipyard upgrades are done, set against the workers its projected population can supply. An installation counts at the day the forecast finishes its project, and a conversion counts the difference of the workers of the two installations; a slipway or capacity upgrade counts at the finish date of its remaining build points. A shipyard aboard a ship needs no workers from the colony, so its activity adds none. The lower figure counts only completions the forecast and the rates support, the higher one every completion that could have happened by then. A paused task adds nothing, a task that makes no progress adds only what it has already built, and a date that cannot be given is kept as unknown. The forecast reproduces the game\'s cycle arithmetic; a yard upgrade\'s date is an estimate and the figure was not compared with a later save.',
+  note: 'The workers a colony needs month by month once its queued installations are built and its shipyard upgrades are done, set against the workers its projected surface and fixed orbital population can supply. Agriculture takes surface people first and services take the remaining share of the total. An installation counts at the day the forecast finishes its project, and a conversion counts the difference of the workers of the two installations; a slipway or capacity upgrade counts at the finish date of its remaining build points. A shipyard aboard a ship needs no workers from the colony, so its activity adds none. The lower figure counts only completions the forecast and the rates support, the higher one every completion that could have happened by then. A paused task adds nothing, a task that makes no progress adds only what it has already built, and a date that cannot be given is kept as unknown. Queue and yard completion dates remain estimates, not observations from a later save.',
   assumptions: ['no new project, upgrade or colonist is added beyond what the save holds', 'the colony\'s capacity stays what it is today, so a new factory does not speed the queue up', 'a unit adds its workers when it is delivered', 'a yard upgrade\'s minerals are checked against the colony\'s stock today, not against what other work uses first'],
 })
 
@@ -51,8 +53,8 @@ export const YARD_ACTIVITIES = Object.freeze({
 
 const CAPACITY_ADDED = Object.freeze({ 2: 500, 3: 1000, 4: 2000, 5: 5000, 6: 10000 })
 
-// The workers a yard needs, in millions: capacity times slipways, a tenth of it at a commercial yard, over 4,000.
-export const yardWorkers = (yardType, capacity, slipways) => (capacity * slipways * (yardType === 1 ? 1 : 0.1)) / 4000
+// The workers a yard needs, in millions: capacity times slipways, a tenth of it at a commercial or repair yard, over 4,000 (a naval or a light yard counts the whole).
+export const yardWorkers = (yardType, capacity, slipways) => (capacity * slipways * (isFullCapacityYard(yardType) ? 1 : 0.1)) / 4000
 
 // What one yard activity changes in the yard's workers: { delta } (0 for one that changes none, a retool) or { missing } naming what the save lacks or the activity this does not know.
 const yardChange = (yard) => {

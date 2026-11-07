@@ -5,7 +5,7 @@
 
   The checks need no save except the last two groups. Small examples of two to five axes, worked by hand and against an independent oracle (every pair of sets compared, on the same grid of cells that count as alike), show that a set strictly worse on every axis is dropped and so is one that is no better on any axis and worse on one, that incomparable sets stay, that sets alike on every axis stay together by name (their count exact past the names kept), that reversing an axis reverses what is efficient, that the order sets arrive in changes nothing, and that a figure that is not computed (the range and endurance of a set with no fuel) never enters a comparison: it is not read as 0, the set takes no part and is counted and named. A front is provisional when the search stopped early (a candidate budget, a cancelled run, a step's snapshot), or when the front hit its limit, and only a whole domain that the limit did not cut is complete; the text it is shown with says which.
 
-  On small domains an enumeration can walk, the front the search keeps equals the front of every set that meets the targets, for several axis choices and both directions, whatever number of sets the table lists (`keep`); the share and speed frontiers of the earlier search stay as they were and are the front of those two axes once the sets the same-share rule leaves beside a better one are set aside; asking for a front changes no other result; and the front's work counts against a step. With a save, the same on the race's own tanks, engines and tech, and the page's default search with a front gives the digest taken before fronts existed.
+  On small domains an enumeration can walk, the front the search keeps equals the front of every set that meets the targets, for several axis choices and both directions, whatever number of sets the table lists (`keep`); the share and speed frontiers of the earlier search stay as they were and are the front of those two axes once the sets the same-share rule leaves beside a better one are set aside; asking for a front changes no other result; and the front's work counts against a step. With a save, the same on the race's own tanks, engines and tech, and the page's default search with a front gives the digest taken before fronts existed. --no-mutations checks only modded, whose search domain contains 168,284 candidates versus 64,779 in stock. Explicit --stock/--modded arguments are always used as given.
 
   The page is run on a pseudo instance (scripts/lib/page-loader.js). Each mutation of a utility or of the page's script must fail the checks it names. Exit code 1 when a check fails.
 */
@@ -17,6 +17,7 @@ const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { strictRecords } = require('./lib/csv-records')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { FIXTURE, fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -991,9 +992,9 @@ const mutatedSources = (file, from, to) => {
 
 const DEFAULT_INPUT = { hullHS: 100, speed: 2500, fraction: 0.5, goal: { mode: 'range', value: 5e9 }, kind: 'either', minCount: 1, maxCount: 100, share: 0.5 }
 
+// The digest of the default search on the fixture, recorded at AE-301-07 from the search as it stands (the search of the earlier line's saves it was first taken from no longer has a save to run on by default); a save with no digest recorded prints a skip.
 const ANCHORS = {
-  'AuroraDB.db:140:784': { evaluated: 168284, matched: 141201, digest: 'db517f092dd4a48c' },
-  'AuroraDB_271_skoormit_saved.db:138:785': { evaluated: 64779, matched: 49905, digest: '20a9ab5a6d9e3308' },
+  [`${path.basename(FIXTURE.file)}:${FIXTURE.gameId}:${FIXTURE.raceId}`]: { evaluated: 181995, matched: 151846, digest: 'c99ce21b99e53ccc' },
 }
 
 const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts }) => crypto.createHash('sha256').update(JSON.stringify({ sets, lightest, fastest, cheapest, pareto, packages, evaluated: counts.evaluated, matched: counts.feasible })).digest('hex').slice(0, 16)
@@ -1001,11 +1002,14 @@ const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts })
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { part: null }
+  const specified = []
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
-      options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
+      const label = argv[index].slice(2)
+      options[label] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
+      specified.push(label)
       index += 3
     } else if (argv[index] === '--no-mutations') {
       continue
@@ -1015,6 +1019,16 @@ const parseArguments = (argv) => {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
     }
+  }
+
+  options.saveLabels = specified.length ? [...new Set(specified)] : ['fixture']
+
+  if (!specified.length) {
+    options.fixture = fixtureTriple()
+  }
+
+  if (options.part === null && !mutating() && !fs.existsSync(path.resolve(root, options[options.saveLabels[0]][0]))) {
+    throw new Error(`quick representative save is missing: ${options[options.saveLabels[0]][0]}`)
   }
 
   return options
@@ -1191,7 +1205,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   if (anchor) {
     const result = asked.result
 
-    check(`${label}: the default search with a front gives the result taken before fronts existed`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+    check(`${label}: the default search with a front gives the result recorded for this save`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
   } else {
     console.log('SKIP  no digest of the unchanged search is recorded for this save')
   }
@@ -1206,7 +1220,7 @@ const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
   database.close()
 }
 
-const SAVE_LABELS = ['modded', 'stock']
+const SAVE_LABELS = ['fixture', 'modded', 'stock']
 
 // One part, in this process: `head`, a mutant by its id or a save by its label.
 const runPart = async (part, options) => {
@@ -1232,7 +1246,7 @@ const runPart = async (part, options) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+const forwardedSaves = (options) => ['modded', 'stock'].filter((label) => options[label]).flatMap((label) => [`--${label}`, ...options[label].map(String)])
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
@@ -1245,7 +1259,7 @@ const run = async () => {
   // The longest parts first: the saves, then the checks of the real sources, then the mutants.
   const planting = mutating()
   const mutants = planting ? MUTANTS : []
-  const parts = [{ part: 'head', weight: 30 }, ...mutants.map(({ id }) => ({ part: id, weight: 3 })), ...SAVE_LABELS.map((label) => ({ part: label, weight: 60 }))]
+  const parts = [{ part: 'head', weight: 30 }, ...mutants.map(({ id }) => ({ part: id, weight: 3 })), ...options.saveLabels.map((label) => ({ part: label, weight: 60 }))]
   const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
   const printed = (index) => {
     const counts = printSection(sections[index])

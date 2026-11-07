@@ -16,6 +16,7 @@
             <v-btn-toggle v-model="suggestionView" mandatory dense>
               <v-btn value="governors" small>Governor improvements ({{ governorRows.length }})</v-btn>
               <v-btn value="ships" small>Specialist ships ({{ shipRows.length }})</v-btn>
+              <v-btn value="lightNaval" small>Light naval ships ({{ lightRows.length }})</v-btn>
               <v-btn value="research" small>Research ({{ researchRows.length }})</v-btn>
             </v-btn-toggle>
           </div>
@@ -57,22 +58,25 @@
             </div>
           </template>
 
-          <template v-else-if="suggestionView === 'ships'">
-            <v-data-table v-if="shipRows.length" :headers="shipHeaders" :items="shipRows" item-key="key" :items-per-page.sync="shipTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: shipPageSizes }">
+          <template v-else-if="suggestionView === 'ships' || suggestionView === 'lightNaval'">
+            <v-data-table v-if="visibleShipRows.length" :headers="shipHeaders" :items="visibleShipRows" item-key="key" :items-per-page.sync="shipTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: shipPageSizes }">
               <template #[`item.ship`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.ship.ShipName }}<page-link v-if="item.ship.SystemID" :to="systemLink(item.ship.SystemID)" :name="item.ship.SystemName" class="ml-1" /></div>
-                  <div class="caption text--secondary">{{ item.ship.ClassName }} · {{ item.ship.FleetName }}</div>
+                  <div class="caption text--secondary">{{ item.ship.ClassName }} · {{ item.ship.FleetName }}<span v-if="item.ship.ShipSeniorCO === 1"> · Senior CO</span></div>
                 </div>
               </template>
               <template #[`item.post`]="{ item }">
                 <div>{{ item.post.post === 'science' ? 'Science officer' : 'Captain' }}</div>
-                <div class="caption text--secondary">{{ item.post.label }} · {{ rankName(item.post.level) }}<provenance-mark :result="item.postResult" /></div>
+                <div class="caption text--secondary">{{ item.post.label }}<span v-if="declaredText(item.ship)"> (declared as {{ declaredText(item.ship) }})</span> · {{ rankName(item.post.level) }}<span v-if="item.post.seniorCO"> · one above the class</span><provenance-mark :result="item.postResult" /></div>
+                <div v-if="item.post.combat" class="caption warning--text">Ranked by Light Tactical, as the game orders its assignments. Over 20 hull spaces Light Tactical does not count in combat, which takes half of the captain's {{ item.post.combat.label }} instead.</div>
+                <div v-else-if="item.post.share === null" class="caption warning--text">The size of the class is not stored, so whether Light Tactical counts in combat is not known.</div>
               </template>
               <template #[`item.holder`]="{ item }">
                 <div v-if="item.holder">
                   <div>{{ item.holder.Name }}</div>
                   <div class="caption text--secondary">{{ bonusText(item.post.bonusId, item.current) }}</div>
+                  <div v-if="item.combat" class="caption text--secondary">In combat: {{ bonusText(item.combat.bonusId, item.combat.current) }}, half of it counts</div>
                 </div>
                 <span v-else class="warning--text">Vacant</span>
               </template>
@@ -80,21 +84,30 @@
                 <div v-if="item.candidate">
                   <div class="font-weight-medium">{{ item.candidate.Name }}</div>
                   <div class="caption text--secondary">{{ bonusText(item.post.bonusId, item.candidate.bonuses[item.post.bonusId]) }}<provenance-mark :result="item.result" /></div>
+                  <div v-if="item.combat" class="caption text--secondary">In combat: {{ bonusText(item.combat.bonusId, item.combat.candidate) }}, half of it counts</div>
+                  <div v-if="item.alsoBestFor" class="caption text--secondary">Also the best candidate for {{ item.alsoBestFor }} other {{ item.alsoBestFor === 1 ? 'post' : 'posts' }}: alternatives for one officer, not an allocation</div>
                 </div>
                 <span v-else class="text--secondary">None at this rank<provenance-mark :result="item.result" /></span>
                 <div v-if="item.otherRanks" class="caption text--secondary">{{ item.otherRanks }} better at other ranks</div>
                 <div v-if="item.unknownCandidates" class="caption text--secondary">{{ item.unknownCandidates }} unassigned officers cannot be compared: a bonus or rank is not stored</div>
               </template>
             </v-data-table>
-            <div v-else class="panel-body caption text--secondary">{{ shipAssessment.unrated.length ? 'Every specialist ship that can be rated has an officer, and no unassigned officer of the right rank has a better bonus.' : 'Every terraformer, miner, harvester and survey ship has an officer, and no unassigned officer of the post\'s rank has a better bonus.' }}</div>
-            <div v-if="shipAssessment.unrated.length" class="panel-body caption text--secondary">
-              <div>Cannot be rated, so left out of the table ({{ count(shipAssessment.unrated.length) }}):</div>
-              <div v-for="item in unratedShown(shipAssessment.unrated)" :key="item.ship.ShipID">{{ item.ship.ShipName }}{{ item.ship.ClassName ? ` (${item.ship.ClassName})` : '' }}: {{ missingText(item.result) }}<provenance-mark :result="item.result" /></div>
-              <div v-if="unratedMore(shipAssessment.unrated)">and {{ count(unratedMore(shipAssessment.unrated)) }} more</div>
+            <div v-else class="panel-body caption text--secondary">{{ shipEmptyText }}</div>
+            <div v-if="visibleShipAssessment.unrated.length" class="panel-body caption text--secondary">
+              <div>Cannot be rated, so left out of the table ({{ count(visibleShipAssessment.unrated.length) }}):</div>
+              <div v-for="item in unratedShown(visibleShipAssessment.unrated)" :key="item.ship.ShipID">{{ item.ship.ShipName }}{{ item.ship.ClassName ? ` (${item.ship.ClassName})` : '' }}: {{ missingText(item.result) }}<provenance-mark :result="item.result" /></div>
+              <div v-if="unratedMore(visibleShipAssessment.unrated)">and {{ count(unratedMore(visibleShipAssessment.unrated)) }} more</div>
             </div>
-            <div class="panel-foot caption text--secondary">
-              Use it to check why an officer is suggested for a ship. Terraformers and miners use the captain's full bonus. Survey ships with a Science Department use the science officer's bonus, and that post is one rank below the captain. Other survey ships use half the captain's bonus. Candidates are unassigned naval officers of exactly the post's rank, as automatic assignment requires. Officers under "other ranks" would need a promotion or a manual assignment.
-            </div>
+            <template v-if="suggestionView === 'ships'">
+              <div class="panel-foot caption text--secondary">
+                Use it to check why an officer is suggested for a ship. Terraformers and miners use the captain's full bonus. Survey ships with a Science Department use the science officer's bonus, and that post is one rank below the rank the class requires. Other survey ships use the captain's bonus, halved for a ship over 20 hull spaces. The captain's rank is the rank the class requires, which already includes the class's Senior CO option, and one rank higher for a ship set to Senior CO; the science officer's rank does not move with it. A ship set to Senior CO whose class already requires the highest rank has no rank to ask for, so it is listed as one that cannot be rated. A save that does not store a ship's Senior CO setting leaves its captain's rank unknown, since the setting could have raised it by one, so the ship is listed under those that cannot be rated. Candidates are unassigned naval officers of exactly the post's rank, as automatic assignment requires. Officers under "other ranks" would need a promotion or a manual assignment. Each row names the best unassigned officer for that post taken alone; one officer can be the best for several posts, and those rows are alternatives for that officer, not an allocation. A function the player declared for the class shows beside the post label as declared; the post follows the class's modules whatever it is declared as, except that a class declared Light Naval is a light naval ship and is listed under Light naval ships. A ship whose class has no stored main function may be light naval, so it is listed there as one that cannot be rated and not here.
+              </div>
+            </template>
+            <template v-else>
+              <div class="panel-foot caption text--secondary">
+                Use it to check why an officer is suggested for a light naval ship. A ship is light naval when its class's main function is Light Naval and the class has officers. The game works that function out from the class's size, armament and sensors, as Light Naval for an armed class of 20 hull spaces or fewer, unless the player declared it, so a stored Light Naval function on a larger class counts only when it was declared. The captain is ranked by the Light Tactical bonus, as the game orders its assignments for that function, and the captain's rank follows the rank the class requires and the ship's Senior CO setting as for the specialist ships. For a class of 20 hull spaces or fewer that bonus is also what the captain adds to the ship in combat, in full. For a declared class over 20 hull spaces it is not: the ship's tactical multiplier takes half of the captain's Tactical there and nothing of Light Tactical, so those rows show the Tactical bonus of the holder and the candidate beside the ranking, and a candidate with a better Light Tactical is not thereby better in combat. Candidates are unassigned naval officers of exactly the post's rank. Each row names the best unassigned officer for that post taken alone; one officer can be the best for many posts, and those rows are alternatives for that officer, not an allocation. A ship whose class has no stored main function, or one the game does not name, may be light naval and is listed as one that cannot be rated, naming the function. A function the player declared shows beside the post label as declared; only Light Naval is ranked by a bonus of its own here, so a class declared as anything else keeps the post its modules give.
+              </div>
+            </template>
           </template>
 
           <template v-else>
@@ -117,7 +130,7 @@
                 <div class="caption text--secondary">× {{ fixed(item.candidateMultiplier, 2) }}, runs up to {{ item.candidateLabs }} labs<provenance-mark :result="item.result" /></div>
               </template>
             </v-data-table>
-            <div v-else class="panel-body caption text--secondary">{{ projects.length ? (researchAssessment.unrated.length ? 'No unassigned scientist of the right field, able to run the labs, would research faster on a project that can be rated.' : 'No unassigned scientist of the right field, able to run the labs, would research faster.') : 'No research projects are running.' }}</div>
+            <div v-else class="panel-body caption text--secondary" :data-research-skipped="researchAssessment.skipped ? 'true' : null">{{ researchAssessment.skipped ? researchAssessment.skipped : projects.length ? (researchAssessment.unrated.length ? 'No unassigned scientist of the right field, able to run the labs, would research faster on a project that can be rated.' : 'No unassigned scientist of the right field, able to run the labs, would research faster.') : 'No research projects are running.' }}</div>
             <div v-if="researchAssessment.unrated.length" class="panel-body caption text--secondary">
               <div>Cannot be rated, so left out of the table ({{ count(researchAssessment.unrated.length) }}):</div>
               <div v-for="item in unratedShown(researchAssessment.unrated)" :key="item.project.ProjectID">{{ item.project.ProjectName || `Project ${item.project.ProjectID}` }}: {{ missingText(item.result) }}<provenance-mark :result="item.result" /></div>
@@ -179,7 +192,7 @@
               <span v-else-if="item.assignmentMark" class="text--secondary">—<provenance-mark :result="item.assignmentMark" /></span>
               <template v-else>
                 <div>{{ item.post }}</div>
-                <div class="caption text--secondary">{{ item.AssignmentName }}<page-link v-if="item.CommandType === 3" :to="colonyLink(item.CommandID)" :name="item.AssignmentName" class="ml-1" /></div>
+                <div class="caption text--secondary">{{ item.AssignmentName }}<span v-if="item.AssignmentSeniorCO === 1"> · Senior CO ship</span><page-link v-if="item.CommandType === 3" :to="colonyLink(item.CommandID)" :name="item.AssignmentName" class="ml-1" /></div>
               </template>
             </template>
             <template #[`item.Age`]="{ item }">
@@ -329,7 +342,7 @@ import WipNotice from '../components/page/WipNotice.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
-import { AGE_NOTES, COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageBound, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterChoices, rosterFilter, rosterParts, shipSuggestions } from '../utilities/commanders'
+import { AGE_NOTES, COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageBound, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, declaredFunction, formatBonus, formerGroupCounts, formerKind, governorReview, isLightNavalPost, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterChoices, rosterFilter, rosterParts, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadGroundFormationPosts } from '../utilities/ground-formations'
 import { DIAGRAM_LIMIT, hierarchyBranches, hierarchyExport, hierarchyNotice, hierarchyRows, hierarchySummary } from '../utilities/hierarchy-export'
@@ -337,6 +350,7 @@ import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { loadNavalHierarchy } from '../utilities/naval-hierarchy'
 import { describeResult, isAvailable, valueOrNull } from '../utilities/provenance'
+import { NO_RESEARCH_UNREAD, loadNoResearchProjects } from '../utilities/research-data'
 
 const INPUT_LABELS = {
   commanders: 'the commanders',
@@ -344,6 +358,7 @@ const INPUT_LABELS = {
   traits: 'the traits',
   colonies: 'the colonies',
   ships: 'the specialist ships',
+  lightShips: 'the light naval ships',
   projects: 'the research projects',
   former: 'the former commanders',
   formerHistory: 'their careers',
@@ -351,6 +366,7 @@ const INPUT_LABELS = {
   unsettled: 'the commanders with no stored status',
   navalTree: 'the naval command structure',
   groundTree: 'the ground command structure',
+  noResearch: 'the race\'s No Research Projects setting',
 }
 // The reads of the command structure panel alone: the roster and the rest of the page never wait for them, and a failure of one is shown on that panel.
 const OPTIONAL_INPUTS = ['navalTree', 'groundTree']
@@ -393,7 +409,7 @@ export default {
     deepLink,
     loadState(INPUT_LABELS),
     persistedView({
-      suggestionView: { key: 'commandersSuggestionView', default: 'governors', valid: oneOf(['governors', 'ships', 'research']) },
+      suggestionView: { key: 'commandersSuggestionView', default: 'governors', valid: oneOf(['governors', 'ships', 'lightNaval', 'research']) },
       shipTable: tableView('commandersShipsTable', { itemsPerPage: 15, itemsPerPageOptions: SHIP_PAGE_SIZES }),
       typeId: { key: 'commandersType', default: 0, valid: oneOf(COMMANDER_TYPES.map((type) => type.id)) },
       unassignedOnly: { key: 'commandersUnassignedOnly', default: false },
@@ -455,7 +471,7 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
-    // The column groups the save has, { rank, age }, from the capability check of this page (store/capabilities.js); null until it has answered, and the queries then wait for it (`partsFor`).
+    // The column groups the save has, { rank, age, seniorCO }, from the capability check of this page (store/capabilities.js); null until it has answered, and the queries then wait for it (`partsFor`).
     rosterGroups() {
       const report = this.$store.getters['capabilities/report']('/commanders')
 
@@ -520,16 +536,51 @@ export default {
       return this.governorAssessment.coverage
     },
 
+    // The ships of the specialist view: those read for it whose class is not a light naval one (`isLightNavalPost` is false), so a class declared Light Naval is listed once, under the light naval ships.
+    specialistShips() {
+      return this.ships.filter((ship) => isLightNavalPost(ship) === false)
+    },
+
+    // The ships read for the light naval view that are, or may be, light naval ones: a class whose officers, size or declaration are not stored is kept, to be listed as one that cannot be rated.
+    lightNavalShips() {
+      return this.lightShips.filter((ship) => isLightNavalPost(ship) !== false)
+    },
+
     shipAssessment() {
-      return shipSuggestions(this.ships, this.byType[0], this.bonusNames, this.blockedBonuses)
+      return shipSuggestions(this.specialistShips, this.byType[0], this.bonusNames, this.blockedBonuses)
     },
 
     shipRows() {
       return this.shipAssessment.rows.map((row) => ({ ...row, key: row.ship.ShipID }))
     },
 
+    lightAssessment() {
+      return shipSuggestions(this.lightNavalShips, this.byType[0], this.bonusNames, this.blockedBonuses)
+    },
+
+    lightRows() {
+      return this.lightAssessment.rows.map((row) => ({ ...row, key: row.ship.ShipID }))
+    },
+
+    // The rows and the ships left out of them for the ship view the toggle is on.
+    visibleShipAssessment() {
+      return this.suggestionView === 'lightNaval' ? this.lightAssessment : this.shipAssessment
+    },
+
+    visibleShipRows() {
+      return this.suggestionView === 'lightNaval' ? this.lightRows : this.shipRows
+    },
+
+    shipEmptyText() {
+      if (this.suggestionView === 'lightNaval') {
+        return !this.lightNavalShips.length ? 'No ship of a light naval class that has officers.' : this.lightAssessment.unrated.length ? 'Every light naval ship that can be rated has a captain, and no unassigned officer of the post\'s rank has a better Light Tactical bonus.' : 'Every light naval ship has a captain, and no unassigned officer of the post\'s rank has a better Light Tactical bonus.'
+      }
+
+      return this.shipAssessment.unrated.length ? 'Every specialist ship that can be rated has an officer, and no unassigned officer of the right rank has a better bonus.' : 'Every terraformer, miner, harvester and survey ship has an officer, and no unassigned officer of the post\'s rank has a better bonus.'
+    },
+
     researchAssessment() {
-      return researchSuggestions(this.projects, this.byType[3], this.blockedBonuses)
+      return researchSuggestions(this.projects, this.byType[3], this.blockedBonuses, { noResearch: this.noResearch.value === true })
     },
 
     researchRows() {
@@ -539,14 +590,14 @@ export default {
     tiles() {
       const { counts } = this
       const stats = this.governorStats
-      const captainless = captainlessShips(this.ships)
-      const suggestions = bonusSuggestionCount(this.governorAssessment, this.shipAssessment, this.researchAssessment)
+      const captainless = captainlessShips(this.specialistShips)
+      const suggestions = bonusSuggestionCount(this.governorAssessment, this.shipAssessment, this.researchAssessment, this.lightAssessment)
       const tile = (value, results, fields) => ({ ...fields, value, title: `${value}. ${results.map(describeResult).join('. ')}` })
       const captainNote = captainless.value ? `${this.count(captainless.value)} specialist ships without a captain` : captainless.unknown ? 'No specialist ship of a known class lacks a captain' : 'Every specialist ship has a captain'
       const vacantNotes = [captainNote, captainless.unknown ? `${this.count(captainless.unknown)} captainless ships of unknown class` : '', stats.popGaps ? `${this.count(stats.popGaps)} colonies without a governor and no stored population` : ''].filter(Boolean).join(', ')
       const typeNote = [...counts.types.map((type) => `${this.count(type.total)} ${type.plural.toLowerCase()}`), counts.untyped ? `${this.count(counts.untyped)} with no stored type` : '', counts.unsettled ? `${this.count(counts.unsettled)} with no stored status, not counted` : ''].filter(Boolean).join(', ')
       const idleNote = [...counts.types.map((type) => `${this.count(type.idle)} ${type.label.toLowerCase()}`), counts.noPost ? `${this.count(counts.noPost)} with no stored post, not counted` : ''].filter(Boolean).join(', ')
-      const suggestionNote = `${this.count(this.governorRows.length)} governor improvements, ${this.count(this.shipRows.length)} specialist ships, ${this.count(this.researchRows.length)} research projects${suggestions.unknown ? `, ${this.count(suggestions.unknown)} assignments cannot be rated` : ''}`
+      const suggestionNote = `${this.count(this.governorRows.length)} governor improvements, ${this.count(this.shipRows.length)} specialist ships, ${this.count(this.lightRows.length)} light naval ships, ${this.count(this.researchRows.length)} research projects${suggestions.unknown ? `, ${this.count(suggestions.unknown)} assignments cannot be rated` : ''}`
 
       return [
         tile(this.count(counts.total), [counts.totalResult], { label: 'Commanders', note: typeNote }),
@@ -1056,6 +1107,12 @@ export default {
     rankName(level) {
       return this.navalRanks[level] || `rank ${level}`
     },
+    // The function the player declared for a ship's class, as the game names it; empty when the game works it out.
+    declaredText(ship) {
+      const declared = declaredFunction(ship)
+
+      return declared ? declared.label : ''
+    },
     colonyBonuses(colony) {
       return [colony.BonusOne, colony.BonusTwo, colony.BonusThree].filter((id) => id > 0).map((id) => (this.bonusTypeById[id] || {}).Description || `#${id}`).join(', then ')
     },
@@ -1135,7 +1192,7 @@ export default {
 
         const parts = await this.partsFor(this.rosterGroups)
 
-        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.CommandType, FCT_Commander.CommandID, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.HealthRisk, FCT_Commander.StoryCharacter, ${parts.rankColumns}, ${parts.rankLevel}, ${parts.ageColumn}, FCT_Commander.CareerStart, FCT_Game.GameTime, case when FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) then VIR_Ship.ShipName when FCT_Commander.CommandType in (3, 17) then VIR_Population.PopName when FCT_Commander.CommandType = 4 then FCT_SectorCommand.SectorName when FCT_Commander.CommandType = 5 then FCT_GroundUnitFormation.Name when FCT_Commander.CommandType = 12 then FCT_NavalAdminCommand.AdminCommandName when FCT_Commander.CommandType = 7 then FCT_TechSystem.Name end as AssignmentName, VIR_Bonuses.Bonuses, VIR_Traits.Traits from FCT_Commander inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID ${parts.ageJoin} ${parts.rankJoin} ${parts.levelJoin} left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3 left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) left join FCT_Population as VIR_Population on VIR_Population.PopulationID = FCT_Commander.CommandID and FCT_Commander.CommandType in (3, 17) left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 4 left join FCT_GroundUnitFormation on FCT_GroundUnitFormation.FormationID = FCT_Commander.CommandID and FCT_Commander.CommandType = 5 left join FCT_NavalAdminCommand on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_Commander.CommandID and FCT_Commander.CommandType = 7 left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_CommanderBonuses.CommanderID, group_concat(FCT_CommanderBonuses.BonusID || ':' || coalesce(FCT_CommanderBonuses.BonusValue, ''), ',') as Bonuses from FCT_CommanderBonuses inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderBonuses.CommanderID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderBonuses.CommanderID) as VIR_Bonuses on VIR_Bonuses.CommanderID = FCT_Commander.CommanderID left join (select FCT_CommanderTraits.CmdrID as CommanderID, group_concat(FCT_CommanderTraits.TraitID, ',') as Traits from FCT_CommanderTraits inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderTraits.CmdrID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderTraits.CmdrID) as VIR_Traits on VIR_Traits.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and ${SERVING_COMMANDER} order by FCT_Commander.CommanderType, FCT_Commander.Seniority`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.CommandType, FCT_Commander.CommandID, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.HealthRisk, FCT_Commander.StoryCharacter, ${parts.rankColumns}, ${parts.rankLevel}, ${parts.ageColumn}, FCT_Commander.CareerStart, FCT_Game.GameTime, case when FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) then VIR_Ship.ShipName when FCT_Commander.CommandType in (3, 17) then VIR_Population.PopName when FCT_Commander.CommandType = 4 then FCT_SectorCommand.SectorName when FCT_Commander.CommandType = 5 then FCT_GroundUnitFormation.Name when FCT_Commander.CommandType = 12 then FCT_NavalAdminCommand.AdminCommandName when FCT_Commander.CommandType = 7 then FCT_TechSystem.Name end as AssignmentName, ${parts.shipFlag}, VIR_Bonuses.Bonuses, VIR_Traits.Traits from FCT_Commander inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID ${parts.ageJoin} ${parts.rankJoin} ${parts.levelJoin} left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3 left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) left join FCT_Population as VIR_Population on VIR_Population.PopulationID = FCT_Commander.CommandID and FCT_Commander.CommandType in (3, 17) left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 4 left join FCT_GroundUnitFormation on FCT_GroundUnitFormation.FormationID = FCT_Commander.CommandID and FCT_Commander.CommandType = 5 left join FCT_NavalAdminCommand on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_Commander.CommandID and FCT_Commander.CommandType = 7 left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_CommanderBonuses.CommanderID, group_concat(FCT_CommanderBonuses.BonusID || ':' || coalesce(FCT_CommanderBonuses.BonusValue, ''), ',') as Bonuses from FCT_CommanderBonuses inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderBonuses.CommanderID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderBonuses.CommanderID) as VIR_Bonuses on VIR_Bonuses.CommanderID = FCT_Commander.CommanderID left join (select FCT_CommanderTraits.CmdrID as CommanderID, group_concat(FCT_CommanderTraits.TraitID, ',') as Traits from FCT_CommanderTraits inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderTraits.CmdrID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderTraits.CmdrID) as VIR_Traits on VIR_Traits.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and ${SERVING_COMMANDER} order by FCT_Commander.CommanderType, FCT_Commander.Seniority`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1179,7 +1236,20 @@ export default {
 
         const parts = await this.partsFor(this.rosterGroups)
 
-        return await this.database.query(`with VIR_ShipCommanders as materialized (select CommanderID, CommandID, CommandType, RaceID from FCT_Commander where GameID = ${this.GameID} and RaceID = ${this.RaceID} and Deceased = 0 and CommandType in (1, 10) order by rowid) select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_ShipClass.ClassName, ${parts.classRank}, FCT_ShipClass.Terraformers, FCT_ShipClass.MiningModules, FCT_ShipClass.Harvesters, FCT_ShipClass.GeoSurvey, FCT_ShipClass.GravSurvey, (select count(*) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.Name = 'Science Department') as SciencePosts, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 1 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as CaptainID, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 10 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as ScienceOfficerID from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.Terraformers > 0 or FCT_ShipClass.MiningModules > 0 or FCT_ShipClass.Harvesters > 0 or FCT_ShipClass.GeoSurvey > 0 or FCT_ShipClass.GravSurvey > 0 or FCT_ShipClass.Terraformers is null or FCT_ShipClass.MiningModules is null or FCT_ShipClass.Harvesters is null or FCT_ShipClass.GeoSurvey is null or FCT_ShipClass.GravSurvey is null) order by FCT_ShipClass.ClassName, FCT_Ship.ShipName`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`with VIR_ShipCommanders as materialized (select CommanderID, CommandID, CommandType, RaceID from FCT_Commander where GameID = ${this.GameID} and RaceID = ${this.RaceID} and Deceased = 0 and CommandType in (1, 10) order by rowid) select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_ShipClass.ClassName, ${parts.classRank}, FCT_ShipClass.Size as ClassSize, FCT_ShipClass.MainFunction, FCT_ShipClass.UserDefinedFunction, FCT_ShipClass.NoOfficers, FCT_ShipClass.Terraformers, FCT_ShipClass.MiningModules, FCT_ShipClass.Harvesters, FCT_ShipClass.GeoSurvey, FCT_ShipClass.GravSurvey, (select count(*) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.Name = 'Science Department') as SciencePosts, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 1 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as CaptainID, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 10 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as ScienceOfficerID from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.Terraformers > 0 or FCT_ShipClass.MiningModules > 0 or FCT_ShipClass.Harvesters > 0 or FCT_ShipClass.GeoSurvey > 0 or FCT_ShipClass.GravSurvey > 0 or FCT_ShipClass.Terraformers is null or FCT_ShipClass.MiningModules is null or FCT_ShipClass.Harvesters is null or FCT_ShipClass.GeoSurvey is null or FCT_ShipClass.GravSurvey is null) order by FCT_ShipClass.ClassName, FCT_Ship.ShipName`).then(([items]) => Object.freeze(items))
+      }),
+      default: [],
+    },
+    // The ships of a class whose main function is Light Naval, or is not stored or not one the game names so that it may be, with their captain: the ships whose captain the game ranks by Light Tactical (`isLightNavalPost`, utilities/commanders.js, tells which of them are, which are not and which cannot be told).
+    lightShips: {
+      get: tracked('lightShips', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        const parts = await this.partsFor(this.rosterGroups)
+
+        return await this.database.query(`with VIR_ShipCommanders as materialized (select CommanderID, CommandID, CommandType, RaceID from FCT_Commander where GameID = ${this.GameID} and RaceID = ${this.RaceID} and Deceased = 0 and CommandType = 1 order by rowid) select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_ShipClass.ClassName, ${parts.classRank}, FCT_ShipClass.MainFunction, FCT_ShipClass.UserDefinedFunction, FCT_ShipClass.NoOfficers, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 1 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as CaptainID, FCT_ShipClass.Size as ClassSize from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.MainFunction = 3 or FCT_ShipClass.MainFunction is null or FCT_ShipClass.MainFunction not in (${parts.namedFunctions})) order by FCT_ShipClass.ClassName, FCT_Ship.ShipName`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1288,6 +1358,18 @@ export default {
         return Object.freeze(await loadGroundFormationPosts(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: null,
+    },
+
+    // Whether the race starts no research projects (`FCT_Race.NoResearchProjects`), for the research suggestions: no scientist is suggested for a project of a race that starts none. The read guards its own column, so a save without it leaves the setting unknown and the suggestions as they are.
+    noResearch: {
+      get: tracked('noResearch', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_RESEARCH_UNREAD
+        }
+
+        return await loadNoResearchProjects(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_RESEARCH_UNREAD,
     },
   },
 }

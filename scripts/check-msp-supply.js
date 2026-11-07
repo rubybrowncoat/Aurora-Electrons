@@ -3,11 +3,11 @@
 
   bun scripts/check-msp-supply.js [--no-mutations] [--no-saves]
 
-  The ledger is run on colonies worked by hand. A delivery supports the production of its arrival tick and later ones, never an earlier tick, and a delivery after the period counts for nothing. Mines never supply an unlimited amount: they dig at a finite rate from a deposit, drawn on by the mines and the orbital miners together and spent at its amount. A tonne is allocated once: a packet reaches its one destination, a haul's tonnes leave the source and arrive once and are cut to what the source's own production leaves, and the ledger of every colony balances. The queue is served either first or not at all, the export takes the stock above the reserve within the drivers' capacity before the maintenance draw, and no reserve protects the maintenance draw. Both the stock-only and the supplied output name the limiting mineral and the conditional delivery. A figure the save does not hold is unknown, never 0.
+  The ledger is run on colonies worked by hand. Deliveries support their arrival tick and later ticks, never an earlier one. Finite deposits are shared by every mine and miner on them. A tonne is allocated once and each colony's ledger balances. Industrial demand draws before mass-driver export, shipyard demand after it, and maintenance last without a protected reserve. Queue-active and queue-idle runs are conditional scenarios, not guaranteed scheduling bounds. Installation amounts load into decimal before weighting, summation and whole-unit truncation, including donor reservations and the location runway. Stock-only and supplied output name the limiting mineral and conditional delivery. Unknown inputs remain unknown.
 
   The supplied read feeds only its panel, so a failed read holds nothing back: the page, loaded with its real load-state mixin, stays ready, and the panel (its template compiled and rendered) shows the failure or the progress in place of its figures.
 
-  The saves (saves/AuroraDB_271_skoormit_saved.db, game 138, race 785, and AuroraDB.db, game 140, race 784, read-only; a save that is not there is skipped) are optional witnesses of the real loader and of the ledger.
+  The save (the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only; a save that is not there is skipped) is an optional witness of the real loader and of the ledger.
 
   Each planted fault must fail a check that needs no save and that it names. Each benign edit (wording, whitespace, the order of attributes, another default) must leave every check that needs no save green, alone, stacked and under every planted fault. Exit code 1 when a check fails.
 */
@@ -19,6 +19,8 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { compiledTemplate: compiled, renderTree: rendered, treeOf } = require('./lib/vue-render')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -27,17 +29,16 @@ const FILES = {
   component: path.join(root, 'src', 'renderer', 'components', 'logistics', 'MspSupply.vue'),
   page: path.join(root, 'src', 'renderer', 'pages', 'logistics.vue'),
   colonyMinerals: path.join(root, 'src', 'renderer', 'utilities', 'colony-minerals.js'),
+  feeds: path.join(root, 'src', 'renderer', 'utilities', 'resource-feeds.js'),
 }
 const U = 'utility'
 const L = 'logistics'
 const V = 'component'
 const P = 'page'
 const M = 'colonyMinerals'
-const NAMES = ['msp-supply', 'logistics', 'provenance', 'mineral-supply', 'minerals', 'mineral-outlook', 'colony-minerals']
-const SAVES = [
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-]
+const F = 'feeds'
+const NAMES = ['msp-supply', 'logistics', 'provenance', 'mineral-supply', 'minerals', 'mineral-outlook', 'colony-minerals', 'resource-feeds']
+const SAVES = [fixtureSave()]
 
 const STUBS = {
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
@@ -48,7 +49,7 @@ const STUBS = {
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: [], ink: "", inkMuted: "", primary: "" }); export const withAlpha = (color) => color; export const patternImage = () => null; export const seriesIdentity = () => null'
 const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
-const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set() }, state: { RaceNPR: false }, dispatch: async () => {} }
+const PAGE_STORE = { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} }
 
 let failures = 0
 let checks = 0
@@ -87,14 +88,7 @@ const same = (actual, expected) => {
 
 const near = (actual, expected, tolerance = 1e-6) => typeof actual === 'number' && Number.isFinite(actual) && Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected))
 
-const compiled = (source) => {
-  const compiler = require('vue/compiler-sfc')
-  const parsed = compiler.parse({ source })
-  const descriptor = parsed.descriptor || parsed
-
-  return compiler.compileTemplate({ source: descriptor.template.content, filename: 'component.vue', id: 'component' })
-}
-
+// Each text is compiled once in a process, however many times it is rendered or read (scripts/lib/vue-render.js keeps that one).
 const templateErrors = (source) => compiled(source).errors.map(String)
 
 // The root element of a compiled template, and every element in document order (the branches of a v-if chain included).
@@ -178,12 +172,12 @@ const world = (m) => {
   // The tonnes of `name` that `msp` MSP take.
   const tonnes = (name, msp) => msp * PER[name]
   // The Logistics page's row of a maintenance colony: 10 facilities at 50 a year, 4 MSP each, so 2000 MSP a year at a modifier of 1.
-  const row = (id, over = {}) => ({ PopulationID: id, PopName: `C${id}`, SystemName: 'Sol', Component: 1, SystemBodyID: id, PlanetNumber: id, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, MaintenanceFacilities: 10, MSPProduction: 50, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, ...over })
+  const row = (id, over = {}) => ({ PopulationID: id, PopName: `C${id}`, NPR: 0, Population: 1, MspPopulated: provenance.ofRule({ rule: 'logistics.mspPopulation', value: true }), SystemName: 'Sol', ComponentNumber: 1, SystemBodyID: id, PlanetNumber: id, OrbitNumber: 0, BodyClass: 1, SystemBodyName: null, MaintenanceFacilities: 10, MSPProduction: 50, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, ...over })
   // The loader's row of the same colony: stock and reserve of every mineral, the mass driver and the place.
   const source = (id, stock = {}, reserve = {}, over = {}) => ({ PopulationID: id, PopName: `C${id}`, SystemID: SYSTEM, MassDriverDest: 0, Drivers: 0, DriverGaps: 0, DestinationID: null, DestinationName: null, DestinationRaceID: null, DestinationSystemID: null, Xcor: 10 * id, Ycor: 10, ShuttleCapacity: null, ServiceNames: null, ...Object.fromEntries(ALL.flatMap((name) => [[name, stock[name] ?? (MIN.includes(name) ? 1e6 : 0)], [`Reserve${name}`, reserve[name] ?? 0]])), ...over })
   const pair = (id, stock = {}, over = {}, reserve = {}, extra = {}) => ({ colony: row(id, { ...stock, ...over }), source: source(id, stock, reserve, extra) })
   const ships = (to, over = {}) => ({ MassDriverDest: to.PopulationID, DestinationID: to.PopulationID, DestinationName: to.PopName, DestinationRaceID: RACE, DestinationSystemID: to.SystemID, Drivers: 5, DriverGaps: 0, ...over })
-  const sources = (over = {}) => ({ colonies: [], needs: {}, packets: {}, packetRows: [], surface: [], orbital: [], plan: null, freighters: null, shuttleTechnology: null, problems: [], ...over })
+  const sources = (over = {}) => ({ colonies: [], needs: {}, queuePhases: over.needs === null ? null : { industrial: over.needs || {}, shipyard: {} }, packets: {}, packetRows: [], surface: [], orbital: [], plan: null, freighters: null, shuttleTechnology: null, problems: [], ...over })
   const admins = { 1: { NavalAdminCommandID: 1, SystemID: 5, ParentCommandID: 0, BonusValue: 1.2, Share: 0.5, Eligible: true, Unknown: null, Systems: new Set([5]) } }
   // 10 manned mines of 10 t, accessibility 1, every modifier neutral: 100 t a year, from a deposit of `Amount`.
   const surface = (id, material, over = {}) => ({ PopulationID: id, PopName: `C${id}`, SystemID: SYSTEM, SystemName: 'Sol', SystemBodyID: id, MaterialID: material, Amount: 1e9, MassDriverExport: 0, PurchaseCivilianMinerals: 0, ManualMineCount: 10, AutomatedMineCount: 0, CivilianMineCount: 0, MineProduction: 10, Accessibility: 1, GovernorBonus: 1, SectorBonus: 1, Efficiency: 1, StabilityModifier: 1, PoliticalModifier: 1, RadiationModifier: 1, ...over })
@@ -228,6 +222,8 @@ const memoryDatabase = async (names, tables) => {
   await run('create table DIM_PlanetaryInstallation (PlanetaryInstallationID integer, MassDriverValue real)')
   await run('create table FCT_PopulationInstallations (GameID integer, PopID integer, PlanetaryInstallationID integer, Amount real)')
   await run(`create table FCT_MassDriverPackets (PacketID integer, GameID integer, RaceID integer, DestID integer, Speed real, Xcor real, Ycor real, ${count})`)
+  await run(`create table FCT_IndustrialProjects (PopulationID integer, GameID integer, RaceID integer, Amount real, ${count})`)
+  await run(`create table FCT_ShipyardTask (PopulationID integer, GameID integer, RaceID integer, TaskTypeID integer, TotalBP real, CompletedBP real, ${count})`)
 
   for (const [table, entries] of Object.entries(tables)) {
     for (const entry of entries) {
@@ -236,6 +232,73 @@ const memoryDatabase = async (names, tables) => {
   }
 
   return { query: (sql) => allRows(raw, sql), close: () => closeRaw(raw) }
+}
+
+// Raw rows for the compact public census-wiring controls; census arithmetic is covered by its own suite.
+const censusDatabase = async (colonies, changes = {}) => {
+  const raw = new sqlite3.Database(':memory:')
+  const query = (sql) => allRows(raw, sql)
+  const schemas = {
+    FCT_Population: 'PopulationID integer, PopName text, Population real, SystemID integer, SystemBodyID integer, GameID integer, RaceID integer, MaintProdStatus integer, MaintenanceStockpile real, FuelStockpile real, FuelProdStatus integer, Efficiency real, UnrestPoints real, PoliticalStatus integer, WarningMSP real, WarningFuel real, MassDriverDest integer, ' + ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite'].flatMap((name) => [`${name} real`, `Reserve${name} real`]).join(', '),
+    FCT_SystemBody: 'SystemBodyID integer, Xcor real, Ycor real, StarID integer, PlanetNumber integer, OrbitNumber integer, BodyClass integer, RadiationLevel real',
+    FCT_Ship: 'ShipID integer, ShipName text, ShipClassID integer, FleetID integer, GameID integer, RaceID integer',
+    FCT_ShipClass: 'ShipClassID integer, ClassName text, ArkShip integer',
+    FCT_Fleet: 'FleetID integer, FleetName text, AssignedPopulationID integer, OrbitBodyID integer, SystemID integer, RaceID integer, Xcor real, Ycor real, CivilianFunction integer',
+    FCT_MoveOrders: 'FleetID integer, GameID integer',
+    FCT_ClassComponent: 'ClassID integer, ComponentID integer, NumComponent real',
+    FCT_ShipDesignComponents: 'SDComponentID integer, ComponentTypeID integer, SpecialFunction integer, ComponentValue real',
+    FCT_DamagedComponent: 'ShipID integer, ComponentID integer, Number integer',
+    FCT_ShipCargo: 'ShipID integer, SpeciesID integer, GameID integer, CargoTypeID integer, Amount real',
+    FCT_Species: 'SpeciesID integer, GameID integer, SpeciesName text',
+    FCT_Race: 'RaceID integer, NPR integer, MSPProduction real, FuelProduction real, MaintenanceCapacity real, EconomicProdModifier real',
+    FCT_PopulationInstallations: 'PopID integer, PlanetaryInstallationID integer, Amount real',
+    DIM_PlanetaryInstallation: 'PlanetaryInstallationID integer, MaintenanceValue real, RefineryProductionValue real, MiningProductionValue real, MassRefuelling real, CargoShuttleValue real, MassDriverValue real, Name text',
+    DIM_PopPoliticalStatus: 'StatusID integer, ProductionMod real',
+    FCT_SystemBodyName: 'SystemBodyID integer, RaceID integer, Name text',
+    FCT_RaceSysSurvey: 'SystemID integer, RaceID integer, Name text',
+    FCT_Star: 'StarID integer, ComponentNumber integer',
+  }
+  const tables = {
+    FCT_Population: colonies.map(({ PopulationID, PopName, Population, SystemBodyID }) => ({ PopulationID, PopName, Population, SystemBodyID, SystemID: SYSTEM, GameID: GAME, RaceID: RACE })),
+    FCT_SystemBody: colonies.map(({ SystemBodyID, Xcor, Ycor }) => ({ SystemBodyID, Xcor, Ycor })),
+    FCT_Ship: [{ ShipID: 1, ShipName: 'Ark', ShipClassID: 1, FleetID: 1, GameID: GAME, RaceID: RACE }],
+    FCT_ShipClass: [{ ShipClassID: 1, ClassName: 'Ark', ArkShip: 1 }],
+    FCT_Fleet: [{ FleetID: 1, FleetName: 'Ark fleet', AssignedPopulationID: 1, OrbitBodyID: 1, SystemID: SYSTEM, Xcor: 10, Ycor: 10, CivilianFunction: 0 }],
+    FCT_ClassComponent: [{ ClassID: 1, ComponentID: 1, NumComponent: 1 }],
+    FCT_ShipDesignComponents: [{ SDComponentID: 1, ComponentTypeID: 17, SpecialFunction: 7, ComponentValue: 1 }],
+    FCT_ShipCargo: [{ ShipID: 1, SpeciesID: 1, GameID: GAME, CargoTypeID: 1, Amount: 1 }],
+    FCT_Species: [{ SpeciesID: 1, GameID: GAME, SpeciesName: 'People' }],
+    ...changes,
+  }
+
+  for (const [table, schema] of Object.entries(schemas)) {
+    await query(`create table ${table} (${schema}${schema.includes('GameID') ? '' : ', GameID integer'})`)
+
+    for (const source of tables[table] || []) {
+      const entry = { GameID: GAME, ...(table === 'FCT_Fleet' ? { RaceID: RACE } : {}), ...source }
+
+      await query(`insert into ${table} (${Object.keys(entry).join(', ')}) values (${Object.values(entry).map(sqlValue).join(', ')})`)
+    }
+  }
+
+  return { query, close: () => closeRaw(raw) }
+}
+
+// Actual report SQL and timing over a small saved world, without replacing the census or arithmetic.
+const savedSupplyDatabase = async (w, colonies, facilities = [{ amount: 1, weight: 1 }]) => {
+  const rows = colonies.map((colony) => ({ ...w.source(colony.PopulationID), ...colony, GameID: GAME, RaceID: RACE, SystemID: 10, FuelStockpile: 0, FuelProdStatus: 0, Efficiency: 1, UnrestPoints: 0, MaintenanceStockpile: 100 }))
+  const columns = new Set(['PopulationID', 'PopName', 'Population', 'SystemBodyID', 'GameID', 'RaceID', 'SystemID', 'MaintProdStatus', 'MaintenanceStockpile', 'FuelStockpile', 'FuelProdStatus', 'Efficiency', 'UnrestPoints', 'MassDriverDest', ...w.ALL.flatMap((name) => [name, `Reserve${name}`])])
+  const database = await censusDatabase(colonies, {
+    FCT_Population: rows.map((row) => Object.fromEntries(Object.entries(row).filter(([name]) => columns.has(name)))),
+    FCT_SystemBody: colonies.map((colony) => ({ SystemBodyID: colony.SystemBodyID, Xcor: colony.PopulationID === 1 ? 3000000 : 0, Ycor: colony.PopulationID === 1 ? 4000000 : 0, RadiationLevel: 0 })),
+    FCT_Race: [{ RaceID: RACE, NPR: 0, MSPProduction: 50, FuelProduction: 0, MaintenanceCapacity: 1000, EconomicProdModifier: 1 }],
+    DIM_PlanetaryInstallation: facilities.map(({ weight }, index) => ({ PlanetaryInstallationID: index + 1, MaintenanceValue: weight, RefineryProductionValue: 0, MiningProductionValue: 0, MassRefuelling: 0, CargoShuttleValue: 0, MassDriverValue: 0, Name: `Facility ${index + 1}` })),
+    FCT_PopulationInstallations: colonies.flatMap((colony) => facilities.map(({ amount }, index) => ({ PopID: colony.PopulationID, PlanetaryInstallationID: index + 1, Amount: amount }))),
+    FCT_Fleet: [],
+    FCT_Ship: [],
+  })
+
+  return { ...database, query: (sql, options = {}) => database.query(sql.replace(/:(GameID|RaceID)\b/g, (_, key) => String(options.replacements[key]))) }
 }
 
 // ---------- the ledger, on the colonies worked by hand ----------
@@ -283,8 +346,251 @@ const pure = (ctx) => {
     return near(value(quarter.high.result), 0) && quarter.high.delivery === null && near(value(year.high.result), 0.2 * production(a.colony)) && year.high.delivery && year.high.delivery.firstDay === 201 ? true : short([value(quarter.high.result), quarter.high.delivery, value(year.high.result), year.high.delivery && year.high.delivery.firstDay])
   })
 
+  // NPR producers share their capital's minerals; local stocks cannot supply an independent forecast.
+  add('npr: distinct local and capital stocks and competing colonies never produce a local-stock forecast without the shared capital mineral stock', () => {
+    const capital = pair(1, { Duranium: 20 }, { NPR: 1, MaintenanceFacilities: 1 })
+    const dryColony = pair(2, { Duranium: 0 }, { NPR: 1, MaintenanceFacilities: 1 })
+    const richColony = pair(3, { Duranium: 100 }, { NPR: 1, MaintenanceFacilities: 1 })
+    const pairs = [capital, dryColony, richColony]
+    const rows = rowsOf({ pairs })
+    const outputs = pairs.map(({ colony }) => lg.mspOutput(colony, 1))
+    const location = lg.maintenanceLocations({ colonies: pairs.map(({ colony }) => ({ ...colony, SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceStockpile: 100, Efficiency: 1, CapacityModifier: 1, MaintenanceCapacity: 1000 })), ships: [], modifierOf: () => 1, maintenanceCapacity: 1000, economicModifier: 1 })[0]
+    const figures = [...outputs, ...rows.flatMap((entry) => [entry.stockOnly.result, entry.high.result, entry.low.result]), location.productionResult]
+    const player = rowOf(rowsOf({ pairs: [pair(4, { Duranium: 0 }, { MaintenanceFacilities: 1 }), pair(5, { Duranium: 100 }, { MaintenanceFacilities: 1 })] }), 5)
+
+    return figures.every((figure) => figure.status === 'unavailable' && figure.inputs.missing.some((text) => /shared.*capital.*mineral stock/i.test(text))) && rows.every((entry) => entry.ledger === null && entry.deliveries.length === 0) && near(value(player.stockOnly.result), 200) && location.runway === null ? true : short([figures.map((figure) => [figure.value, figure.status, figure.inputs.missing]), location.runway, value(player.stockOnly.result)])
+  })
+
+  add('population-owner: maintenance output uses the shared loader without retaining private census helpers or reads', () => /\bloadOrbitalCensus\(database, \{ GameID, RaceID \}\)/.test(ctx.logisticsText) && !/\b(?:mspShipPeople|censusInteger|addPeopleBound|minimumPeopleBound|loadArks|arkLayer)\b|select rowid as CensusRowID/.test(ctx.logisticsText))
+
+  add('population: decided zero, decided positive and unavailable gates control actual output without changing nominal facility capacity', () => {
+    const gate = (value) => value === null ? ctx.m.provenance.unavailable({ rule: 'logistics.mspPopulation', missing: ['the population census'] }) : ctx.m.provenance.ofRule({ rule: 'logistics.mspPopulation', value })
+    const empty = pair(1, {}, { MaintenanceFacilities: 1, MspPopulated: gate(false) })
+    const populated = pair(2, {}, { MaintenanceFacilities: 1, MspPopulated: gate(true) })
+    const unknown = pair(3, {}, { MaintenanceFacilities: 1, MspPopulated: gate(null) })
+    const rows = rowsOf({ pairs: [empty, populated, unknown] })
+    const actual = rows.map((entry) => [value(entry.stockOnly.result), value(entry.high.result), value(entry.low.result)])
+    const outputs = [empty, populated, unknown].map(({ colony }) => value(lg.mspOutput(colony, 1)))
+    const location = lg.maintenanceLocations({ colonies: [{ ...empty.colony, SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceStockpile: 100, Efficiency: 1, CapacityModifier: 1, MaintenanceCapacity: 1000 }], ships: [], modifierOf: () => 1, maintenanceCapacity: 1000, economicModifier: 1 })[0]
+    const absent = lg.mspOutput(row(4, { MaintenanceFacilities: 1, MspPopulated: undefined, Population: 1, OrbitalPopulation: 1 }), 1)
+
+    return near(value(lg.mspProduction(empty.colony, 1)), 200) && same(outputs, [0, 200, null]) === true && actual[0].every((value) => value === 0) && actual[1].every((value) => near(value, 200)) && actual[2].every((value) => value === null) && absent.status === 'unavailable' && location.production === 0 && location.potential === 200 && location.blocked === 0 && lg.mspLimitingMineral({ ...empty.colony, Duranium: 0 }, 1) === null && lg.mspMineralShortfall({ ...empty.colony, Duranium: 0 }, 1).length === 0 ? true : short([outputs, actual, location.production, location.potential, location.blocked, absent])
+  })
+
+  add('population-read: positive, zero and undecided shared census decisions reach actual forecasts, maintenance locations, the page and the supply feed', async () => {
+    const failures = []
+
+    for (const example of [{ name: 'positive', amount: 1, expected: 200 }, { name: 'zero', amount: 0, expected: 0 }, { name: 'undecided', amount: null, expected: null }]) {
+      const colonies = [row(1, { Population: 0, MspPopulated: undefined, MaintenanceFacilities: 1, SystemID: SYSTEM, Xcor: 10, Ycor: 10, MaintenanceStockpile: 100, Efficiency: 1, CapacityModifier: 1, MaintenanceCapacity: 1000 })]
+      const raw = await censusDatabase(colonies, {
+        FCT_Fleet: [{ FleetID: 1, AssignedPopulationID: 1, SystemID: SYSTEM + 1, RaceID: RACE, Xcor: 10, Ycor: 10, CivilianFunction: 0 }],
+        FCT_ShipCargo: [{ ShipID: 1, SpeciesID: 1, GameID: GAME, CargoTypeID: 1, Amount: example.amount }],
+      })
+      let censusReads = 0
+      const database = {
+        query: async (sql) => {
+          if (sql.startsWith('select FCT_PopulationInstallations.PopID,')) return [[{ PopID: 1, Amount: 1, MaintenanceValue: 1 }]]
+          if (!sql.startsWith('select rowid as CensusRowID')) return [colonies]
+          if (sql.includes('FCT_Population.*')) censusReads++
+          return await raw.query(sql)
+        },
+      }
+
+      try {
+        const loaded = await lg.loadMspPopulation(database, { GameID: GAME, RaceID: RACE, colonies })
+        const supplied = await ctx.m.feeds.loadSupplyState(database, { GameID: GAME, RaceID: RACE })
+        const vm = instantiate(ctx.pageOptions, { $store: PAGE_STORE, database, GameID: GAME, RaceID: RACE, data: { loadErrors: {} } })
+        const pageRows = await vm.runAsync('colonies')
+        const forecast = rowsOf({ pairs: [{ colony: loaded[0], source: w.source(1) }] })[0]
+        const location = lg.maintenanceLocations({ colonies: loaded, ships: [], modifierOf: () => 1, maintenanceCapacity: 1000, economicModifier: 1 })[0]
+        const feed = ctx.m.feeds.supplyFeeds({ colonies: supplied, modifierOf: () => 1 }).find((entry) => entry.resource === 'msp')
+        const figures = [value(lg.mspOutput(loaded[0], 1)), value(forecast.stockOnly.result), value(forecast.high.result), value(forecast.low.result), location.production, feed.production, value(lg.mspOutput(pageRows[0], 1))]
+        const gate = lg.mspPopulated(loaded[0])
+        const nominal = value(lg.mspProduction(loaded[0], 1))
+        const explained = example.expected !== null || (gate.status === 'unavailable' && gate.inputs.missing.length > 0)
+        const carried = gate.assumptions.some((text) => /saved positions/.test(text))
+
+        if (censusReads !== 3 || nominal !== 200 || location.potential !== 200 || !explained || !carried || figures.some((figure) => example.expected === null ? figure !== null : !near(figure, example.expected))) failures.push([example.name, censusReads, nominal, figures, gate])
+      } finally {
+        await raw.close()
+      }
+    }
+
+    return failures.length ? short(failures) : true
+  })
+
+  add('population-race: unknown colony attribution blocks positive output but not a census-proved zero; absent entries and failed roster reads never become empty colonies', async () => {
+    const observations = []
+
+    for (const amount of [0, 1]) {
+      const colonies = [row(1, { Population: 0, MspPopulated: undefined, MaintenanceFacilities: 1, Xcor: 10, Ycor: 10 })]
+      const raw = await censusDatabase(colonies, { FCT_Population: [{ PopulationID: 1, Population: 0, SystemBodyID: 1, GameID: GAME, RaceID: null }], FCT_ShipCargo: [{ ShipID: 1, SpeciesID: 1, GameID: GAME, CargoTypeID: 1, Amount: amount }] })
+
+      try {
+        const loaded = await lg.loadMspPopulation(raw, { GameID: GAME, RaceID: RACE, colonies: [...colonies, row(2, { MaintenanceFacilities: 1, MspPopulated: undefined })] })
+        const unknown = lg.mspOutput(loaded[0], 1)
+        const absent = lg.mspOutput(loaded[1], 1)
+
+        observations.push([value(unknown), unknown.inputs.missing.some((text) => /race/.test(text)), absent.status])
+      } finally {
+        await raw.close()
+      }
+    }
+
+    let rejected = false
+
+    try {
+      await lg.loadMspPopulation({ query: async () => { throw new Error('unreadable roster') } }, { GameID: GAME, RaceID: RACE, colonies: [row(1)] })
+    } catch (error) {
+      rejected = error.message === 'unreadable roster'
+    }
+
+    return rejected && same(observations, [[0, false, 'unavailable'], [null, true, 'unavailable']]) === true ? true : short([rejected, observations])
+  })
+
   // ----- mines are never unlimited supply (the stock-only output) -----
   const mined = { Mines: 10, DepositDuranium: 1, DepositUridium: 1, DepositGallicite: 1 }
+  add('facilities: the summed maintenance facility units are truncated before the rate: 1.5 facilities at 50 BP make 200 MSP per year, and a fraction below one makes none', () => {
+    const one = rowOf(rowsOf({ pairs: [pair(1, {}, { MaintenanceFacilities: 1.5 })] }), 1)
+    const fractional = row(1, { MaintenanceFacilities: 0.9, MSPProduction: null })
+
+    return near(value(one.stockOnly.result), 200) && value(lg.mspOutput(one.colony, 1)) === 200 && value(lg.mspProduction(fractional, null)) === 0 ? true : short([value(one.stockOnly.result), value(lg.mspOutput(one.colony, 1)), value(lg.mspProduction(fractional, null))])
+  })
+  add('facility-load: saved amounts convert before decimal weighting and summation, and the whole-unit rate reaches every public descendant', async () => {
+    const observations = []
+    const cases = [
+      { name: 'load rounds to one', facilities: [{ amount: 0.9999999999999999, weight: 1 }], expected: 200 },
+      { name: 'genuinely below one', facilities: [{ amount: 0.99999999999999, weight: 1 }], expected: 0 },
+      { name: 'ordinary fraction', facilities: [{ amount: 1.5, weight: 1 }], expected: 200 },
+      { name: 'decimal weighted sum', facilities: Array.from({ length: 10 }, () => ({ amount: 0.05, weight: 2 })), expected: 200 },
+      { name: 'weighted below one stays below', facilities: [{ amount: 0.333333333333333, weight: 3 }], expected: 0 },
+      { name: 'decimal product just below one', facilities: [{ amount: 0.99999999, weight: 1.00000001 }], expected: 0 },
+    ]
+    const real = await ctx.realMsp()
+
+    for (const example of cases) {
+      const database = await savedSupplyDatabase(w, [row(1, { Duranium: 30 }), row(2, { Duranium: 0 })], example.facilities)
+
+      try {
+        const colonies = await ctx.m.feeds.loadSupplyState(database, { GameID: GAME, RaceID: RACE })
+        const vm = instantiate(ctx.pageOptions, { $store: PAGE_STORE, database, GameID: GAME, RaceID: RACE, data: { loadErrors: {} } })
+        const pageRows = await vm.runAsync('colonies')
+        const routes = await real.loadMspColonies(database, { GameID: GAME, RaceID: RACE })
+        const plan = { hauls: [{ ...haul(routes[0], routes[1], [{ name: 'Duranium', tonnes: 20 }]), from: routes[0], to: routes[1], km: 5000000, jumps: 0 }], unmet: [], left: [] }
+        const freighters = [{ ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 2 }]
+        const forecast = real.mspSupplyRows({ colonies, sources: w.sources({ colonies: routes, plan, freighters, shuttleTechnology: 1 }), modifierOf: () => 1, navalAdmins: {}, formulaVersion: '3.2.x', RaceID: RACE, years: 1 })
+        const donor = rowOf(forecast, 1)
+        const recipient = rowOf(forecast, 2)
+        const feed = ctx.m.feeds.supplyFeeds({ colonies, modifierOf: () => 1 }).find((entry) => entry.key === '1:msp')
+        const ship = { ShipID: 1, ShipName: 'Ship', FleetID: 1, FleetName: 'Fleet', SystemID: 10, OrbitBodyID: 1, Xcor: 3000000, Ycor: 4000000, AssignedPopulationID: 0, Size: 1, Cost: 1200, Commercial: 0, SupplyShip: 0, MinimumSupplies: 0, CurrentMaintSupplies: 0, MaintenanceState: 0, MothershipID: 0, CarrierCommercialHangar: null, Modules: 0, Bays: 0 }
+        const location = lg.maintenanceLocations({ colonies: [pageRows[0]], ships: [ship], modifierOf: () => 1, maintenanceCapacity: 1000, economicModifier: 1 })[0]
+        const figures = [value(lg.mspProduction(colonies[0], 1)), value(lg.mspOutput(colonies[0], 1)), value(lg.mspProduction(pageRows[0], 1)), feed.production, value(donor.stockOnly.result), value(donor.high.result), value(donor.low.result), location.production, location.potential]
+        const delivery = recipient.deliveries.find((entry) => entry.kind === 'haul')
+        const expectedTonnes = example.expected === 200 ? 10 : 20
+        const expectedRunway = example.expected === 200 ? 1 : 1 / 3
+
+        if (figures.some((figure) => !near(figure, example.expected)) || !delivery || !near(delivery.tonnes.value, expectedTonnes) || !near(donor.ledger.high.given.Duranium, expectedTonnes) || !near(location.net, example.expected - 300) || !near(location.runway, expectedRunway)) observations.push([example.name, figures, delivery && delivery.tonnes.value, location.net, location.runway])
+      } finally {
+        await database.close()
+      }
+    }
+
+    return observations.length ? short(observations) : true
+  })
+  add('donor-census: the zero and positive donor completions deliver ten or zero tonnes, while an undecided donor keeps delivery and both supplied outputs unavailable', async () => {
+    const real = await ctx.realMsp()
+    const observations = []
+
+    for (const surface of [0, 1, null]) {
+      const database = await savedSupplyDatabase(w, [row(1, { Population: surface, Duranium: 20 }), row(2, { Duranium: 0 })])
+
+      try {
+        const colonies = await ctx.m.feeds.loadSupplyState(database, { GameID: GAME, RaceID: RACE })
+        const routes = await real.loadMspColonies(database, { GameID: GAME, RaceID: RACE })
+        const plan = { hauls: [{ ...haul(routes[0], routes[1], [{ name: 'Duranium', tonnes: 10 }]), from: routes[0], to: routes[1], km: 5000000, jumps: 0 }], unmet: [], left: [] }
+        const freighters = [{ ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 2 }]
+        const timed = real.timeHauls({ plan, freighters, shuttleTechnology: 1, formulaVersion: '3.2.x' })[0]
+        const rows = real.mspSupplyRows({ colonies, sources: w.sources({ colonies: routes, plan, freighters, shuttleTechnology: 1 }), modifierOf: () => 1, navalAdmins: {}, formulaVersion: '3.2.x', RaceID: RACE, years: 1 })
+        const recipient = rowOf(rows, 2)
+        const delivery = recipient.deliveries.find((entry) => entry.kind === 'haul')
+        const results = [recipient.high.result, recipient.low.result, delivery && delivery.tonnes, delivery && delivery.msp, delivery && delivery.mspLow]
+        const expected = surface === 0 ? 100 : 0
+        const valid = surface === null ? results.every((entry) => entry && entry.status === 'unavailable' && entry.value === null && entry.inputs.missing.some((text) => /donor C1.*surface population/.test(text))) : delivery && near(delivery.tonnes.value, surface === 0 ? 10 : 0) && [recipient.high.result, recipient.low.result].every((entry) => near(entry.value, expected))
+
+        if (!valid || value(recipient.stockOnly.result) !== 0 || !near(timed.days, 46.41203703703704) || (surface === null && recipient.ledger !== null)) observations.push([surface, timed.days, results, recipient.stockOnly.result, recipient.ledger])
+      } finally {
+        await database.close()
+      }
+    }
+
+    return observations.length ? short(observations) : true
+  })
+  add('donor-inputs: unavailable donor modifier, facility amount, stock or producer row cannot authorize a definite haul', async () => {
+    const real = await ctx.realMsp()
+    const observations = []
+
+    for (const input of ['modifier', 'facilities', 'stock', 'producer row']) {
+      const database = await savedSupplyDatabase(w, [row(1, { Duranium: input === 'stock' ? null : 20 }), row(2, { Duranium: 0 })])
+
+      try {
+        if (input === 'facilities') await database.query('update FCT_PopulationInstallations set Amount = null where PopID = 1')
+        const loaded = await ctx.m.feeds.loadSupplyState(database, { GameID: GAME, RaceID: RACE })
+        const colonies = input === 'producer row' ? loaded.filter((row) => row.PopulationID !== 1) : loaded
+        const routes = await real.loadMspColonies(database, { GameID: GAME, RaceID: RACE })
+        const plan = { hauls: [{ ...haul(routes[0], routes[1], [{ name: 'Duranium', tonnes: 10 }]), from: routes[0], to: routes[1], km: 5000000, jumps: 0 }], unmet: [], left: [] }
+        const freighters = [{ ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 2 }]
+        const rows = real.mspSupplyRows({ colonies, sources: w.sources({ colonies: routes, plan, freighters, shuttleTechnology: 1 }), modifierOf: (id) => id === 1 && input === 'modifier' ? null : 1, navalAdmins: {}, formulaVersion: '3.2.x', RaceID: RACE, years: 1 })
+        const recipient = rowOf(rows, 2)
+        const delivery = recipient.deliveries.find((entry) => entry.kind === 'haul')
+        const results = [recipient.high.result, recipient.low.result, delivery && delivery.tonnes, delivery && delivery.msp, delivery && delivery.mspLow]
+
+        if (value(recipient.stockOnly.result) !== 0 || !results.every((entry) => entry && entry.status === 'unavailable' && entry.inputs.missing.some((text) => /donor C1/.test(text)))) observations.push([input, results])
+      } finally {
+        await database.close()
+      }
+    }
+
+    return observations.length ? short(observations) : true
+  })
+  add('facilities: the integer facility rate reaches donor reservation through real haul timing: 30 t less 20 t of annual inputs leaves a 10 t delivery after 23.2638889 days', async () => {
+    const real = await ctx.realMsp()
+    const a = pair(1, { Duranium: 30 }, { MaintenanceFacilities: 1.5 }, {}, { SystemID: 10, Xcor: 3000000, Ycor: 4000000, ShuttleCapacity: 1, ServiceNames: 'Spaceport' })
+    const b = pair(2, { Duranium: 0 }, {}, {}, { SystemID: 10, Xcor: 0, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' })
+    const plan = { hauls: [{ ...haul(a.source, b.source, [{ name: 'Duranium', tonnes: 10 }]), from: a.source, to: b.source, km: 5000000, jumps: 0 }], unmet: [], left: [] }
+    const freighters = [{ ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 2 }]
+    const shuttleTechnology = 1
+    const timed = real.timeHauls({ plan, freighters, shuttleTechnology, formulaVersion: '3.2.x' })[0]
+    const rows = real.mspSupplyRows({ colonies: [a.colony, b.colony], sources: w.sources({ colonies: [a.source, b.source], plan, freighters, shuttleTechnology }), modifierOf: () => 1, navalAdmins: {}, formulaVersion: '3.2.x', RaceID: RACE, years: 1 })
+    const donor = rowOf(rows, 1)
+    const recipient = rowOf(rows, 2)
+    const delivery = recipient.deliveries.find((entry) => entry.kind === 'haul')
+
+    return near(timed.days, 23.26388888888889) && delivery && near(delivery.tonnes.value, 10) && near(donor.ledger.high.given.Duranium, 10) && near(recipient.ledger.high.credited.Duranium, 10) && near(value(donor.stockOnly.result), 200) ? true : short([timed.days, delivery && delivery.tonnes.value, donor.ledger.high.given, recipient.ledger.high.credited])
+  })
+  add('haul-boundary: the cross-system class haul just inside day 24 omits waits that can push it beyond the horizon, so delivery and supplied descendants retain the round-trip limitation', async () => {
+    const real = await ctx.realMsp()
+    const a = pair(1, { Duranium: 100 }, {}, {}, { SystemID: 10, Xcor: 36785000, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' })
+    const b = pair(2, { Duranium: 0 }, {}, {}, { SystemID: 11, Xcor: 0, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' })
+    const plan = { hauls: [{ ...haul(a.source, b.source, [{ name: 'Duranium', tonnes: 10 }]), from: a.source, to: b.source, km: 36785000, jumps: 1 }], unmet: [], left: [] }
+    const freighters = [{ ShipClassID: 1, ClassName: 'Hauler', CargoCapacity: 100000, ColonistCapacity: 0, MaxSpeed: 1000, FuelPerHour: 100, Size: 20, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, ShuttleStrength: 1, ClassCrew: 10, EnginePower: 100, FuelEfficiency: 1, FuelCapacity: 1e12, Ships: 1 }]
+    const timed = real.timeHauls({ plan, freighters, shuttleTechnology: 1, formulaVersion: '3.2.x' })[0]
+    const run = (days) => real.mspSupplyRows({ colonies: [a.colony, b.colony], sources: w.sources({ colonies: [a.source, b.source], plan, freighters, shuttleTechnology: 1 }), modifierOf: () => 1, navalAdmins: {}, formulaVersion: '3.2.x', RaceID: RACE, years: days / 365 }).find((entry) => entry.populationId === 2)
+    const before = run(23)
+    const inside = run(24)
+    const delivery = inside.deliveries.find((entry) => entry.kind === 'haul')
+    const figures = [inside.high.result, inside.low.result, delivery && delivery.tonnes, delivery && delivery.msp, inside.high.delivery && inside.high.delivery.msp]
+
+    // A standard player transit adds at least 121 seconds per jump, each way; the class estimate has only 30 seconds to spare.
+    return near(timed.days, 24 - 30 / 86400) && timed.days + 242 / 86400 > 24 && before.ledger.high.credited.Duranium === 0 && inside.ledger.high.credited.Duranium === 10 && figures.every((figure) => figure && figure.rule.versions.join() === '2.7.x' && figure.assumptions.some((text) => /jump shock waits.*not counted/i.test(text))) && inside.stockOnly.result.rule.versions.join() === '3.2.x' ? true : short([timed.days, before.ledger.high.credited.Duranium, inside.ledger.high.credited.Duranium, figures.map((figure) => figure && [figure.rule.versions, figure.assumptions])])
+  })
+  add('location: whole facility output reaches net and runway without discarding the output assumptions: 100 MSP stock over 300 upkeep less 200 output lasts one year', () => {
+    const colony = { ...row(1, { MaintenanceFacilities: 1.5 }), SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceStockpile: 100, Efficiency: 1, CapacityModifier: 1, MaintenanceCapacity: 1000 }
+    const ship = { ShipID: 1, ShipName: 'Ship', FleetID: 1, FleetName: 'Fleet', SystemID: 1, OrbitBodyID: 1, Xcor: 0, Ycor: 0, AssignedPopulationID: 0, Size: 1, Cost: 1200, Commercial: 0, SupplyShip: 0, MinimumSupplies: 0, CurrentMaintSupplies: 0, MaintenanceState: 0, MothershipID: 0, CarrierCommercialHangar: null, Modules: 0, Bays: 0 }
+    const location = lg.maintenanceLocations({ colonies: [colony], ships: [ship], modifierOf: () => 1, maintenanceCapacity: 1000, economicModifier: 1 })[0]
+    const totals = lg.maintenanceSupplyTotals([location], () => 1)
+
+    return location.production === 200 && location.net === -100 && location.runway === 1 && totals.production === 200 && totals.potential === 200 && location.runwayResult.assumptions.includes('The present stock alone: mines, orbital miners, packets and hauls are not counted') ? true : short([location.production, location.net, location.runway, totals.production, location.runwayResult && location.runwayResult.assumptions])
+  })
   add('local: a colony with mines on a deposit has a finite stock-only output: the stock of its scarcest mineral over what an MSP takes, never the full production', () => {
     const c = row(1, { ...mined, Duranium: tonnes('Duranium', 0.25 * production(row(1))) })
     const out = lg.mspOutput(c, 1)
@@ -359,11 +665,13 @@ const pure = (ctx) => {
   add('shared: civilian mining draws on the deposit whether its output is taxed or bought, and the colony keeps only its own share of a finite deposit', () => {
     const target = { PopulationID: 2, PopName: 'C2', SystemID: SYSTEM }
     const held = { Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6 }
+    const packeted = { ...held, Duranium: 0 }
     const taxed = rowOf(rowsOf({ pairs: [pair(1, dry())], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 0 })] }), 1)
-    const bought = rowOf(rowsOf({ pairs: [pair(1, dry(), {}, held, ships(target))], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 1, MassDriverExport: 1 })] }), 1)
+    const bought = rowOf(rowsOf({ pairs: [pair(1, dry(), {}, packeted, ships(target))], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 1, MassDriverExport: 1 })] }), 1)
+    const filled = rowOf(rowsOf({ pairs: [pair(1, dry(), {}, held, ships(target))], surface: [surface(1, 1, { Amount: 60, CivilianMineCount: 10, PurchaseCivilianMinerals: 1, MassDriverExport: 1 })] }), 1)
     const plenty = rowOf(rowsOf({ pairs: [pair(1, dry())], surface: [surface(1, 1, { CivilianMineCount: 10, PurchaseCivilianMinerals: 0 })] }), 1)
 
-    return near(taxed.ledger.high.credited.Duranium, 30) && near(bought.ledger.high.credited.Duranium, 30) && near(plenty.ledger.high.credited.Duranium, 100) ? true : short([taxed.ledger.high.credited.Duranium, bought.ledger.high.credited.Duranium, plenty.ledger.high.credited.Duranium])
+    return near(taxed.ledger.high.credited.Duranium, 30) && near(bought.ledger.high.credited.Duranium, 30) && near(filled.ledger.high.credited.Duranium, 60) && near(plenty.ledger.high.credited.Duranium, 100) ? true : short([taxed.ledger.high.credited.Duranium, bought.ledger.high.credited.Duranium, filled.ledger.high.credited.Duranium, plenty.ledger.high.credited.Duranium])
   })
   add('shared: a colony on the body whose mining rate is not known leaves the draw on the deposit unknown, so nothing from it is counted for any colony', () => {
     const a = pair(1, dry())
@@ -381,7 +689,7 @@ const pure = (ctx) => {
     return rows.length === 2 && worst < 1e-6 && rows.every((entry) => entry.ledger.high && Math.abs(Object.values(entry.ledger.high.credited).reduce((sum, t) => sum + t, 0)) >= 0) ? true : short([rows.length, worst])
   })
   add('once: a simulated run of every kind of flow leaves no tonne unaccounted for', () => {
-    const run = sim({ stock: { Duranium: 40, Uridium: 40, Gallicite: 40 }, inflows: [lump('Duranium', 10, 30), lump('Uridium', 50.2, 12), { group: 'mines', kind: 'mining', mineral: 'Gallicite', rate: 70, scale: ms.depositScales({ amount: 25, demand: 70, days: 365 }).scale }], outflows: [{ group: 'haul to 2', mineral: 'Duranium', tonnes: 15 }], queue: { Duranium: 5, Uridium: 2, Gallicite: 1 }, exporter: { capacity: 200, reserve: { Duranium: 3, Uridium: 3, Gallicite: 3 }, others: [{ stock: 40, reserve: 0 }] } })
+    const run = sim({ stock: { Duranium: 40, Uridium: 40, Gallicite: 40 }, inflows: [lump('Duranium', 10, 30), lump('Uridium', 50.2, 12), { group: 'mines', kind: 'mining', mineral: 'Gallicite', rate: 70, scale: ms.depositScales({ amount: 25, demand: 70, days: 365 }).scale }], outflows: [{ group: 'haul to 2', mineral: 'Duranium', tonnes: 15 }], queue: { industrial: { Duranium: 5, Uridium: 2, Gallicite: 1 }, shipyard: { Duranium: 0, Uridium: 0, Gallicite: 0 } }, exporter: { capacity: 200, reserve: { Duranium: 3, Uridium: 3, Gallicite: 3 }, others: [{ stock: 40, reserve: 0 }] } })
 
     return run.residual < 1e-9 && run.flows.given.Duranium === 15 && run.flows.queued.Duranium === 5 && run.flows.exported.Duranium > 0 ? true : short([run.residual, run.flows])
   })
@@ -449,8 +757,19 @@ const pure = (ctx) => {
   })
 
   // ----- the queue, the export and the order of the draws -----
+  add('queue-order: industrial work precedes export and yard work follows it: 100 t, a 50 t reserve and 40 t of yard demand leave 10 t for 100 MSP, not 500', () => {
+    const stock = { Duranium: 100, Uridium: 1e6, Gallicite: 1e6 }
+    const target = { PopulationID: 2, PopName: 'C2', SystemID: SYSTEM }
+    const a = pair(1, stock, { MaintenanceFacilities: 365, MSPProduction: 125 }, { ...stock, Duranium: 50 }, ships(target))
+    const output = (industry, yard) => rowOf(rowsOf({ pairs: [a], years: 1 / 365, needs: { 1: need({ Duranium: 40 }) }, queuePhases: { industrial: { 1: need({ Duranium: industry }) }, shipyard: { 1: need({ Duranium: yard }) } } }), 1)
+    const yard = output(0, 40)
+    const mixed = output(10, 30)
+    const industry = output(40, 0)
+
+    return near(value(yard.low.result) / 365, 100) && near(yard.ledger.low.exported.Duranium, 50) && near(yard.ledger.low.queued.Duranium, 40) && near(value(mixed.low.result) / 365, 200) && near(mixed.ledger.low.queued.Duranium, 40) && near(value(industry.low.result) / 365, 500) && near(industry.ledger.low.exported.Duranium, 10) && yard.balance < 1e-9 ? true : short([value(yard.low.result) / 365, value(mixed.low.result) / 365, value(industry.low.result) / 365, yard.ledger.low, industry.ledger.low])
+  })
   add('queue: the queue served first takes the stock before maintenance and the idle queue does not: the output with the queue first is never above the output with it idle', () => {
-    const run = ms.allocateMsp({ colony: { production: 365, stock: { Duranium: 36.5, Uridium: 1e6, Gallicite: 1e6 }, inflows: [], outflows: [], queue: { Duranium: 36.5, Uridium: 0, Gallicite: 0 }, exporter: null }, days: 365 })
+    const run = ms.allocateMsp({ colony: { production: 365, stock: { Duranium: 36.5, Uridium: 1e6, Gallicite: 1e6 }, inflows: [], outflows: [], queue: { industrial: { Duranium: 36.5, Uridium: 0, Gallicite: 0 }, shipyard: { Duranium: 0, Uridium: 0, Gallicite: 0 } }, exporter: null }, days: 365 })
 
     return near(run.high.made, 365) && near(run.low.made, 0) && run.low.flows.queued.Duranium === 36.5 && run.low.made <= run.high.made ? true : short([run.high.made, run.low.made, run.low.flows.queued])
   })
@@ -670,6 +989,22 @@ const pure = (ctx) => {
 
     return byId[1].Drivers === 1 && byId[2].Drivers === 2 && byId[1].DriverGaps === 0 && byId[4].DriverGaps === 1 && near(loaded, whole) && Math.abs(fractional - whole) > 1 ? true : short([colonies.map((colony) => [colony.PopulationID, colony.Drivers, colony.DriverGaps]), loaded, whole, fractional])
   }))
+  add('queue-read: the phase-aware loader keeps industrial and yard needs on their own sides of export, while its combined read stays the haul planner\'s default', () => withSave({}, async (database) => {
+    const costs = Object.fromEntries(names.map((name) => [name, name === 'Duranium' ? 20 : 0]))
+    const columns = names.join(', ')
+    const values = names.map((name) => costs[name]).join(', ')
+
+    await database.query(`insert into FCT_IndustrialProjects (PopulationID, GameID, RaceID, Amount, ${columns}) values (1, ${GAME}, ${RACE}, 0.5, ${values})`)
+    await database.query(`insert into FCT_ShipyardTask (PopulationID, GameID, RaceID, TaskTypeID, TotalBP, CompletedBP, ${columns}) values (1, ${GAME}, ${RACE}, 0, 100, 25, ${values}), (2, ${GAME}, ${RACE}, 3, 100, 0, ${values})`)
+    await database.query(`insert into FCT_ShipyardTask (PopulationID, GameID, RaceID, TaskTypeID, TotalBP, CompletedBP, ${columns}) values (3, ${GAME}, ${RACE}, 0, 100, 0, ${names.map((name) => name === 'Duranium' ? 'null' : '0').join(', ')})`)
+    const plain = await ctx.m.cm.loadQueueNeeds(database, { GameID: GAME, RaceID: RACE })
+    const phases = await ctx.m.cm.loadQueueNeeds(database, { GameID: GAME, RaceID: RACE, byPhase: true })
+    const loaded = await ms.loadMspSupply(database, { GameID: GAME, RaceID: RACE })
+    const a = pair(1, { Duranium: 100, Uridium: 1e6, Gallicite: 1e6 }, { MaintenanceFacilities: 365, MSPProduction: 125 }, { Duranium: 50, Uridium: 1e6, Gallicite: 1e6 }, ships({ PopulationID: 2, PopName: 'C2', SystemID: SYSTEM }))
+    const one = rowOf(rowsOf({ pairs: [a], years: 1 / 365, needs: loaded.needs, queuePhases: loaded.queuePhases }), 1)
+
+    return plain[1].Duranium === 25 && !plain[2] && plain[3].Duranium === null && phases.shipyard[3].MissingDuranium === 1 && phases.industrial[1].Duranium === 10 && phases.shipyard[1].Duranium === 15 && same(phases.combined, plain) === true && near(value(one.low.result) / 365, 350) ? true : short([plain, phases, value(one.low.result) / 365])
+  }))
   add('once: a packet launched by another race and bound for a colony of the race is the race\'s, as the game lets it land: the loaders of the packets in flight read it for the race of the destination', () => {
     const t = tonnes('Duranium', 0.2 * production(row(1)))
     const packets = [packetRow(100, RACE + 1, 1, { Duranium: t }), packetRow(101, RACE, 3, { Gallicite: 7 }), packetRow(102, RACE + 2, 3, { Gallicite: 9 }), { ...packetRow(103, RACE, 1, { Duranium: 5 }), GameID: GAME + 1 }]
@@ -690,51 +1025,13 @@ const pure = (ctx) => {
 }
 
 // The rules the ledger gives its figures are registered, each with a verification and the structure it reads.
-const ctxRulesRegistered = (m) => ['mspSupply.stockOnly', 'mspSupply.supplied', 'mspSupply.delivery', 'mspSupply.arrival'].every((id) => { const rule = m.provenance.getRule(id); return rule && rule.verification && rule.structure && rule.structure.length > 0 })
+const ctxRulesRegistered = (m) => ['mspSupply.stockOnly', 'mspSupply.supplied', 'mspSupply.delivery', 'mspSupply.arrival', 'logistics.mspProduction', 'logistics.maintenanceLocation'].every((id) => { const rule = m.provenance.getRule(id); return rule && rule.verification && rule.structure && rule.structure.length > 0 && rule.versions.join() === (['mspSupply.supplied', 'mspSupply.delivery'].includes(id) ? '2.7.x' : '3.2.x') })
 
 // ---------- the panel ----------
-
-const treeOf = (node) => {
-  const found = []
-  const visit = (entry) => {
-    if (Array.isArray(entry)) {
-      entry.forEach(visit)
-    } else if (entry && typeof entry === 'object') {
-      found.push(entry)
-      visit(entry.children)
-    }
-  }
-
-  visit(node)
-
-  return found
-}
 
 // The results the provenance marks of a render are bound to, and every mark (a rule's too).
 const marksIn = (nodes) => treeOf(nodes).filter((node) => node.tag === 'provenance-mark').map((node) => node.data.attrs && node.data.attrs.result).filter((result) => result !== undefined)
 const markCount = (nodes) => treeOf(nodes).filter((node) => node.tag === 'provenance-mark').length
-
-// What a compiled template renders for a mounted instance: the render function of the component's own template runs with the instance as its scope. Each element it creates is a record { tag, data, children } and each interpolated text is recorded; the scoped slots are functions of the record of the table, to be called with a row.
-const rendered = (componentText, vm, overrides = {}) => {
-  const compiler = require('vue/compiler-sfc')
-  const parsed = compiler.parse({ source: componentText })
-  const descriptor = parsed.descriptor || parsed
-  const { code } = compiler.compileTemplate({ source: descriptor.template.content, filename: 'component.vue', id: 'component' })
-  const render = require('vm').runInNewContext(`${code.replace(/export \{[^}]*\}\s*$/, '')}\nrender`, {})
-  const tags = []
-  const texts = []
-  const make = (tag, data, children) => {
-    const hasData = !Array.isArray(data)
-
-    tags.push(tag)
-
-    return { tag, data: (hasData ? data : null) || {}, children: (hasData ? children : data) || [] }
-  }
-  const helpers = { _self: { _c: make }, _l: (list, each) => (list || []).map(each), _v: (text) => text, _s: (value) => { texts.push(String(value)); return String(value) }, _e: () => null, _u: (slots) => Object.fromEntries(slots.map((slot) => [slot.key, slot.fn])), _m: () => null }
-  const tree = render.call(new Proxy(vm, { get: (target, key) => (key in overrides ? overrides[key] : key in helpers ? helpers[key] : target[key]) }))
-
-  return { tags, texts, tree }
-}
 
 const panel = (ctx) => {
   const w = world(ctx.m)
@@ -1129,7 +1426,7 @@ const openSave = (file) => new Promise((resolve, reject) => {
     return
   }
 
-  const raw = new sqlite3.Database(resolved, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve({ file: path.basename(resolved), query: (sql) => allRows(raw, sql), close: () => closeRaw(raw) })))
+  const raw = new sqlite3.Database(resolved, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve({ file: path.basename(resolved), query: (sql, options = {}) => allRows(raw, sql.replace(/:(GameID|RaceID)\b/g, (_, key) => String(options.replacements[key]))), close: () => closeRaw(raw) })))
 })
 
 const rowsOf = async (database, sql) => (await database.query(sql))[0]
@@ -1146,10 +1443,9 @@ const saveStatements = async (ctx, save) => {
   const statements = []
   const add = (label, test) => statements.push([`save-ledger: ${name}: ${label}`, test])
   const where = `GameID = ${save.game} and RaceID = ${save.race}`
-  const colonies = async () => rowsOf(database, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.MaintProdStatus, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite, FCT_Race.MSPProduction, coalesce(VIR_Installations.MaintenanceFacilities, 0) as MaintenanceFacilities from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.MaintenanceValue * FCT_PopulationInstallations.Amount) as MaintenanceFacilities from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${save.game} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${save.game} and FCT_Population.RaceID = ${save.race} order by FCT_Population.PopulationID`)
   const ledger = async (years = 1) => {
     const read = await ms.loadMspSupply(database, { GameID: save.game, RaceID: save.race })
-    const rows = await colonies()
+    const rows = await ctx.m.feeds.loadSupplyState(database, { GameID: save.game, RaceID: save.race })
     const out = ms.mspSupplyRows({ colonies: rows, sources: read, modifierOf: () => 1, navalAdmins: {}, formulaVersion: '2.7.x', RaceID: save.race, years })
 
     return { read, rows, out }
@@ -1189,13 +1485,30 @@ const saveStatements = async (ctx, save) => {
 
 /* eslint-disable no-template-curly-in-string */
 const MUTATIONS = [
+  { name: 'NPR actual output uses local stock', file: L, find: 'const stockGaps = mspStockGaps(colony)', replace: 'const stockGaps = []', fails: ['npr'] },
+  { name: 'NPR forecast uses local stock', file: U, find: '...(active.value === 0 ? [] : mspStockGaps(colony))', replace: '...[]', fails: ['npr'] },
+  { name: 'the consumer discards the shared population decision', file: L, find: 'parts: { population: entry.hasPopulation, attribution }', replace: 'parts: { population: ofRule({ rule, value: true }), attribution }', fails: ['population-read'] },
+  { name: 'the consumer treats an undecided census as empty', file: L, find: 'parts: { population: entry.hasPopulation, attribution }', replace: 'parts: { population: isAvailable(entry.hasPopulation) ? entry.hasPopulation : ofRule({ rule, value: false }), attribution }', fails: ['population-read'] },
+  { name: 'the consumer treats unknown race attribution as selected', file: L, find: 'entry.raceMatches === true', replace: 'entry.raceMatches !== false', fails: ['population-race'] },
+  { name: 'the supply forecast restores nominal output for an empty colony', file: U, find: 'const description = { production: active.value,', replace: 'const description = { production: production.value,', fails: ['population'] },
+  { name: 'the supply feed restores nominal output for an empty colony', file: F, find: 'valueOrNull(mspActiveProduction(colony, modifier))', replace: 'colony.MaintenanceFacilities * colony.MSPProduction * 4 * modifier', fails: ['population-read'] },
+  { name: 'delivery promotes an erased retained timing primitive', file: U, find: "id: 'mspSupply.delivery',\n  versions: ['2.7.x']", replace: "id: 'mspSupply.delivery',\n  versions: ['3.2.x']", fails: ['haul-boundary'] },
+  { name: 'supplied output promotes an erased retained timing primitive', file: U, find: "id: 'mspSupply.supplied',\n  versions: ['2.7.x']", replace: "id: 'mspSupply.supplied',\n  versions: ['3.2.x']", fails: ['haul-boundary'] },
+  { name: 'maintenance production keeps a fractional facility unit', file: L, find: 'value: facilities * colony.MSPProduction', replace: 'value: colony.MaintenanceFacilities * colony.MSPProduction', fails: ['facilities', 'location'] },
+  { name: 'facility count truncates the binary sum before decimal loading', file: L, find: 'MspFacilityUnits: sum === null ? null : floorRatio(sum, ONE)', replace: 'MspFacilityUnits: Math.trunc(rows.filter((row) => row.PopID === colony.PopulationID).reduce((total, row) => total + row.Amount * row.MaintenanceValue, 0))', fails: ['facility-load'] },
+  { name: 'facility products lose decimal precision before their sum', file: L, find: 'MspFacilityUnits: sum === null ? null : floorRatio(sum, ONE)', replace: 'MspFacilityUnits: floorRatio(fromDouble(rows.filter((row) => row.PopID === colony.PopulationID).reduce((total, row) => total + row.Amount * row.MaintenanceValue, 0)), ONE)', fails: ['facility-load'] },
+  { name: 'the yard draws before export as part of the industrial queue', file: U, find: 'serve(need && need.industrial)', replace: 'serve(need && need.industrial); serve(need && need.shipyard)', fails: ['queue-order', 'queue-read'] },
+  { name: 'the industrial queue is omitted', file: U, find: 'serve(need && need.industrial)', replace: 'void need', fails: ['queue-order'] },
+  { name: 'industrial projects are read as yard projects', file: M, find: "'industrial' as Phase", replace: "'shipyard' as Phase", fails: ['queue-read'] },
+  { name: 'the location runway discards the net production assumptions', file: L, find: 'parts: { stock: stock.result, supply: supply.result, net: netResult }', replace: 'parts: { stock: stock.result, supply: supply.result, net: ofRule({ rule: LOCATION_RULE, value: net }) }', fails: ['location'] },
   { name: 'mines read as unlimited supply again where a deposit stands under them', file: L, find: 'msp: isNumber(colony[mineral.name]) ? Math.max(0, colony[mineral.name]) / mineral.perMsp : null }))', replace: 'msp: colony.Mines > 0 && colony[`Deposit${mineral.name}`] > 0 ? Infinity : isNumber(colony[mineral.name]) ? Math.max(0, colony[mineral.name]) / mineral.perMsp : null }))', fails: ['local'] },
   { name: 'a delivery credited on the first tick whatever its day', file: U, find: 'const step = stepOf(inflow.day)', replace: 'const step = 1', fails: ['late'] },
   { name: 'a delivery credited on the tick before its arrival', file: U, find: 'Math.max(1, Math.ceil(day - EPSILON))', replace: 'Math.max(1, Math.floor(day))', fails: ['late'] },
   { name: 'a packet counted twice', file: U, find: 'inflows.push({ group: \'packets\', kind: \'packets\', mineral: name, tonnes: packet[name], day: arrival.days })', replace: 'inflows.push({ group: \'packets\', kind: \'packets\', mineral: name, tonnes: packet[name], day: arrival.days }, { group: \'packets\', kind: \'packets\', mineral: name, tonnes: packet[name], day: arrival.days })', fails: ['once'] },
   { name: 'every colony counts every packet', file: U, find: 'const packets = sources.packetRows.filter((packet) => packet.DestID === id)', replace: 'const packets = sources.packetRows.filter(() => true)', fails: ['once'] },
-  { name: 'a haul that does not debit its source', file: U, find: 'outflows.push({ group, mineral: mineral.name, tonnes: scaled.get(`${haul.key}:${mineral.name}`) })', replace: 'scaled.get(`${haul.key}:${mineral.name}`)', fails: ['hauls'] },
+  { name: 'a haul that does not debit its source', file: U, find: 'outflows.push({ group, mineral: mineral.name, tonnes: amount.value })', replace: 'void amount', fails: ['hauls'] },
   { name: 'a haul not cut to what its source\'s production leaves', file: U, find: 'const share = total > cap && total > 0 ? cap / total : 1', replace: 'const share = 1', fails: ['hauls'] },
+  { name: 'unknown donor reservation falls back to the full planned haul', file: U, find: 'entries.forEach((entry) => scaled.set(entry.key, unknown))', replace: "entries.forEach((entry) => scaled.set(entry.key, result('mspSupply.delivery', entry.tonnes, ['the planned haul'])))", fails: ['donor-census'] },
   { name: 'a tonne a haul gives that stays in the stock', file: U, find: 'held[outflow.mineral] -= given', replace: 'void given', fails: ['once'] },
   { name: 'the amount of a deposit ignored', file: U, find: 'const amount = known ? Math.max(...entry.amounts) : null', replace: 'const amount = 1e12', fails: ['local'] },
   { name: 'a deposit kept apart for each colony on its body', file: U, find: 'const deposit = deposits.get(`${rows[0].SystemBodyID}:${MATERIAL[name]}`)', replace: 'const deposit = depositsOf({ surface: sources.surface.filter((row) => row.PopulationID === id), orbital: sources.orbital.filter((row) => row.PopulationID === id), navalAdmins, days }).get(`${rows[0].SystemBodyID}:${MATERIAL[name]}`)', fails: ['shared'] },
@@ -1215,7 +1528,7 @@ const MUTATIONS = [
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'a failed read showing the database error as it came', file: U, find: 'could not be read (${failureWords(error)})', replace: 'could not be read (${error.message})', fails: ['page'] },
   { name: 'the queue-first run that skips the queue', file: U, find: 'const low = colony.queue ? simulate({ ...colony, days }) : null', replace: 'const low = colony.queue ? simulate({ ...colony, queue: null, days }) : null', fails: ['queue'] },
-  { name: 'the limiting mineral of the supplied output not named', file: U, find: 'limiting: run.limiting, delivery: deliveryOf(groups)', replace: 'limiting: null, delivery: deliveryOf(groups)', fails: ['limiting'] },
+  { name: 'the limiting mineral of the supplied output not named', file: U, find: 'limiting: Object.keys(uncertain).length ? null : run.limiting, delivery: deliveryOf(groups)', replace: 'limiting: null, delivery: deliveryOf(groups)', fails: ['limiting'] },
   { name: 'the conditional delivery of the stock-only output not named', file: U, find: 'limiting: allocation.stockOnly.limiting, delivery: deliveryOf(allocation.highGroups)', replace: 'limiting: allocation.stockOnly.limiting, delivery: null', fails: ['limiting'] },
   { name: 'the stock-only limiting mineral not named', file: U, find: 'limiting: allocation.stockOnly.limiting, delivery: deliveryOf(allocation.highGroups)', replace: 'limiting: null, delivery: deliveryOf(allocation.highGroups)', fails: ['limiting'] },
   { name: 'a packet with no arrival time counted on the first tick', file: U, find: 'if (arrival.days === null) {', replace: 'if (false) {', fails: ['unknown'] },
@@ -1246,7 +1559,10 @@ const COMPOSED = MUTATIONS.map((mutation, index) => ({ id: `composed:${index}`, 
 
 // Edits that must change nothing the checks look at: the summary and the header reworded, whitespace before an equals sign and a reordered list of attributes on the page's mount and on a marked cell, the columns in another order, another default horizon and the bound values written another way. Each is located by its structure (the attribute, the key or the state it belongs to and its whole value, with any spacing around `=` and either quote), never by what it holds now, so it still applies after the others.
 const QUOTED = '"[^"]*"|\'[^\']*\''
-const attribute = (name) => new RegExp(`(?<=\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*(${QUOTED})`)
+const escaped = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const attribute = (name) => new RegExp(`(?<=\\s)${escaped(name)}\\s*=\\s*(${QUOTED})`)
+// The attribute of one tag: the page binds `:rows` on the panel's mount and on the summary's, so a name alone finds two.
+const attributeOf = (tag, name) => new RegExp(`(?<=<${tag}\\b[^>]*?\\s)${escaped(name)}\\s*=\\s*(${QUOTED})`)
 const valueOf = (quoted) => quoted.slice(1, -1)
 const quote = (text) => (text.includes('"') ? `'${text}'` : `"${text}"`)
 
@@ -1260,10 +1576,10 @@ const BENIGN = [
   { name: 'the summary shortened to one sentence', file: V, at: attribute('data-summary'), to: () => 'data-summary="Compare the maintenance supplies of each colony with and without incoming minerals."' },
   { name: 'the header of the panel reworded', file: V, at: /(<div class="panel-head">\s*<span[^>]*>)[^<]*/, to: (m) => `${m[1]}Incoming minerals and maintenance` },
   { name: 'the foot of the panel reworded', file: V, at: /(<div class="panel-foot[^"]*">)[^<]*/, to: (m) => `${m[1]}\n        The figures are an estimate from the saved game.\n      ` },
-  { name: 'whitespace around the equals sign of a bound property on the mount', file: P, at: attribute(':rows'), to: (m) => `:rows  =  ${m[1]}` },
+  { name: 'whitespace around the equals sign of a bound property on the mount', file: P, at: attributeOf('msp-supply', ':rows'), to: (m) => `:rows  =  ${m[1]}` },
   { name: 'the attributes of the mount reordered', file: P, at: /(<msp-supply)([^>]*?)(\s*\/>)/, to: (m) => `${m[1]} ${reversed(m[2])}${m[3]}` },
-  { name: 'the rows given to the panel in parentheses', file: P, at: attribute(':rows'), to: (m) => `:rows=${quote(`(${valueOf(m[1])})`)}` },
-  { name: 'the horizon given to the panel as a negated negation', file: P, at: attribute(':years'), to: (m) => `:years=${quote(`+${valueOf(m[1])}`)}` },
+  { name: 'the rows given to the panel in parentheses', file: P, at: attributeOf('msp-supply', ':rows'), to: (m) => `:rows=${quote(`(${valueOf(m[1])})`)}` },
+  { name: 'the horizon given to the panel as a negated negation', file: P, at: attributeOf('msp-supply', ':years'), to: (m) => `:years=${quote(`+${valueOf(m[1])}`)}` },
   { name: 'whitespace in the mark of a figure cell', file: V, at: new RegExp(`(${SLOT('stockOnlyValue')}[\\s\\S]*?)<provenance-mark\\s+:result\\s*=\\s*(${QUOTED})\\s*/>`), to: (m) => `${m[1]}<provenance-mark  :result = ${m[2]}  />` },
   { name: 'the attributes of a figure cell reordered', file: V, at: new RegExp(`(${SLOT('highValue')}\\s*<span)([^>]*)>`), to: (m) => `${m[1]} ${reversed(m[2])}>` },
   { name: 'the columns of the table in the opposite order', file: V, at: /(headers\(\) \{\s*return \[\n)([\s\S]*?)(\n\s*\]\n\s*\})/, to: (m) => `${m[1]}${m[2].split('\n').reverse().join('\n')}${m[3]}` },
@@ -1326,9 +1642,10 @@ const stackedSources = () => BENIGN.reduce((sources, edit) => applied(sources, e
 const contextOf = async (sources) => {
   const changed = (name) => sources[name] !== TEXTS[name]()
   const haulPlan = haulStubbed(fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', 'haul-plan.js'), 'utf8'))
-  const sourcesFor = { 'haul-plan': haulPlan, ...(changed(U) ? { 'msp-supply': sources[U] } : {}), ...(changed(L) ? { logistics: sources[L] } : {}), ...(changed(M) ? { 'colony-minerals': sources[M] } : {}) }
-  const utilitySources = { ...(changed(U) ? { 'utilities/msp-supply': sources[U] } : {}), ...(changed(L) ? { 'utilities/logistics': sources[L] } : {}), ...(changed(M) ? { 'utilities/colony-minerals': sources[M] } : {}) }
+  const sourcesFor = { 'haul-plan': haulPlan, ...(changed(U) ? { 'msp-supply': sources[U] } : {}), ...(changed(L) ? { logistics: sources[L] } : {}), ...(changed(M) ? { 'colony-minerals': sources[M] } : {}), ...(changed(F) ? { 'resource-feeds': sources[F] } : {}) }
+  const utilitySources = { ...(changed(U) ? { 'utilities/msp-supply': sources[U] } : {}), ...(changed(L) ? { 'utilities/logistics': sources[L] } : {}), ...(changed(M) ? { 'utilities/colony-minerals': sources[M] } : {}), ...(changed(F) ? { 'utilities/resource-feeds': sources[F] } : {}) }
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: sourcesFor })
+  const realMsp = async () => (await loadUtilities(['msp-supply'], { stubs: STUBS, sources: Object.fromEntries(Object.entries(sourcesFor).filter(([name]) => name !== 'haul-plan')) }))['msp-supply']
   const options = await loadPage('components/logistics/MspSupply', { stubs: STUBS, sources: { 'components/logistics/MspSupply': sources[V], ...utilitySources } })
   const recorder = 'export const oneOf = (values) => (value) => values.includes(value); export const tableView = (key, defaults) => ({ key, default: defaults, table: true }); export default (fields) => { globalThis.__persistedFields = fields; return { data: () => Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, field.default])) } }'
   const pageSources = { 'pages/logistics': sources[P], ...utilitySources }
@@ -1336,7 +1653,7 @@ const contextOf = async (sources) => {
   const pagePersisted = globalThis.__persistedFields
   const livePageOptions = await loadPage('pages/logistics', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/load-state': null }, sources: pageSources })
 
-  return { m: { ms: loaded['msp-supply'], lg: loaded.logistics, mo: loaded['mineral-outlook'], provenance: loaded.provenance, minerals: loaded.minerals, cm: loaded['colony-minerals'] }, options, pageOptions, pagePersisted, livePageOptions, componentText: sources[V], pageText: sources[P] }
+  return { m: { ms: loaded['msp-supply'], lg: loaded.logistics, mo: loaded['mineral-outlook'], provenance: loaded.provenance, minerals: loaded.minerals, cm: loaded['colony-minerals'], feeds: loaded['resource-feeds'] }, realMsp, options, pageOptions, pagePersisted, livePageOptions, componentText: sources[V], pageText: sources[P], logisticsText: sources[L] }
 }
 
 const keyOf = (name) => name.slice(0, name.indexOf(':'))

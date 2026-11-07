@@ -29,6 +29,7 @@ const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched, patchedGroup, plantedPatch, plantedGroup } = require('./lib/mutant-source')
 const { runSuite, declaredGroup } = require('./lib/suite-runner')
 const { assert, runChecks, caughtBy, judgedGroup, subjectModule, harnessStore, boundary } = require('./lib/fault-credit')
+const { FIXTURE, fixtureRows } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
@@ -89,13 +90,17 @@ const ACTIONS = {
   63: { name: 'Unload All Minerals', item: 0, quantity: false, minimum: false, transit: false },
   96: { name: 'Unload All Installations', item: 0, quantity: false, minimum: false, transit: false },
   124: { name: 'Standard Transit Inside System', item: 13, quantity: false, minimum: false, transit: false },
+  140: { name: 'Load Ship Component', item: 15, quantity: true, minimum: false, transit: false },
+  141: { name: 'Unload Ship Component', item: 21, quantity: true, minimum: false, transit: false },
   165: { name: 'Balance Minerals', item: 0, quantity: false, minimum: false, transit: false },
   176: { name: 'Load Installation', item: 2, quantity: true, minimum: false, transit: false },
   177: { name: 'Unload Installation', item: 19, quantity: true, minimum: false, transit: false },
   178: { name: 'Load Mineral Type', item: 1, quantity: true, minimum: false, transit: false },
   179: { name: 'Unload Mineral Type', item: 20, quantity: true, minimum: false, transit: false },
   180: { name: 'Load Mineral when X available', item: 1, quantity: true, minimum: true, transit: false },
+  189: { name: 'Unload All Ship Components', item: 0, quantity: true, minimum: false, transit: false },
   223: { name: 'Load All Minerals Until Full', item: 0, quantity: false, minimum: false, transit: false },
+  237: { name: 'Load All Ship Components', item: 0, quantity: false, minimum: false, transit: false },
 }
 
 // The colony of system n is population 100 + n on body 1000 + n; the jump points between systems a and b are 1000 a + b (leaving a) and 1000 b + a (entering b), moved by `via` for another pair.
@@ -315,6 +320,10 @@ add('flows', 'a cycle moves what its loads and unloads say, read over two passes
   assert.deepEqual(flowsOf([stop(1, 4), jump(1, 2), stop(2, 6, { MaxItems: 5 }), jump(2, 3), stop(3, 6), jump(3, 1)]), ['colonists|colony:101|colony:102'], 'an unload of colonists takes all it can whatever its quantity says')
   assert.deepEqual(flowsOf([stop(1, 4), jump(1, 2), stop(2, 6), jump(2, 3), stop(3, 6), jump(3, 1)]), ['colonists|colony:101|colony:102'], 'an unload of all that is held leaves nothing')
   assert.deepEqual(flowsOf([stop(1, 223), jump(1, 2), stop(2, 63, { MaxItems: 5 }), jump(2, 3), stop(3, 63), jump(3, 1)]), one, 'a quantity an action does not read does not limit it')
+  assert.deepEqual(flowsOf(loop(237, 189)), ['components|colony:101|colony:102'], 'ship components loaded by one order are unloaded by another')
+  assert.deepEqual(flowsOf(loop(237, [189, { MaxItems: 5 }])), ['components|colony:101|colony:102'], 'Unload All Ship Components carries a quantity and ignores it')
+  assert.deepEqual(flowsOf([typed(1, 140, 5, 10), jump(1, 2), typed(2, 141, 5, 5), jump(2, 3), stop(3, 189), jump(3, 1)]), ['components|colony:101|colony:102'], 'Unload Ship Component carries a quantity and ignores it: it takes every unit of its component')
+  assert.deepEqual(flowsOf([typed(1, 140, 5), jump(1, 2), typed(2, 141, 6), jump(2, 3), stop(3, 189), jump(3, 1)]), ['components|colony:101|colony:103'], 'an unload of one component takes only that component')
   assert.deepEqual(flowsOf([stop(1, 223), jump(1, 3), stop(3, 62), jump(3, 2), stop(2, 63), jump(2, 1)]), ['minerals|colony:101|colony:102', 'minerals|colony:103|colony:102'], 'two loads for one unload are two flows')
 })
 
@@ -1159,8 +1168,9 @@ const MUTATIONS = [
   { name: 'an unload leaves what it took held', file: S, find: 'if (!part.limited || total <= part.amount) {', to: 'if (false) {', fails: ['flows'] },
   { name: 'an unload takes all that is held even when it is limited', file: S, find: 'if (!part.limited || total <= part.amount) {', to: 'if (true) {', fails: ['flows'] },
   { name: 'only the last load is held', file: S, find: '        entries.set(key, { source: part.stop,', to: '        entries.clear()\n        entries.set(key, { source: part.stop,', fails: ['flows'] },
-  { name: 'every unload with a quantity is limited', file: S, find: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity', fails: ['flows'] },
-  { name: 'an unload of colonists with a quantity stored is limited', file: S, find: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: action.quantity && integer(order.MaxItems) > 0', fails: ['flows'] },
+  { name: 'every unload with a quantity is limited', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity', fails: ['flows'] },
+  { name: 'an unload of colonists with a quantity stored is limited', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: action.quantity && integer(order.MaxItems) > 0', fails: ['flows'] },
+  { name: 'an unload of one ship component is limited by its quantity', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', fails: ['flows'] },
   { name: 'a desired route counts every source of the unloads at its second colony', file: S, find: '.filter((source) => source.from === desire.from)', to: '', fails: ['desires'] },
   { name: 'a survey location is the same in every system', file: S, find: '`survey:${present(order.StartSystemID)}:${present(order.DestinationID)}`', to: '`survey:0:${present(order.DestinationID)}`', fails: ['path-identity'] },
   { name: 'a jump inside a system ignores its exit', file: S, find: '`lagrange:${present(order.DestinationID)}>${present(order.DestinationItemID)}`', to: '`lagrange:${present(order.DestinationID)}>0`', fails: ['path-identity'] },
@@ -1237,11 +1247,11 @@ const BENIGN = [
   { name: 'the empty year written as a function result', family: 'rewrite', file: A, find: 'const NO_YEAR = null', to: 'const NO_YEAR = (() => null)()' },
   { name: 'the loader\'s required columns listed in another order', family: 'list order', file: Q, find: "const REQUIRED_ORDER_COLUMNS = ['MoveOrderID', 'FleetID', 'MoveOrder', 'MoveActionID', 'StartSystemID', 'DestinationType', 'DestinationID']", to: "const REQUIRED_ORDER_COLUMNS = ['DestinationID', 'DestinationType', 'StartSystemID', 'MoveActionID', 'MoveOrder', 'FleetID', 'MoveOrderID']" },
   { name: 'the check for capacities not in the save written the other way round', family: 'condition turned round', file: S, find: '} else if (figure.holds === null) {', to: '} else if (null === figure.holds) {' },
-  { name: 'the limit of an unload written with its terms swapped', family: 'condition turned round', file: S, find: 'limited: ITEM_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: integer(order.MaxItems) > 0 && action.quantity && ITEM_UNLOADS.has(order.MoveActionID)' },
+  { name: 'the limit of an unload written with its terms swapped', family: 'condition turned round', file: S, find: 'limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0', to: 'limited: integer(order.MaxItems) > 0 && action.quantity && QUANTITY_UNLOADS.has(order.MoveActionID)' },
   { name: 'the sum of the held cargo written the other way round', family: 'condition turned round', file: C, find: '.reduce((total, entry) => total + entry.amount, 0)', to: '.reduce((total, entry) => entry.amount + total, 0)' },
   { name: 'the sources a delivery is covered by written the other way round', family: 'condition turned round', file: S, find: 'const serving = settled.filter((member) => shares.get(member) > 0)', to: 'const serving = settled.filter((member) => 0 < shares.get(member))' },
   { name: 'the scale of the settled test written with its terms swapped', family: 'condition turned round', file: C, find: 'Math.max(1, Math.abs(entry.amount))', to: 'Math.max(Math.abs(entry.amount), 1)' },
-  { name: 'the test for a cycle that has not settled written with its terms swapped', family: 'condition turned round', file: C, find: 'cargo.settled === false', to: 'false === cargo.settled' },
+  { name: 'the test for a cycle that has not settled written with its terms swapped', family: 'condition turned round', file: C, find: '|| cargo.settled === false) {', to: '|| false === cargo.settled) {' },
   { name: 'the shortfall of a demand written with its conditions swapped', family: 'condition turned round', file: S, find: 'short === 0 || (!unknown.length && !untold.length && !open.length) ? short : null', to: '(!open.length && !untold.length && !unknown.length) || short === 0 ? short : null' },
 ]
 
@@ -1296,11 +1306,36 @@ const detail = (results) => results.map((result) => `${result.id}: ${result.kind
 
 // ---- The page, in a browser over a constructed copy of a save ----------------------------------------------------------
 
-const SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire', GameID: 140, RaceID: 784 }
+const SAVE = { file: FIXTURE.file, game: FIXTURE.gameName, race: FIXTURE.raceName, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId }
 const TIMEOUT = 120000
 
-// The world: the fleets of the page are these and no other. Each is a fleet of the save with ships, whose queue is made here.
-const WORLD = { A: 460251, B: 460255, C: 460047, D: 460188, E: 460033, F: 460114, G: 460159, H: 460167, I: 460187, J: 460576, K: 460220 }
+// The world: the fleets of the page are these and no other. Each is a fleet of the save with ships and a cargo hold, chosen here from the fixture: A, D and K are the freight fleets whose queues the others are given (each opens with a load at a colony and holds an unload at a colony; D runs other places than A, and K places neither of them runs where the save has such a fleet), J the next freight fleet that runs places of its own and keeps its queue, and B, C, E, F, I, G and H the freight fleets with orders after them.
+const worldOf = () => {
+  const rows = fixtureRows('select o.FleetID as fleet, o.MoveOrder as number, o.MoveActionID as action, o.PopulationID as population from FCT_MoveOrders o join FCT_Fleet f on f.FleetID = o.FleetID where f.GameID = ? and f.RaceID = ? and exists (select 1 from FCT_Ship s join FCT_ShipClass c on c.ShipClassID = s.ShipClassID where s.FleetID = f.FleetID and c.CargoCapacity > 0) order by o.FleetID, o.MoveOrder', FIXTURE.gameId, FIXTURE.raceId)
+  const queues = new Map()
+
+  rows.forEach((row) => queues.set(row.fleet, [...(queues.get(row.fleet) || []), row]))
+
+  const fleets = [...queues.keys()]
+  const places = (id) => [...new Set(queues.get(id).filter((row) => (row.action === 223 || row.action === 63) && row.population > 0).map((row) => row.population))]
+  const sources = fleets.filter((id) => queues.get(id).length >= 4 && queues.get(id)[0].action === 223 && queues.get(id)[0].population > 0 && queues.get(id).some((row) => row.action === 63 && row.population > 0)).sort((a, b) => queues.get(b).length - queues.get(a).length || a - b)
+  const shares = (a, b) => places(a).some((place) => places(b).includes(place))
+  const A = sources[0]
+  const D = sources.find((id) => id !== A && !shares(id, A))
+  const K = sources.find((id) => id !== A && id !== D && !shares(id, A) && !shares(id, D)) || sources.find((id) => id !== A && id !== D && places(id).join() !== places(A).join() && places(id).join() !== places(D).join())
+  const others = fleets.filter((id) => ![A, D, K].includes(id))
+  const J = others.find((id) => queues.get(id).length >= 2 && [A, D, K].every((source) => places(source).join() !== places(id).join()))
+  const rest = others.filter((id) => id !== J)
+
+  if (!A || !D || !K || !J || rest.length < 7) {
+    throw new Error('the save has too few freight fleets with orders (four that run places of their own and seven more) to make the world of the routes from')
+  }
+
+  const [B, C, E, F, I, G, H] = rest
+
+  return { A, B, C, D, E, F, G, H, I, J, K }
+}
+const WORLD = worldOf()
 
 const all = (db, sql, ...params) => db.query(sql).all(...params)
 
@@ -1357,6 +1392,9 @@ const constructedWorld = () => {
   db.run(`update FCT_Fleet set CycleMoves = 0 where FleetID in (${WORLD.F}, ${WORLD.I})`)
   db.run(`insert into FCT_FleetConditionalOrder (FleetID, GameID, ConditionalOrderID, ConditionID, Priority, CreateFWP) values (${WORLD.E}, ${SAVE.GameID}, 33, 9, 1, 0)`)
   db.run(`update FCT_MoveOrders set OrderDelayRemaining = 400 where FleetID = ${WORLD.C} and MoveOrder = 1`)
+
+  // J keeps its own queue but has not reached the stock of its first order, so its group is served and shows no flag: the group that the switch of the flagged routes must drop.
+  db.run(`update FCT_MoveOrders set Arrived = 0 where FleetID = ${WORLD.J}`)
 
   // Two templates of the cycle of D, one of them saved at another rotation and the other with a delay on one order.
   db.run('delete from FCT_MoveOrderTemplate')
@@ -2461,7 +2499,7 @@ const BROWSER_MUTATIONS = [
   { name: 'the panel is drawn transparent', file: G, find: 'elevation="1" data-route-groups>', to: 'elevation="1" data-route-groups style="opacity: 0">', fails: ['screen-groups', 'screen-capacity', 'screen-flags', 'screen-links', 'screen-names', 'screen-closed', 'screen-state', 'screen-filter'] },
   { name: 'the handling of a cycle that never settles is drawn', file: 'page', find: '<handling-breakdown v-if="item.cargo.settled" :rows', to: '<handling-breakdown v-if="true" :rows', group: 'groups-a', fails: ['screen-unsettled'] },
   { name: 'the note that a cycle never settles is not drawn', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>', to: '<div v-else-if="false" class="caption text--secondary mt-2" data-cargo-unsettled>', group: 'groups-b', fails: ['screen-unsettled'] },
-  { name: 'the note that a cycle never settles is drawn in other words', file: 'page', find: 'data-cargo-unsettled>{{ cargoUnsettled }}</div>', to: 'data-cargo-unsettled>{{ cargoUnsettled.toUpperCase() }}</div>', group: 'groups-c', fails: ['screen-unsettled'] },
+  { name: 'the note that a cycle never settles is drawn in other words', file: 'page', find: 'data-cargo-unsettled>{{ item.cargo.unmodelled || cargoUnsettled }}</div>', to: 'data-cargo-unsettled>{{ (item.cargo.unmodelled || cargoUnsettled).toUpperCase() }}</div>', group: 'groups-c', fails: ['screen-unsettled'] },
   { name: 'the desired routes the panel keeps are not read again', file: 'page', find: '@changed="desiresChanged"', to: '@changed="() => {}"', fails: ['desire-created', 'desire-edited', 'desire-reloaded', 'desire-deleted', 'desire-count'] },
   { name: 'the coverage of a desired route is always told covered', file: 'desireView', find: 'data-desire-state-text>{{ coverageText(item.cover.state) }}', to: "data-desire-state-text>{{ coverageText('covered') }}", group: 'desires-4', fails: ['desire-coverage'] },
   { name: 'a route nothing serves is drawn with a freight delivered', file: 'desireView', find: '<div v-if="item.cover.capacity !== null"><span data-desire-delivered>', to: '<div v-if="item.cover.capacity !== null || item.cover.state === \'uncovered\'"><span data-desire-delivered>', group: 'desires-4', fails: ['desire-delivered'] },
@@ -2495,7 +2533,7 @@ const BROWSER_BENIGN = [
   { name: 'the closed queues titled with a suffix', family: 'qualifier moved', reads: 'groups', file: G, find: 'Queues that do not repeat ({{ audit.closed.length }})', to: '({{ audit.closed.length }}) queues that do not repeat' },
   { name: 'the empty table worded with a synonym', family: 'synonym', reads: 'groups', file: G, find: 'no-data-text="No fleet repeats a route."', to: 'no-data-text="No fleet runs a repeating route."' },
   { name: 'the handling of a settled cycle drawn on a strict comparison', family: 'condition turned round', reads: 'groups', file: 'page', find: '<handling-breakdown v-if="item.cargo.settled" :rows', to: '<handling-breakdown v-if="item.cargo.settled === true" :rows' },
-  { name: 'the note of a cycle that never settles drawn as a paragraph', family: 'element kind', reads: 'groups', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ cargoUnsettled }}</div>', to: '<p v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ cargoUnsettled }}</p>' },
+  { name: 'the note of a cycle that never settles drawn as a paragraph', family: 'element kind', reads: 'groups', file: 'page', find: '<div v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ item.cargo.unmodelled || cargoUnsettled }}</div>', to: '<p v-else class="caption text--secondary mt-2" data-cargo-unsettled>{{ item.cargo.unmodelled || cargoUnsettled }}</p>' },
   { name: 'the number and the id of a stored order told the other way round', family: 'parts reordered', reads: 'groups', file: G, find: '#<span data-route-order-number>{{ order.MoveOrder }}</span> (order <span data-route-order-id>{{ order.MoveOrderID }}</span>)</span><span v-if="!member.record.orders.length">none</span>', to: 'order <span data-route-order-id>{{ order.MoveOrderID }}</span> at position <span data-route-order-number>{{ order.MoveOrder }}</span></span><span v-if="!member.record.orders.length">none</span>' },
   { name: 'the button of a new desired route with the event in its longhand', family: 'v-on longhand', reads: 'desires', file: 'desireView', find: 'data-desire-new @click="startNew"', to: 'data-desire-new v-on:click="startNew"' },
   { name: 'the demand of a desired route read through a list', family: 'condition rewritten', reads: 'desires', file: 'desireView', find: "draft.yearly === '' || draft.yearly === null ? null : Number(draft.yearly)", to: "['', null].includes(draft.yearly) ? null : Number(draft.yearly)" },
@@ -2600,8 +2638,19 @@ const runBenignTogether = async () => {
   check('benign rewrites together: no check fails', failed.length === 0, detail(failed))
 }
 
+// The checks that need the freight figures the Hauling table draws for a fleet. The figures rest on the loading strength rule (utilities/transport.js), and while that rule does not hold for the version of the save a fleet has no figure to compare: those checks, and the planted faults that only they judge, are printed as needs tier b (owner AE-302-08) and run again once the rule holds.
+const FIGURE_CHECKS = new Set(['screen-filter', 'screen-capacity', 'screen-state', 'desire-created', 'desire-coverage', 'desire-delivered', 'desire-delivered-unit', 'desire-gap', 'desire-gap-unit', 'desire-refreshed'])
+const FIGURES_NOTE = 'needs tier b: the fleets have no freight figure in the table until the loading strength rule holds for the version of the save (owner AE-302-08)'
+
+const figuresHold = async () => {
+  const { provenance } = await loadUtilities(['provenance', 'transport'], { stubs: STUBS })
+
+  return provenance.ruleSupports('transport.handlingStrength', '3.2.x') === true
+}
+
 // The page server, the browser and the world the page variants of a worker share, started by `prepare`.
-const PAGE = { world: null, labels: null, sources: null, server: null, chrome: null }
+const PAGE = { world: null, labels: null, sources: null, server: null, chrome: null, figures: false }
+const neededOf = (fails) => fails.filter((id) => PAGE.figures || !FIGURE_CHECKS.has(id))
 
 const startPage = async () => {
   const { startPageServer } = require('./lib/page-server')
@@ -2609,6 +2658,7 @@ const startPage = async () => {
   PAGE.world = constructedWorld()
   PAGE.world.capableNames = [PAGE.world.expected[WORLD.A].name, PAGE.world.expected[WORLD.D].name]
   PAGE.labels = await wordsOf()
+  PAGE.figures = await figuresHold()
   PAGE.sources = sourcesOf()
   PAGE.server = await startPageServer({ save: PAGE.world.file })
   PAGE.chrome = await require('playwright').chromium.launch()
@@ -2669,12 +2719,17 @@ const pageSeen = async (reads, given, what) => {
   }
 }
 
-const pageChecksOf = (reads) => (reads === 'desires' ? desireChecks : reads === 'refresh' ? refreshChecks : browserChecks)
+const pageChecksOf = (reads) => (reads === 'desires' ? desireChecks : reads === 'refresh' ? refreshChecks : browserChecks).filter((item) => PAGE.figures || !FIGURE_CHECKS.has(item.id))
 
 const judgePage = (reads, seen) => runChecks(pageChecksOf(reads), { seen: seen.value, world: PAGE.world, labels: PAGE.labels })
 
 const runPage = async (reads) => {
   const seen = await pageSeen(reads, PAGE.sources, 'the sources as they are')
+  const waiting = (reads === 'desires' ? desireChecks : reads === 'refresh' ? refreshChecks : browserChecks).filter((item) => !PAGE.figures && FIGURE_CHECKS.has(item.id)).map((item) => item.id)
+
+  if (waiting.length) {
+    console.log(`SKIP  ${waiting.join(', ')}: ${FIGURES_NOTE}`)
+  }
 
   for (const result of await judgePage(reads, seen)) {
     check(`${result.id}: ${result.name}`, result.ok, `${result.kind}: ${result.detail}`)
@@ -2687,19 +2742,35 @@ const pageLabel = (key) => path.basename(FILES[key])
 
 const runPageFault = async (index) => {
   const mutation = BROWSER_MUTATIONS[index]
+  const fails = neededOf(mutation.fails)
+
+  if (!fails.length) {
+    console.log(`SKIP  planted fault of the page: ${mutation.name}: only checks that need the freight figures judge it: ${FIGURES_NOTE}`)
+
+    return
+  }
+
   const reads = readsOfFault(mutation)
   const failed = failedOf(await judgePage(reads, await pageSeen(reads, planted(PAGE.sources, mutation), `the fault "${mutation.name}"`)))
-  const credited = failed.filter((result) => mutation.fails.includes(result.id) && result.kind === 'assertion')
+  const credited = failed.filter((result) => fails.includes(result.id) && result.kind === 'assertion')
 
-  check(`mutation caught: ${mutation.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, mutation.fails, { name: mutation.name }), failed.map((result) => `${result.id}: ${result.kind}: ${String(result.detail).split('\n')[0]}`).join('; '))
+  check(`mutation caught: ${mutation.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, fails, { name: mutation.name }), failed.map((result) => `${result.id}: ${result.kind}: ${String(result.detail).split('\n')[0]}`).join('; '))
 }
 
-// The faults of a group planted together in the sources, the page opened once over them, and each member credited by its own checks alone (`judgedGroup`): a check no member names that fails stops the run as a defect of the harness in the group. `--solo` hands one member.
-const runPageGroup = async (group, members) => {
+// The faults of a group planted together in the sources, the page opened once over them, and each member credited by its own checks alone (`judgedGroup`): a check no member names that fails stops the run as a defect of the harness in the group. `--solo` hands one member. A member that only checks needing the freight figures judge is left out of the group and printed as needs tier b.
+const runPageGroup = async (group, handed) => {
+  const members = handed.filter((member) => neededOf(member.fails).length)
+
+  handed.filter((member) => !members.includes(member)).forEach((member) => console.log(`SKIP  planted fault of the page: ${member.name}: only checks that need the freight figures judge it: ${FIGURES_NOTE}`))
+
+  if (!members.length) {
+    return
+  }
+
   const reads = readsOfFault(members[0])
   const results = await judgePage(reads, await pageSeen(reads, plantedGroup(PAGE.sources, members, pageLabel), members.length === 1 ? `the fault "${members[0].name}"` : `the faults of the group ${group}`))
 
-  for (const { member, caught, failed } of judgedGroup(results, members, { what: `the faults of the group ${group}`, alone: members.length === 1 })) {
+  for (const { member, caught, failed } of judgedGroup(results, members.map((entry) => ({ ...entry, fails: neededOf(entry.fails) })), { what: `the faults of the group ${group}`, alone: members.length === 1 })) {
     const credited = failed.filter((result) => result.kind === 'assertion')
 
     check(`mutation caught: ${member.name}: credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caught, `expected a value of ${member.fails.join(', ')}; ${failed.length ? detail(failed) : 'every check it names held'}`)

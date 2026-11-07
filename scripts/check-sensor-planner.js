@@ -12,14 +12,17 @@
   - template: every top-level panel carries a data-summary, the texts keep the impersonal voice, the stored-figure warning and the unavailable text are in the template, and the persisted view keeps each typed figure for the race;
   - save: the page's own reads on the stock save, a row for every class, no cross-section the rules rebuild differently from the one stored, and every thermal and EM sensor the race has researched;
 
-  Mutants: each deliberate fault in a copy of the page's script (or its template text) must fail the checks it names.
+  Mutants: each deliberate fault in a copy of the page's script (or its template text) must fail the checks it names. Missing enemy curves and shortened thermal comparisons are credited by their observed series/column counts before any optional entry is dereferenced, never by the resulting TypeError.
 
   Prints `N of N checks passed`; any failed check sets exit code 1. A check whose save is not there is reported as skipped, never as passed.
 */
 const fs = require('fs')
 const path = require('path')
+const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { fixtureTriple } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const pagePath = path.join(root, 'src', 'renderer', 'pages', 'sensors.vue')
@@ -60,11 +63,15 @@ const check = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `  [${typeof result === 'string' ? result : 'false'}]`}`)
 }
 
-const settle = async (test) => {
+const settle = async (test, valueOnly = false) => {
   try {
     return await test()
   } catch (error) {
-    return `threw ${error.message}`
+    if (valueOnly && (kindOf(error) !== 'assertion' || isSubjectThrow(error))) {
+      throw error
+    }
+
+    return valueOnly ? error.message : `threw ${error.message}`
   }
 }
 
@@ -364,6 +371,10 @@ const pageStatements = async (mutate, stock) => {
       const vm = page({ enemyThermal: '100', targetThermal: '10, 1000, 100' })
       const thermal = vm.passiveSets.find((set) => set.kind === 'thermal')
 
+      assert.equal(thermal.curve.series.filter((series) => series.key === 'thermal-enemy').length, 1, 'the typed enemy sensor has one curve')
+      assert.equal(thermal.curve.rows[0].ranges.filter((range) => range.key === 'thermal-enemy').length, 1, 'the typed enemy sensor has one range column')
+      assert.equal(thermal.curve.rows[0].ranges.find((range) => range.key === 'thermal-enemy').result.value, passiveRange(100, 10), 'the enemy sensor keeps its typed sensitivity')
+
       return thermal.curve.series.map((series) => series.name).join() === 'Thermal 100 (100),Thermal 25 (25),Enemy sensor' && thermal.curve.rows.map((entry) => entry.signature).join() === '10,100,1000' && thermal.sensitivities.length === 3 ? true : short(thermal.curve.series.map((series) => series.name))
     }],
     ['passive: four times the sensitivity doubles the range of a fixed signature', () => {
@@ -371,6 +382,10 @@ const pageStatements = async (mutate, stock) => {
       const { ranges } = vm.passiveSets.find((set) => set.kind === 'thermal').curve.rows[0]
       const own = ranges.find((range) => range.key === 'thermal-41')
       const enemy = ranges.find((range) => range.key === 'thermal-enemy')
+
+      assert.equal(ranges.filter((range) => range.key === 'thermal-enemy').length, 1, 'the typed enemy sensor has one range column')
+
+      assert.equal(enemy.result.value, 2 * own.result.value, 'four times the sensitivity doubles the range')
 
       return close(enemy.result.value, 2 * own.result.value) && close(own.result.value, passiveRange(25, 400)) ? true : short([own.result.value, enemy.result.value])
     }],
@@ -413,6 +428,9 @@ const pageStatements = async (mutate, stock) => {
       const vm = page()
       const [full, half] = vm.reductionRows
       const design = (thermalTech, thermalCost) => rules.engineDesign({ sizeHS: 10, thrust: 1, engineTech: 25, fuelTech: 1, thermalTech, thermalCost })
+
+      assert.equal(full.byFraction.length, 3, 'the thermal comparison has a column for each typed share')
+      assert.equal(full.byFraction[2].result.value, 500, 'full power uses the typed full-power share')
 
       return vm.reductionRows.length === 2 && full.byFraction[2].result.value === 500 && half.byFraction[2].result.value === 250 && close(full.engineCost.value, design(1, 1).cost) && close(half.engineCost.value, design(0.5, 2).cost) && close(half.classEngineCost.value, 2 * design(0.5, 2).cost) && half.engineCost.value > full.engineCost.value ? true : short(vm.reductionRows.map((entry) => [entry.level.name, entry.aggregate.value, entry.engineCost.value]))
     }],
@@ -604,6 +622,8 @@ const MUTATIONS = [
 ]
 
 const runMutations = async (stock) => {
+  refusePlanting('the page faults')
+
   for (const { name, find, replace, fails } of MUTATIONS) {
     let outcome
 
@@ -618,7 +638,7 @@ const runMutations = async (stock) => {
         const results = []
 
         for (const [statement, test] of named) {
-          results.push([statement, await settle(test)])
+          results.push([statement, await settle(test, true)])
         }
 
         const held = results.filter(([, result]) => result === true).map(([statement]) => statement)
@@ -634,7 +654,7 @@ const runMutations = async (stock) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { stock: fixtureTriple(), mutations: mutating() }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock') {

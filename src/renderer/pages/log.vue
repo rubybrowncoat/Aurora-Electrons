@@ -73,7 +73,9 @@
                 <div class="event-heading">
                   <v-icon small class="mr-2" :style="{ color: 'inherit' }">{{ eventIcons[row.event.EventType] || 'mdi-text-box-outline' }}</v-icon>
                   <span class="event-type">{{ row.event.TypeName }}</span>
+                  <span v-if="isInterrupting(row.event)" class="interrupt-mark" :title="interruptTitle">(I)</span>
                   <span v-if="row.group" class="repeat-count">{{ count(row.events.length) }} events</span>
+                  <span v-if="isHidden(row.event)" class="new-label hidden-label" :title="hiddenTitle">Hidden in the game</span>
                   <span v-if="isNew(row.event)" class="new-label">New</span>
                   <span v-if="!row.group && isPinned(row.event)" class="new-label pinned-label">Pinned</span>
                   <span class="event-date">{{ row.group ? row.event.Day : row.event.DateTime }}</span>
@@ -95,15 +97,15 @@
         </window-virtual-scroll>
         <div v-else class="pa-6 text--secondary">{{ listPending ? 'Reading the archive.' : listEvents.length ? 'No events match these filters.' : archiveListed ? 'The archive holds no events of the race.' : 'The race has no events in the save.' }}</div>
         <div class="panel-foot caption text--secondary">
-          Use it to pick out new and important events among the rows. Rows keep the race's custom alert and text colours. Click a message to read it in full, expand a daily repeat to read each message, or pin an event to keep it in the Pinned panel. "New" compares the game time of an event with the end of the newest increment that the previous visit to this page saw on this branch. The first visit to a branch inherits what its parent saw up to the fork.
+          Use it to pick out new and important events among the rows. Rows keep the race's custom alert and text colours. Click a message to read it in full, expand a daily repeat to read each message, or pin an event to keep it in the Pinned panel. "New" compares the game time of an event with the end of the newest increment that the previous visit to this page saw on this branch. The first visit to a branch inherits what its parent saw up to the fork. {{ depthText }} A row of a type the race hid in the game's Events window carries Hidden in the game; the log keeps the row either way. A type the game flags as interrupting carries (I), read from the open save.
         </div>
       </v-card>
     </template>
 
     <v-dialog :value="!!detail" max-width="760" @input="(value) => { if (!value) detail = null }">
       <v-card v-if="detail" class="event-detail">
-        <v-card-title class="event-detail-title">{{ detail.TypeName }}<v-spacer /><v-btn icon aria-label="Close event" @click="detail = null"><v-icon>mdi-close</v-icon></v-btn></v-card-title>
-        <v-card-subtitle class="event-detail-meta">{{ detail.DateTime }}<span v-if="detail.SystemName"> · {{ detail.SystemName }}</span><span v-if="detail.ColonyName"> · {{ detail.ColonyName }}</span><span v-if="detail.archived"> · From the archive</span><span v-if="isPinned(detail)"> · Pinned</span></v-card-subtitle>
+        <v-card-title class="event-detail-title">{{ detail.TypeName }}<span v-if="isInterrupting(detail)" class="interrupt-mark" :title="interruptTitle">(I)</span><v-spacer /><v-btn icon aria-label="Close event" @click="detail = null"><v-icon>mdi-close</v-icon></v-btn></v-card-title>
+        <v-card-subtitle class="event-detail-meta">{{ detail.DateTime }}<span v-if="detail.SystemName"> · {{ detail.SystemName }}</span><span v-if="detail.ColonyName"> · {{ detail.ColonyName }}</span><span v-if="detail.archived"> · From the archive</span><span v-if="isPinned(detail)"> · Pinned</span><span v-if="isHidden(detail)" :title="hiddenTitle"> · Hidden in the game</span></v-card-subtitle>
         <v-card-text class="event-detail-message" :style="eventStyle(detail)">{{ detail.MessageText }}</v-card-text>
         <v-card-text v-if="pinMessage" class="error--text py-2" role="alert">{{ pinMessage }}</v-card-text>
         <v-card-actions class="event-detail-actions">
@@ -142,19 +144,25 @@ import { eventColorToRGBA, gameTime } from '../utilities/aurora'
 import { readRegistry } from '../utilities/campaign'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { EVENT_ICONS } from '../utilities/event-icons'
-import { eventCapOfSettings, eventEstimate, readLogWindow, rowCounts, rowFingerprint, saveArchiveChoice } from '../utilities/event-archive'
+import { eventCapOfSettings, eventEstimate, logDepth, readLogWindow, rowCounts, rowFingerprint, saveArchiveChoice } from '../utilities/event-archive'
 import { PIN_STATES, pinKey, pinOfRow, pinsOf, pinState, readPins, seededPins, withNote, withPin, withoutPin } from '../utilities/event-pins'
 import { cleanKeywords, groupTypes, keywordTest, newPresetId, presetTypes, readPresets, withPreset, withRenamedPreset, withoutPreset } from '../utilities/event-triage'
 import { bytesText, campaignStorage } from '../utilities/history'
 import { branchLineage, gameDateText } from '../utilities/history-milestones'
 import { tracked } from '../utilities/load-tracking'
 import { archiveEvents, pinnableRow, playerPins, readArchiveFile, readArchiveNames } from '../utilities/log-archive-view'
-import { DEFAULT_WINDOW, diagnose, readDiagnostic } from '../utilities/log-diagnostics'
+import { DEFAULT_WINDOW, diagnose, readDiagnostic, readHiddenTypes, readInterruptTypes } from '../utilities/log-diagnostics'
 import { isNewEvent, newestEnd, readLook, withLook } from '../utilities/log-visit'
 
 const INPUT_LABELS = { logEvents: 'the game log' }
 
 const NO_LOOK = Object.freeze({ key: null, t: null, settled: false })
+
+// What a row's hidden mark means: the race hid the type in the game's own Events window, and the log keeps the row either way.
+const HIDDEN_TITLE = 'The race hid this event type in the game\'s Events window; the log keeps the row.'
+
+// What the interrupt mark says: the open save's event table flags the type, so the game stops for an event of it.
+const INTERRUPT_TITLE = 'The game flags this event type to interrupt the player; the flag is read from the open save.'
 
 export default {
   components: { ArchivePanel, ChartCanvas, DiagnosticPanel, LoadState, LogPresets, LogTypeFilter, PageLink, PinnedPanel, StatTiles, WindowVirtualScroll },
@@ -195,6 +203,8 @@ export default {
       expandedGroups: [],
       detail: null,
       eventIcons: EVENT_ICONS,
+      hiddenTitle: HIDDEN_TITLE,
+      interruptTitle: INTERRUPT_TITLE,
     }
   },
   computed: {
@@ -239,6 +249,40 @@ export default {
       }
 
       return this.archiveNames ? archiveEvents(this.archiveRecord, this.archiveNames, this.StartYear) : []
+    },
+
+    // What the list holds as stored: the span between the earliest and latest event time and the row count, or null when it holds none.
+    depth() {
+      return logDepth(this.listEvents)
+    },
+
+    // The list's depth in words, dated from the rows themselves, so the page states what the save or the archive kept and no assumed window.
+    depthText() {
+      const depth = this.depth
+      const held = this.archiveListed ? 'The archive' : 'The save'
+
+      if (this.archiveListed && !this.archiveNames) {
+        return 'The archive\'s rows are not read, so their span is not stated.'
+      }
+
+      if (!depth) {
+        return `${held} holds no event of the race.`
+      }
+
+      const date = (seconds) => gameDateText(this.StartYear, seconds).slice(0, 10)
+      const span = depth.from === null ? '' : depth.from === depth.to ? `, on ${date(depth.from)}` : `, from ${date(depth.from)} to ${date(depth.to)}`
+
+      return `${held} holds ${this.count(depth.count)} ${depth.count === 1 ? 'event' : 'events'} of the race${span}.`
+    },
+
+    // The event types the race hid in the game's Events window, read with the log: a Set, or null when the table could not be read (unknown, never none).
+    hiddenTypes() {
+      return this.logEvents.hiddenTypes || null
+    },
+
+    // The event types the open save's event table flags as interrupting the player, read with the log: a Set, or null when the table could not be read (unknown, never none).
+    interruptTypes() {
+      return this.logEvents.interruptTypes || null
     },
 
     // The previous visit to this branch, as game time; null on a first visit.
@@ -704,6 +748,16 @@ export default {
       return isNewEvent(event, this.lastSeen)
     },
 
+    // Whether the race hid the event's type in the game's Events window: the log holds the row and the list marks it. A hidden list that could not be read marks nothing, never everything.
+    isHidden(event) {
+      return !!this.hiddenTypes && this.hiddenTypes.has(Number(event.EventType))
+    },
+
+    // Whether the open save's event table flags the event's type as interrupting the player: the list marks it (I). A table that could not be read marks nothing, never everything.
+    isInterrupting(event) {
+      return !!this.interruptTypes && this.interruptTypes.has(Number(event.EventType))
+    },
+
     // Settles what the previous visit to this branch was (once for the campaign, race and branch; it stays fixed while the page is open) and then records this save's newest increment for the next visit.
     visit() {
       const key = `${this.contextKey}|${this.branchId}`
@@ -953,7 +1007,8 @@ export default {
         }
 
         const startYear = this.StartYear
-        const [rows] = await this.database.query(`select L.rowid as id, L.IncrementID, L.Time, L.EventType, L.MessageText, L.SystemID, L.PopulationID, L.Xcor, L.Ycor, L.IDType, L.SMOnly, coalesce(T.Description, 'Event type ' || L.EventType) as TypeName, C.EventTypeID is not null as Customized, C.AlertColour, C.TextColour, S.SystemID as KnownSystemID, S.Name as SystemName, P.PopulationID as ColonyID, P.PopName as ColonyName, B.SystemBodyID, B.Name as SystemBodyName, B.BodyClass, B.PlanetNumber, B.OrbitNumber, Star.Component from FCT_GameLog as L left join DIM_EventType as T on T.EventTypeID = L.EventType left join FCT_EventColour as C on C.EventTypeID = L.EventType and C.GameID = L.GameID and C.RaceID = L.RaceID left join FCT_Population as P on P.PopulationID = L.PopulationID and P.GameID = L.GameID and P.RaceID = L.RaceID left join FCT_RaceSysSurvey as S on S.SystemID = case when L.SystemID > 0 then L.SystemID else P.SystemID end and S.GameID = L.GameID and S.RaceID = L.RaceID left join FCT_SystemBody as B on B.SystemBodyID = P.SystemBodyID and B.GameID = L.GameID left join FCT_Star as Star on Star.StarID = B.StarID and Star.GameID = L.GameID where L.GameID = ${this.GameID} and L.RaceID = ${this.RaceID} and coalesce(L.SMOnly, 0) = 0 order by L.Time desc, L.IncrementID desc, L.rowid desc`)
+        // The race's whole log, with every row the save kept (no limit and no window assumed), the types the race hid in the game's Events window, so the list can mark them, and the types the save flags as interrupting the player, read from the same open save so a reopened save's flags are the ones shown.
+        const [[rows], hiddenTypes, interruptTypes] = await Promise.all([this.database.query(`select L.rowid as id, L.IncrementID, L.Time, L.EventType, L.MessageText, L.SystemID, L.PopulationID, L.Xcor, L.Ycor, L.IDType, L.SMOnly, coalesce(T.Description, 'Event type ' || L.EventType) as TypeName, C.EventTypeID is not null as Customized, C.AlertColour, C.TextColour, S.SystemID as KnownSystemID, S.Name as SystemName, P.PopulationID as ColonyID, P.PopName as ColonyName, B.SystemBodyID, B.Name as SystemBodyName, B.BodyClass, B.PlanetNumber, B.OrbitNumber, Star.ComponentNumber from FCT_GameLog as L left join DIM_EventType as T on T.EventTypeID = L.EventType left join FCT_EventColour as C on C.EventTypeID = L.EventType and C.GameID = L.GameID and C.RaceID = L.RaceID left join FCT_Population as P on P.PopulationID = L.PopulationID and P.GameID = L.GameID and P.RaceID = L.RaceID left join FCT_RaceSysSurvey as S on S.SystemID = case when L.SystemID > 0 then L.SystemID else P.SystemID end and S.GameID = L.GameID and S.RaceID = L.RaceID left join FCT_SystemBody as B on B.SystemBodyID = P.SystemBodyID and B.GameID = L.GameID left join FCT_Star as Star on Star.StarID = B.StarID and Star.GameID = L.GameID where L.GameID = ${this.GameID} and L.RaceID = ${this.RaceID} and coalesce(L.SMOnly, 0) = 0 order by L.Time desc, L.IncrementID desc, L.rowid desc`), readHiddenTypes(this.database, this.GameID, this.RaceID), readInterruptTypes(this.database)])
         const dates = new Map()
 
         const events = rows.map((event) => {
@@ -971,6 +1026,12 @@ export default {
 
         // Not enumerable, so nothing walks the ledger's thousands of increments.
         Object.defineProperty(events, 'logWindow', { value: logWindow })
+
+        // The types the race hid in the game's Events window go with the rows of the same read; null when they could not be read, so no row is marked rather than all of them.
+        Object.defineProperty(events, 'hiddenTypes', { value: hiddenTypes })
+
+        // The types the save flags as interrupting the player go with the rows of the same read; null when they could not be read, so no row is marked rather than all of them.
+        Object.defineProperty(events, 'interruptTypes', { value: interruptTypes })
 
         return events
       }),
@@ -1086,6 +1147,14 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  // The game's own (I) beside the type: the open save's event table flags the type, so the game stops for an event of it.
+  .interrupt-mark {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-size: calc(12px * var(--ae-font-scale));
+    opacity: 0.85;
   }
 
   .event-date {

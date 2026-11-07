@@ -1,12 +1,25 @@
-// What the opened save supports: which of the tables and columns each report reads it has, and whether the lookup rows the planners key on mean what they expect. A save carries no version label, so structure (the columns a report reads) and meaning (what an ID stands for, the formula version) are checked apart, and neither stands in for the other.
+// What the opened save supports: which of the tables and columns each report reads it has, and whether the lookup rows the planners key on mean what they expect. A save carries no version label, so structure (the columns a report reads) and meaning (what an ID stands for, the formula version) are checked apart, and neither stands in for the other. Whether the save is of the Aurora line the app reads at all is decided by its shape alone (`lineResult`): a save without the seven columns Aurora 3.0 added over the releases before it is refused as a save from before Aurora 3.0, while a save of 3.0, 3.1 or 3.2 is of the 3.2 line, the three being schema-identical. The formula version rests on the same seven (`formulaResult`): a save with all of them is the stated one, assumed, and a save missing any of them states none.
 //
-// The reads of every report come from utilities/capability-reads.js, written by `node scripts/check-capabilities.js --write` from the pages' own queries, one entry per tracked input (`tracked('<key>', ...)` in a page, a check of the warnings page, the app shell's reads). This module adds what the scan cannot know: the columns a query builds by name or lists without its table (`EXTRA_READS`, `MARKER_COLUMNS`, and `MARKER_USES` where a page uses a known part of what it builds), the reads that guard themselves (`TOLERATED`), which inputs a page can really do without (`OPTIONAL`), the column groups a report can lose without the rest (`SOFT`), and the lookup rows whose meaning is checked (`BONUS_NAMES`, `COMPONENT_TYPES`).
+// The reads of every report come from utilities/capability-reads.js, written by `node scripts/check-capabilities.js --write` from the pages' own queries, one entry per tracked input (`tracked('<key>', ...)` in a page, a check of the warnings page, the app shell's reads). This module adds what the scan cannot know: the columns a query builds by name or lists without its table (`EXTRA_READS`, `MARKER_COLUMNS`, and `MARKER_USES` where a page uses a known part of what it builds), the reads that guard themselves (`TOLERATED`), which inputs a page can really do without (`OPTIONAL`), the column groups a report can lose without the rest (`SOFT`), the lookup rows whose meaning is checked (`BONUS_NAMES`, `COMPONENT_TYPES`) and the 3.1 tables and columns declared before a page reads them (`DECLARED`, which gate nothing).
 //
 // A report is 'supported' (every input it reads is there), 'degraded' (an optional input, a soft column group or a lookup row is not, and each is named) or 'unsupported' (an input it cannot do without is missing). A page holds back its content while any input it tracks fails, so an input is required unless the page really goes on without it. `preflight` only selects: from `pragma_table_xinfo` (so generated and hidden columns count) and the lookup tables, never writing to the save.
 import { READS } from './capability-reads'
 import { fieldWords, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
-export const STATED_FORMULA_VERSION = '2.7.x'
+export const STATED_FORMULA_VERSION = '3.2.x'
+
+// The columns Aurora 3.0 added over the releases before it, by table, which tell a save of the 3.2 line from one from before it: every save of the line has all of them, and a save without all of them is from before it, so one that lacks some but not all is still read as the line, damaged. Aurora 3.0, 3.1 and 3.2 are not told apart, since the shipped 3.0.0, 3.1.0 and 3.2.0 databases are identical in tables and columns and a save holds no version string, so all three are read as the 3.2 line. Read from the diff of the shipped databases of the last release before it and of 3.0.0: every other table and column is the same. The fields are built from the pairs, not written out, so that the scan of the pages does not take them for reads of the pages.
+const SIGNATURE_COLUMNS = Object.freeze({
+  FCT_Game: Object.freeze(['LostColonies', 'GenerateNonOxygenRaces', 'NoShieldTechnology', 'OrbitalMovementInSubPulse']),
+  FCT_Ship: Object.freeze(['ShipSeniorCO']),
+  FCT_Race: Object.freeze(['NoResearchProjects']),
+  FCT_Population: Object.freeze(['AlienArtifacts']),
+})
+
+export const LINE_SIGNATURE = Object.freeze(Object.entries(SIGNATURE_COLUMNS).flatMap(([table, columns]) => columns.map((column) => [table, column].join('.'))))
+
+// The columns the formula version rests on: the same seven, since a save has all of them only when it is of the line, and a save that is not is not known to be played under the rules the app states.
+const FORMULA_COLUMNS = LINE_SIGNATURE
 
 const FORMULA = 'capability.formulaVersion'
 const BONUS = 'capability.bonusName'
@@ -16,44 +29,48 @@ registerRule({
   id: FORMULA,
   versions: [STATED_FORMULA_VERSION],
   verification: 'assumed',
-  structure: ['FCT_Game.AllowCMC', 'FCT_Game.AncientRelics'],
-  note: 'A save carries no version label. The two game settings that came with the current release line (whether civilian mining complexes are allowed and whether ancient relics are on) are stored together, so a save with both is taken as played under the rules the app states, and a save without one of them has no formula version. That is a fact about the schema, not a verified version.',
+  structure: FORMULA_COLUMNS,
+  note: 'A save carries no version label. The seven columns the first release of the line added over the earlier line are in every save of the line, whose three releases are identical in schema, so a save with all seven is taken as played under the rules the app states, and a save missing one of them has no formula version. That is a fact about the schema, not a verified version.',
 })
 
 registerRule({
   id: BONUS,
-  versions: ['2.7.x'],
+  versions: [STATED_FORMULA_VERSION],
   verification: 'confirmed',
   structure: ['DIM_CommanderBonusType.BonusID', 'DIM_CommanderBonusType.Description', 'DIM_CommanderBonusType.Percentage'],
-  note: 'The commander bonus IDs the planners read were compared with the game\'s commander bonus types in two saves: each stands for the same bonus, a multiplier or a rating, in both. A save whose row differs is not mapped.',
+  note: 'The commander bonus IDs the planners read were compared with the commander bonus types of the three shipped databases of the line and of a played save migrated to it: each stands for the same bonus, a multiplier or a rating, in all four. The line removed Fighter Combat (26) and added Light Tactical (39); the planners read Light Tactical, which ranks the captains of light naval ships, so it is gated, and not Fighter Combat, which none reads. Communications (22) is gated for the contact rating the captains of diplomacy ships give. A save whose row differs is not mapped.',
 })
 
 registerRule({
   id: COMPONENT,
-  versions: ['2.7.x'],
+  versions: [STATED_FORMULA_VERSION],
   verification: 'confirmed',
   structure: ['DIM_ComponentType.ComponentTypeID', 'DIM_ComponentType.TypeDescription'],
-  note: 'Component type 29 is Jump Point Stabilisation in the saves examined, so a save whose type differs is not mapped.',
+  note: 'Component type 29 is Jump Point Stabilisation in the three shipped databases of the line and in a played save migrated to it, so a save whose type differs is not mapped. The line removed Fighter Pod Bay (65) and added Ordnance Factory Module (72); no planner reads the removed type, and the planners that read the module key on it like the other module types, so neither is gated.',
 })
 
-// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships, the jump point infrastructure and the gate builders of the Lagrange page (its map and saved points do not read them, and the infrastructure table marks the figures it cannot give as unknown), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals and the fleet stations' fleets, bodies and orders of the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the ships' fuel service of the Logistics page (the tanker panel and the harvesters' fuel service column name what they could not read, with a Retry; the stock figures do not rest on it), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
+// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page and its other reads (each check shows its own failure in place, the idle fleets check among them, whose key the scan cannot read, and a snooze stamp that cannot be read is left as no stamp), the ships, the jump point infrastructure and the gate builders of the Lagrange page (its map and saved points do not read them, and the infrastructure table marks the figures it cannot give as unknown), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals, the fleet stations' fleets, bodies and orders and the panel's own picker of bodies on the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the ships' fuel service of the Logistics page (the tanker panel and the harvesters' fuel service column name what they could not read, with a Retry; the stock figures do not rest on it), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the colony costs of the Galaxy Map (the habitability layer and the habitable mark say that the costs could not be worked out; no other layer or figure of the map rests on them), the bodies the notes of the Notebook page link to (a failed read is kept as an error that the form names, and a link to a body then reads as not checked, never as gone; the notes do not rest on it), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
 const OPTIONAL = Object.freeze({
-  '/warnings': (key) => key.startsWith('check:'),
+  '/warnings': (key) => key.startsWith('check:') || key === 'page',
+  '/notebook': (key) => key === 'page',
   '/lagrange': (key) => key === 'ships' || key === 'jumpInfrastructure' || key === 'jumpBuilders',
   '/colony-outlook': (key) => key === 'bootstrapSources' || key === 'colonistSources',
   '/mineral-outlook': (key) => key === 'siteDeposits' || key === 'deploymentSources',
   '/finances': (key) => key === 'shippingTax',
-  '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves' || key === 'FuelReserves',
+  '/logistics': (key) => key === 'mspSupply' || key === 'fuelDonors' || key === 'summarySources' || key === 'FleetStations' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves' || key === 'FuelReserves',
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
-  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'fuelSites' || key === 'FuelReserveReader' || key === 'positionFacts' || key === 'orbitFacts',
+  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'fuelSites' || key === 'shippingTax' || key === 'FuelReserveReader' || key === 'positionFacts' || key === 'orbitFacts',
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'routeQueues' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
-  '/map': (key) => key === 'groundFormations' || key === 'recoveryObjects' || key === 'observationRead',
+  '/map': (key) => key === 'groundFormations' || key === 'habitability' || key === 'recoveryObjects' || key === 'observationRead',
   // The life pods and wrecks of the recovery ledger of the Galaxy Map (`recoveryObjects`) are read only when the ledger is opened: a save that lacks a table or column of them leaves the ledger without them, and the ledger says so in place. The formations read for an observation (`observationRead`) are reached through the choice of the ledger's observation, which names every observed kind; the map reads no formation for it.
   // The formations read for the observation (`observationRead`) are an opt-in feature of Survey Progress and of the recorder behind History: a save without a column of that read leaves the observation unavailable (Survey Progress says so in place of the switch, and the recorder notes the failed read in the record), and nothing else of either page.
   '/survey-progress': (key) => ['formations', 'groundCommanders', 'ruinSites', 'constructSites', 'troopBays', 'observationRead'].includes(key),
   '/history': (key) => key === 'observationRead',
   // The command structure panel of the Commanders page reads the naval admin commands, fleets and ships and the ground formations with their commanders, each loader checking its own columns; the roster does not rest on them, and the panel names what could not be read.
-  '/commanders': (key) => key === 'navalTree' || key === 'groundTree',
+  '/commanders': (key) => key === 'navalTree' || key === 'groundTree' || key === 'noResearch',
+  // The race's No Research Projects setting is read by a loader that names its column first (`loadNoResearchProjects`): a save without the column leaves the setting unknown, and the Research page and the Commanders suggestions say so and go on as for any race. The items of the Engineering, Ordnance and Ground Unit Projects of the Industry jobs (`developments`) are read the same way: a save without a table of them leaves the line under those jobs saying so, and the jobs stay.
+  '/technologies': (key) => key === 'noResearch',
+  '/production': (key) => key === 'developments',
 })
 
 // The life pods and wrecks read for the observation (`recoveryObservationRead`) are an opt-in of the Galaxy Map's recovery ledger and of the recorder behind History, which any page that switches observation on or reads a record reaches: a save without a column of that read leaves the observation unavailable, in place of its switch, and nothing else of any page.
@@ -62,16 +79,20 @@ export const isOptional = (route, key) => key === 'recoveryObservationRead' || B
 // The ranks of the naval admin commanders decide whether a command's bonus applies down its chain, so a report that reads them keeps its stock figures and leaves only the rates that need the chain unknown (`loadNavalAdmins` takes `ranks`).
 const navalRank = (affects) => Object.freeze({ key: 'navalRank', label: 'Naval admin ranks', affects, fields: Object.freeze(['FCT_Commander.RankID', 'FCT_Ranks.*']) })
 
+// The reads of the panels the Logistics page mounts beside its own, each with its own loading, failure and Retry: the fleet stations and their picker, the station objects and bodies, the resource reserves and the fuel reserves. The scan cannot tell a component's reads from the page's own, so these fields stay in its `page` input, which is required; the group takes them out of what the page cannot do without, so a save without one degrades the report and each panel names what it could not read instead of the page being withheld. The fields are the page's reads that an optional input of the page also names and no required input does: the six tables only these panels read, and the one column each of FCT_RaceSysSurvey and FCT_SystemBodyName that their queries add to the columns the page's own reads name.
+const STATION_PANEL_READS = Object.freeze({ key: 'stationPanels', label: 'The station and reserve panels', affects: 'the fleet stations, the station objects and bodies, the resource reserves and the fuel reserves, each of which names what it could not read in its own panel, with its own Retry', fields: Object.freeze(['DIM_TechType.*', 'FCT_FleetHistory.*', 'FCT_RaceSysSurvey.DiscoveredTime', 'FCT_RaceTech.*', 'FCT_System.*', 'FCT_SystemBodyName.GameID', 'FCT_TechSystem.*', 'FCT_Waypoint.*']) })
+
 // The column groups a report can lose without the rest of it. `fields` are 'Table.Column', or 'Table.*' for a whole table that only the group reads. A group's columns still count as missing for the report's inputs, but degrade the report instead of making it unsupported, and the page leaves them out of its queries (`groupsOf`).
 export const SOFT = Object.freeze({
   '/commanders': Object.freeze([
     Object.freeze({ key: 'rank', label: 'Officer ranks', affects: 'rank names and levels, the order by rank and the specialist ship suggestions, which need the rank a class requires', fields: Object.freeze(['FCT_Commander.RankID', 'FCT_Ranks.*', 'FCT_ShipClass.RankRequired']) }),
     Object.freeze({ key: 'age', label: 'Officer ages', affects: 'officer ages', fields: Object.freeze(['FCT_Species.*', 'FCT_Commander.SpeciesID']) }),
+    Object.freeze({ key: 'seniorCO', label: 'Ship Senior CO', affects: 'the Senior CO mark of the ships table and of the roster, and the captain rank of the specialist ship suggestions, which is unknown while the save does not store the setting: the game raises the class rank by one for a ship set to Senior CO', fields: Object.freeze(['FCT_Ship.ShipSeniorCO']) }),
   ]),
   '/production': Object.freeze([navalRank('the orbital terraforming rates of the colonies, which rest on the ranks of the naval admin commanders')]),
   '/mineral-outlook': Object.freeze([navalRank('the mining rates of the orbital miners, which rest on the ranks of the naval admin commanders')]),
   '/habitability': Object.freeze([navalRank('the mining outlook of the mass-driver colonies, which rests on the ranks of the naval admin commanders')]),
-  '/logistics': Object.freeze([navalRank('the fuel output of the Sorium harvesters, which rests on the ranks of the naval admin commanders')]),
+  '/logistics': Object.freeze([navalRank('the fuel output of the Sorium harvesters, which rests on the ranks of the naval admin commanders'), STATION_PANEL_READS]),
   '/survey-progress': Object.freeze([navalRank('the survey rates of the fleets, which rest on the ranks of the naval admin commanders')]),
   '/hauling': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
   '/information': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
@@ -92,12 +113,14 @@ export const MARKER_COLUMNS = Object.freeze({
   DIM_NavalAdminCommandType: SHARE_NAMES,
 })
 
-// The columns an input uses of a table whose bare `*` marker stands for more than the page needs: { [route]: { [input]: { [table]: [column] } } }, which replace that marker's list in `MARKER_COLUMNS`. Each page loads the naval admin commands of one share (`loadNavalAdmins(..., { share })`), the Colonization Planner through utilities/colonization-data.js and the handling times of Transport and Hauling through utilities/handling-support.js.
+// The columns an input uses of a table whose bare `*` marker stands for more than the page needs: { [route]: { [input]: { [table]: [column] } } }, which replace that marker's list in `MARKER_COLUMNS`. Each page loads the naval admin commands of one share (`loadNavalAdmins(..., { share })`; the production modifiers every colony capacity page shares read the Industrial share for the orbital term of the ordnance capacity), the Colonization Planner through utilities/colonization-data.js and the handling times of Transport and Hauling through utilities/handling-support.js.
 export const MARKER_USES = Object.freeze({
-  '/production': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
-  '/mineral-outlook': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/production': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/mineral-outlook': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/habitability': Object.freeze({ outlook: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
-  '/logistics': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/logistics': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/colony-outlook': Object.freeze({ populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/shipyards': Object.freeze({ populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/hauling': Object.freeze({ handlingSupport: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Logistics']) }) }),
   '/information': Object.freeze({ handlingSupport: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Logistics']) }) }),
   '/survey-progress': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Survey']) }) }),
@@ -121,7 +144,7 @@ const RESERVE_PANEL_READS = [
   'FCT_Ship(GameID ShipClassID ShipID)',
   'FCT_ShipClass(ClassName GameID MinimumFuel MinimumSupplies RaceID ShipClassID)',
   'FCT_Species(ProductionRateModifier ResearchRateModifier SpeciesID)',
-  'FCT_Star(Component StarID)',
+  'FCT_Star(ComponentNumber StarID)',
   'FCT_SystemBody(BodyClass OrbitNumber PlanetNumber RadiationLevel StarID SystemBodyID Xcor Ycor)',
   'FCT_SystemBodyName(Name RaceID SystemBodyID)',
 ].join(' ')
@@ -161,33 +184,43 @@ const FLEET_COMMAND_READS = 'FCT_Fleet(ParentCommandID)'
 
 const MASS_DRIVER_READS = 'DIM_PlanetaryInstallation(MassDriverValue) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* GameID MassDriverDest PopulationID RaceID) FCT_PopulationInstallations(Amount)'
 
+// The wrecks and life pods a Lagrange point carries are read for the position facts by one statement built from the name of each table (route-position.js), so the scan finds the whole table and none of its columns: these are the columns the two reads name.
+const ANCHORED_OBJECT_READS = 'FCT_Lifepods(LifepodID GameID SystemID OrbitLagrangeID Xcor Ycor) FCT_Wrecks(WreckID GameID SystemID OrbitLagrangeID Xcor Ycor)'
+
+// The columns the shared orbital colonist census reads; every input that consumes it names them.
+const ORBITAL_CENSUS_READS = 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_DamagedComponent(ComponentID GameID Number ShipID) FCT_Fleet(AssignedPopulationID CivilianFunction FleetID GameID RaceID Xcor Ycor) FCT_MoveOrders(FleetID GameID) FCT_Population(GameID Population PopulationID RaceID SystemBodyID) FCT_Ship(FleetID GameID ShipClassID ShipID) FCT_ShipCargo(Amount CargoTypeID GameID ShipID SpeciesID) FCT_ShipClass(ArkShip GameID ShipClassID) FCT_ShipDesignComponents(ComponentTypeID ComponentValue GameID SDComponentID SpecialFunction) FCT_Species(GameID SpeciesID) FCT_SystemBody(GameID SystemBodyID Xcor Ycor)'
+
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
   '/production': Object.freeze({
     colonyFacilities: 'DIM_PlanetaryInstallation(ResearchValue GroundTrainingValue)',
+    researches: ORBITAL_CENSUS_READS,
     procurementSources: 'FCT_ShipDesignComponents(Size Cost)',
     page: FLEET_COMMAND_READS,
   }),
   '/warnings': Object.freeze({
     page: `DIM_PlanetaryInstallation(ConstructionValue OrdnanceProductionValue FighterProductionValue) ${STOCKPILES}`,
     'check:dangerous-rifts': STOCKPILES,
+    'check:idle-research-labs': ORBITAL_CENSUS_READS,
     'check:free-construction-capacity': 'DIM_PlanetaryInstallation(ConstructionValue)',
     'check:free-ordnance-capacity': 'DIM_PlanetaryInstallation(OrdnanceProductionValue)',
     'check:free-fighter-capacity': 'DIM_PlanetaryInstallation(FighterProductionValue)',
+    'check:known-unexploited-constructs': ORBITAL_CENSUS_READS,
   }),
   '/habitability': Object.freeze({
-    gases: 'DIM_Gases(GasID Name BoilingPoint GHGas AntiGHGas Dangerous DangerousLevel)',
+    gases: 'DIM_Gases(GasID Name FreezingPoint GHGas AntiGHGas DangerousOxygen DangerousPPMOxygen DangerousMethane DangerousPPMMethane DangerousSulphur DangerousPPMSulphur DangerousAmmonia DangerousPPMAmmonia)',
     outlook: `FCT_MassDriverPackets(GameID RaceID ${MINERAL_LIST})`,
     BodyDetail: FLEET_COMMAND_READS,
   }),
-  '/logistics': Object.freeze({ page: START_DELAY_READS, colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
+  '/logistics': Object.freeze({ page: START_DELAY_READS, colonies: `FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID) ${ORBITAL_CENSUS_READS}`, fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
   '/minerals': Object.freeze({ page: 'FCT_IndustrialProjects(* Amount GameID PopulationID RaceID) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* Reserve* GameID PopulationID RaceID) FCT_ShipyardTask(* CompletedBP GameID PopulationID RaceID TaskTypeID TotalBP)' }),
   '/colony-outlook': Object.freeze({ bootstrapSources: BUILDABILITY_READS, page: START_DELAY_READS }),
-  '/routes': Object.freeze({ page: START_DELAY_READS }),
+  '/routes': Object.freeze({ page: START_DELAY_READS, positionFacts: ANCHORED_OBJECT_READS }),
   '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_MineralDeposit(Accessibility Amount) FCT_SystemBody(Xcor)', deploymentSources: BUILDABILITY_READS, page: MASS_DRIVER_READS }),
-  '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS }),
-  '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS }),
+  '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS, positionFacts: ANCHORED_OBJECT_READS }),
+  '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS, shippingTax: 'FCT_Race(GameID RaceID ShippingLineTax NPR)', positionFacts: ANCHORED_OBJECT_READS }),
+  '/technologies': Object.freeze({ constructs: ORBITAL_CENSUS_READS }),
   '/designed-tech': Object.freeze({
     categories: 'DIM_ResearchCategories(CategoryID Name)',
     classUsage: 'FCT_Ship(ShipClassID GameID RaceID Destroyed)',
@@ -229,14 +262,17 @@ export const BONUS_NAMES = Object.freeze({
   2: Object.freeze({ name: 'Survey', percentage: true, routes: Object.freeze(['/survey-progress', '/commanders']), effect: Object.freeze({ default: 'the survey rates of the fleets', '/commanders': OFFICERS }) }),
   3: Object.freeze({ name: 'Research', percentage: true, routes: Object.freeze(['/production', '/technologies', '/commanders']), effect: Object.freeze({ '/production': 'the research rates of projects with a scientist', '/technologies': 'the research bonus of the scientists', '/commanders': OFFICERS }) }),
   4: Object.freeze({ name: 'Shipbuilding', percentage: true, routes: Object.freeze(MIXIN_REPORTS), effect: 'the shipyard build rates of the colonies' }),
-  5: Object.freeze({ name: 'Production', percentage: true, routes: Object.freeze([...MIXIN_REPORTS, '/hauling', '/lagrange']), effect: Object.freeze({ default: 'the construction, ordnance and fighter capacity of the colonies', '/hauling': 'the maintenance supplies and fuel the colonies make in the reserve ledger', '/lagrange': 'the stabilisation ships and the stabilisation times' }) }),
+  5: Object.freeze({ name: 'Production', percentage: true, routes: Object.freeze([...MIXIN_REPORTS, '/hauling', '/lagrange']), effect: Object.freeze({ default: 'the construction, ordnance and light naval capacity of the colonies', '/hauling': 'the maintenance supplies and fuel the colonies make in the reserve ledger', '/lagrange': 'the stabilisation ships and the stabilisation times' }) }),
   6: Object.freeze({ name: 'Mining', percentage: true, routes: Object.freeze(['/commanders', '/mineral-outlook', '/habitability', '/logistics', '/minerals']), effect: Object.freeze({ '/commanders': OFFICERS, '/mineral-outlook': 'the mining rates of the colonies and the orbital miners', '/habitability': 'the mineral runway that sets the plan\'s mineral weights', '/logistics': 'the fuel output of the Sorium harvesters', '/minerals': 'the output of the civilian mining policy' }) }),
   8: Object.freeze({ name: 'Population Growth', percentage: true, routes: Object.freeze(['/colony-outlook', '/commanders']), effect: Object.freeze({ default: 'the growth rates of the colonies', '/commanders': OFFICERS }) }),
   9: Object.freeze({ name: 'Terraforming', percentage: true, routes: Object.freeze(['/production', '/habitability', '/commanders']), effect: Object.freeze({ default: 'the terraforming capacity and rates of the colonies, with the commanders and naval admin chain behind them', '/commanders': OFFICERS }) }),
   11: Object.freeze({ name: 'Ground Construction', percentage: true, routes: Object.freeze(MIXIN_REPORTS), effect: 'the ground unit construction rates of the colonies' }),
+  21: Object.freeze({ name: 'Tactical', percentage: true, routes: Object.freeze(['/commanders']), effect: 'the Tactical bonus shown beside the Light Tactical ranking of a light naval ship over 20 hull spaces' }),
+  22: Object.freeze({ name: 'Communications', percentage: true, routes: Object.freeze(['/intelligence']), effect: 'the contact rating that the captains of the ships with a Diplomacy Module give an attempt at communication' }),
   24: Object.freeze({ name: 'Logistics', percentage: true, routes: Object.freeze(['/hauling', '/information']), effect: 'the commander, naval admin, governor and sector terms of the cargo handling times' }),
   25: Object.freeze({ name: 'Colony Administration', percentage: false, routes: Object.freeze(['/commanders']), effect: OFFICERS }),
   27: Object.freeze({ name: 'Research Admin', percentage: false, routes: Object.freeze(['/technologies', '/commanders']), effect: Object.freeze({ '/technologies': 'the labs the scientists may run', '/commanders': OFFICERS }) }),
+  39: Object.freeze({ name: 'Light Tactical', percentage: true, routes: Object.freeze(['/commanders']), effect: OFFICERS }),
 })
 
 export const COMPONENT_TYPES = Object.freeze({
@@ -310,42 +346,35 @@ const GATE_TABLES = Object.freeze({
   DIM_ComponentType: ['ComponentTypeID', 'TypeDescription'],
 })
 
-const FORMULA_COLUMNS = Object.freeze(['AllowCMC', 'AncientRelics'])
+// The Aurora 3.1 tables and columns the catalogue knows before a page reads them: the two ordnance series tables (AE-308-05), the Lagrange anchor columns, with the two columns the line kept although their behaviour is replaced (AE-308-06), and the option, archaeology and light-naval columns (AE-308-07). `item` is the item that declares the structure and `readBy` the item the ledger gives the read to, which turns the declaration into an ordinary input of its route when it lands. `retained` marks a column the line kept from the header before it, so a save from before the line holds it too. A declared field is never an input of a report, and no model carries one for a page that does not read the column: the preflight reads every declared table's schema and says whether the save holds each column, and a save that lacks one changes no report's status, so a declaration gates, degrades and withholds nothing of its own.
+export const DECLARED = Object.freeze([
+  Object.freeze({ item: 'AE-308-05', readBy: 'AE-303-03', table: 'FCT_OrdnanceSeries', columns: Object.freeze(['OrdnanceSeriesID', 'Description', 'GameID', 'RaceID']) }),
+  Object.freeze({ item: 'AE-308-05', readBy: 'AE-303-03', table: 'FCT_OrdnanceSeriesMissileType', columns: Object.freeze(['OrdnanceSeriesID', 'MissileTypeID', 'GameID', 'Priority', 'RaceID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-04', table: 'FCT_Fleet', columns: Object.freeze(['AutoLP']), retained: true, note: 'kept in the 3.1 header although its behaviour is replaced, and in the header before it; the game reads a fleet\'s Lagrange mode from LagrangeStatus and this column from nothing, so the app reads it nowhere' }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-05', table: 'FCT_SystemBody', columns: Object.freeze(['FixedBodyLagrangePointID']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-303-01', table: 'FCT_SystemBody', columns: Object.freeze(['ArtifactReserve', 'RuinLevel']) }),
+  Object.freeze({ item: 'AE-308-06', readBy: 'AE-302-04', table: 'FCT_Game', columns: Object.freeze(['OrbitalMotionAst']), retained: true, note: 'kept in the 3.1 header although its behaviour is replaced, and in the header before it; the game gates no body by it, so the app reads it nowhere' }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-301-06', table: 'FCT_Game', columns: Object.freeze(['LostColonies', 'GenerateNonOxygenRaces', 'NoShieldTechnology']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-302-01', table: 'FCT_Race', columns: Object.freeze(['chkShowBodyColours', 'chkCCIncludeLowG', 'chkGasGiantColour']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-04', table: 'FCT_Race', columns: Object.freeze(['chkJumpPointBuoys']) }),
+  Object.freeze({ item: 'AE-308-07', readBy: 'AE-303-01', table: 'FCT_Population', columns: Object.freeze(['AlienArtifacts', 'ConstructPriority', 'AccruedArtifactPoints', 'AccruedConstructPoints', 'NoRuinRecovery']) }),
 
-// What each formula column stores, in words for a missing input.
-const FORMULA_SETTINGS = Object.freeze({ AllowCMC: 'the game setting that allows civilian mining complexes', AncientRelics: 'the game setting for ancient relics' })
-
-// The columns Aurora 2.7 added over 2.6, as 'Table.Column', which tell a 2.7 save from an older one: a save carries no version label, and no 2.7 save is without all of them. Read from the saves on disk (AuroraDB_270_base.db against AuroraDB_260_base.db: every other table and column is the same).
-export const LINE_SIGNATURE = Object.freeze([
-  'FCT_Game.AllowCMC',
-  'FCT_Game.AncientRelics',
-  'FCT_DesignPhilosophy.MaintenanceModules',
-  'FCT_Fleet.AutoLP',
-  'FCT_Population.AcademyNameThemeID',
-  'FCT_Population.BuildReplacements',
-  'FCT_Population.ReplacementCapacity',
-  'FCT_Population.UseAcademyNameTheme',
-  'FCT_Race.RandomClassName',
-  'FCT_Race.chkCometNames',
-  'FCT_Race.chkComets',
-  'FCT_Ship.MaxActiveResolution',
-  'FCT_Ship.SLRetire',
-  'FCT_ShipClassTemplate.CrewDesignEfficiency',
 ])
 
-// The Aurora line the app is for, as its major and minor ('2.7'): the stated formula version without its patch.
+// The Aurora line the app is for, as its major and minor ('3.2'): the stated formula version without its patch.
 export const LINE_NAME = STATED_FORMULA_VERSION.split('.').slice(0, 2).join('.')
 
 // The words of a refusal, by the reason of `lineResult`: `notice` is the sentence the Unsupported save panel opens with, `status` the line the save status says.
 export const REFUSALS = Object.freeze({
   'not-aurora': Object.freeze({ notice: 'The file has no game table, so it is not an Aurora save.', status: 'refused: no game table' }),
-  'pre-2.7': Object.freeze({ notice: `The save is not shaped like an Aurora ${LINE_NAME} save: none of the ${LINE_SIGNATURE.length} columns Aurora ${LINE_NAME} added is in it.`, status: `refused: not a ${LINE_NAME} save (none of the ${LINE_SIGNATURE.length} columns of Aurora ${LINE_NAME})` }),
+  'pre-3.0': Object.freeze({ notice: `The save is not shaped like an Aurora ${LINE_NAME} save: none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added is in it. A save of Aurora 2.7 is read by the Aurora Electrons 2.7.x line, releases 2.7.N from the release/2.7 branch (2.7.11 as of this release); a save from before Aurora 2.7 is read by Aurora Electrons 0.11.0.`, status: `refused: not a ${LINE_NAME} save (none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added)` }),
 })
 
 const allTables = () => {
   const tables = new Set(Object.keys(GATE_TABLES))
 
   Object.values(INPUTS).forEach((inputs) => inputs.forEach((input) => Object.keys(input.reads).forEach((table) => tables.add(table))))
+  DECLARED.forEach((entry) => tables.add(entry.table))
   tables.add('FCT_Game')
   LINE_SIGNATURE.forEach((field) => tables.add(field.split('.')[0]))
 
@@ -384,14 +413,22 @@ const hasTable = (schema, table) => schema.has(table.toLowerCase())
 
 const hasColumn = (schema, table, column) => hasTable(schema, table) && schema.get(table.toLowerCase()).has(column.toLowerCase())
 
-// The formula version of the save as a result of 'capability.formulaVersion': the stated one, assumed, when the save has both formula columns of FCT_Game, unavailable (naming the absent settings in words) otherwise. Separate from the structure checks: a save can have every column a report reads and still be of another game version.
+// The formula version of the save as a result of 'capability.formulaVersion': the stated one, assumed, when the save has every column of the line's signature, unavailable (naming the absent columns in words) otherwise, so a save from before 3.0 and a damaged 3.x save state no formula version. Separate from the structure checks: a save can have every column a report reads and still be of another game version.
 export const formulaResult = (schema) => {
-  const missing = FORMULA_COLUMNS.filter((column) => !hasColumn(schema, 'FCT_Game', column)).map((column) => FORMULA_SETTINGS[column])
+  const missing = FORMULA_COLUMNS.filter((field) => {
+    const [table, column] = field.split('.')
 
-  return missing.length ? unavailable({ rule: FORMULA, missing, present: qualified(FORMULA_COLUMNS.filter((column) => hasColumn(schema, 'FCT_Game', column)), 'FCT_Game') }) : ofRule({ rule: FORMULA, value: STATED_FORMULA_VERSION, inputs: { present: qualified(FORMULA_COLUMNS, 'FCT_Game') } })
+    return !hasColumn(schema, table, column)
+  })
+
+  if (missing.length) {
+    return unavailable({ rule: FORMULA, missing: missing.map(fieldWords), present: FORMULA_COLUMNS.filter((field) => !missing.includes(field)) })
+  }
+
+  return ofRule({ rule: FORMULA, value: STATED_FORMULA_VERSION, inputs: { present: FORMULA_COLUMNS } })
 }
 
-// Which Aurora line the save is of, from its schema: { status: 'refused' | 'accepted', reason: 'not-aurora' | 'pre-2.7' | null, line, missing }. A schema with no FCT_Game table is no Aurora save, and one with none of LINE_SIGNATURE is a save from before Aurora 2.7: both are refused. A schema with any of it is of the stated line (`line`), whichever of the columns it lacks (`missing`): a damaged 2.7 save is not refused, and `formulaResult` and the report gating say what it lacks. Aurora's later lines are not told apart (a 3.0 save is expected to hold every column of the signature).
+// Which Aurora line the save is of, from its schema: { status: 'refused' | 'accepted', reason: 'not-aurora' | 'pre-3.0' | null, line, missing }. A schema with no FCT_Game table is no Aurora save, and one with none of LINE_SIGNATURE is a save from before Aurora 3.0: both are refused. A schema with any of it is of the stated line (`line`), whichever of the columns it lacks (`missing`): a damaged 3.2 save is not refused, and `formulaResult` and the report gating say what it lacks. Aurora 3.0, 3.1 and 3.2 are not told apart: the three shipped databases are identical in schema, and all read as the 3.2 line.
 export const lineResult = (schema) => {
   if (!hasTable(schema, 'FCT_Game')) {
     return Object.freeze({ status: 'refused', reason: 'not-aurora', line: null, missing: Object.freeze([]) })
@@ -404,21 +441,22 @@ export const lineResult = (schema) => {
   })
 
   if (missing.length === LINE_SIGNATURE.length) {
-    return Object.freeze({ status: 'refused', reason: 'pre-2.7', line: null, missing: Object.freeze(missing) })
+    return Object.freeze({ status: 'refused', reason: 'pre-3.0', line: null, missing: Object.freeze(missing) })
   }
 
   return Object.freeze({ status: 'accepted', reason: null, line: STATED_FORMULA_VERSION, missing: Object.freeze(missing) })
 }
 
-// The formula version the save's schema stands for: the stated one ('2.7.x') for a save with both 2.7 columns of FCT_Game, null for any other shape, and the landing rule is then not settled (`landingThreshold`).
-export const loadFormulaVersion = async (database) => {
-  const [rows] = await database.query(schemaSql(['FCT_Game']))
+// The formula version the save's schema stands for: the stated one ('3.2.x') for a save with every column of the line's signature, null for any other shape, and the loading rules are then not settled (`loadingRulesHold`). The signature spans four tables, so all of them are read here.
+export const loadFormulaResult = async (database) => {
+  const tables = [...new Set(FORMULA_COLUMNS.map((field) => field.split('.')[0]))]
+  const [rows] = await database.query(schemaSql(tables))
 
-  return valueOrNull(formulaResult(schemaOf(rows)))
+  return formulaResult(schemaOf(rows))
 }
 
-// 'Table.Column' of each column; joined by name so that the scan of the pages does not take these for reads of the pages.
-const qualified = (columns, table) => columns.map((column) => [table, column].join('.'))
+// The same read as the version alone, null when the save states none, for the reports that need only the string.
+export const loadFormulaVersion = async (database) => valueOrNull(await loadFormulaResult(database))
 
 const fieldText = (gap) => (gap.column ? `${gap.table}.${gap.column}` : `${gap.table} (table)`)
 
@@ -542,7 +580,6 @@ const gateEntries = (gates) => [
 export const blockedBonuses = (gates) => new Set(Object.entries(gates ? gates.bonuses : BONUS_NAMES).filter(([, result]) => !gates || !isAvailable(result)).map(([id]) => Number(id)))
 
 const UNCONFIRMED = 'the capability check of the save has not confirmed the lookup rows these figures depend on'
-
 // Why the lookup rows a figure depends on are not confirmed, as a list of texts: [] when every one of `bonuses` (commander bonus IDs) and `components` (component type IDs) reads as expected, what each lookup says it differs in when the check answered, and one text when it has not (`gates` null).
 export const gateGaps = (gates, { bonuses = [], components = [] }) => {
   if (!gates) {
@@ -554,7 +591,15 @@ export const gateGaps = (gates, { bonuses = [], components = [] }) => {
   return [...bonuses.flatMap((id) => gapsOfGate(gates.bonuses[id], id, 'commander bonus')), ...components.flatMap((id) => gapsOfGate(gates.components[id], id, 'component type'))]
 }
 
-// The save's capabilities from its schema (`schemaOf`) and lookup rows (`rows`: { bonuses, components } keyed by ID): { line, formula, gates, reports: { [route]: { status, missing, degraded, unchecked, groups } }, shell, tables, columns }. `line` is `lineResult`'s: whether the save is of the Aurora line the app reads at all; every report is evaluated whatever it says, and the layout decides what a refused save is shown.
+// What the catalogue declares beyond the pages' reads, as `DECLARED`'s entries with `present` and `absent`: the columns of the entry the save holds and those it lacks. A declared field is no report's input, so none of them gates, degrades or withholds a report, and a save from before the line names every one as absent without changing a status.
+const declaredOf = (schema) => DECLARED.map((entry) => {
+  const absent = entry.columns.filter((column) => !hasColumn(schema, entry.table, column))
+
+  return Object.freeze({ ...entry, present: Object.freeze(entry.columns.filter((column) => !absent.includes(column))), absent: Object.freeze(absent) })
+})
+
+// The save's capabilities from its schema (`schemaOf`) and lookup rows (`rows`: { bonuses, components } keyed by ID): { line, formula, gates, declared, reports: { [route]: { status, missing, degraded, unchecked, groups } }, shell, tables, columns }. `line` is `lineResult`'s: whether the save is of the Aurora line the app reads at all; every report is evaluated whatever it says, and the layout decides what a refused save is shown.
+//  - `declared` are the structures the catalogue knows before a page reads them, by entry, with the columns the save holds and those it lacks ({ item, readBy, table, columns, note?, present, absent }); they gate nothing.
 //  - `missing` are the required inputs with a missing field: [{ key, label, fields }].
 //  - `degraded` are the optional inputs and soft groups with a missing field, [{ key, label, affects, fields, group? }], and the lookup rows that differ, as { key, label, affects, fields: [why], gate: true }.
 //  - `unchecked` are the reads whose columns the preflight does not check because the read guards itself, [{ key, label, table, why }].
@@ -578,7 +623,7 @@ export const evaluate = (schema, rows = {}) => {
   const shell = evaluateInputs('shell', schema)
   const columns = [...schema.values()].reduce((total, set) => total + set.size, 0)
 
-  return { line: lineResult(schema), formula: formulaResult(schema), gates, reports, shell: { ...shell, status: shell.status === 'unsupported' ? 'degraded' : shell.status }, tables: schema.size, columns }
+  return { line: lineResult(schema), formula: formulaResult(schema), gates, declared: declaredOf(schema), reports, shell: { ...shell, status: shell.status === 'unsupported' ? 'degraded' : shell.status }, tables: schema.size, columns }
 }
 
 const asRows = (rows) => (Array.isArray(rows) ? rows : [])

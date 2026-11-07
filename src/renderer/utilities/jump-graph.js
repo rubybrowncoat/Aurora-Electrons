@@ -7,10 +7,19 @@ export const KM_PER_AU = 149600000
 
 const hasPosition = (point) => Number.isFinite(point.Xcor) && Number.isFinite(point.Ycor)
 
+// A fleet's Lagrange mode is `FCT_Fleet.LagrangeStatus` (Manual 0, Plotted 1, Dynamic 2) and never the legacy `FCT_Fleet.AutoLP` text, which the game does not read. An order placed for a fleet inserts the intra-system Lagrange jumps when the fleet is Plotted, or Dynamic with no move order queued, and the destination is no Lagrange point; a Dynamic fleet with orders has its route recalculated by the movement update.
+export const LAGRANGE_MODES = Object.freeze({ 0: 'manual', 1: 'plotted', 2: 'dynamic' })
+
+// The mode a `LagrangeStatus` value names ('manual', 'plotted' or 'dynamic'), null for a value that is not read or that the game does not define.
+export const lagrangeModeOf = (status) => (status === null || status === undefined || status === '' ? null : LAGRANGE_MODES[Number(status)] || null)
+
+// Whether an order placed for a fleet of `mode` that has `queued` move orders takes Lagrange jumps: always for Plotted, never for Manual, and for Dynamic only while no order is queued. null when the mode or the queue is not read.
+export const takesLagrange = (mode, queued) => (mode === 'plotted' ? true : mode === 'manual' ? false : mode === 'dynamic' && Number.isInteger(queued) ? queued === 0 : null)
+
 const hypot = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
 
 // The rules of a route over the explored jump points, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The plan-level ones (totals, travel time, speed, avoid options) are in utilities/route-plan.js.
-const ROUTE_VERSIONS = ['2.7.x']
+const ROUTE_VERSIONS = ['3.2.x']
 
 registerRule({
   id: 'route.jumps',
@@ -18,7 +27,7 @@ registerRule({
   units: 'jumps',
   verification: 'confirmed',
   structure: ['FCT_JumpPoint.WPLink', 'FCT_RaceJumpPointSurvey.Explored', 'FCT_RaceJumpPointSurvey.Charted'],
-  note: 'The fewest transits over the jump points the race has explored, the shorter way breaking a tie; the search was checked against the game\'s own routes. A link the race has not explored, or one with no position in the save, is never crossed, so a system only such links reach has no route.',
+  note: 'The fewest transits over the jump points the race has explored, the shorter way breaking a tie; the search was checked against the game\'s own routes. A link the race has not explored, or one with no position in the save, is never crossed, so a system only such links reach has no route. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 registerRule({
@@ -27,7 +36,7 @@ registerRule({
   units: 'km',
   verification: 'confirmed',
   structure: ['FCT_JumpPoint.Xcor, Ycor', 'FCT_LagrangePoint.Xcor, Ycor', 'FCT_SystemBody.Xcor, Ycor'],
-  note: 'The straight-line distances flown inside each system between the places the route passes, summed; a jump takes no distance and a system\'s centre is where the galactic map measures from. Arithmetic over saved positions: a place with no position in the save has no distance.',
+  note: 'The straight-line distances flown inside each system between the places the route passes, summed; a jump takes no distance and a system\'s centre is where the galactic map measures from. Arithmetic over saved positions: a place with no position in the save has no distance. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
 })
 
 const ROUTE_INPUTS = ['the explored jump points', 'their positions']

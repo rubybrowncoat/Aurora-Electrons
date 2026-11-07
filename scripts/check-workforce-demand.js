@@ -3,13 +3,15 @@
 
   node scripts/check-workforce-demand.js [--no-mutations] [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
+  With no options it runs on the migrated 3.1 fixture of scripts/lib/fixtures.js, read-only.
 
   Worked cases on synthetic rows (labelled so) run the real functions: a factory or a yard upgrade that finishes raises the demand from the month its date falls in (a date on a month's last day counts in that month, the day after in the next), a paused, queued or stalled job adds nothing that is certain and a stalled one at most what its stock builds, a job with no date adds nothing to the lower demand and everything to the higher, a conversion adds the difference of the two installations (and lowers the demand where the new one needs fewer), a retool adds nothing, a shipyard activity the model does not know and a colony of a spied empire are unavailable and name what is missing, population orbiting aboard Arks never reaches the workers, and a colony with nothing queued gives the Outlook's own figure.
 
   The saves are read through the page's own reads and checked against counts of the rows in the save: on the current basis nothing extra is read and every row is the Outlook's own, value for value; on the committed basis with nothing queued it is the same; with the queue every event is one of the colony's projects or yards, in the forecast's order, dated the way the rules above say, with no phantom installation from a paused, queued or stalled job. A check that needs a case the save does not hold prints UNSUPPORTED and is in neither the passes nor the failures.
 
   The yards aboard a ship run on the saves that hold them, whatever saves are named (SHIP_YARD_SAVES, read-only; a copy is a temporary table over the save's own; a save that is not there reads UNSUPPORTED): the page's colonies read gives each colony the workers of the yards no ship holds, value for value against a sum worked out here from the save's yard and ship rows, and the colonies named for a yard aboard a ship read the figure worked out by hand; with the queue counted, an activity given to a yard aboard a ship in a copy is not read, and the workers the colony's activities change leave it out. A rewrite of both filters that says the same thing must leave those checks green.
+
+  The species growth modifier is applied to positive growth only (3.1: docs `COLONY_AND_POPULATION_LIFECYCLE_REFERENCE.md` § Changes since the earlier line, line 229). A worked case runs a colony of 100 M people at a species modifier of 1.5, and one whose governor bonus takes its growth below zero, through the growth rate, the Outlook's growth figure and its projection, and reads the rate alone of a colony with no people and an unreadable modifier and of one with no people at a radiation level. The save whose own colonies are run beside it is read by hand (population, species, body and installation rows), not through the Outlook's colonies read, which is of the earlier schema: the interim 3.1 fixture of scripts/lib/fixtures.js (a game of the earlier line migrated to the 3.1 schema, game 141, race 784), UNSUPPORTED when it is not there. A save whose colonies all read a species modifier of 1 cannot tell either growth mutant apart: its save case is no credit for the mutant, and where no save can tell it apart the worked case carries the kill. Every colony's rate is compared with the rule worked out here, the species modifier on growth that is positive and left off growth that is not, with the zero case (no people) and the negative one (a governor bonus below zero) taken from the same colonies.
 
   The mutants load a temp copy of the utilities folder with one thing changed; each must fail the check named with it. The faults of the yards aboard a ship are planted in the page and must fail their checks by a value on every save that holds the case, never by a throw of the page.
 */
@@ -22,17 +24,14 @@ const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { patched, plantedPatch } = require('./lib/mutant-source')
 const { assert, boundary, caughtAll, judged, runChecks } = require('./lib/fault-credit')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
-const DEFAULT_SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
-// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In saves/AuroraDB.db (game 138, race 785) BEG-A2M9 XENO (49494, 92 M people) holds the repair yard Fix50 001 aboard a ship (50,000 t, 1.25 M workers were it counted) beside 0.00025 M of yards of its own; `activity` is that ship's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship. In saves/AuroraDB_270_unknown.db (game 140, race 784) Epsilon Ceti (49025) and Adhara (49026) each hold one repair yard aboard a ship (100,000 t, 2.5 M) and none of their own; they have no people, and the page reads only colonies with people, so a copy gives them some (`peopled`). In the owner's AuroraDB-271-spookyerol-repair-yards.db at the root (game 141, race 784; local only, so it reads unsupported where it is not there) the homeworld Aurelia (48979, 497 M people) holds two repair yards aboard ships, SB15M Shipbreaker 001 (1,500,000 t, 37.5 M were it counted) and SNS Hephaestus (31,000 t, 0.775 M), beside 74.25 M of yards of its own; `activity` is the shipbreaker's yard.
+const FIXTURE_SAVE = fixtureSave()
+const DEFAULT_SAVES = [FIXTURE_SAVE]
+// The saves that hold shipyards aboard a ship, with the colonies named for them and the workers their own yards need, read by hand from the save. In the migrated 3.1 fixture (game 141, race 784) the homeworld Aurelia (48979) holds two repair yards aboard ships, a shipbreaker's (1,500,000 t, 37.5 M were it counted) and a smaller one's (31,000 t, 0.775 M), beside 91.5 M of yards of its own (eight yards, from 1.25 M to 17.25 M each: the three commercial and five naval yards and a Light yard of 1,000 t and five slipways, which needs the whole 1.25 M as a naval yard does, not a tenth of it); `activity` is the shipbreaker's yard, which a copy gives an activity, as no save holds one on a yard aboard a ship.
 const SHIP_YARD_SAVES = [
-  { file: 'saves/AuroraDB.db', game: 138, race: 785, named: { 49494: 0.00025 }, activity: 6760 },
-  { file: 'saves/AuroraDB_270_unknown.db', game: 140, race: 784, named: { 49025: 0, 49026: 0 }, peopled: [49025, 49026] },
-  { file: 'AuroraDB-271-spookyerol-repair-yards.db', game: 141, race: 784, named: { 48979: 74.25 }, activity: 25 },
+  { file: FIXTURE_SAVE.file, game: FIXTURE_SAVE.game, race: FIXTURE_SAVE.race, named: { 48979: 91.5 }, activity: 25 },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {
@@ -40,6 +39,7 @@ const STUBS = {
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
+  'lodash/groupBy': 'export default (list, key) => list.reduce((groups, row) => { (groups[row[key]] ||= []).push(row); return groups }, {})',
 }
 const UTILITIES = ['workforce-demand', 'colonies', 'production', 'industry-cycle', 'minerals', 'decimal', 'provenance', 'search-run']
 const TOLERANCE = 1e-9
@@ -141,11 +141,11 @@ const mutatedUtilities = async (file, from, to) => {
   }
 }
 
-const MODIFIERS = { PopName: 'Test colony', ConstructionProduction: 36500, OverallProductionModifier: 1, ConstructionPower: 1, EngineerProductionModifier: 0, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400, ShipyardBuildRate: 3650, ShipyardOperations: 1 }
+const MODIFIERS = { PopName: 'Test colony', ConstructionProduction: 36500, OverallProductionModifier: 1, ConstructionPower: 1, GroundConstructionPower: 0, OrdnanceProduction: 0, OrdnanceProductionPower: 0, FighterProduction: 0, FighterProductionPower: 0, MinConstructionPeriod: 86400, ShipyardBuildRate: 3650, ShipyardOperations: 1 }
 const INSTALLATIONS = { 1: { Workers: 0.05 }, 2: { Workers: 0.2 }, 3: { Workers: 0 }, 4: { Workers: 0.1 } }
 
 // A colony of 100 million people of which 20 million are employed by installations, the way the page reads one.
-const colonyRow = (extra = {}) => ({ PopulationID: 7, PopName: 'Test colony', Population: 100, ReqInf: 0, SpeciesID: 1, PopulationGrowthModifier: 1, PopulationGrowthBonus: 1, PopulationDensityModifier: 1, SystemBodyID: 70, BodyClass: 1, Radius: 6400, HydroExt: 0.5, TidalLock: 0, RadiationLevel: 0, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, InstallationWorkers: 20, YardWorkers: 0, BodyPopulation: 100, InfrastructureCost: 0, ...extra })
+const colonyRow = (extra = {}) => ({ PopulationID: 7, PopName: 'Test colony', Population: 100, OrbitalPopulation: 0, CurrentColonyCost: 0, MaximumColonyCost: 0, ReqInf: 0, SpeciesID: 1, PopulationGrowthModifier: 1, PopulationGrowthBonus: 1, PopulationDensityModifier: 1, SystemBodyID: 70, BodyClass: 1, Radius: 6400, HydroExt: 0.5, TidalLock: 0, RadiationLevel: 0, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, InstallationWorkers: 20, YardWorkers: 0, BodyPopulation: 100, InfrastructureCost: 0, ...extra })
 
 // One industrial project of the colony as the page reads it, with 1,000,000 t of each mineral in stock unless the case says otherwise.
 const projectRow = (extra = {}) => ({ ID: 1, Name: `Project ${extra.ID || 1}`, ProductionType: 0, ProductionID: 1, PopulationID: 7, Percentage: 100, Amount: 4, PartialCompletion: 0, ProdPerUnit: 1000, Queue: 0, Paused: 0, FuelRequired: 0, StockFuel: 0, ConversionFrom: null, ConversionSource: null, ...Object.fromEntries(MINERAL_NAMES.flatMap((name) => [[name, 0], [`Stock${name}`, 1e6]])), ...extra })
@@ -242,6 +242,12 @@ const syntheticCases = (apps, capacities) => {
     return events.length === 1 && event.kind === 'yard' && event.status === 'dated' && near(event.earliest, 200) && near(event.delta, 0.25) && near(value.required.low[6], 20) && near(value.required.low[7], 20.25) && near(value.required.high[7], 20.25) && near(value.required.high[6], 20) && near(thirty[0], 20) && near(thirty[1], 20.25) && near(thirtyOne[1], 20) && near(thirtyOne[2], 20.25) && near(year[11], 20) && near(year[12], 20.25)
   })
 
+  holds('yardLight', 'a slipway at a light yard of 1,000 t with five slipways raises its workers by the whole 1,000 t over 4,000 (0.25 M), as at a naval yard, where a commercial yard of the same size needs a tenth of it (0.025 M)', () => {
+    const [light, naval, commercial] = [4, 1, 2].map((SYType) => scene({ yards: [yardRow({ SYType, Capacity: 1000, Slipways: 5, UpgradeTaskType: 1 })] }).events[0])
+
+    return light.kind === 'yard' && near(light.delta, 0.25) && near(naval.delta, 0.25) && near(commercial.delta, 0.025)
+  })
+
   holds('yardPaused', 'a paused yard activity adds nothing, and one at a yard with no build rate (it makes no progress) adds nothing either', () => {
     const paused = scene({ yards: [yardRow({ Paused: 1 })] })
     const stuck = scene({ yards: [yardRow()], modifiers: { ...MODIFIERS, ShipyardBuildRate: 0 } })
@@ -322,11 +328,11 @@ const syntheticCases = (apps, capacities) => {
     return near(now.required, 21.5) && near(now.free, now.available - 21.5) && near(entry.results.workersLater.value.required, 21.5)
   })
 
-  holds('ark', 'population aboard Ark ships never becomes surface workforce: the committed split of a colony is the split of its surface projection whatever orbits it', () => {
-    const { value, entry, committed } = scene({ projects: [factory()], colony: { OrbitalPopulation: 5, ArkOccupied: 5 } })
+  holds('ark', 'orbital people contribute to services and manufacturing but not surface agriculture: at 100 M surface and 100 M orbital the current and committed workforce have 61.251939 M available', () => {
+    const { value, entry, committed } = scene({ projects: [factory()], colony: { OrbitalPopulation: 100, ArkOccupied: 100 } })
     const surface = entry.results.projection.value
 
-    return committed.status !== 'unavailable' && near(value.later.best.population, surface.final) && near(value.later.worst.population, surface.final)
+    return committed.status !== 'unavailable' && near(entry.results.workersNow.value.available, 61.2519390047156) && near(value.later.best.population, surface.final) && near(value.later.best.totalPopulation, surface.final + 100) && near(value.later.best.agriculture, surface.final * 0.05)
   })
 
   holds('bounds', 'the lower demand never exceeds the higher in any month, so the free workers of the best case never fall below those of the worst', () => {
@@ -343,12 +349,12 @@ const syntheticCases = (apps, capacities) => {
     return certain.value.firstShort.best === 2 && certain.value.firstShort.worst !== null && certain.value.firstShort.worst <= 2 && possible.value.firstShort.best === null && possible.value.firstShort.worst !== null && scene({ colony: tight }).value.firstShort.worst === null
   })
 
-  holds('recoveryEpisode', 'the month a colony\'s worst case is back, as `recovery.worstAfterBest`, is the end of the worst case\'s shortage that holds the best case\'s first short month, not the end of an earlier shortage of the worst case alone: a possible yard upgrade puts the worst case short from month 1 to 3 and a certain slipway puts both short from month 14 (the best case is back in month 48, the worst case in month 60 or not within the 5 years), while `recovery.worst` stays the worst case\'s own first recovery', () => {
+  holds('recoveryEpisode', 'the recovery of the worst-case shortage that contains the later supported shortage is kept apart from its earlier recovery: linear monthly increments give month 47 supported and month 59 possible; a larger possible demand remains short through month 60', () => {
     const yards = (target) => [yardRow({ UpgradeTaskType: 8, CapacityTarget: target }), yardRow({ ShipyardID: 6, ShipyardName: 'Later slipway', UpgradeTaskType: 1, Capacity: 19520, RemainingProduction: 10000 })]
     const colony = { InstallationWorkers: 23.24, YardWorkers: 14.76 }
-    const [back, short] = [12000, 12200].map((target) => scene({ years: 5, colony, yards: yards(target) }).value)
+    const [back, short] = [12000, 12400].map((target) => scene({ years: 5, colony, yards: yards(target) }).value)
 
-    return back.firstShort.best === 14 && back.firstShort.worst === 1 && back.recovery.best === 48 && back.recovery.worst === 3 && back.recovery.worstAfterBest === 60 && short.recovery.worst === 4 && short.recovery.worstAfterBest === null && short.recovery.best === 48
+    return back.firstShort.best === 14 && back.firstShort.worst === 1 && back.recovery.best === 47 && back.recovery.worst === 3 && back.recovery.worstAfterBest === 59 && short.recovery.worst === 5 && short.recovery.worstAfterBest === null && short.recovery.best === 47
   })
 
   const comp = (extra) => projectRow({ ProductionType: 3, ProductionID: 0, Amount: 1, ProdPerUnit: 1, Duranium: 1, StockDuranium: 1, ...extra })
@@ -391,6 +397,23 @@ const syntheticCases = (apps, capacities) => {
     return [open, negative].every(({ committed }) => committed.status === 'unavailable' && committed.value === null && committed.inputs.missing.some((name) => /capacity target/.test(name))) && stopped.committed.status !== 'unavailable'
   })
 
+  holds('growthModifier', 'the species growth modifier scales growth that is positive and is left off growth that is not: a colony of 100 M people at a species modifier of 1.5 grows at one and a half times its base rate, one with no people at all keeps a rate of 0 whatever its species modifier reads (even when the row has none), and one whose governor bonus takes its growth below zero keeps the whole loss, while the Outlook\'s growth figure and its projection carry the same rate', () => {
+    const base = 0.2 / Math.cbrt(100)
+    const capacityOf = (row) => apps.colonies.bodyCapacity(row)
+    const rateOf = (row) => apps.colonies.growthRate(row, row.Population, row.BodyPopulation, capacityOf(row))
+    const withBonus = (row, bonus) => apps.colonies.growthRate({ ...row, PopulationGrowthBonus: bonus }, row.Population, row.BodyPopulation, capacityOf(row))
+    const positiveRow = colonyRow({ Population: 100, PopulationGrowthModifier: 1.5 })
+    const zeroRow = colonyRow({ Population: 0, PopulationGrowthModifier: undefined })
+    const negativeRow = colonyRow({ Population: 100, PopulationGrowthModifier: 1.5, PopulationGrowthBonus: -1 })
+    const radiatedRow = colonyRow({ Population: 0, PopulationGrowthModifier: 1.5, RadiationLevel: 400 })
+    const positive = rateOf(positiveRow)
+    const negative = rateOf(negativeRow)
+    const [grown] = apps.colonies.outlookColonies([positiveRow], [], YEARS)
+    const [shrunk] = apps.colonies.outlookColonies([negativeRow], [], YEARS)
+
+    return near(positive, base * 1.5) && rateOf(zeroRow) === 0 && near(rateOf(radiatedRow), 0) && near(negative, -base) && near(withBonus(positiveRow, 1), positive) && near(grown.results.growth.value, positive) && near(shrunk.results.growth.value, negative) && near(grown.results.projection.value.series[1], 100 * (1 + positive / 12)) && near(shrunk.results.projection.value.series[1], 100 * (1 + negative / 12)) && shrunk.results.projection.value.series[1] < 100
+  })
+
   return results
 }
 
@@ -405,6 +428,13 @@ const pageCases = async (pageOptions, store) => {
 
     return vm
   }
+
+  const orbital = await open({ InstallationWorkers: 40 }, [], { arks: { ships: [{ ShipID: 1, AssignedPopulationID: 7, OrbitBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, CivilianFunction: 0, MoveOrders: 0, Berths: 100000000 }], cargo: [{ ShipID: 1, Amount: 100000000, Rows: 1, Amounts: 1, SpeciesID: 1, SpeciesName: 'Source case' }], colonies: [{ PopulationID: 7, SystemBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, Population: 100 }] } })
+  holds('orbitalPage', 'PAGE 100 M orbital people join 100 M surface people for 61.251939 M manufacturing workers and no shortage against 40 M demand, while surface population remains 100 M', () => {
+    const row = orbital.rows[0]
+
+    return near(row.Population, 100) && near(row.OrbitalPopulation, 100) && near(row.workersNow.available, 61.2519390047156) && near(row.workersNow.agriculture, 5) && row.shortNow === false && near(row.workersLater.totalPopulation, row.final + 100)
+  })
   // 200 factories of 0.2 M workers that the Duranium in stock (1 t each, 100 t held) builds only half of: the colony has workers to spare in the supported case and is 9 M short in the worst one.
   const stalled = (installationWorkers, attentionOnly) => open({ InstallationWorkers: installationWorkers }, [projectRow({ ID: 9, Amount: 200, ProductionID: 2, Duranium: 1, StockDuranium: 100 })], { attentionOnly })
   const [worstOnly, fine] = [await stalled(38, true), await stalled(20, true)]
@@ -474,8 +504,8 @@ const pageCases = async (pageOptions, store) => {
     return smallerRow.committed.recovery.worst > smallerRow.committed.recovery.best && smallerRow.recoveryAtBestOnly === true && smallerRow.shortInBetween === true && smallerRow.mayBeShortLater === false && smallerRow.freeLater > 0 && smallerRow.freeLaterWorst > 0 && !/short again|still short/.test(smallerRow.duringNote) && /1 short on the way, back by 10 y/.test(mixedTiles[0].note) && !/only at best/.test(mixedTiles[0].note)
   })
 
-  // The early completion and a possible continual upgrade (0.04 M of workers) as above, then a slipway added on a later day (a certain 9 M of workers): both cases are healthy again in month 9 and the worst case is short again at the horizon.
-  const second = await open({ InstallationWorkers: 38.5 }, [factories()], { attentionOnly: true, yardActivities: [yardRow({ ShipyardID: 6, UpgradeTaskType: 8, CapacityTarget: 10080 }), yardRow({ ShipyardID: 7, UpgradeTaskType: 1, Slipways: 1, Capacity: 37560, RemainingProduction: 17300 })] })
+  // Linear monthly growth supplies 49.065720761 M workers at ten years. A 9.54 M slipway leaves demand at 49.04 M supported and 49.08 M possible, so only the latter is short again.
+  const second = await open({ InstallationWorkers: 38.5 }, [factories()], { attentionOnly: true, yardActivities: [yardRow({ ShipyardID: 6, UpgradeTaskType: 8, CapacityTarget: 10080 }), yardRow({ ShipyardID: 7, UpgradeTaskType: 1, Slipways: 1, Capacity: 38160, RemainingProduction: 17300 })] })
   const [secondRow] = second.rows
   const [secondTile] = second.tiles.filter((tile) => tile.label === 'Colonies short of workers')
 
@@ -485,18 +515,18 @@ const pageCases = async (pageOptions, store) => {
 
   // Synthetic: a possible continual yard upgrade (1 M of workers from month 1 to its target) and, from month 14, a slipway that adds 4.88 M for certain. The upgrade alone puts the worst case short from month 1 until it recovers early; the slipway then puts both cases short from month 14.
   const episodes = (target) => open({ InstallationWorkers: 23.24, YardWorkers: 14.76 }, [], { horizon: 5, attentionOnly: true, yardActivities: [yardRow({ UpgradeTaskType: 8, CapacityTarget: target }), yardRow({ ShipyardID: 6, ShipyardName: 'Later slipway', UpgradeTaskType: 1, Capacity: 19520, RemainingProduction: 10000 })] })
-  const [earlier, earlierThenShort] = [await episodes(12000), await episodes(12200)]
+  const [earlier, earlierThenShort] = [await episodes(12000), await episodes(12400)]
   const [earlierRow] = earlier.rows
   const [thenShortRow] = earlierThenShort.rows
   const [earlierTile] = earlier.tiles.filter((tile) => tile.label === 'Colonies short of workers')
   const [thenShortTile] = earlierThenShort.tiles.filter((tile) => tile.label === 'Colonies short of workers')
 
-  holds('earlierWorstRecovery', 'PAGE a colony whose worst case has a shortage of its own that recovers early (a possible yard upgrade, month 1 to 3) and then both cases are short from the month of a certain later addition (a slipway, month 14) is worded with the recovery of the shortage the row names: the worst case is back when that shortage ends (month 60), never in the month the earlier one did', () => {
-    return earlierRow.committed.firstShort.best === 14 && earlierRow.committed.firstShort.worst === 1 && earlierRow.committed.recovery.worst === 3 && earlierRow.committed.recovery.best === 48 && earlierRow.committed.recovery.worstAfterBest === 60 && earlierRow.shortInBetween === true && earlierRow.mayBeShortLater === false && earlier.visibleRows.length === 1 && /^Short of workers from month 14, back by month 48 at best, month 60 at worst$/.test(earlierRow.duringNote) && /1 short on the way, back by 5 y/.test(earlierTile.note) && !/only at best/.test(earlierTile.note)
+  holds('earlierWorstRecovery', 'PAGE the row names the recovery of the supported shortage at month 47 and its possible extension through month 59, not the earlier possible recovery at month 3', () => {
+    return earlierRow.committed.firstShort.best === 14 && earlierRow.committed.firstShort.worst === 1 && earlierRow.committed.recovery.worst === 3 && earlierRow.committed.recovery.best === 47 && earlierRow.committed.recovery.worstAfterBest === 59 && earlierRow.shortInBetween === true && earlierRow.mayBeShortLater === false && earlier.visibleRows.length === 1 && /^Short of workers from month 14, back by month 47 at best, month 59 at worst$/.test(earlierRow.duringNote) && /1 short on the way, back by 5 y/.test(earlierTile.note) && !/only at best/.test(earlierTile.note)
   })
 
   holds('earlierWorstRecoveryThenShort', 'PAGE the same colony with a slightly larger possible upgrade, whose worst case is still short at the horizon from the month of the certain later addition, says in its row that the worst case is still short at the horizon, never that it is back in the month its earlier, separate shortage ended, and the tile counts it as "only at best"', () => {
-    return thenShortRow.committed.firstShort.best === 14 && thenShortRow.committed.firstShort.worst === 1 && thenShortRow.committed.recovery.worst === 4 && thenShortRow.committed.recovery.best === 48 && thenShortRow.committed.recovery.worstAfterBest === null && thenShortRow.shortInBetween === true && thenShortRow.mayBeShortLater === true && earlierThenShort.visibleRows.length === 1 && /^Short of workers from month 14, back by month 48 at best; still short at worst at 5 y$/.test(thenShortRow.duringNote) && /1 short on the way, back by 5 y \(1 of them only at best\)/.test(thenShortTile.note)
+    return thenShortRow.committed.firstShort.best === 14 && thenShortRow.committed.firstShort.worst === 1 && thenShortRow.committed.recovery.worst === 5 && thenShortRow.committed.recovery.best === 47 && thenShortRow.committed.recovery.worstAfterBest === null && thenShortRow.shortInBetween === true && thenShortRow.mayBeShortLater === true && earlierThenShort.visibleRows.length === 1 && /^Short of workers from month 14, back by month 47 at best; still short at worst at 5 y$/.test(thenShortRow.duringNote) && /1 short on the way, back by 5 y \(1 of them only at best\)/.test(thenShortTile.note)
   })
 
   return results
@@ -522,9 +552,11 @@ const MUTANTS = [
   { name: 'a retool that raises the yard\'s workers', file: DEMAND_FILE, from: 'if (type === 7) {\n    return { delta: 0 }', to: 'if (type === 7) {\n    return { delta: 0.1 }', fails: 'retool' },
   { name: 'a colony of a spied empire that is worked out from its own stock', file: DEMAND_FILE, from: 'if (npr && (needs.installation.length || needs.yards.length)) {', to: 'if (false) {', fails: 'unavailable' },
   { name: 'a queue forecast still running that is read as nothing queued', file: DEMAND_FILE, from: 'gaps.push(\'the queue forecast (still running)\')', to: 'void 0', fails: 'unavailable' },
+  { name: 'a light yard\'s workers counted at a tenth, as a commercial yard\'s', file: DEMAND_FILE, from: 'isFullCapacityYard(yardType) ? 1 : 0.1', to: 'yardType === 1 ? 1 : 0.1', fails: 'yardLight' },
+  { name: 'a light yard not counted among the yards that need the whole capacity', file: 'shipyard-types.js', from: 'export const isFullCapacityYard = (type) => type === SHIPYARD_TYPE.NAVAL || type === SHIPYARD_TYPE.LIGHT', to: 'export const isFullCapacityYard = (type) => type === SHIPYARD_TYPE.NAVAL', fails: 'yardLight' },
   { name: 'the lower and the higher demand swapped', file: DEMAND_FILE, from: 'const [low, high] = requiredSeries(events, colony.InstallationWorkers + colony.YardWorkers, months)', to: 'const [high, low] = requiredSeries(events, colony.InstallationWorkers + colony.YardWorkers, months)', fails: 'bounds' },
   { name: 'workers needed today that leave the yards out', file: COLONIES_FILE, from: 'required = colony.InstallationWorkers + colony.YardWorkers', to: 'required = colony.InstallationWorkers', fails: 'currentSplit' },
-  { name: 'population orbiting aboard Arks that is added to the people who can work', file: DEMAND_FILE, from: 'workerSplit(colony, population, value, required[month])', to: 'workerSplit(colony, population + (colony.ArkOccupied || 0), value, required[month])', fails: 'ark' },
+  { name: 'orbital people omitted from the committed worker split', file: DEMAND_FILE, from: 'workerSplit(colony, population, value, required[month])', to: 'workerSplit({ ...colony, OrbitalPopulation: 0 }, population, value, required[month])', fails: 'ark' },
   { name: 'a committed split that does not equal the current one where nothing is queued (the horizon figure takes the yards off twice)', file: DEMAND_FILE, from: 'const [low, high] = requiredSeries(events, colony.InstallationWorkers + colony.YardWorkers, months)', to: 'const [low, high] = requiredSeries(events, colony.InstallationWorkers + 2 * colony.YardWorkers, months)', fails: 'zeroEvents' },
   { name: 'a first short month taken from the lower demand only', file: DEMAND_FILE, from: 'firstShort: { best: firstShort(free.best), worst: firstShort(free.worst) }', to: 'firstShort: { best: firstShort(free.best), worst: firstShort(free.best) }', fails: 'firstShort' },
   { name: 'a worst case recovery taken from its own first shortage, not from the one that holds the best case\'s', file: DEMAND_FILE, from: 'worstAfterBest: recoveryAfter(free.worst, firstShort(free.best))', to: 'worstAfterBest: recoveryOf(free.worst)', fails: 'recoveryEpisode' },
@@ -538,6 +570,7 @@ const MUTANTS = [
 ]
 
 const PAGE_MUTANTS = [
+  { name: 'the page omits orbital people from the worker inputs', from: 'OrbitalPopulation: valueOrNull(orbital)', to: 'OrbitalPopulation: 0', fails: 'orbitalPage' },
   { name: 'an attention filter that hides a colony short only in the worst case', from: '(!this.attentionOnly || row.attention === true || row.shortInBetween === true || row.mayBeShortDuring === true)', to: '(!this.attentionOnly || row.attention === true || row.shortInBetween === true)', fails: 'attentionPossible' },
   { name: 'a tile that does not say how many colonies may be short', from: '$' + '{possible ? `$' + '{possible} more may be short at worst · ` : \'\'}', to: '', fails: 'attentionPossible' },
   { name: 'a tile that counts the worst case as the certain shortage at the horizon', from: 'const shortLater = countOf(\'workersLater\', isShort)', to: 'const shortLater = countOf(\'workersLaterWorst\', isShort)', fails: 'attentionPossible' },
@@ -580,7 +613,7 @@ const saveCases = async (database, save, pageOptions, apps, productionOptions, s
 
   check(`${name}: on the current basis the page reads nothing extra: no project, shipyard activity or installation type is queried, and the forecast has no colony to run`, vm.industry.length === 0 && vm.yardActivities.length === 0 && Object.keys(vm.installationTypes).length === 0 && queriesFor(/FCT_IndustrialProjects|FCT_Shipyard|DIM_PlanetaryInstallation/) === 0 && vm.forecastRunInput.colonies.length === 0)
 
-  const reference = apps.colonies.outlookColonies(vm.colonies, vm.inbound, vm.horizon)
+  const reference = apps.colonies.outlookColonies(vm.rows, vm.inbound, vm.horizon)
   const rows = vm.rows
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -667,9 +700,83 @@ const saveCases = async (database, save, pageOptions, apps, productionOptions, s
     unsupportedNote(`${name}: a colony with people aboard Arks`, 'no Ark of the race is at a colony with a known population aboard')
   }
 
-  check(`${name}: population aboard Arks never reaches the workers: every committed row's people at the horizon are the surface projection's final population (${committedRows.filter((row) => row.committed).length} rows, ${arkRows.length} of them with an Ark)`, arkLeak.length === 0)
+  check(`${name}: orbital people stay out of surface growth while remaining in the total workforce population (${committedRows.filter((row) => row.committed).length} rows, ${arkRows.length} of them with an Ark)`, arkLeak.length === 0 && committedRows.filter((row) => row.committed).every((row) => near(row.workersLater.totalPopulation, row.final + row.OrbitalPopulation)))
 
   console.log(`  ${name}: ${withQueue.length} colonies with events, ${installationEvents.length} installation events (${dated.length} dated), ${yardEvents.length} yard events, ${committedRows.filter((row) => row.laterRange).length} with a range at the horizon, ${committedRows.filter((row) => !row.committed).length} unavailable`)
+}
+
+// ---------- the species growth modifier ----------
+
+// The save whose own colonies are run through the growth rule: the interim 3.1 fixture (a game of the earlier line migrated to the 3.1 schema, race 784 of game 141). Its tables are read by hand rather than through the Outlook's colonies read, which is of the earlier schema; a save that is not there reads UNSUPPORTED.
+const GROWTH_SAVES = [fixtureSave()]
+
+// The faults planted in the growth rule, each with the worked case and the save case that must fail with it.
+const GROWTH_MUTANTS = [
+  { name: 'a species growth modifier applied to growth that is not positive, as the earlier line did', file: COLONIES_FILE, from: '(growth > 0 ? growth * colony.PopulationGrowthModifier : growth)', to: '(growth * colony.PopulationGrowthModifier)', fails: 'growthModifier', save: 'growthSaveUnscaled' },
+  { name: 'a species growth modifier left out of growth that is positive', file: COLONIES_FILE, from: 'growth > 0 ? growth * colony.PopulationGrowthModifier : growth', to: 'growth', fails: 'growthModifier', save: 'growthSaveScaled' },
+]
+
+// Species scaling is isolated on saved populations at a hypothetical zero colony cost, so no infrastructure shortfall masks the branch: radiation is subtracted before positive crowding, while negative growth and an empty population are not crowded.
+const growthSaveCases = async (database, save, apps) => {
+  const name = database.file
+  const colonies = await rowsOf(database, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.SystemBodyID, FCT_Population.ReqInf, FCT_Species.PopulationGrowthModifier, FCT_Species.PopulationDensityModifier, FCT_SystemBody.Radius, FCT_SystemBody.HydroExt, FCT_SystemBody.TidalLock, FCT_SystemBody.BodyClass, FCT_SystemBody.RadiationLevel from FCT_Population inner join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${save.game} and FCT_Population.RaceID = ${save.race} and FCT_Population.Population > 0 order by FCT_Population.PopulationID`)
+  const bodies = new Map((await rowsOf(database, `select SystemBodyID, sum(Population) as Population from FCT_Population where GameID = ${save.game} and RaceID = ${save.race} group by SystemBodyID`)).map((row) => [row.SystemBodyID, row.Population]))
+  // The installations the page's own colonies read sums, so that a colony's infrastructure cap is the one the Outlook works with.
+  const installations = new Map((await rowsOf(database, `select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.InfrastructureValue * FCT_PopulationInstallations.Amount) as Infrastructure, sum(DIM_PlanetaryInstallation.LGInfrastructureValue * FCT_PopulationInstallations.Amount) as LGInfrastructure, sum(DIM_PlanetaryInstallation.Workers * FCT_PopulationInstallations.Amount) as Workers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${save.game} group by FCT_PopulationInstallations.PopID`)).map((row) => [row.PopID, row]))
+  const rows = colonies.map((colony) => {
+    const built = installations.get(colony.PopulationID) || { Infrastructure: 0, LGInfrastructure: 0, Workers: 0 }
+
+    return { ...colony, BodyPopulation: bodies.get(colony.SystemBodyID), CurrentColonyCost: 0, MaximumColonyCost: 0, OrbitalPopulation: 0, PopulationGrowthBonus: 1, Infrastructure: built.Infrastructure, LGInfrastructure: built.LGInfrastructure, InstallationWorkers: built.Workers, YardWorkers: 0, InfrastructureCost: 0, LowGravity: 0 }
+  })
+  const capacityOf = (row) => apps.colonies.bodyCapacity(row)
+  const crowdOf = (row) => apps.colonies.crowdingFactor(row.BodyPopulation, capacityOf(row))
+  const rateOf = (row) => apps.colonies.growthRate(row, row.Population, row.BodyPopulation, capacityOf(row))
+  const rateWith = (row, change) => {
+    const changed = { ...row, ...change }
+
+    return apps.colonies.growthRate(changed, changed.Population, changed.BodyPopulation, capacityOf(changed))
+  }
+  const baseOf = (row) => Math.min(0.1, 0.2 / Math.cbrt(row.Population))
+  // The share of a rate the species modifier takes: the rate without radiation over the base rate and the crowding factor. It is the species modifier where the modifier is applied, 1 where growth is positive and the modifier is not, and -1 where the growth itself is negative and the modifier is not.
+  const shareOf = (rate, row) => (rate / crowdOf(row) + Math.round(row.RadiationLevel * 0.25) / 10000) / baseOf(row)
+
+  if (!rows.length) {
+    return { cases: [], unsupported: [`${name}: the species growth modifier`, 'the race holds no colony with people'], discriminates: { growthSaveScaled: false, growthSaveUnscaled: false } }
+  }
+
+  const scalable = rows.filter((row) => row.PopulationGrowthModifier !== 1 && crowdOf(row) > 0)
+  // Whether the save can tell a growth mutant apart: a colony whose species modifier is not 1, whose crowding factor is positive, and whose growth the case runs has the sign the mutant changes — positive where the modifier must be applied, negative where it must be left off. The stock save's colonies all read 1, so it credits neither mutant and its save case is unsupported for both.
+  const discriminates = {
+    growthSaveScaled: scalable.some((row) => baseOf(row) * row.PopulationGrowthBonus > 0),
+    growthSaveUnscaled: scalable.some((row) => baseOf(row) * -1 < 0),
+  }
+  const lossShare = (row) => (rateWith(row, { PopulationGrowthBonus: -1 }) + Math.round(row.RadiationLevel * 0.25) / 10000) / baseOf(row)
+  const wrongScaled = scalable.filter((row) => !near(shareOf(rateOf(row), row), row.PopulationGrowthModifier))
+  const wrongUnscaled = scalable.filter((row) => !near(lossShare(row), -1) || near(lossShare(row), -row.PopulationGrowthModifier))
+  const wrongLoss = scalable.filter((row) => !near(rateWith(row, { PopulationGrowthBonus: -1 }), -baseOf(row) - Math.round(row.RadiationLevel * 0.25) / 10000))
+  const wrongZero = rows.filter((row) => !near(rateWith(row, { Population: 0 }), 0))
+  const entries = apps.colonies.outlookColonies(rows, [], YEARS)
+  // The first projected month takes one linear one-twelfth-year increment at that annual rate.
+  const wrongOutlook = rows.filter((row, index) => {
+    const { growth, projection } = entries[index].results
+
+    if (growth.value === null || projection.value === null) {
+      return true
+    }
+
+    const rate = rateOf(row)
+    const grown = Math.max(0, row.Population * (1 + rate / 12))
+
+    return !near(growth.value, rate) || !near(projection.value.series[0], row.Population) || !near(projection.value.series[1], grown)
+  })
+  const cases = [
+    [`${name}: each of the ${rows.length} colonies grows at its own species modifier over the base rate and the crowding factor (${scalable.length} of them with a modifier other than 1)`, wrongScaled.length === 0, 'growthSaveScaled'],
+    [`${name}: a governor bonus that takes a colony's growth below zero is not species-scaled: the loss is the base rate and the crowding factor, with no modifier of the ${scalable.length} colonies`, wrongUnscaled.length === 0 && wrongLoss.length === 0, 'growthSaveUnscaled'],
+    [`${name}: a colony with no people grows at 0 whatever its species modifier or radiation reads`, wrongZero.length === 0, 'growthSaveZero'],
+    [`${name}: the Outlook's growth figure and its first projected month are that rate on all ${rows.length} colonies`, wrongOutlook.length === 0, 'growthSaveOutlook'],
+  ]
+
+  return { cases, unsupported: scalable.length ? [] : [[`${name}: a colony whose species growth modifier is not 1`, 'no colony of the race has one']], discriminates }
 }
 
 // ---------- the yards aboard a ship ----------
@@ -708,7 +815,7 @@ const onCopy = async (database, edits, work) => {
   }
 }
 
-// What the race's yards need, worked out here from the save's rows the way the game counts them: a yard counts at its colony unless its ParentShipID names a ship of the game, with capacity x slipways / 4,000 at a naval yard (type 1) and a tenth of that at any other. { workers: { [PopulationID]: M workers }, aboard: { [PopulationID]: [ShipyardID] }, activities: [ShipyardID] of the yards no ship holds that have an activity, in order }.
+// What the race's yards need, worked out here from the save's rows the way the game counts them: a yard counts at its colony unless its ParentShipID names a ship of the game, with capacity x slipways / 4,000 at a naval yard (type 1) or a Light yard (type 4) and a tenth of that at any other. { workers: { [PopulationID]: M workers }, aboard: { [PopulationID]: [ShipyardID] }, activities: [ShipyardID] of the yards no ship holds that have an activity, in order }.
 const yardOracle = async (database, save) => {
   const yards = await rowsOf(database, `select ShipyardID, PopulationID, SYType, Slipways, Capacity, TaskType, ParentShipID from FCT_Shipyard where GameID = ${save.game} and RaceID = ${save.race}`)
   const ships = new Set((await rowsOf(database, `select ShipID from FCT_Ship where GameID = ${save.game}`)).map((row) => row.ShipID))
@@ -719,7 +826,7 @@ const yardOracle = async (database, save) => {
     if (ships.has(yard.ParentShipID)) {
       (aboard[yard.PopulationID] = aboard[yard.PopulationID] || []).push(yard.ShipyardID)
     } else {
-      workers[yard.PopulationID] = (workers[yard.PopulationID] || 0) + (yard.Capacity * yard.Slipways * (yard.SYType === 1 ? 1 : 0.1)) / 4000
+      workers[yard.PopulationID] = (workers[yard.PopulationID] || 0) + (yard.Capacity * yard.Slipways * (yard.SYType === 1 || yard.SYType === 4 ? 1 : 0.1)) / 4000
     }
   })
 
@@ -729,11 +836,10 @@ const yardOracle = async (database, save) => {
 // The checks of one save that holds yards aboard a ship, as { id, name, run } for `runChecks` (scripts/lib/fault-credit.js): the page runs behind its `boundary`, so a read that throws is told apart from a wrong value.
 const shipYardChecks = (database, save) => {
   const named = Object.entries(save.named).map(([id, workers]) => `${id} at ${workers} M`).join(', ')
-  const peopled = save.peopled ? { FCT_Population: [`update FCT_Population set Population = 10 where PopulationID in (${save.peopled.join(', ')})`] } : {}
   const checks = [{
     id: 'yards-colony',
-    name: `${database.file}: each colony's shipyards need the workers of the yards no ship holds: the page's colonies read gives every colony the sum over its yards whose ParentShipID names no ship of the game (capacity x slipways / 4,000 at a naval yard, a tenth of it at any other), and the colonies that hold a yard aboard a ship read ${named}${save.peopled ? ' (on a copy that gives them 10 M people)' : ''}`,
-    run: ({ pageOptions, store }) => onCopy(database, peopled, async () => {
+    name: `${database.file}: each colony's shipyards need the workers of the yards no ship holds: the page's colonies read gives every colony the sum over its yards whose ParentShipID names no ship of the game (capacity x slipways / 4,000 at a naval yard, a tenth of it at any other), and the colonies that hold a yard aboard a ship read ${named}`,
+    run: ({ pageOptions, store }) => onCopy(database, {}, async () => {
       const oracle = await yardOracle(database, save)
       const vm = instantiate(pageOptions, { ...store, database, GameID: save.game, RaceID: save.race, boundary })
       const colonies = await vm.runAsync('colonies')
@@ -817,12 +923,73 @@ const shipYardCases = async (pageOptions, store) => {
 
 const valueOrZero = (result) => (result && result.status !== 'unavailable' ? result.value : 0)
 
+// The species growth modifier on the worked cases and on the saves that hold colonies: the cases printed, and in a full run each planted fault, which must fail its worked case and the save case beside it.
+const growthSection = async (apps, capacities, results) => {
+  console.log('\n== the species growth modifier ==')
+  const opened = []
+
+  for (const save of GROWTH_SAVES) {
+    const database = await openSave(save.file)
+
+    if (database) {
+      opened.push({ database, save })
+    } else {
+      unsupportedNote(`${save.file}: the species growth modifier`, 'the save is not there')
+    }
+  }
+
+  try {
+    for (const { database, save } of opened) {
+      const grown = await growthSaveCases(database, save, apps)
+
+      grown.unsupported.forEach(([statement, detail]) => unsupportedNote(statement, detail))
+      grown.cases.forEach(([statement, held]) => check(statement, held))
+    }
+
+    for (const mutant of mutating() ? GROWTH_MUTANTS : []) {
+      const mutated = await mutatedUtilities(mutant.file, mutant.from, mutant.to)
+      const broken = syntheticCases(mutated, capacities).filter(([, held]) => !held).map(([, , key]) => key)
+      const telling = []
+
+      for (const { database, save } of opened) {
+        const grown = await growthSaveCases(database, save, mutated)
+
+        broken.push(...grown.cases.filter(([, held]) => !held).map(([, , key]) => key))
+
+        if (!Object.hasOwn(grown.discriminates, mutant.save)) {
+          throw new Error(`${database.file}: the growth mutants name no save case "${mutant.save}"`)
+        }
+
+        if (grown.discriminates[mutant.save]) {
+          telling.push(database.file)
+        }
+      }
+
+      const named = results.find(([, , key]) => key === mutant.fails)
+      const keys = [...new Set(broken)]
+
+      check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..." and, on a save that can tell it apart, the save's growth case beside it`, named[1] && keys.includes(mutant.fails) && (!telling.length || keys.includes(mutant.save)), `${keys.length} cases fail: ${keys.join(', ')}; saves that can tell it apart: ${telling.join(', ') || 'none'}`)
+    }
+  } finally {
+    opened.forEach(({ database }) => database.close())
+  }
+}
+
 const main = async () => {
   const saves = parseArguments(process.argv.slice(2))
+  const explicitSaves = process.argv.includes('--save')
+  const quickDefault = !explicitSaves && !mutating()
+  const representative = DEFAULT_SAVES[0]
+
+  if (quickDefault && !fs.existsSync(path.resolve(root, representative.file))) {
+    throw new Error(`quick mode requires its representative save: ${representative.file}`)
+  }
+
+  const ordinarySaves = quickDefault ? [representative] : saves
   const apps = await loadUtilities(UTILITIES, { stubs: STUBS })
   const pageOptions = await loadPage('pages/colony-outlook', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB } })
   const productionOptions = await loadPage('pages/production', { stubs: STUBS })
-  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: { RaceNPR: false }, dispatch: async () => {} } }
+  const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => null }, state: { RaceNPR: false }, dispatch: async () => {} } }
   const synthetic = instantiate(pageOptions, { ...store, data: { populationProductionModifiers: { 7: MODIFIERS } } })
   const capacities = Object.fromEntries(['construction', 'ordnance', 'fighter'].map((kind) => [kind, synthetic.populationCapacityResult(7, kind)]))
 
@@ -853,7 +1020,9 @@ const main = async () => {
     check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..."`, named[1] && broken.includes(mutant.fails), `${broken.length} cases fail: ${[...new Set(broken)].join(', ')}`)
   }
 
-  for (const save of saves) {
+  await growthSection(apps, capacities, results)
+
+  for (const save of ordinarySaves) {
     const database = await openSave(save.file)
 
     if (!database) {

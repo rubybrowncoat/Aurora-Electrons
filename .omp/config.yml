@@ -1,0 +1,39 @@
+# Bash guardrails for this repository (owner decision, 2026-11-06). Recursive deletes follow directory junctions on Windows: a scratch tree that links saves/, artifacts/ or node_modules into itself takes their contents with it when it is removed as a whole. A tree is removed only through `bun scripts/lib/scratch-tree.js remove <dir>`, which unlinks every junction first; nothing here deletes a tree recursively. First match wins; `deny` refuses the command before it runs in every approval mode. The rules match command text literally (one segment at a time), so they do not see a delete issued through eval, a script or another program: those stay forbidden by AGENTS.md.
+bash:
+  patterns:
+    - match: "git worktree remove*"
+      approval: deny
+    - match: "*git worktree remove*"
+      approval: deny
+    - match: "git clean -*f*"
+      approval: deny
+    - match: "git clean -*x*"
+      approval: deny
+    - match: "git clean -*X*"
+      approval: deny
+    - match: "rm -r*"
+      approval: deny
+    - match: "rm -R*"
+      approval: deny
+    - match: "rm -fr*"
+      approval: deny
+    - match: "rm -fR*"
+      approval: deny
+    - match: "rm -f -r*"
+      approval: deny
+    - match: "rm --recursive*"
+      approval: deny
+    - match: "*rmdir /s*"
+      approval: deny
+    - match: "*rmdir /S*"
+      approval: deny
+    - match: "*rd /s*"
+      approval: deny
+    - match: "*rd /S*"
+      approval: deny
+    - match: "*Remove-Item*-Recurse*"
+      approval: deny
+    - match: "*del /s*"
+      approval: deny
+    - match: "*del /S*"
+      approval: deny

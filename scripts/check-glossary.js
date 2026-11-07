@@ -17,6 +17,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { createOwnedTemp, removeOwnedTemp } = require('./lib/owner-temp')
 const { loadUtilities } = require('./lib/utilities')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel, runChild } = require('./lib/check-pool')
@@ -178,7 +179,7 @@ const synthetic = (m, tree) => {
     ['no entry names a rule or a verification, or carries a review date or a version label', async () => firstProblem(TERMS.flatMap((item) => FORBIDDEN_FIELDS.map((field) => [`${item.id}`, Object.prototype.hasOwnProperty.call(item, field) ? `has a ${field} field` : ''])))],
 
     ['no registered rule states a table or column name, a code span or a release number in its note or assumptions', async () => {
-      const code = /\b(?:FCT|DIM|VIR)_\w+|`[^`]*`|\b2\.[67](?:\.\d+|\.x)?\b|\b[a-z]+[A-Za-z]*\.[a-z][A-Za-z]+\b|\b[A-Z][a-z]+[A-Z][A-Za-z]+\b|\b[A-Z]{2,}_[A-Z_]+\b|[A-Za-z-]+\.js\b/
+      const code = /\b(?:FCT|DIM|VIR)_\w+|`[^`]*`|\b(?:2\.[67]|3\.[0-2])(?:\.\d+|\.x)?\b|\b[a-z]+[A-Za-z]*\.[a-z][A-Za-z]+\b|\b[A-Z][a-z]+[A-Z][A-Za-z]+\b|\b[A-Z]{2,}_[A-Z_]+\b|[A-Za-z-]+\.js\b/
       const rules = provenance.listRules()
 
       return firstProblem(rules.flatMap((rule) => [rule.note, ...rule.assumptions].map((text) => [rule.id, code.test(text) ? `says "${code.exec(text)[0]}"` : ''])))
@@ -315,7 +316,7 @@ const synthetic = (m, tree) => {
     }],
 
     ['the runway of a maintenance location is the stock and spare MSP over upkeep less production, as its definitions say', async () => {
-      const colony = { PopulationID: 1, SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 100, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 50, WarningMSP: 0 }
+      const colony = { PopulationID: 1, NPR: 0, MspPopulated: provenance.ofRule({ rule: 'logistics.mspPopulation', value: true }), SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 100, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 50, WarningMSP: 0 }
       const ship = { ShipID: 1, ShipName: 'Ship', FleetID: 1, FleetName: 'Fleet', SystemID: 1, SystemName: 'System', OrbitBodyID: 1, Xcor: 0, Ycor: 0, AssignedPopulationID: 0, ShipClassID: 1, ClassName: 'Class', Size: 1, Commercial: 0, SupplyShip: 0, MinimumSupplies: 0, ClassSupplies: 0, MaintPriority: 0, CurrentMaintSupplies: 0, MaintenanceState: 0, LastOverhaul: 0, MothershipID: 0, CarrierCommercialHangar: null, Modules: 0, Bays: 0 }
       const placeOf = (upkeep) => logistics.maintenanceLocations({ colonies: [colony], ships: [{ ...ship, Cost: upkeep * 4 }, { ...ship, ShipID: 2, FleetID: 2, Size: 0, Cost: 0, Commercial: 1, SupplyShip: 1, CurrentMaintSupplies: 5 }], modifierOf: () => 1, maintenanceCapacity: 50, economicModifier: 1 })[0]
       const { production } = placeOf(0)
@@ -355,7 +356,7 @@ const synthetic = (m, tree) => {
 
     ['the RP left is the stored remainder or the cost less banked points, and the time left is that over the rate, as the definitions say', async () => {
       const tech = { TechSystemID: 1, Name: 'Tech', DevelopCost: 100, FieldID: 1, TechTypeID: 1, TypeName: 'Type', RaceID: 0, Prerequisite1: 0, Prerequisite2: 0 }
-      const project = { ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, OutputPerLab: 10, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null }
+      const project = { ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, ResearchBase: 10, ResearchRateModifier: 1, EconomicProdModifier: 1, Efficiency: 1, RadiationLevel: 0, UnrestPoints: 0, ProductionMod: 1, ResearchSpeed: 100, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null }
       const remaining = (state) => research.evaluateResearch(research.buildTechGraph([tech]), research.researchState({ raceId: 1, researched: [], ...state })).get(1).remaining
       const years = (left) => research.scheduleProjects([{ ...project, ResearchPointsRequired: left }], [], new Map())[0].yearsResult.value
 
@@ -402,7 +403,7 @@ const synthetic = (m, tree) => {
 const mutatedCopy = (file, from, to) => {
   refusePlanting(`${file}: ${from}`)
 
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-glossary-mutant-'))
+  const directory = createOwnedTemp('ae-glossary-mutant-')
 
   COPIED.forEach((folder) => fs.cpSync(path.join(rendererDirectory, folder), path.join(directory, folder), { recursive: true }))
 
@@ -410,14 +411,14 @@ const mutatedCopy = (file, from, to) => {
   const source = fs.readFileSync(target, 'utf8')
 
   if (source.split(from).length !== 2) {
-    fs.rmSync(directory, { recursive: true, force: true })
+    removeOwnedTemp(directory)
     throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
   }
 
   const changed = source.replace(from, () => to)
 
   if (REGISTERS_RULE.test(source) !== REGISTERS_RULE.test(changed)) {
-    fs.rmSync(directory, { recursive: true, force: true })
+    removeOwnedTemp(directory)
     throw new Error(`The mutation of ${file} changes whether it registers a rule, which the rule modules found once for the real tree would miss: ${from}`)
   }
 
@@ -436,7 +437,7 @@ const MUTATIONS = [
   ['a term is no longer shown on any page', GLOSSARY, 'terms: [\'game-log\', \'production-cycle\'', 'terms: [\'production-cycle\'', ['every term is shown on some page']],
   ['the runway term leaves the Mineral Outlook', GLOSSARY, 'terms: [\'runway\', \'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', 'terms: [\'mining-rate\', \'deposit\', \'accessibility\', \'ton\', \'estimated-output\']', ['mapped to the pages that show them']],
   ['a term carries a review date', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, reviewed: \'2026-10-13\' })', ['carries a review date or a version label']],
-  ['a term carries a game version label', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, versions: \'2.7.x\' })', ['carries a review date or a version label']],
+  ['a term carries a game version label', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ id, term: name, units, definition, versions: \'3.2.x\' })', ['carries a review date or a version label']],
   ['a term loses its local definition', GLOSSARY, 'units, definition })', 'units, definition: \'\' })', ['every term has a name']],
   ['a definition holds an address', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'See https://example.com for the mass unit of ships, cargo and minerals;', ['a definition is short text of its own']],
   ['a definition speaks in the first person', GLOSSARY, 'The mass unit of ships, cargo and minerals;', 'The mass unit of my ships, cargo and minerals;', ['the help speaks in the impersonal voice']],
@@ -444,6 +445,7 @@ const MUTATIONS = [
   ['a term names a rule', GLOSSARY, 'Object.freeze({ id, term: name, units, definition })', 'Object.freeze({ rule: \'finances.treasury\', id, term: name, units, definition })', ['no entry names a rule or a verification']],
   ['a rule note names a saved column', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, read from FCT_Race.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a rule note names another rule by its id', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as mspSupply.supplied gives it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
+  ['a rule note names a release of the line', path.join('utilities', 'finances.js'), 'The race\\\'s stored treasury, shown as saved.', 'The race\\\'s stored treasury, shown as saved, as the 3.2 schema stores it.', ['no registered rule states a table or column name, a code span or a release number in its note or assumptions']],
   ['a missing site input named by its saved column', path.join('utilities', 'minerals.js'), "const DEPOSIT_INPUTS = ['the amount of the deposit', 'the accessibility of the deposit']", "const DEPOSIT_INPUTS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']", ['no unavailable result names a table or column']],
   ['a missing starting delay named by its saved column', path.join('utilities', 'route-time.js'), "const START_DELAY_GAP = 'the delay the fleet starts with'", "const START_DELAY_GAP = 'the delay the fleet starts with (FCT_Ship.SensorDelay)'", ['no unavailable result names a table or column']],
   ['a missing post named by its bare column', path.join('utilities', 'commanders.js'), 'missing: [`the post of $' + '{person.Name}`]', 'missing: [`CommandType of $' + '{person.Name}`]', ['no unavailable result names a table or column']],
@@ -482,7 +484,7 @@ const MUTATIONS = [
   ['the shortage rule wants two tons', path.join('utilities', 'colony-minerals.js'), 'if (needs - stock >= 1) {', 'if (needs - stock >= 2) {', ['a mineral shortage is']],
   ['the haul plan stops counting packets as held', path.join('utilities', 'haul-plan.js'), 'const held = mineral.stock + mineral.inbound', 'const held = mineral.stock', ['a hauling shortfall counts']],
   ['the haul plan measures the reserve against the stock alone', path.join('utilities', 'haul-plan.js'), 'mineral.reserve - Math.max(held, mineral.needs)', 'mineral.reserve - held', ['a hauling shortfall counts']],
-  ['the MSP runway divides by upkeep', path.join('utilities', 'logistics.js'), '(stock.value + supply.value) / -net', '(stock.value + supply.value) / upkeep', ['the runway of a maintenance location']],
+  ['the MSP runway divides by upkeep', path.join('utilities', 'logistics.js'), '(values.stock + values.supply) / -values.net', '(values.stock + values.supply) / upkeep', ['the runway of a maintenance location']],
   ['a location that breaks even gets a runway', path.join('utilities', 'logistics.js'), 'net === null || net >= 0 ? null', 'net === null || net > 0 ? null', ['the runway of a maintenance location']],
   ['the net MSP is taken the wrong way round', path.join('utilities', 'logistics.js'), 'compute: (values) => values.production - values.upkeep', 'compute: (values) => values.upkeep - values.production', ['the runway of a maintenance location']],
   ['the mineral runway divides by the net itself', path.join('utilities', 'mineral-outlook.js'), '/ -values[\'yearly net\']', '/ values[\'yearly net\']', ['the runway of a mineral']],
@@ -542,7 +544,7 @@ const tryMutation = async ([label, file, from, to, expected], ruleModules) => {
     return [label, error.message, '']
   } finally {
     if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
+      removeOwnedTemp(directory)
     }
   }
 }

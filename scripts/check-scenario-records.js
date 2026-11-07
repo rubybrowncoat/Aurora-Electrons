@@ -128,7 +128,7 @@ const adapters = (m) => {
     },
     fingerprint: (type, row) => [type, row.name, row.size].join(':'),
     resolve: (links, context) => links.map((link) => rowOf(context, link)),
-    versions: (payload) => ({ 'design.rules': '2.7.x', techCount: payload.techIds.length }),
+    versions: (payload) => ({ 'design.rules': '3.2.x', techCount: payload.techIds.length }),
   })
   registry.register({
     kind: 'colony-note',
@@ -814,8 +814,8 @@ const defineSuite = (m) => {
     assert.equal(next.uuid, made.uuid)
     assert.equal(next.createdAt, made.createdAt)
     assert.ok(next.updatedAt > made.updatedAt)
-    assert.deepEqual(next.versions, { 'design.rules': '2.7.x', techCount: 3 })
-    assert.deepEqual(made.versions, { 'design.rules': '2.7.x', techCount: 2 })
+    assert.deepEqual(next.versions, { 'design.rules': '3.2.x', techCount: 3 })
+    assert.deepEqual(made.versions, { 'design.rules': '3.2.x', techCount: 2 })
     assert.equal(next.base.gameTime, 1000)
 
     const rebased = w.repo.update(scope('c1', 7, 'b1', 1500), made.uuid, 2, { rebase: true })
@@ -1090,7 +1090,7 @@ const defineSuite = (m) => {
 
     assert.equal(edited.schema, 2)
     assert.deepEqual(edited.payload, { title: 'Legacy', techIds: [7] })
-    assert.deepEqual(edited.versions, { 'design.rules': '2.7.x', techCount: 1 })
+    assert.deepEqual(edited.versions, { 'design.rules': '3.2.x', techCount: 1 })
   })
 
   check('versions', 'a record of a newer schema or of an unknown kind is listed with a flag, its payload untouched, and is not edited', () => {

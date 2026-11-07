@@ -3,20 +3,25 @@
 
   bun scripts/check-shipping-runway.js [--no-mutations] [--no-saves]
 
-  The checks that need no save run the utility on wealth logs worked by hand: a year of 5-day cycles whose per-cycle amounts make every yearly figure a whole number, so each expected figure is written out below from the amounts, not read from the module. They prove: the no-change scenario is the Finances runway itself (the same object of the ledger, and the same value as the treasury over the loss worked by hand, for every window and for a treasury that lasts, one that is never exhausted, a net of exactly 0 and a treasury that is empty); the exhaustion of piecewise nets (two stretches, the first with a surplus, an exhaustion inside the first stretch, one reached in the second) and the balance at a year; the verdict over a horizon (exhausted within it, past it, never, now, unknown) and the date of an exhaustion; contracts delayed, at the tax rate of now, at a rate of 0 and at a changed rate, for a player and for a computer-run empire (whose receipt is halved); government transports, which are never taken as free (a blank running cost gives no figure, a running cost of 0 is a figure) and whose break-even running cost leaves the net as it is; planned contracts of each category (installation cargo pays the line its receipt after the tax, the others carry the tax only), a blank line ignored, no line entered giving no figure, a start after the delay; every blank or unreadable field giving no figure; an unsupported game version, a tax rate that is not stored, a tax rate of 100 %, a logged tax below what the contracts imply and a civilian use on the wrong side of the wealth use table; the saved tax rate read from the save by a loader that checks the column; actual figures (logged, scaled) kept apart from estimates and assumptions; the spread across the windows; and the panel and the page (the optional read that never holds the page back, the summary, the marks, the table beside the chart, no first or second person, no source name of the game).
+  The checks that need no save run the utility on wealth logs worked by hand: a year of 5-day cycles whose per-cycle amounts make every yearly figure a whole number, so each expected figure is written out below from the amounts, not read from the module. They prove: the logged civilian flows keep the fuel sale's income apart from the shipping taxes (a window of fuel income is not tax); the no-change scenario is the Finances runway itself (the same object of the ledger, and the same value as the treasury over the loss worked by hand, for every window and for a treasury that lasts, one that is never exhausted, a net of exactly 0 and a treasury that is empty); the exhaustion of piecewise nets (two stretches, the first with a surplus, an exhaustion inside the first stretch, one reached in the second) and the balance at a year; the verdict over a horizon (exhausted within it, past it, never, now, unknown) and the date of an exhaustion; contracts delayed, at the tax rate of now, at a rate of 0 and at a changed rate, for a player and for a computer-run empire (whose receipt is halved); government transports, which are never taken as free (a blank running cost gives no figure, a running cost of 0 is a figure) and whose break-even running cost leaves the net as it is; planned contracts of each category (installation cargo pays the line its receipt after the tax, the others carry the tax only), a blank line ignored, no line entered giving no figure, a start after the delay; every blank or unreadable field giving no figure; an unsupported game version, a tax rate that is not stored, a tax rate of 100 %, a logged tax below what the contracts imply and a civilian use on the wrong side of the wealth use table; the saved tax rate read from the save by a loader that checks the column; actual figures (logged, scaled) kept apart from estimates and assumptions; the spread across the windows; and the panel and the page (the optional read that never holds the page back, the summary, the marks, the table beside the chart, no first or second person, no source name of the game).
 
-  Each planted fault (a change of the utility, of the Finances utility, of the panel or of the page, made in an isolated copy by scripts/lib/mutant-source.js) must fail a group of the checks that needs no save, and each is located by structure (the attribute, key or state it belongs to and its whole value), never by wording or a default. Benign edits (wording, the order and spacing of attributes, the defaults of the entered fields and of the horizon) must leave every save-free check green, one at a time and all together, and every planted fault must still apply exactly once and fail its named checks on the source with every benign edit applied. With saves (the modded AuroraDB.db game 140 race 784 and the stock saves/AuroraDB_271_skoormit_saved.db game 138 race 785; one that is not there is reported as not run) it also reads the page's own reads from the save and compares the no-change runway and the logged contracts with sums taken straight from the log. Prints `N of N checks passed`; exit code 1 when a check fails.
+  Each planted fault (a change of the utility, of the Finances utility, of the panel or of the page, made in an isolated copy by scripts/lib/mutant-source.js) must fail every group it declares, including each declared save witness. A save witness that did not run rejects the variant, even when its save-free group failed. Ordinary mutants retain their save mappings; composed replants declare only their save-free groups and deliberately do not read saves. Each fault is located by structure (the attribute, key or state it belongs to and its whole value), never by wording or a default. Benign edits must leave every save-free check green, one at a time and all together, and every planted fault must still apply exactly once and fail its declared checks on the source with every benign edit applied.
+
+  With the save (the migrated 3.1 fixture of scripts/lib/fixtures.js) the head also reads the page's own reads and compares the no-change runway and the logged contracts with sums taken straight from the log. The head reports an absent save as not run; a mutant declaring a witness for that save fails instead. `--no-saves` keeps the head save-free but cannot credit an ordinary mutant that declares a save witness. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
 const nodeVm = require('vm')
 const sqlite3 = require('sqlite3')
 const Vue = require('vue')
-const assert = require('./lib/bounded-assert')
+const { assert, isMarked, isSubjectThrow, through, boundary, subjectModule, runChecks, judged, caughtBy } = require('./lib/fault-credit')
+const { HarnessError } = require('./lib/browser-observe')
+const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { fixtureSave } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const FILES = {
@@ -30,10 +35,7 @@ const L = 'ledger'
 const V = 'component'
 const P = 'page'
 const NAMES = ['shipping-runway', 'finances', 'provenance', 'civilian-tariff']
-const SAVES = [
-  { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-]
+const SAVES = [fixtureSave()]
 
 const STUBS = {
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
@@ -43,7 +45,7 @@ const STUBS = {
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 const THEME_STUB = 'export const chartTheme = () => ({ categorical: ["#a1", "#a2", "#a3", "#a4"], primary: "#p0", ink: "", inkMuted: "" }); export const withAlpha = (color) => color'
-const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
+const STORE = { getters: { config: { get: () => 'Tick' } }, state: { freshness: { generation: 0 } } }
 
 let failures = 0
 let checks = 0
@@ -76,6 +78,10 @@ const same = (actual, expected) => {
 
     return true
   } catch (error) {
+    if (!isMarked(error) || isSubjectThrow(error)) {
+      throw error
+    }
+
     return `${short(actual)} ≠ ${short(expected)}`
   }
 }
@@ -158,7 +164,30 @@ const isText = (value) => typeof value === 'string'
 const hasClass = (name) => (value) => isText(value) && value.split(/\s+/).includes(name)
 
 const PRONOUNS = /\b(I|me|my|mine|you|your|yours|we|our|ours)\b/i
-const SOURCE_NAMES = new RegExp(['\\.' + 'cs\\b', 'Record' + 'WealthIncome', 'Civilian' + 'Constracts', 'Ship' + '\\.cs'].join('|'))
+const SOURCE_NAMES = /\b[A-Z][a-z]\w*\.[A-Z]\w*\b|\b(?:s?method_\d+|G(?:Class|Enum)\d+)\b|\.cs\b/
+// The app's own capitalised compounds, each a component, save column or query field these sources must name and none of them the game's code: the bare-name test below lets them through.
+const APP_NAMES = new Set([
+  'AnnualWealth', // the saved yearly balance of a wealth row, shown apart from the window
+  'ChartCanvas', // the shared component that draws the chart
+  'DisplayOrder', // the saved order of a wealth use
+  'FinancesPage', // the page component that mounts the panel
+  'GameID', // the saved game key every read is scoped by
+  'GameTime', // the saved time the window and its scale are read from
+  'LoadState', // the shared component that shows a read's loading and failed states
+  'ProvenanceMark', // the shared component that names the rule behind a figure
+  'RaceID', // the saved race key every read is scoped by
+  'SeriesKey', // the legend key of a chart series
+  'ShippingLineTax', // the tax field of the shipping tax read
+  'ShippingRunway', // the panel component the page mounts
+  'StartYear', // the saved calendar start the dates are counted from
+  'TimeUsed', // the saved time of a wealth row, which the window filters on
+  'UseID', // the saved wealth use of a row
+  'WealthPoints', // the saved balance a wealth row carries
+  'WealthUseID', // the saved wealth use key of a row
+])
+// A bare capitalised compound names a class or a member unless it is one of the app's own words above: no game name may be spelled, so the shape is tested instead.
+const BARE_NAME = /\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b/g
+const namesCode = (text) => SOURCE_NAMES.test(text) || [...text.matchAll(BARE_NAME)].some(([name]) => !APP_NAMES.has(name))
 
 // ---------- the world worked by hand ----------
 
@@ -170,6 +199,7 @@ const SAVED_TAX = { rate: 0.2, missing: '' }
 const USES = {
   44: ['Civilian Contracts', 0],
   32: ['Tax on Shipping Trade Goods', 1],
+  34: ['Tax on Shipping Colonists', 1],
   47: ['Tax on Civilian Fuel', 1],
   11: ['Worker Taxes', 1],
   5: ['Shipbuilding', 0],
@@ -202,7 +232,7 @@ const world = (m, { perCycle = PLAYER, balance = BALANCE, windowDays = 365, shap
 
 const inputsOf = (over = {}) => ({ horizon: 25, futureTax: null, pauseYears: '2', governmentCost: '', planStart: '0', lines: [], ...over })
 
-const buildOf = (m, w, { version = '2.7.x', npr = false, tax = SAVED_TAX, ...over } = {}) => m.sr.buildScenarios({ ledger: w.ledger, version, npr, tax, inputs: inputsOf(over) })
+const buildOf = (m, w, { version = '3.2.x', npr = false, tax = SAVED_TAX, ...over } = {}) => m.sr.buildScenarios({ ledger: w.ledger, version, npr, tax, inputs: inputsOf(over) })
 
 const scenarioOf = (built, id) => built.scenarios.find((scenario) => scenario.id === id)
 
@@ -217,7 +247,7 @@ const gap = (result) => !result.inputs.missing.length ? 'names nothing missing' 
 
 const lasts = (years) => ({ state: 'lasts', years })
 
-// The published 2.7 rates, written apart from the module.
+// The published rates, written apart from the module.
 const RATE = { cargoPoint: 0.00015, tradeGood: 0.375, colonist: 0.00015, passenger: 0.006 }
 
 const runs = (m) => {
@@ -238,7 +268,7 @@ const runs = (m) => {
   // ----- the no-change scenario is the Finances runway -----
   add('parity: the no-change scenario is the ledger\'s own net and runway, for every window', () => [30, 90, 180, 365].map((days) => {
     const w = world(m, { windowDays: days })
-    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: days, ledger: w.ledger, options: [30, 90, 180, 365] }), windowDays: days, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
+    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: days, ledger: w.ledger, options: [30, 90, 180, 365] }), windowDays: days, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
     const first = none(built)
 
     return first.exhaustion === w.ledger.runway && first.net === w.ledger.net ? true : `window ${days}: not the ledger's own results`
@@ -553,16 +583,16 @@ const runs = (m) => {
     return ['delay', 'government'].every((id) => value(scenarioOf(built, id).exhaustion) === null) && built.taxRate.inputs.missing.join().includes('shipping line tax') && value(built.taxRate) === null && none(built).exhaustion === w.ledger.runway ? true : 'a figure'
   })
   add('inputs: a tax rate that has not been read (null) is unknown, a rate of 0 is a rate, and a negative rate is no rate', () => same([value(sr.taxRateResult(null)), value(sr.taxRateResult({ rate: 0, missing: '' })), value(sr.taxRateResult({ rate: -0.1, missing: '' })), value(sr.taxRateResult({ rate: 0.25, missing: '' }))], [null, 0, null, 0.25]))
-  add('inputs: a tax rate of 100 % leaves no fare to imply from the receipt, so no scenario figure, with contracts logged or none', () => [world(m), world(m, { perCycle: { 11: 40, 5: 60 } })].every((w) => value(scenarioOf(buildOf(m, w, { tax: { rate: 1, missing: '' } }), 'delay').exhaustion) === null) || 'a figure')
+  add('inputs: a tax rate of 100 % leaves no fare to imply from the receipt, so no scenario figure, with contracts logged or none', () => same([world(m), world(m, { perCycle: { 11: 40, 5: 60 } })].map((w) => value(scenarioOf(buildOf(m, w, { tax: { rate: 1, missing: '' } }), 'delay').exhaustion)), [null, null]))
   add('inputs: logged taxes below the tax the logged contracts imply give no scenario figure, naming the tax rate that held', () => {
     const delay = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 32: 10, 11: 40, 5: 60 } })), 'delay')
 
     return value(delay.exhaustion) === null && gap(delay.exhaustion) === true ? true : short(delay.exhaustion.inputs)
   })
   add('inputs: the tax paired with the contracts is held against the logged tax of installation deliveries alone: another logged civilian tax does not make up for it, and covers it only when the installation tax itself does', () => {
-    const masked = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 47: 25, 11: 40, 5: 60 } })), 'delay')
-    const own = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 32: 25, 47: 25, 11: 40, 5: 60 } })), 'delay')
-    const maskedGross = buildOf(m, world(m, { perCycle: { 44: 100, 47: 25, 11: 40, 5: 60 } })).pieces.gross
+    const masked = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 34: 25, 11: 40, 5: 60 } })), 'delay')
+    const own = scenarioOf(buildOf(m, world(m, { perCycle: { 44: 100, 32: 25, 34: 25, 11: 40, 5: 60 } })), 'delay')
+    const maskedGross = buildOf(m, world(m, { perCycle: { 44: 100, 34: 25, 11: 40, 5: 60 } })).pieces.gross
 
     return value(masked.exhaustion) === null && gap(masked.exhaustion) === true && value(maskedGross) === null && value(own.exhaustion) !== null ? true : short([masked.exhaustion.inputs, value(own.exhaustion)])
   })
@@ -585,7 +615,7 @@ const runs = (m) => {
     const wrong = w.wealth.map((row) => (row.UseID === 44 ? { ...row, Income: 1 } : row))
     const ledger = m.finances.buildLedger({ treasury: w.treasury, wealth: wrong, windowDays: 365 })
     const flows = sr.civilianFlows(ledger)
-    const built = sr.buildScenarios({ ledger, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
+    const built = sr.buildScenarios({ ledger, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
 
     return value(flows.contracts) === null && value(flows.net) === null && flows.net.inputs.missing.join().includes(USES[44][0]) && value(scenarioOf(built, 'delay').exhaustion) === null && scenarioOf(built, 'none').exhaustion === ledger.runway ? true : short(flows.net.inputs)
   })
@@ -606,12 +636,21 @@ const runs = (m) => {
 
     return same(rest.uses.map((use) => [use.id, use.income]), [[6, false], [5, false], [11, true]])
   })
-  add('roles: every civilian use of the log has a role, the taxes are income and the contract and the uses nothing books are spending', () => {
+  add('roles: every civilian use of the log has a role, the taxes and the fuel sale are income and the contract and the uses nothing books are spending', () => {
     const ids = m.tariff.CIVILIAN_USES.map((use) => use.id).sort((a, b) => a - b)
     const roles = Object.keys(sr.ROLES).map(Number).sort((a, b) => a - b)
-    const sides = m.tariff.CIVILIAN_USES.every((use) => (sr.ROLES[use.id] === 'tax') === (use.side === 'income'))
+    const sides = m.tariff.CIVILIAN_USES.every((use) => ['tax', 'fuel'].includes(sr.ROLES[use.id]) === (use.side === 'income'))
 
-    return same(roles, ids) === true && sides && sr.ROLES[sr.CONTRACT_USE] === 'contract' ? true : short([roles, ids, sides])
+    return same(roles, ids) === true && sides && sr.ROLES[sr.CONTRACT_USE] === 'contract' && sr.ROLES[47] === 'fuel' ? true : short([roles, ids, sides])
+  })
+  add('flows: a fuel sale in the log is income of its own, not a shipping tax: the taxes are unchanged, the sale is its own flow, and the civilian net and the ledger both keep it', () => {
+    const plain = world(m)
+    const fuelled = world(m, { perCycle: { ...PLAYER, 47: 10 } })
+    const flows = sr.civilianFlows(fuelled.ledger)
+    const bare = sr.civilianFlows(plain.ledger)
+    const rest = sr.obligations(fuelled.ledger, flows)
+
+    return same([value(flows.taxes), value(bare.taxes), value(flows.contracts)], [1825, 1825, 7300]) === true && near(value(flows.fuel), 730) && near(value(flows.net), 1825 + 730 - 7300) && near(value(fuelled.ledger.net), NET_PLAYER + 730) && near(value(rest.rest), REST) ? true : short([value(flows.taxes), value(flows.fuel), value(flows.net), value(fuelled.ledger.net), value(rest.rest)])
   })
 
   // ----- the saved tax rate -----
@@ -675,7 +714,12 @@ const runs = (m) => {
 
     return rules.every((id) => provenance.getRule(id) && provenance.getRule(id).verification === 'estimated') && provenance.getRule('shippingRunway.assumption').verification === 'assumed' && provenance.getRule('shippingRunway.windowTax').verification === 'assumed' ? true : 'a rule is registered above what it is'
   })
-  add('actual: the breaks of the shipping contracts rule cover the versions the payout rates are published for, and no other', () => ['2.7.x'].every((version) => provenance.ruleSupports('shippingRunway.contractFlow', version) === true) && ['2.6.0', null, 'x'].every((version) => provenance.ruleSupports('shippingRunway.contractFlow', version) !== true) ? true : 'the gate')
+  add('actual: the breaks of the shipping contracts rule cover the versions the payout rates are published for, and no other', () => {
+    const published = provenance.getRule('civilianTariff.rates').versions
+    const holds = (version) => provenance.ruleSupports('shippingRunway.contractFlow', version) === true
+
+    return published.length && published.every(holds) && ['2.8.0', '3.0.0', '3.20.0', null, 'x'].every((version) => !holds(version)) ? true : 'the gate'
+  })
 
   // ----- the windows -----
   const spreadWorld = () => {
@@ -683,7 +727,7 @@ const runs = (m) => {
 
     return w
   }
-  const spreadOf = (w, id = 'none', options = [30, 90, 180, 365]) => sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: w.windowDays, ledger: w.ledger, options }), windowDays: w.windowDays, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf({ governmentCost: '0' }) }).spread[id]
+  const spreadOf = (w, id = 'none', options = [30, 90, 180, 365]) => sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: w.treasury, wealth: w.wealth, windowDays: w.windowDays, ledger: w.ledger, options }), windowDays: w.windowDays, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf({ governmentCost: '0' }) }).spread[id]
   add('window: the spread names the earliest and the latest exhaustion across the windows, with the window each comes from', () => {
     const spread = spreadOf(spreadWorld())
 
@@ -692,7 +736,7 @@ const runs = (m) => {
   add('window: a window changes the figures, and the selected window is what the scenarios show', () => {
     const w = spreadWorld()
     const small = world(m, { perCycle: { 11: 40, 5: 20 }, balance: 11680, shape: { 5: [200, 20, 6] }, windowDays: 30 })
-    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: small.treasury, wealth: small.wealth, windowDays: 30, ledger: small.ledger, options: [30, 90, 180, 365] }), windowDays: 30, version: '2.7.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
+    const built = sr.buildShippingRunway({ windows: sr.windowLedgers({ treasury: small.treasury, wealth: small.wealth, windowDays: 30, ledger: small.ledger, options: [30, 90, 180, 365] }), windowDays: 30, version: '3.2.x', npr: false, tax: SAVED_TAX, inputs: inputsOf() })
 
     return same([built.windowDays, value(scenarioOf(built, 'none').exhaustion), value(w.ledger.runway)], [30, lasts(1), { state: 'covered', years: null }])
   })
@@ -724,16 +768,16 @@ const runs = (m) => {
 }
 
 const componentChecks = (ctx) => {
-  const { m, componentOptions, componentText, pageText, pageOptions, pageReal } = ctx
+  const { m, componentOptions, componentText, pageText, utilityText, pageOptions, pageReal } = ctx
   const statements = []
   const add = (name, test) => statements.push([name, test])
   const w = world(m)
   const fake = fakeDatabase
   const date = (seconds) => String(Math.round(seconds)).replace(/\d/g, (digit) => 'abcdefghij'[digit])
-  const props = (over = {}) => ({ ledger: w.ledger, treasury: w.treasury, wealth: w.wealth, windowDays: 365, windowOptions: [30, 90, 180, 365], formulaVersion: '2.7.x', npr: false, tax: SAVED_TAX, taxState: { loading: false, failed: '', error: '' }, date, separator: '', historyRecorded: true, ...over })
+  const props = (over = {}) => ({ ledger: w.ledger, treasury: w.treasury, wealth: w.wealth, windowDays: 365, windowOptions: [30, 90, 180, 365], formulaVersion: '3.2.x', npr: false, tax: SAVED_TAX, taxState: { loading: false, failed: '', error: '' }, date, separator: '', historyRecorded: true, ...over })
   // Every input of the panel at a value of its own, so that no check rests on the default the panel starts with.
   const INPUT_DATA = { horizon: 25, futureTax: null, pauseYears: '2', governmentCost: '', planStart: '0', view: 'chart' }
-  const mount = (over = {}, data = {}) => instantiate(componentOptions, { $store: STORE, data: { ...props(over), ...INPUT_DATA, ...data } })
+  const mount = (over = {}, data = {}) => instantiate(componentOptions, { boundary, $store: STORE, data: { ...props(over), ...INPUT_DATA, ...data } })
   const panelAst = () => templateOf(componentText).ast
   // The panel rendered by Vue itself in a state of its own: `state(world)` is [props, data]; gives the summary of the card it makes and every warning or error Vue raised.
   const rendered = (state) => {
@@ -748,15 +792,26 @@ const componentChecks = (ctx) => {
     const fresh = world(m)
     const [over, data] = state(fresh)
 
-    Vue.config.productionTip = false
-    Vue.config.devtools = false
-    Vue.config.warnHandler = (message) => problems.push(message)
-    Vue.config.errorHandler = (error) => problems.push(String(error))
+    const prior = { productionTip: Vue.config.productionTip, devtools: Vue.config.devtools, warnHandler: Vue.config.warnHandler, errorHandler: Vue.config.errorHandler }
+    const errors = []
 
-    const vm = new Vue({ mixins: [componentOptions], propsData: { ...props(), ledger: fresh.ledger, treasury: fresh.treasury, wealth: fresh.wealth, ...over }, data: () => ({ ...INPUT_DATA, ...data }), render, staticRenderFns })
-    const card = vm._render()
+    try {
+      Vue.config.productionTip = false
+      Vue.config.devtools = false
+      Vue.config.warnHandler = (message) => problems.push(message)
+      Vue.config.errorHandler = (error) => errors.push(error)
 
-    return { summary: card && card.data && card.data.attrs ? card.data.attrs['data-summary'] : undefined, problems }
+      const vm = new Vue({ mixins: [componentOptions], propsData: { ...props(), ledger: fresh.ledger, treasury: fresh.treasury, wealth: fresh.wealth, ...over }, data: () => ({ ...INPUT_DATA, ...data }), render, staticRenderFns })
+      const card = through('the shipping panel render', () => vm._render())
+
+      if (errors.length) {
+        through('the shipping panel error handler', () => { throw errors[0] })
+      }
+
+      return { summary: card && card.data && card.data.attrs ? card.data.attrs['data-summary'] : undefined, problems }
+    } finally {
+      Object.assign(Vue.config, prior)
+    }
   }
   const exhaustion = (kind, years) => m.provenance.ofRule({ rule: 'shippingRunway.exhaustion', value: kind === 'covered' ? { state: 'covered', years: null } : kind === 'depleted' ? { state: 'depleted', years: 0 } : { state: 'lasts', years }, inputs: { present: ['x'] } })
 
@@ -882,10 +937,10 @@ const componentChecks = (ctx) => {
 
     return seen.every((one) => typeof one.summary === 'string' && one.summary === written && one.summary.trim() !== '') && seen.every((one) => one.problems.length === 0) ? true : short(seen.map((one) => [one.summary === written, one.problems]))
   })
-  add('component: the template compiles, and the panel speaks in no first or second person nor names the game\'s sources', () => {
+  add('component: the template compiles, and the panel speaks in no first or second person nor names a code identifier or file name', () => {
     const errors = templateErrors(componentText)
 
-    return errors.length ? short(errors) : !PRONOUNS.test(componentText.replace(/<style[\s\S]*$/, '').replace(/<script[\s\S]*?<\/script>/, (script) => script.replace(/\/\/[^\n]*/g, ''))) && !SOURCE_NAMES.test(componentText) ? true : 'a pronoun or a source name'
+    return errors.length ? short(errors) : !PRONOUNS.test(componentText.replace(/<style[\s\S]*$/, '').replace(/<script[\s\S]*?<\/script>/, (script) => script.replace(/\/\/[^\n]*/g, ''))) && !namesCode(componentText) ? true : 'a pronoun or a source name'
   })
   add('component: every figure shown in the panel carries a provenance mark, its own or its row\'s, the cells of the balance table having theirs on the column heads', () => {
     const ast = panelAst()
@@ -894,6 +949,13 @@ const componentChecks = (ctx) => {
     const heads = elementsOf(ast, (el) => el.tag === 'th' && (el.for === 'legend' || el.if === 'hasHistory'))
 
     return bare.length === 0 && figures.length > 4 && heads.length === 2 && heads.every(hasMark) ? true : short([bare, figures.length, heads.length])
+  })
+  add('component: the fuel sale income is a row of its own, marked, apart from the shipping taxes', () => {
+    const ast = panelAst()
+    const rows = elementsOf(ast, (el) => el.tag === 'tr' && el.if === 'model.flows.fuel.value')
+    const marked = rows.length === 1 && nodesOf(rows[0], (node) => node.type === 1 && node.tag === 'provenance-mark').length === 1
+
+    return rows.length === 1 && marked && nodesOf(rows[0], (node) => node.type === 2 && node.text.includes('model.flows.fuel.value')).length === 1 ? true : 'the fuel row'
   })
   add('component: the chart has a table of the same balances beside it, behind a toggle, with a column for the log\'s balances and one for each scenario', () => {
     const ast = panelAst()
@@ -948,13 +1010,13 @@ const componentChecks = (ctx) => {
   const trackedKeys = [...pageText.matchAll(/tracked\('(\w+)'/g)].map((match) => match[1])
   const mountTag = (pageText.match(/<shipping-runway\b[^>]*>/) || [''])[0]
   const READ = 'shippingTax'
-  const mountPage = (data = {}) => instantiate(pageOptions, { $store: STORE, data: { loadErrors: {}, ...data } })
-  const mountReal = (data = {}) => instantiate({ mixins: [pageReal], methods: { inputSettled() {} } }, { $store: STORE, data: { loadErrors: {}, treasury: w.treasury, wealth: w.wealth, formulaVersion: '2.7.x', ...data } })
+  const mountPage = (data = {}) => instantiate(pageOptions, { boundary, $store: STORE, data: { loadErrors: {}, ...data } })
+  const mountReal = (data = {}) => instantiate({ mixins: [pageReal], methods: { inputSettled() {} } }, { boundary, $store: STORE, data: { loadErrors: {}, treasury: w.treasury, wealth: w.wealth, formulaVersion: { value: '3.2.x', status: 'assumed', inputs: { present: [], missing: [] } }, ...data } })
   const coreSettled = () => Object.assign({}, ...labelKeys.filter((key) => key !== READ).map((key) => ({ [key]: null })))
 
   add('page: the panel is mounted once with the ledger, the treasury row, the wealth rows, the window, the version, the race kind, the tax read and its state, and registered', () => {
     const bound = attributesOf(mountTag)
-    const wanted = { ':ledger': 'ledger', ':treasury': 'treasury', ':wealth': 'wealth', ':window-days': 'windowDays', ':window-options': 'windowOptions', ':formula-version': 'formulaVersion', ':tax': 'shippingTax', ':tax-state': 'shippingTaxState', ':date': 'date', ':separator': 'separator', '@retry': 'retryShippingTax' }
+    const wanted = { ':ledger': 'ledger', ':treasury': 'treasury', ':wealth': 'wealth', ':window-days': 'windowDays', ':window-options': 'windowOptions', ':formula-version': 'saveRules', ':tax': 'shippingTaxState.value', ':tax-state': 'shippingTaxState', ':date': 'date', ':separator': 'separator', '@retry': 'retryShippingTax' }
 
     return Object.entries(wanted).every(([name, expression]) => bound[name] === expression) && isText(bound[':npr']) && !/RaceNPR/.test(bound[':npr']) && (pageText.match(/<shipping-runway\b/g) || []).length === 1 && 'ShippingRunway' in pageOptions.components ? true : `${mountTag} ${Object.keys(pageOptions.components)}`
   })
@@ -1003,18 +1065,24 @@ const componentChecks = (ctx) => {
     const full = mountPage({ database, GameID: 7, RaceID: 9 })
     const read = await full.runAsync(READ)
 
-    return none === null && noRace === null && noGame === null && read.rate === 0.3 && full.loadErrors[READ] === null && /GameID = 7/.test(sqls.join()) && /RaceID = 9/.test(sqls.join()) ? true : short([none, noRace, noGame, read])
+    return none === null && noRace === null && noGame === null && read.value.rate === 0.3 && read.GameID === 7 && read.RaceID === 9 && full.loadErrors[READ] === null && /GameID = 7/.test(sqls.join()) && /RaceID = 9/.test(sqls.join()) ? true : short([none, noRace, noGame, read])
   })
   add('page: the runway page does not wait for the tax read, and a failure of it is shown on the panel alone', async () => {
-    const busy = { query: async () => { throw new Error('SQLITE_BUSY') } }
+    const busyError = new Error('SQLITE_BUSY')
+    const busy = { query: async () => { throw busyError } }
     const vm = mountReal({ loadErrors: coreSettled(), database: busy, GameID: 1, RaceID: 2 })
     const before = [vm.ready, vm.inputsLoaded, vm.shippingTaxState.loading]
 
-    await vm.runAsync(READ).catch(() => {})
+    await vm.runAsync(READ).catch((error) => {
+      if (!isSubjectThrow(error) || error.original !== busyError) {
+        throw error
+      }
+    })
 
     const failed = [vm.ready, vm.failedInputs.length, vm.failedInputsText, vm.shippingTaxState.failed !== '', vm.shippingTaxState.loading, vm.shippingTaxState.error]
 
     vm.loadErrors[READ] = null
+    vm.shippingTax = { GameID: 1, RaceID: 2, generation: 0, value: { rate: 0.25, missing: '', npr: false } }
 
     return same([before, failed, [vm.ready, vm.shippingTaxState.loading, vm.shippingTaxState.failed]], [[true, true, true], [true, 0, '', true, false, 'SQLITE_BUSY'], [true, false, '']])
   })
@@ -1026,6 +1094,14 @@ const componentChecks = (ctx) => {
     return same([vm.ready, vm.failedInputs, alone.failed !== '', alone.loading, again.failed, again.loading], [false, ['treasury'], true, false, '', true])
   })
   add('page: the page without a treasury row is not ready, even with every read in', () => same(mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, treasury: null }).ready, false))
+  add('page: a tax read made for another race or another copy of the save is not taken as this race\'s, so the panel waits for its own read', () => {
+    const read = { rate: 0.25, missing: '', npr: true }
+    const other = mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, GameID: 1, RaceID: 2, shippingTax: { GameID: 1, RaceID: 3, generation: 0, value: read } }).shippingTaxState
+    const older = mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, GameID: 1, RaceID: 2, shippingTax: { GameID: 1, RaceID: 2, generation: 4, value: read } }).shippingTaxState
+    const here = mountReal({ loadErrors: { ...coreSettled(), [READ]: null }, GameID: 1, RaceID: 2, shippingTax: { GameID: 1, RaceID: 2, generation: 0, value: read } }).shippingTaxState
+
+    return same([other.loading, other.value, older.loading, older.value, here.loading, here.value], [true, null, true, null, false, read])
+  })
   add('page: the optional read is named in the words of the load state: its own label, which no other read has', () => {
     const labelOf = (key) => (labels.match(new RegExp(`^ {2}${key}:\\s*'([^']*)'`, 'm')) || [])[1]
     const own = labelOf(READ)
@@ -1033,16 +1109,16 @@ const componentChecks = (ctx) => {
 
     return typeof own === 'string' && own.trim() !== '' && labelKeys.filter((key) => key !== READ).every((key) => labelOf(key) !== own) && failed.includes(own) ? true : short([own, failed])
   })
-  add('page: the template compiles, and the page speaks in no first or second person nor names the game\'s sources', () => {
+  add('page: the template compiles, and the page speaks in no first or second person nor names a code identifier or file name', () => {
     const errors = templateErrors(pageText)
 
-    return errors.length ? short(errors) : !SOURCE_NAMES.test(pageText) && !PRONOUNS.test(mountTag) ? true : 'a pronoun or a source name'
+    return errors.length ? short(errors) : !namesCode(pageText) && !PRONOUNS.test(mountTag) ? true : 'a pronoun or a source name'
   })
-  add('wiring: the utility and the check speak in no first or second person in their texts, and name no source of the game', () => {
-    const text = fs.readFileSync(FILES.utility, 'utf8')
+  add('wiring: the utility and the check speak in no first or second person in their texts, and name no code identifier or file name', () => {
+    const text = utilityText
     const strings = [...text.matchAll(/'((?:[^'\\\n]|\\.)*)'/g)].map((match) => match[1]).filter((item) => item.length > 12)
 
-    return strings.every((item) => !PRONOUNS.test(item)) && !SOURCE_NAMES.test(text) && !SOURCE_NAMES.test(componentText) ? true : short(strings.filter((item) => PRONOUNS.test(item)))
+    return strings.every((item) => !PRONOUNS.test(item)) && !namesCode(text) && !namesCode(componentText) ? true : short(strings.filter((item) => PRONOUNS.test(item)))
   })
 
   return statements
@@ -1083,22 +1159,22 @@ const saveStatements = async (ctx, save) => {
   const { m, pageOptions } = ctx
   const statements = []
   const add = (name, test) => statements.push([name, test])
-  const vm = instantiate(pageOptions, { $store: STORE, database, GameID: save.game, RaceID: save.race, data: { loadErrors: {}, formulaVersion: '2.7.x' } })
+  const vm = instantiate(pageOptions, { boundary, $store: STORE, database, GameID: save.game, RaceID: save.race, data: { loadErrors: {}, formulaVersion: { value: '3.2.x', status: 'assumed', inputs: { present: [], missing: [] } } } })
 
   await Promise.all(['treasury', 'wealth', 'shippingTax'].map((key) => vm.runAsync(key)))
 
   const [tax] = (await database.query(`select ShippingLineTax from FCT_Race where GameID = ${save.game} and RaceID = ${save.race}`))[0]
   const tag = path.basename(save.file)
 
-  add(`save-tax: ${tag}: the page's read of the tax rate is the stored rate`, () => same(vm.shippingTax.rate, tax.ShippingLineTax === null ? null : Number(tax.ShippingLineTax)))
+  add(`save-tax: ${tag}: the page's read of the tax rate is the stored rate`, () => same(vm.shippingTax.value.rate, tax.ShippingLineTax === null ? null : Number(tax.ShippingLineTax)))
   add(`save-kind: ${tag}: the page's read of the race kind is the stored NPR, unknown for NULL`, async () => {
     const [row] = (await database.query(`select NPR from FCT_Race where GameID = ${save.game} and RaceID = ${save.race}`))[0]
 
-    return same(vm.shippingTax.npr, row.NPR === null ? null : Number(row.NPR) !== 0)
+    return same(vm.shippingTax.value.npr, row.NPR === null ? null : Number(row.NPR) !== 0)
   })
   add(`save-parity: ${tag}: the no-change scenario of every window is the page's ledger runway`, () => [30, 90, 180, 365].map((days) => {
     const ledger = m.finances.buildLedger({ treasury: vm.treasury, wealth: vm.wealth, windowDays: days })
-    const built = m.sr.buildScenarios({ ledger, version: '2.7.x', npr: false, tax: vm.shippingTax, inputs: inputsOf() })
+    const built = m.sr.buildScenarios({ ledger, version: '3.2.x', npr: false, tax: vm.shippingTax.value, inputs: inputsOf() })
 
     return scenarioOf(built, 'none').exhaustion === ledger.runway && same(value(scenarioOf(built, 'none').exhaustion), value(ledger.runway)) === true ? true : `window ${days}`
   }).find((result) => result !== true) || true)
@@ -1113,7 +1189,7 @@ const saveStatements = async (ctx, save) => {
   })
   add(`save-delay: ${tag}: with the stored tax rate the pause adds the contracts less the paired tax to the net`, () => {
     const ledger = m.finances.buildLedger({ treasury: vm.treasury, wealth: vm.wealth, windowDays: 365 })
-    const built = m.sr.buildScenarios({ ledger, version: '2.7.x', npr: false, tax: vm.shippingTax, inputs: inputsOf() })
+    const built = m.sr.buildScenarios({ ledger, version: '3.2.x', npr: false, tax: vm.shippingTax.value, inputs: inputsOf() })
     const flows = m.sr.civilianFlows(ledger)
     const delay = scenarioOf(built, 'delay')
     const paired = value(built.pieces.pairedTax)
@@ -1140,7 +1216,7 @@ const MUTATIONS = [
   { name: 'an empty treasury under a loss reads as lasting', file: U, find: 'return { kind: \'now\', years: 0 }', replace: 'return { kind: \'exhausted\', years: 0 }', fails: ['verdict'] },
   { name: 'an exhaustion is dated in seconds from today, not in years', file: U, find: 'gameTime + years * SECONDS_PER_YEAR', replace: 'gameTime + years', fails: ['time'] },
   { name: 'the year is 30 days', file: U, find: 'export const SECONDS_PER_YEAR = HISTORY_DAYS * SECONDS_PER_DAY', replace: 'export const SECONDS_PER_YEAR = 30 * SECONDS_PER_DAY', fails: ['time'] },
-  { name: 'the no-change scenario is a copy of the runway, not the ledger\'s own', file: U, at: /exhaustion: ledger\.runway \}/, to: () => 'exhaustion: exhaustion([{ years: Infinity, net: ledger.net }]) }', fails: ['parity'] },
+  { name: 'the no-change scenario is a copy of the runway, not the ledger\'s own', file: U, at: /exhaustion: ledger\.runway \}/, to: () => 'exhaustion: exhaustion([{ years: Infinity, net: ledger.net }]) }', fails: ['parity', 'save-parity'] },
   { name: 'the selected window\'s ledger is built again instead of the page\'s', file: U, find: 'ledger: days === windowDays ? ledger : buildLedger({ treasury, wealth, windowDays: days })', replace: 'ledger: buildLedger({ treasury, wealth, windowDays: days })', fails: ['parity', 'component'] },
   { name: 'the paired tax is never taken off the contracts', file: U, find: '(values) => values.gross * values.windowTax)', replace: '(values) => 0)', fails: ['delay', 'gov'] },
   { name: 'the gross fare is the receipt over one plus the tax', file: U, find: 'values.contracts / (values.kind * (1 - values.windowTax))', replace: 'values.contracts / (values.kind * (1 + values.windowTax))', fails: ['delay'] },
@@ -1159,33 +1235,37 @@ const MUTATIONS = [
   { name: 'a future tax over 100 % is accepted', file: U, find: 'percent !== null && percent >= 0 && percent <= 100', replace: 'percent !== null && percent >= 0', fails: ['blank'] },
   { name: 'a blank future tax is the rate now', file: U, at: /blank\(FUTURE_TAX_MISSING\)/, to: () => 'combine({ rule: \'shippingRunway.assumption\', parts: { x: taxRate }, compute: (values) => values.x })', fails: ['blank'] },
   { name: 'every game version has the shipping rules', file: U, find: 'const gated = (version) => ruleSupports(\'shippingRunway.contractFlow\', version) !== true', replace: 'const gated = (version) => false', fails: ['inputs'] },
-  { name: 'the shipping rules hold for any 2.x version', file: U, at: /const VERSIONS = \[[^\]]*\]/, to: () => 'const VERSIONS = [\'2.x\']', fails: ['actual', 'inputs'] },
+  { name: 'the shipping rules hold for any 3.x version', file: U, at: /const VERSIONS = \[[^\]]*\]/, to: () => 'const VERSIONS = [\'3.x\']', fails: ['actual', 'inputs'] },
   { name: 'a logged tax below the implied tax is accepted', file: U, at: /raw\.value \* taxBelowOne\.value > flows\.contractTax\.value \* \(1 \+ 1e-9\) \+ 1e-9/, to: () => 'false', fails: ['inputs'] },
   { name: 'the implied tax is held against every logged civilian tax, not the tax on installation deliveries', file: U, at: /flows\.contractTax\.value \* \(1 \+ 1e-9\)/, to: () => 'flows.taxes.value * (1 + 1e-9)', fails: ['inputs'] },
-  { name: 'a tax rate of 100 % is divided by', file: U, find: 'windowTax.value >= 1', replace: 'windowTax.value > 1', fails: ['inputs'] },
+  // Only at exactly 100 %, admit the rate and divide by the tax itself to produce a finite wrong figure; all other rates keep their healthy guard and denominator, so another inputs statement cannot supply this fault's credit.
+  { name: 'a tax rate of 100 % is divided by', file: U, at: /const taxBelowOne = [^\n]+\n\s*const raw = piece\([^\n]+/, to: (m) => m[0].replace('windowTax.value >= 1', 'windowTax.value > 1').replace('(1 - values.windowTax)', '(values.windowTax === 1 ? values.windowTax : 1 - values.windowTax)'), fails: ['inputs'] },
   { name: 'a negative tax rate is a rate', file: U, find: 'finite(tax.rate) && tax.rate >= 0 ?', replace: 'finite(tax.rate) ?', fails: ['inputs'] },
   { name: 'an unknown race kind is a player\'s', file: U, find: 'typeof npr === \'boolean\' ? ofRule', replace: 'true ? ofRule', fails: ['inputs'] },
   { name: 'an absent saved tax rate is 0', file: U, at: /rate === null \|\| rate === undefined/, to: () => 'false', fails: ['load'] },
   { name: 'a race with no row has a tax rate of 0', file: U, at: /(if \(!rows\.length\) \{\s*return )\{[^}]*\}/, to: (m) => `${m[1]}{ rate: 0, missing: '' }`, fails: ['load'] },
   { name: 'a save without the column has a tax rate of 0', file: U, at: /(if \(!stored\.length\) \{\s*return )\{[^}]*\}/, to: (m) => `${m[1]}{ rate: 0, missing: '' }`, fails: ['load'] },
   { name: 'the columns are selected without looking at the schema', file: U, at: /const stored = RACE_COLUMNS\.filter\([^\n]*\)/, to: () => 'const stored = RACE_COLUMNS', fails: ['load'] },
-  { name: 'the race kind is not read', file: U, at: /const RACE_COLUMNS = \[[^\]]*\]/, to: () => 'const RACE_COLUMNS = [\'ShippingLineTax\']', fails: ['load', 'page'] },
+  { name: 'the race kind is not read', file: U, at: /const RACE_COLUMNS = \[[^\]]*\]/, to: () => 'const RACE_COLUMNS = [\'ShippingLineTax\']', fails: ['load', 'page', 'save-kind'] },
   { name: 'a race kind stored as NULL is a player\'s', file: U, at: /(const raceKindOf = [\s\S]*?)return null/, to: (m) => `${m[1]}return false`, fails: ['load', 'page'] },
   { name: 'the tax rate is read for any race', file: U, at: / and RaceID = \$\{Number\(RaceID\)\}/, to: () => '', fails: ['load'] },
-  { name: 'installation cargo costs the line nothing', file: U, find: '(installation ? gross * values.kind * (1 - values.futureTax) : 0)', replace: '0', fails: ['plan'] },
+  { name: 'installation cargo costs the line nothing', file: U, find: 'receiptOf(gross, { taxRate: values.futureTax, modifier: values.kind })', replace: '0', fails: ['plan'] },
   { name: 'trade goods are charged the line\'s receipt', file: U, find: 'const installation = line.category === \'cargoPoint\'', replace: 'const installation = true', fails: ['plan'] },
   { name: 'the tax of a planned contract is paid, not earned', file: U, find: 'return gross * values.futureTax - (', replace: 'return -gross * values.futureTax - (', fails: ['plan'] },
-  { name: 'a planned contract is priced at a computer-run empire\'s halved fare', file: U, find: 'billionKm: typedNumber(line.distance), npr: false })', replace: 'billionKm: typedNumber(line.distance), npr: true })', fails: ['plan'] },
+  { name: 'a planned contract\'s receipt is halved twice', file: U, find: 'receiptOf(gross, { taxRate: values.futureTax, modifier: values.kind })', replace: 'receiptOf(gross, { taxRate: values.futureTax, modifier: values.kind * values.kind })', fails: ['plan'] },
   { name: 'a blank line is a line with nothing in it', file: U, find: 'inputs.lines.filter((line) => !isBlankLine(line))', replace: 'inputs.lines', fails: ['plan'] },
   { name: 'no contract entered is a plan of nothing', file: U, at: /: unavailable\(\{ rule: 'shippingRunway\.planLine', missing: \[[^\]]*\] \}\)/, to: () => ': ofRule({ rule: \'shippingRunway.planLine\', value: 0, inputs: { present: [\'none\'] } })', fails: ['plan'] },
   { name: 'the break-even adds the tax', file: U, find: '(values) => values.contracts - values.pairedTax })', replace: '(values) => values.contracts + values.pairedTax })', fails: ['gov'] },
-  { name: 'the civilian net adds the contracts', file: U, find: 'values.taxes - values.contracts - values.legacy', replace: 'values.taxes + values.contracts - values.legacy', fails: ['flows'] },
+  { name: 'the civilian net adds the contracts', file: U, find: 'values.taxes + values.fuel - values.contracts - values.legacy', replace: 'values.taxes + values.fuel + values.contracts - values.legacy', fails: ['flows'] },
+  { name: 'the fuel sale counts as a shipping tax', file: U, find: "47: 'fuel'", replace: "47: 'tax'", fails: ['flows', 'roles'] },
+  { name: 'the fuel sale is left out of the civilian net', file: U, find: 'values.taxes + values.fuel - values.contracts - values.legacy', replace: 'values.taxes - values.contracts - values.legacy', fails: ['flows'] },
   { name: 'the contract use books like a legacy use', file: U, find: '44: \'contract\'', replace: '44: \'legacy\'', fails: ['flows', 'roles'] },
   { name: 'a use nothing books is a tax', file: U, find: '46: \'legacy\'', replace: '46: \'tax\'', fails: ['roles'] },
   { name: 'a use of the wrong side is flowed anyway', file: U, find: 'return category && category.income !== (use.side === \'income\')', replace: 'return false', fails: ['flows'] },
   { name: 'the obligations list the shipping uses too', file: U, find: '!(category.id in ROLES)', replace: 'true', fails: ['flows'] },
   { name: 'the obligations list the larger spending last', file: U, find: '(valueOrNull(b.yearly) ?? -1) - (valueOrNull(a.yearly) ?? -1)', replace: '(valueOrNull(a.yearly) ?? -1) - (valueOrNull(b.yearly) ?? -1)', fails: ['flows'] },
-  { name: 'a use not logged is unknown', file: U, find: 'compute: () => (category ? category.perYear : 0)', replace: 'compute: () => category.perYear', fails: ['flows'] },
+  // Keep an unlogged use explicitly unavailable, rather than crashing before the flows checks can compare its value with 0.
+  { name: 'a use not logged is unknown', file: U, find: 'const category = ledger.categories.find((item) => item.id === id)', replace: "const category = ledger.categories.find((item) => item.id === id)\n\n  if (!category) {\n    return unavailable({ rule: 'shippingRunway.windowFlow', missing: ['no amount of this use logged in the window'] })\n  }", fails: ['flows'] },
   { name: 'the earliest exhaustion is the latest', file: U, find: '.sort((a, b) => a.order - b.order)', replace: '.sort((a, b) => b.order - a.order)', fails: ['window'] },
   { name: 'a window with no figure counts as a figure', file: U, find: '.filter((row) => row.order !== null)', replace: '.map((row) => ({ ...row, order: row.order === null ? 0 : row.order }))', fails: ['window'] },
   { name: 'the scenarios\' results are called confirmed', file: U, find: 'id: \'shippingRunway.exhaustion\',\n  versions: VERSIONS,\n  units: \'years\',\n  verification: \'estimated\'', replace: 'id: \'shippingRunway.exhaustion\',\n  versions: VERSIONS,\n  units: \'years\',\n  verification: \'confirmed\'', fails: ['actual'] },
@@ -1196,8 +1276,9 @@ const MUTATIONS = [
   { name: 'the trajectory leaves out the balance of today', file: U, at: /for \(let year = 0; year <= horizon; year \+= step\) \{/, to: () => 'for (let year = step; year <= horizon; year += step) {', fails: ['time'] },
   { name: 'the trajectory leaves out the years a net changes at', file: U, at: /if \(from > 0 && from <= horizon\) \{\s*years\.add\(from\)\s*\}/, to: () => '', fails: ['time'] },
   { name: 'a stretch with no net is a stretch of the trajectory', file: U, at: / \|\| !scenario\.segments\.every\(\(segment\) => isAvailable\(segment\.net\)\)/, to: () => '', fails: ['time'] },
-  { name: 'a scenario with no figure has a trajectory', file: U, at: /!scenario\.segments \|\| /, to: () => '', fails: ['time'] },
-  { name: 'the timeline leaves out the past', file: U, at: /\.\.\.past, \.\.\.ahead/, to: () => '...ahead', fails: ['time', 'component'] },
+  { name: 'a scenario with no figure has a trajectory', file: U, find: 'if (!scenario.segments || !isAvailable(treasury) || !scenario.segments.every', replace: 'if (!scenario.segments) {\n    return years.map((year) => ({ year, balance: treasury.value }))\n  }\n\n  if (!scenario.segments || !isAvailable(treasury) || !scenario.segments.every', fails: ['time'] },
+  // Retain the final logged balance so chart readers can compare the missing history by value, without losing the history dataset's shape.
+  { name: 'the timeline leaves out all but the last balance of the past', file: U, at: /\.\.\.past, \.\.\.ahead/, to: () => '...past.slice(-1), ...ahead', fails: ['time', 'component'] },
   { name: 'the panel loses the summary', file: V, at: attribute('data-summary'), to: () => '', fails: ['component'] },
   { name: 'the summary of the panel follows its state', file: V, at: attribute('data-summary'), to: () => ':data-summary="horizon > 25 ? \'a\' : \'b\'"', fails: ['component'] },
   { name: 'the panel shows the tax read\'s state nowhere', file: V, tag: { name: 'div', has: { 'v-if': (value) => isText(value) && value.includes('taxState.loading') && value.includes('taxState.failed') } }, to: (text) => setAttribute(text, 'v-if', 'false'), fails: ['component'] },
@@ -1214,15 +1295,24 @@ const MUTATIONS = [
   { name: 'the panel links nowhere for the observed rate', file: V, tag: { name: 'router-link', has: { to: '/history' }, span: 'element' }, to: (text) => text.replace(/^<router-link\b(?:"[^"]*"|'[^']*'|[^>"'])*>|<\/router-link>$/g, ''), fails: ['component'] },
   { name: 'the panel works out the observed rate itself', file: V, at: /historyRecorded: \{ type: Boolean, default: false \},/, to: (m) => `${m[0]}\n    stockRate: { type: Number, default: 0 },`, fails: ['component'] },
   { name: 'the panel speaks to the reader', file: V, tag: { name: 'v-text-field', has: { ':value': 'futureTaxShown' } }, to: (text) => setAttribute(text, 'hint', 'Untouched: your rate carries on'), fails: ['component'] },
-  { name: 'the panel names a source of the game', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${'Ship' + '.cs'} `, fails: ['component'] },
+  { name: 'the panel names a code file with a line cite', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${['Specimen', 'cs'].join('.')}:12-15 `, fails: ['component'] },
+  { name: 'the panel names a qualified member call', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}Specimen.ForbiddenCall() `, fails: ['component'] },
+  { name: 'the panel names a qualified member reference', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}Specimen.ForbiddenReference `, fails: ['component'] },
+  { name: 'the panel names a standalone numbered member', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${['method', '900001'].join('_')} `, fails: ['component'] },
+  { name: 'the panel names a standalone numbered static member', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${['smethod', '900001'].join('_')} `, fails: ['component'] },
+  { name: 'the panel names a numbered class', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}G${'Class'}900001 `, fails: ['component'] },
+  { name: 'the panel names a numbered enum', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}G${'Enum'}900001 `, fails: ['component'] },
+  { name: 'the panel names a standalone named member of two parts', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}WidgetTotals `, fails: ['component'] },
+  { name: 'the panel names a standalone named member of three parts', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}RecalculateWidgetTotals `, fails: ['component'] },
   { name: 'the horizon is left out of the words for an exhaustion past it', file: V, at: /(case 'beyond':\s*return )`[^`]*`/, to: (m) => `${m[1]}'Lasts, to'`, fails: ['component'] },
   { name: 'the exhaustion is not dated', file: V, at: /(case 'exhausted':\s*return )`[^`]*`/, to: (m) => `${m[1]}'Exhausted'`, fails: ['component'] },
   { name: 'the page waits for the tax read', file: P, at: /const OPTIONAL_INPUTS = \[[^\]]*\]/, to: () => 'const OPTIONAL_INPUTS = []', fails: ['page'] },
   { name: 'the page is ready once every read is in, the tax read included', file: P, find: 'return allLoaded(this.loadErrors, CORE_INPUTS)', replace: 'return allLoaded(this.loadErrors, Object.keys(INPUT_LABELS))', fails: ['page'] },
   { name: 'a failed tax read holds the page back', file: P, find: 'return CORE_INPUTS.filter((key) => this.loadErrors[key])', replace: 'return Object.keys(INPUT_LABELS).filter((key) => this.loadErrors[key])', fails: ['page'] },
   { name: 'the tax read is untracked', file: P, find: 'shippingTax: {\n      get: tracked(\'shippingTax\', async function () {', replace: 'shippingTax: {\n      get: tracked(\'shippingRate\', async function () {', fails: ['page'] },
-  { name: 'the tax read ignores the race selected', file: P, find: 'loadShippingTax(this.database, { GameID: this.GameID, RaceID: this.RaceID })', replace: 'loadShippingTax(this.database, { GameID: this.GameID, RaceID: 1 })', fails: ['page'] },
-  { name: 'the tax read runs with no race selected', file: P, find: 'if (!this.database || !this.GameID || !this.RaceID) {\n          return null\n        }\n\n        return await loadShippingTax', replace: 'if (!this.database) {\n          return null\n        }\n\n        return await loadShippingTax', fails: ['page'] },
+  { name: 'the tax read ignores the race selected', file: P, find: 'loadShippingTax(this.database, { GameID, RaceID })', replace: 'loadShippingTax(this.database, { GameID, RaceID: 1 })', fails: ['page'] },
+  { name: 'the tax read runs with no race selected', file: P, find: 'if (!this.database || !GameID || !RaceID) {\n          return null\n        }\n\n        return { GameID, RaceID, generation, value: await loadShippingTax', replace: 'if (!this.database) {\n          return null\n        }\n\n        return { GameID, RaceID, generation, value: await loadShippingTax', fails: ['page'] },
+  { name: 'the tax state takes a read made for another race', file: P, find: 'const current = held && held.GameID === this.GameID && held.RaceID === this.RaceID && held.generation === generation', replace: 'const current = !!held', fails: ['page'] },
   { name: 'the panel is given a fixed race kind', file: P, tag: { name: 'shipping-runway', has: { ':npr': isText } }, to: (text) => setAttribute(text, ':npr', 'false'), fails: ['page'] },
   { name: 'the panel is given the race kind of the selection, which makes an unstored kind a player\'s', file: P, tag: { name: 'shipping-runway', has: { ':npr': isText } }, to: (text) => setAttribute(text, ':npr', '!!RaceNPR'), fails: ['page'] },
   { name: 'the panel is given no tax state', file: P, tag: { name: 'shipping-runway', has: { ':tax-state': isText } }, to: (text) => dropAttribute(text, ':tax-state'), fails: ['page'] },
@@ -1235,10 +1325,20 @@ const MUTATIONS = [
 ]
 /* eslint-enable no-template-curly-in-string */
 
+MUTATIONS.push(
+  { name: 'the yearly ledger uses one day less than the stated year', file: L, find: 'HISTORY_DAYS / coverage.value', replace: '(HISTORY_DAYS - 1) / coverage.value', fails: ['world'] },
+  { name: 'the utility names the missing version rules in the first person', file: U, find: "const GATE_MISSING = 'the civilian", replace: "const GATE_MISSING = 'our civilian", fails: ['wiring'] },
+  { name: 'a stored shipping tax rate is unavailable even when present', file: U, find: "{ rate: Number(rate), missing: '' }", replace: "{ rate: null, missing: 'the stored shipping line tax' }", fails: ['load', 'save-tax'] },
+  { name: 'the logged contracts are unavailable even when their amount is known, zero included', file: U, find: 'const contracts = flowOf(ledger, CONTRACT_USE)', replace: "const contracts = unavailable({ rule: 'shippingRunway.windowFlow', missing: ['the logged installation contracts'] })", fails: ['flows', 'save-flows'] },
+  { name: 'the delayed-contract net is unavailable even with its inputs present', file: U, find: 'net: now, later: segments[segments.length - 1].net', replace: "net: id === 'delay' ? unavailable({ rule: 'shippingRunway.scenarioNet', missing: ['the delayed-contract yearly net'] }) : now, later: segments[segments.length - 1].net", fails: ['delay', 'save-delay'] }
+)
+
 const MUTANTS = MUTATIONS.map((mutation, index) => ({ id: `mutant:${index}`, ...mutation }))
 
-// The same planted faults on the source with every benign edit applied.
-const COMPOSED = MUTATIONS.map((mutation, index) => ({ id: `composed:${index}`, ...mutation }))
+// The same planted faults on the source with every benign edit applied, observed without saves.
+// Replants 12, 41, 106, 107 and 108 therefore declare only parity; load/page; load; flows; delay.
+// Their ordinary counterparts keep save-parity, save-kind, save-tax, save-flows and save-delay.
+const COMPOSED = MUTATIONS.map((mutation, index) => ({ id: `composed:${index}`, ...mutation, fails: mutation.fails.filter((key) => !key.startsWith('save-')) }))
 
 // Edits that must change nothing the checks look at: wording, the order and spacing of attributes, the defaults of the entered fields and the default horizon. Each is located by its structure (the attribute, key or state it belongs to and its whole value, with any spacing around `=` and either quote), never by what it holds now, so it still applies after a rewording, another default or another edit of the list.
 const BENIGN = [
@@ -1312,42 +1412,91 @@ const sourcesOf = (edit) => {
 // The real sources with every benign edit applied in turn.
 const stackedSources = () => BENIGN.reduce((sources, edit) => applied(sources, edit), sourcesOf(null))
 
-const contextOf = async (sources) => {
+// A fault keeps every reader of its named checks. Heads and rewrites use the complete context.
+const CONTEXT_INPUTS = {
+  world: [],
+  parity: [],
+  exhaust: [],
+  verdict: [],
+  time: [],
+  delay: [],
+  plan: [],
+  gov: [],
+  blank: [],
+  inputs: [],
+  flows: [],
+  roles: [],
+  load: [],
+  actual: [],
+  window: [],
+  wiring: [],
+  component: ['component'],
+  page: ['page', 'pageReal'],
+  'save-tax': ['page'],
+  'save-kind': ['page'],
+  'save-parity': ['page'],
+  'save-flows': ['page'],
+  'save-delay': ['page'],
+}
+const contextInputs = (keys = null) => {
+  if (keys === null) {
+    return new Set(['component', 'page', 'pageReal'])
+  }
+
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(CONTEXT_INPUTS, key)) {
+      throw new HarnessError(`no shipping context mapping names ${key}`)
+    }
+  }
+
+  return new Set(keys.flatMap((key) => CONTEXT_INPUTS[key]))
+}
+const omittedContext = (name) => new Proxy({}, { get: () => { throw new HarnessError(`the shipping checks read the omitted ${name} context`) } })
+const contextOf = async (sources, keys = null) => {
+  const needed = contextInputs(keys)
   const changed = (name) => sources[name] !== TEXTS[name]()
   const sourcesFor = { ...(changed(U) ? { 'shipping-runway': sources[U] } : {}), ...(changed(L) ? { finances: sources[L] } : {}) }
   const utilitySources = { ...(changed(U) ? { 'utilities/shipping-runway': sources[U] } : {}), ...(changed(L) ? { 'utilities/finances': sources[L] } : {}) }
   const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources: sourcesFor })
   const modules = { 'components/charts/theme': THEME_STUB }
-  const componentOptions = await loadPage('components/finances/ShippingRunway', { stubs: STUBS, modules, sources: { 'components/finances/ShippingRunway': sources[V], ...utilitySources } })
-  const pageOptions = await loadPage('pages/finances', { stubs: STUBS, modules, sources: { 'pages/finances': sources[P], 'components/finances/ShippingRunway': sources[V], ...utilitySources } })
-  const pageReal = await loadPage('pages/finances', { stubs: STUBS, modules: { ...modules, 'mixins/load-state': null }, sources: { 'pages/finances': sources[P], 'components/finances/ShippingRunway': sources[V], ...utilitySources } })
+  const componentOptions = needed.has('component') ? await loadPage('components/finances/ShippingRunway', { stubs: STUBS, modules, sources: { 'components/finances/ShippingRunway': sources[V], ...utilitySources } }) : omittedContext('component')
+  const pageOptions = needed.has('page') ? await loadPage('pages/finances', { stubs: STUBS, modules, sources: { 'pages/finances': sources[P], 'components/finances/ShippingRunway': sources[V], ...utilitySources } }) : omittedContext('page')
+  const pageReal = needed.has('pageReal') ? await loadPage('pages/finances', { stubs: STUBS, modules: { ...modules, 'mixins/load-state': null }, sources: { 'pages/finances': sources[P], 'components/finances/ShippingRunway': sources[V], ...utilitySources } }) : omittedContext('pageReal')
 
-  return { m: { sr: loaded['shipping-runway'], finances: loaded.finances, provenance: loaded.provenance, tariff: loaded['civilian-tariff'] }, componentOptions, pageOptions, pageReal, componentText: sources[V], pageText: sources[P] }
+  return { m: { sr: subjectModule(loaded['shipping-runway'], 'shipping runway'), finances: subjectModule(loaded.finances, 'finances'), provenance: subjectModule(loaded.provenance, 'provenance'), tariff: subjectModule(loaded['civilian-tariff'], 'civilian tariff') }, componentOptions, pageOptions, pageReal, componentText: sources[V], pageText: sources[P], utilityText: sources[U] }
 }
 
 const keyOf = (name) => name.slice(0, name.indexOf(':'))
 
 // The statements run, as [name, result]; `keys` limits them to the checks of those keys.
 const runStatements = async (statements, keys = null) => {
-  const results = []
+  const selected = statements.filter(([name]) => keys === null || keys.includes(keyOf(name)))
+  const results = await runChecks(selected.map(([name, test]) => ({
+    id: name,
+    name,
+    run: async () => {
+      const prior = Vue.config.errorHandler
+      const errors = []
 
-  for (const [name, test] of statements) {
-    if (keys && !keys.includes(keyOf(name))) {
-      continue
-    }
+      try {
+        Vue.config.errorHandler = (error) => errors.push(error)
 
-    let result
+        const result = await test()
 
-    try {
-      result = await test()
-    } catch (error) {
-      result = `threw ${error.message}`
-    }
+        if (errors.length) {
+          through('the shipping statement Vue error handler', () => { throw errors[0] })
+        }
 
-    results.push([name, result])
-  }
+        assert.strictEqual(result, true, typeof result === 'string' ? result : 'the shipping check returned no true value')
+      } finally {
+        Vue.config.errorHandler = prior
+      }
+    },
+  })))
 
-  return results
+  judged(results, 'the shipping statements')
+
+  return results.map((result) => [result.name, result.ok ? true : result.detail, result])
 }
 
 let useSaves = true
@@ -1373,6 +1522,29 @@ const statementsOf = async (ctx, withSaves) => {
   return { statements, opened, skipped }
 }
 
+// Every behavioral statement, including each present save row, has a declared fault family.
+const coverageOf = (statements, mutations = MUTATIONS) => {
+  const keys = new Set(statements.map(([name]) => keyOf(name)))
+  const bare = mutations.filter((mutation) => !mutation.fails.some((key) => !key.startsWith('save-') && keys.has(key))).map((mutation) => mutation.name)
+  const uncovered = statements.map(([name]) => name).filter((name) => !mutations.some((mutation) => mutation.fails.includes(keyOf(name))))
+  const unknown = [...new Set(mutations.flatMap((mutation) => mutation.fails))].filter((key) => !Object.prototype.hasOwnProperty.call(CONTEXT_INPUTS, key))
+
+  return { bare, uncovered, unknown }
+}
+
+const creditOf = (results, required, witnesses, mutant) => {
+  const failed = judged(results.map(([, , result]) => result), mutant.name)
+
+  if (failed.some((result) => result.threw)) {
+    throw new HarnessError(`${mutant.name} made the subject throw: ${failed.filter((result) => result.threw).map((result) => result.detail).join('; ')}`)
+  }
+
+  const missedGroups = [...required, ...witnesses].filter((key) => !caughtBy(failed.filter((result) => keyOf(result.name) === key), results.filter(([name]) => keyOf(name) === key).map(([name]) => name), mutant))
+  const missedSaves = results.filter(([name]) => witnesses.includes(keyOf(name))).filter(([, , result]) => !caughtBy(failed, [result.id], mutant)).map(([name]) => name)
+
+  return { failed, missed: [...missedGroups, ...missedSaves] }
+}
+
 const checkHead = async () => {
   const ctx = await contextOf(sourcesOf(null))
   const { statements, opened, skipped } = await statementsOf(ctx, true)
@@ -1383,19 +1555,22 @@ const checkHead = async () => {
     console.log(`SKIP  ${file} is not there`)
   }
 
-  const keys = new Set(statements.map(([name]) => keyOf(name)))
-  const bare = MUTATIONS.filter((mutation) => !mutation.fails.some((key) => !key.startsWith('save-') && keys.has(key))).map((mutation) => mutation.name)
+  const { bare, uncovered, unknown } = coverageOf(statements)
 
-  check('mutations: every planted fault names a group of checks that needs no save, so a checkout without the saves still catches it', bare.length ? short(bare) : true)
+  check('mutations: every planted fault names a save-free group, and every observed behavioral check names a fault family', bare.length || uncovered.length || unknown.length ? short({ bare, uncovered, unknown }) : true)
 
-  for (const [name, result] of await runStatements(statements)) {
-    check(name, result)
+  try {
+    for (const [name, result] of await runStatements(statements)) {
+      check(name, result)
+    }
+  } finally {
+    await Promise.all(opened.map((read) => read.close()))
   }
-
-  await Promise.all(opened.map((read) => read.close()))
 }
 
 const checkMutant = async (mutant, composed = false) => {
+  refusePlanting(mutant.name)
+
   const began = Date.now()
   const label = `${composed ? 'mutation caught on the stacked benign edits' : 'mutation caught'}: ${mutant.name}`
   let sources
@@ -1408,28 +1583,38 @@ const checkMutant = async (mutant, composed = false) => {
     return
   }
 
+  const required = mutant.fails.filter((key) => !key.startsWith('save-'))
+  const witnesses = mutant.fails.filter((key) => key.startsWith('save-'))
+  const readSaves = !composed && useSaves && witnesses.length > 0
   let ctx
 
   try {
-    ctx = await contextOf(sources)
+    ctx = await contextOf(sources, [...required, ...(readSaves ? witnesses : [])])
   } catch (error) {
     check(label, `does not load: ${error.message}`)
 
     return
   }
 
-  // The checks of the saves are witnesses: each must fail when its save is there, and none is needed when it is not. Every planted fault names a group that needs no save, and that group must fail whatever saves are present.
-  const required = mutant.fails.filter((key) => !key.startsWith('save-'))
-  const witnesses = mutant.fails.filter((key) => key.startsWith('save-'))
-  const { statements, opened } = await statementsOf(ctx, !composed && witnesses.length > 0)
+  // Every declared mapping must run and bite; skipped or disabled saves cannot disappear from it.
+  const { statements, opened, skipped } = await statementsOf(ctx, readSaves)
   const present = (key) => statements.some(([name]) => keyOf(name) === key)
-  const named = [...required, ...witnesses.filter(present)]
-  const absent = required.filter((key) => !present(key))
-  const results = await runStatements(statements, named)
-  const missed = named.filter((key) => !results.some(([name, result]) => keyOf(name) === key && result !== true))
+  const named = mutant.fails
+  const missing = named.filter((key) => !present(key) || (witnesses.includes(key) && skipped.length > 0))
+  const missingReasons = missing.map((key) => witnesses.includes(key) ? `${key} (declared save witness did not run${!readSaves ? ': saves disabled' : skipped.length ? `: ${skipped.join(', ')}` : ''})` : key)
 
-  await Promise.all(opened.map((read) => read.close()))
-  check(label, !required.length ? 'names no group of checks that needs no save' : absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  try {
+    const results = await runStatements(statements, named)
+    const { failed, missed } = creditOf(results, required, witnesses, mutant)
+    const ran = named.filter((key) => results.some(([name]) => keyOf(name) === key))
+    const bit = named.filter((key) => !missing.includes(key) && !missed.some((name) => name === key || keyOf(name) === key))
+
+    console.log(`SHIPPING-FAULT-OBSERVATION ${JSON.stringify({ id: mutant.id, name: mutant.name, composed, declared: named, named, ran, bit, missing, missed, failed })}`)
+
+    check(label, !required.length ? 'names no group of checks that needs no save' : missing.length ? `declared mappings did not run: ${missingReasons.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  } finally {
+    await Promise.all(opened.map((read) => read.close()))
+  }
 }
 
 // An edit that changes no behaviour (wording, whitespace, the order of attributes, a default) leaves every check that needs no save green: the checks look at what the sources do, not at how they are written.
@@ -1500,7 +1685,7 @@ const checkStacked = async () => {
 }
 
 const parseArguments = (argv) => {
-  const options = { part: null, mutations: true, saves: true }
+  const options = { part: null, mutations: mutating(), saves: true }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--part') {
@@ -1549,7 +1734,8 @@ const run = async () => {
   const stacked = options.mutations ? ['stacked'] : []
   const composed = options.mutations ? COMPOSED : []
   const extra = options.saves ? [] : ['--no-saves']
-  const sections = await runSections(__filename, [{ args: ['--part', 'head', ...extra], weight: 30 }, ...[...wanted, ...benign].map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 })), ...stacked.map((id) => ({ args: ['--part', id, ...extra], weight: 5 })), ...composed.map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 }))])
+  // Bound this suite's isolated parts independently of CHECK_JOBS, the budget shared between scripts.
+  const sections = await runSections(__filename, [{ args: ['--part', 'head', ...extra], weight: 30 }, ...[...wanted, ...benign].map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 })), ...stacked.map((id) => ({ args: ['--part', id, ...extra], weight: 5 })), ...composed.map(({ id }) => ({ args: ['--part', id, ...extra], weight: 3 }))], 4)
   let at = 0
 
   const printed = () => {

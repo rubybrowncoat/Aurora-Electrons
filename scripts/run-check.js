@@ -26,6 +26,9 @@ const SAMPLE_SECONDS = 5
 // How long `start` waits for the supervisor's first write, and how long a run whose starter has written the status and whose supervisor has not is taken to be starting.
 const STARTUP_SECONDS = 60
 const POLL_MS = 100
+// Windows readers may briefly deny deletion of the destination. Keep the old complete status visible and retry only that observed sharing failure, for at most two seconds.
+const STATUS_WRITE_MS = 2000
+const STATUS_WAIT = new Int32Array(new SharedArrayBuffer(4))
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -71,11 +74,49 @@ const takeStartup = (name) => {
   }
 }
 
+const replaceStatus = (file) => {
+  const began = Date.now()
+  let failure = null
+
+  do {
+    try {
+      fs.renameSync(`${file}.next`, file)
+
+      return
+    } catch (error) {
+      if (process.platform !== 'win32' || error.code !== 'EPERM') {
+        throw error
+      }
+
+      failure = error
+    }
+
+    const left = STATUS_WRITE_MS - (Date.now() - began)
+
+    if (left > 0) {
+      Atomics.wait(STATUS_WAIT, 0, 0, Math.min(25, left))
+    }
+  } while (Date.now() - began < STATUS_WRITE_MS)
+
+  throw failure
+}
+
 const writeStatus = (name, status) => {
   const file = statusFile(name)
 
-  fs.writeFileSync(`${file}.next`, `${JSON.stringify(status, null, 2)}\n`)
-  fs.renameSync(`${file}.next`, file)
+  try {
+    fs.writeFileSync(`${file}.next`, `${JSON.stringify(status, null, 2)}\n`)
+    replaceStatus(file)
+  } catch (error) {
+    // The detached supervisor has no stderr reader, including for a sampler callback that throws outside main's promise. Record the original failure separately without re-entering status publication.
+    try {
+      fs.appendFileSync(path.join(folderOf(name), 'supervisor-errors.log'), `${new Date().toISOString()} ${error.code || error.name} ${error.stack || error}\n`)
+    } catch (diagnosticError) {
+      // Preserve the publication error even when its diagnostic cannot be written.
+    }
+
+    throw error
+  }
 }
 
 // A run that says it is going and whose supervisor is alive.
@@ -170,36 +211,82 @@ const supervise = async (name, script, args) => {
     written = Date.now()
     writeStatus(name, { ...status, last, seconds: undefined })
   }
+  let sampler = null
+  let sampling = true
+  let finished = false
+  let publicationError = null
+  const stopSampler = () => {
+    sampling = false
+    sampler?.stop()
+  }
+  const failPublication = (error) => {
+    publicationError = publicationError || error
+    stopSampler()
+
+    if (!finished) {
+      child.kill()
+    }
+  }
   const child = startChild(script, args, {
     env: { CHECK_JOBS: process.env.CHECK_JOBS || '1' },
     maxBuffer: Infinity,
     onLine: (line) => {
-      fs.writeSync(log, `${line}\n`)
+      try {
+        fs.writeSync(log, `${line}\n`)
 
-      if (line.trim()) {
-        last = line.trim().slice(0, 300)
+        if (line.trim()) {
+          last = line.trim().slice(0, 300)
+        }
+      } catch (error) {
+        failPublication(error)
       }
     },
   })
 
-  status.child = child.pid
-  save()
+  child.done.then(() => { finished = true }, () => { finished = true })
 
-  const sampler = sampleTree(child.pid, (sample) => {
-    const peak = status.peak || { tree: 0, process: 0, name: '' }
+  try {
+    status.child = child.pid
+    save()
+    sampler = sampleTree(child.pid, (sample) => {
+      if (!sampling) {
+        return
+      }
 
-    status.peak = { tree: Math.max(peak.tree, sample.tree), ...(sample.process >= peak.process ? { process: sample.process, name: sample.name } : { process: peak.process, name: peak.name }) }
+      try {
+        const peak = status.peak || { tree: 0, process: 0, name: '' }
 
-    if (Date.now() - written > SAMPLE_SECONDS * 1000) {
-      save()
+        status.peak = { tree: Math.max(peak.tree, sample.tree), ...(sample.process >= peak.process ? { process: sample.process, name: sample.name } : { process: peak.process, name: peak.name }) }
+
+        if (Date.now() - written > SAMPLE_SECONDS * 1000) {
+          save()
+        }
+      } catch (error) {
+        failPublication(error)
+      }
+    })
+
+    const { code } = await child.done
+
+    stopSampler()
+
+    if (publicationError) {
+      throw publicationError
     }
-  })
-  const { code } = await child.done.catch((error) => ({ code: null, error }))
-  const lines = fs.readFileSync(path.join(folder, 'log.txt'), 'utf8').split('\n').map((line) => line.trim()).filter(Boolean)
 
-  sampler.stop()
-  fs.closeSync(log)
-  writeStatus(name, { ...status, state: 'done', code, seconds: (Date.now() - began) / 1000, ended: new Date().toISOString(), summary: lines.filter((line) => /\bchecks? passed\b/.test(line)).pop() || lines.pop() || '' })
+    const lines = fs.readFileSync(path.join(folder, 'log.txt'), 'utf8').split('\n').map((line) => line.trim()).filter(Boolean)
+
+    writeStatus(name, { ...status, state: 'done', code, seconds: (Date.now() - began) / 1000, ended: new Date().toISOString(), summary: lines.filter((line) => /\bchecks? passed\b/.test(line)).pop() || lines.pop() || '' })
+  } finally {
+    stopSampler()
+
+    if (!finished) {
+      child.kill()
+    }
+
+    await child.done.catch(() => {})
+    fs.closeSync(log)
+  }
 }
 
 const start = async (argv) => {
@@ -280,12 +367,25 @@ const wait = async (argv) => {
     throw new Error(`no run of ${name}`)
   }
 
-  while (going(readStatus(name)) || starting(readStatus(name))) {
-    await pause(2000)
+  // Both predicates judge one snapshot. After apparent death, re-read that launch's result: a supervisor can publish done and exit between a running read and its liveness test.
+  let seen = readStatus(name)
+  let ended = null
+
+  while (!ended) {
+    if (going(seen) || starting(seen)) {
+      await pause(2000)
+      seen = readStatus(name)
+      continue
+    }
+
+    const current = readStatus(name)
+
+    if (current.started === seen.started && current.supervisor === seen.supervisor) {
+      ended = current
+    } else {
+      seen = current
+    }
   }
-
-  const ended = readStatus(name)
-
   console.log(describe(name, ended))
   process.exit(ended.state === 'done' && Number.isInteger(ended.code) ? ended.code : 2)
 }
