@@ -4,7 +4,7 @@
   Run: bun scripts/check-station-components.js [--no-mutations]
 
   The rules are the game's, written here from the game's rules, never read from the modules, and every figure is worked from them: no played save holds a Light Naval or Space Station project made from stored components with its Use Components box known (the owner's decision Q7 of AE-31: game-shaped planted cases stand in), so each case plants rows into in-memory copies of the migrated fixture (scripts/lib/fixtures.js, game 141, race 784), as scripts/check-industry-projects.js does, with the project made by an oracle of the game's own creation:
-  - the project's cost a unit starts as the class's cost and its minerals as the class's, and each component the class mounts is looked at in the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds (a RaceTech row) is taken only when the Use Components box is Checked and the stock covers the batch, a component of alien technology is taken whenever the stock covers it and refuses the project when it does not;
+  - the project's cost a unit starts as the class's cost and its minerals as the class's, and each component the class mounts is looked at in the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds (an FCT_RaceTech row) is taken only when the Use Components box is Checked and the stock covers the batch, a component of alien technology is taken whenever the stock covers it and refuses the project when it does not;
   - each component taken lowers the cost a unit by its cost times its count and the minerals by its minerals times its count, and takes the batch from the stock;
   - a unit never costs less than 1 BP;
   - the game builds a project at its share of the capacity of its kind, a Space Station on construction and a Light Naval project on its own light naval capacity;
@@ -153,7 +153,7 @@ const WEALTH_OF = { [LIGHT_NAVAL]: 3, [SPACE_STATION]: 45 }
 const KIND_OF = { [LIGHT_NAVAL]: 'fighter', [SPACE_STATION]: 'construction' }
 const TYPE_NAMES = { [LIGHT_NAVAL]: 'Light Naval', [SPACE_STATION]: 'Space station' }
 
-// What the save holds of a class, the way the game's own lists hold it: its cost and its components with the cost and minerals each, and whether the race holds the component (a RaceTech row).
+// What the save holds of a class, the way the game's own lists hold it: its cost and its components with the cost and minerals each, and whether the race holds the component (an FCT_RaceTech row).
 const classOf = (database, classId) => {
   const head = database.query(`select ClassName, Cost from FCT_ShipClass where ShipClassID = ${classId}`).get()
   const parts = database.query(`select FCT_ClassComponent.ComponentID as id, FCT_ClassComponent.NumComponent as count, FCT_ShipDesignComponents.Name, FCT_ShipDesignComponents.Cost, ${MINERAL_NAMES.map((name) => `FCT_ShipDesignComponents.${name}`).join(', ')}, (select count(*) from FCT_RaceTech where FCT_RaceTech.TechID = FCT_ClassComponent.ComponentID and FCT_RaceTech.RaceID = ${RACE}) as researched from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = ${classId} order by FCT_ClassComponent.ComponentID`).all()
@@ -225,7 +225,7 @@ const insertProject = (database, row) => {
   database.run(`insert into FCT_IndustrialProjects (${columns.join(', ')}) values (${values.map(literal).join(', ')})`)
 }
 
-// The projects of a copy: the components of alien technology (their RaceTech rows deleted), each case's stock put in the colony (every component the class mounts reset to what the case says), and the project made by the game's creation. A case the game refuses leaves no project. Gives the case with what the oracle stored.
+// The projects of a copy: the components of alien technology (their FCT_RaceTech rows deleted), each case's stock put in the colony (every component the class mounts reset to what the case says), and the project made by the game's creation. A case the game refuses leaves no project. Gives the case with what the oracle stored.
 const plantCases = (database, { alien = [], cases }) => {
   alien.forEach((id) => database.run(`delete from FCT_RaceTech where RaceID = ${RACE} and TechID = ${id}`))
 

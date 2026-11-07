@@ -126,7 +126,7 @@ For a colony's species Xenophobia `Xp`, and Intelligence multiplier `I = 1 + bon
 base colony gain = elapsed subpulse seconds / 86400 * I * (1 - Xp/100)
 colony IP gain = base colony gain / 5 if communication is not established
 colony IP gain = base colony gain otherwise
-race IP contribution = base colony gain * min(1, TotalPopulation/100)
+race IP contribution = base colony gain * min(1, the race's total population / 100)
 ```
 
 Population is measured in millions, so the race contribution reaches full strength at 100 million inhabitants. Race IP gains are divided by five before communication is established. Both colony and race intelligence from this source are therefore reduced to 20% before translation. Each colony record receives one accumulation per timestamp.
@@ -317,7 +317,7 @@ The remaining contact and intelligence codes are useful for database readers.
 | `FCT_Contacts.ContactType` | 0 None; 1 Ship; 3 Salvo; 4 Population; 9 Packet; 12 Ground unit; 14 STO ground unit; 16 Shipyard; 17 Explosion; 18 EW impact; 19 Secondary power; 20 Secondary Mg; 22 Waypoint |
 | Contact freshness (not saved) | 0 Current; 1 Partial; 2 Lost |
 | `FCT_AlienClass.EngineType` | 0 None; 1 Military; 2 Commercial; 3 FAC; 4 Survey; 5 Fighter |
-| Jammer type | 0 None; 1 Sensor; 2 FireControl; 3 Missile |
+| Jammer type | 0 None; 1 Sensor; 2 Fire control; 3 Missile |
 | Transponder mode | 0 Off; 1 Friendly; 2 All |
 | Special race type | 0 Standard; 1 Precursors; 2 Swarm; 3 Invaders; 4 Rakhas; 5 Eldar; 6 Ancients |
 | Racial personality selector | 0 Xenophobia; 1 Translation; 2 Militancy; 3 Determination |

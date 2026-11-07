@@ -211,7 +211,7 @@ const withPopulation = (colony) => (colony.ReqInf > 0 && !(colony.Population > 0
 // Infrastructure per million people. The game's live requirement (`ReqInf`) already doubles it on low-gravity bodies, so it's used rather than the stale `LastColonyCost`. 0 is a colony that needs none; a requirement the save lacks is unavailable.
 export const infrastructureRateResult = (colony) => derive({ rule: 'colonies.infrastructureRate', source: withPopulation(colony), required: ['ReqInf', ...(colony.ReqInf > 0 ? ['Population'] : [])], compute: () => (colony.ReqInf > 0 ? colony.ReqInf / colony.Population : 0) })
 
-// RecalculateColonyInfrastructureMetrics ceilings the maximum cost requirement independently of the truncated saved total.
+// The game ceilings the maximum cost requirement in its infrastructure recalculation, independently of the truncated saved total.
 export const infrastructureSupportRateResult = (colony) => derive({
   rule: 'colonies.infrastructureCap',
   source: colony,
@@ -256,7 +256,7 @@ export const infrastructureCostResult = (colony, needed) => {
 // The colony cost the infrastructure requirement implies (ReqInf = population x CC x 100 / density). A low-gravity body needs twice the infrastructure at the same colony cost (docs `planetary-installations`), and ReqInf holds that factor.
 export const colonyCostResult = (colony) => derive({ rule: 'colonies.colonyCost', source: withPopulation(colony), required: ['ReqInf', ...(colony.ReqInf > 0 ? ['Population', 'PopulationDensityModifier', 'LowGravity'] : [])], compute: () => (colony.ReqInf > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100 * (colony.LowGravity ? 2 : 1)) : 0) })
 
-// RecalculateWorkforceBreakdown allocates agriculture from surface people first, then services from surface plus orbital people, reducing services rather than agriculture when the two fill the total.
+// The game's workforce breakdown allocates agriculture from surface people first, then services from surface plus orbital people, reducing services rather than agriculture when the two fill the total.
 export const workerSplit = (colony, population, cost, required = colony.InstallationWorkers + colony.YardWorkers) => {
   const orbitalPopulation = colony.OrbitalPopulation ?? 0
   const totalPopulation = population + orbitalPopulation
