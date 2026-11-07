@@ -297,7 +297,7 @@ const PAGE_HELP = Object.freeze({
     usage: [
       'Lagrange map shades each known system by how many stable points it has; click a system to list its planets and moons below.',
       'Planets and moons lists the bodies To stabilise, the Stable ones or All, limited to Systems with colonies if wanted and narrowed by Search; the chip beside the title clears the system, and each body links to the Colonization Planner and the Galaxy Map.',
-      'Stabilisation ships, shown where the race has ships with a stabilisation module, lists each with its captain, crew and activity; a fleet name opens the Route Finder.',
+      'Stabilisation ships, shown where the race has ships with a stabilisation module, lists each with its captain, crew and what its fleet is doing, at a Lagrange point or a jump point; a fleet name opens the Route Finder.',
       'Jump point infrastructure, shown where the race has charted jump points, lists each point\'s gate status, stabilisation orders, mines, buoys and detected objects, with a link to open the point on the map.',
       'A time follows the body\'s mass and the captain and crew of the quickest usable ship, as the footer states; a count the save cannot give is unknown, never 0.',
     ],

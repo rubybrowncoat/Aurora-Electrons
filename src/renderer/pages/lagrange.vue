@@ -96,9 +96,12 @@
             </template>
             <template #[`item.activity`]="{ item }">
               <span v-if="item.activity" class="text-no-wrap">{{ item.activity }}<provenance-mark v-if="item.timeLeft" :result="item.timeLeft" /></span>
-              <span v-else class="text--secondary">No stabilisation order</span>
+              <span v-else class="text--secondary">{{ item.doingText }}</span>
             </template>
           </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            Use it to compare the ships that carry a stabilisation module and see what each fleet is doing. Doing names the Lagrange point or the jump point a fleet is stabilising or on its way to, and where the save does not record whether an order has arrived, it names the order without a state. One order is named alone only when every order of the fleet has a recorded place in its queue and the lowest of them is held once; otherwise it names together every order that could be first, those with no recorded place and those at the lowest recorded place, in a sequence that does not depend on how the rows arrive. A jump point order gives no time left, as the Jump point infrastructure panel states, and Doing reads Unknown for every fleet where the save cannot give the jump point orders.
+          </div>
         </v-card>
 
         <v-card v-if="infrastructureRows.length" class="panel" data-jump-infrastructure data-summary="Review charted jump points, their gate status, stabilisation orders, mines, buoys and detected objects." elevation="1">
@@ -165,7 +168,7 @@ import { systemBodyName } from '../utilities/aurora'
 import { crewFraction } from '../utilities/crew'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { jumpLinks, loadJumpPoints } from '../utilities/jump-graph'
-import { DETECTED_ZERO_TEXT, FAR_SIDE_TEXT, GATE_TEXT, infrastructureRows as readInfrastructure, loadJumpBuilders, loadJumpInfrastructure, STABILISATION_TEXT, UNKNOWN_TEXT } from '../utilities/jump-infrastructure'
+import { arrivalOf, DETECTED_ZERO_TEXT, FAR_SIDE_TEXT, GATE_TEXT, infrastructureRows as readInfrastructure, loadJumpBuilders, loadJumpInfrastructure, STABILISATION_TEXT, UNKNOWN_TEXT } from '../utilities/jump-infrastructure'
 import { bestStabilisation, stabilisationDays, stabilisationMultiplier, timeLeft } from '../utilities/lagrange'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
@@ -189,6 +192,8 @@ const STABILISATION_COMPONENT = 29
 const STABILISE_ACTION = 217
 const PRODUCTION_BONUS = 5
 const STATE_TEXTS = { damaged: 'Module damaged', 'no-crew': 'No crew', bonus: 'Bonus too high', unknown: 'Crew unknown' }
+const NO_ORDER_TEXT = 'No stabilisation order'
+const placeKey = (place) => (Number.isFinite(place) ? place : Infinity)
 const TYPES = { 2: 'Terrestrial planet', 3: 'Dwarf planet', 4: 'Gas giant', 5: 'Super-jovian' }
 const VIEW_OPTIONS = [
   { value: 'candidates', label: 'To stabilise' },
@@ -262,15 +267,16 @@ export default {
       return Object.fromEntries(this.bodies.map((body) => [body.SystemBodyID, systemBodyName(body, { Name: body.SystemName })]))
     },
 
-    // Every ship that carries a stabilisation module: its multiplier on the time as a result, and the state that says why it has none (`stabilisationMultiplier`).
+    // Every ship that carries a stabilisation module: its multiplier on the time as a result, and the state that says why it has none (`stabilisationMultiplier`), beside what its fleet is doing at a Lagrange point or a jump point.
     shipRows() {
-      const { orders, formulaVersion } = this
+      const { orders, formulaVersion, jumpOrdersByFleet } = this
 
       return this.ships.map((ship) => {
         const { state, result } = stabilisationMultiplier(ship, formulaVersion)
         const multiplier = valueOrNull(result)
-        const order = orders.find((candidate) => candidate.FleetID === ship.FleetID)
-        const left = order && order.Arrived ? timeLeft(order.TimeRequired) : null
+        const fleetOrders = orders.filter((candidate) => candidate.FleetID === ship.FleetID)
+        const jumps = jumpOrdersByFleet === null ? [] : jumpOrdersByFleet[ship.FleetID] || []
+        const doing = this.doingOf(fleetOrders, jumps, jumpOrdersByFleet === null)
 
         return {
           ...ship,
@@ -279,10 +285,40 @@ export default {
           result,
           multiplier,
           multiplierSort: multiplier,
-          timeLeft: left,
-          activity: order ? this.orderText(order, left) : null,
+          timeLeft: doing.timeLeft,
+          activity: doing.text,
+          doingText: doing.text || (doing.unknown ? UNKNOWN_TEXT : NO_ORDER_TEXT),
         }
       })
+    },
+
+    // The race's own jump point stabilisation orders by fleet, from the infrastructure read, each point named as the Jump point infrastructure panel names it and each arrival kept as the save records it (a flag other than 0, 1, false or true is unknown): { [FleetID]: [{ MoveOrderID, MoveOrder, arrived, name, systemName }] }. Null while the save cannot give those orders, so a fleet's jump point work is unknown and never none.
+    jumpOrdersByFleet() {
+      const facts = this.jumpInfrastructure
+
+      if (!facts) {
+        return null
+      }
+
+      const points = new Map(this.infrastructureRows.map((row) => [row.WarpPointID, row]))
+      const seen = new Set()
+      const byFleet = {}
+
+      facts.orders.forEach((order) => {
+        if (seen.has(order.MoveOrderID)) {
+          return
+        }
+
+        seen.add(order.MoveOrderID)
+
+        const point = points.get(order.WarpPointID)
+        const list = byFleet[order.FleetID] || []
+
+        list.push({ MoveOrderID: order.MoveOrderID, MoveOrder: order.MoveOrder, arrived: arrivalOf(order.Arrived), name: point ? point.name : null, systemName: point ? point.systemName : null })
+        byFleet[order.FleetID] = list
+      })
+
+      return byFleet
     },
 
     // What the save's lookup rows leave unconfirmed of the two IDs this page reads (component type 29, Jump Point Stabilisation, and the Production bonus, 5), from the capability check (store/capabilities.js): [] when both read as expected, one text while the check has not answered for the copy now open.
@@ -572,7 +608,60 @@ export default {
     },
 
     orderText(order, left) {
-      return order.Arrived ? `Stabilising ${this.bodyNameOf(order.SystemBodyID)}, ${this.leftText(left)}` : `On the way to stabilise ${this.bodyNameOf(order.SystemBodyID)}`
+      const arrived = arrivalOf(order.Arrived)
+
+      if (arrived === null) {
+        return `Stabilisation order for ${this.bodyNameOf(order.SystemBodyID)}`
+      }
+
+      return arrived ? `Stabilising ${this.bodyNameOf(order.SystemBodyID)}, ${this.leftText(left)}` : `On the way to stabilise ${this.bodyNameOf(order.SystemBodyID)}`
+    },
+
+    jumpOrderText(jump) {
+      const point = jump.name ? `the jump point ${jump.name} in ${jump.systemName}` : 'a jump point'
+
+      if (jump.arrived === null) {
+        return `Stabilisation order for ${point}`
+      }
+
+      return jump.arrived ? `Stabilising ${point}` : `On the way to stabilise ${point}`
+    },
+
+    // What the fleet is doing and the time left the mark is drawn from: every Lagrange point order and jump point stabilisation order the fleet holds. `jumpUnknown` says the jump point orders cannot be read, so no fleet can be told it has no order, nor that one order comes before an unread one. One order is named alone only when every place in the fleet's set is a number the save records and the lowest of them is held once; otherwise every order that could be first is named together, those with no recorded place and those at the lowest recorded one. The sequence is the fleet's own, whatever order the rows arrive in: the Lagrange point orders first, then the jump point orders, each by the place the save gives and then by a key the save keeps.
+    doingOf(lagrangeOrders, jumps, jumpUnknown) {
+      if (jumpUnknown) {
+        return { text: null, timeLeft: null, unknown: true }
+      }
+
+      const lagrange = lagrangeOrders.map((order) => {
+        const arrived = arrivalOf(order.Arrived)
+        const left = arrived ? timeLeft(order.TimeRequired) : null
+
+        return { place: order.MoveOrder, text: this.orderText(order, left), timeLeft: left, bodyId: order.SystemBodyID, arrivalRank: arrived === null ? 2 : arrived ? 0 : 1, time: Number.isFinite(order.TimeRequired) ? order.TimeRequired : -1 }
+      })
+      const jumpWork = jumps.map((jump) => ({ place: jump.MoveOrder, text: this.jumpOrderText(jump), timeLeft: null, id: jump.MoveOrderID }))
+
+      if (!lagrange.length && !jumpWork.length) {
+        return { text: null, timeLeft: null, unknown: false }
+      }
+
+      const lagrangeFirst = [...lagrange].sort((a, b) => placeKey(a.place) - placeKey(b.place) || a.bodyId - b.bodyId || a.arrivalRank - b.arrivalRank || a.time - b.time)
+      const jumpFirst = [...jumpWork].sort((a, b) => placeKey(a.place) - placeKey(b.place) || a.id - b.id)
+      const first = this.firstOfWork([...lagrangeFirst, ...jumpFirst])
+
+      if (first.length === 1) {
+        return first[0]
+      }
+
+      return { text: first.map((item, index) => (index === 0 ? item.text : `${item.text.charAt(0).toLowerCase()}${item.text.slice(1)}`)).join('; '), timeLeft: null }
+    },
+
+    // The orders that could be the fleet's first: every order whose place the save does not record, since it could hold any, and every order at the lowest place the save does record, since one above that place is behind at least one order. A place the save does not record is never compared with one it does.
+    firstOfWork(work) {
+      const known = work.map((item) => item.place).filter((place) => Number.isFinite(place))
+      const lowest = known.length ? Math.min(...known) : null
+
+      return work.filter((item) => !Number.isFinite(item.place) || item.place === lowest)
     },
 
     leftText(result) {
@@ -669,7 +758,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_Fleet.FleetName, FCT_MoveOrders.DestinationID as SystemBodyID, FCT_MoveOrders.Arrived, FCT_MoveOrders.TimeRequired from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} and FCT_MoveOrders.MoveActionID = ${STABILISE_ACTION} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_Fleet.FleetName, FCT_MoveOrders.DestinationID as SystemBodyID, FCT_MoveOrders.Arrived, FCT_MoveOrders.TimeRequired, FCT_MoveOrders.MoveOrder from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} and FCT_MoveOrders.MoveActionID = ${STABILISE_ACTION} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
     },
