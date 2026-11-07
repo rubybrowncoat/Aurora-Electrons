@@ -18,6 +18,7 @@ const { Database } = require('bun:sqlite')
 const { assert, runChecks, judged, caughtAll } = require('./lib/fault-credit')
 const { FIXTURE, PLAYED } = require('./lib/fixtures')
 const { loadUtilities } = require('./lib/utilities')
+const { loadModules, instantiate } = require('./lib/page-loader')
 const { plantedPatch } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 
@@ -25,6 +26,12 @@ const root = path.resolve(__dirname, '..')
 const EARTH_ATMOSPHERE_UNITS = 511187128
 const PI = 3.1416
 const GROUP_BY = 'export default (list, key) => list.reduce((groups, item) => { (groups[item[key]] = groups[item[key]] || []).push(item); return groups }, {})'
+const PRODUCTION_STUBS = {
+  dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
+  'dayjs/plugin/utc.js': 'export default {}',
+  romanum: 'export default { toNumeral: String }',
+  'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
+}
 
 const handles = new Map()
 
@@ -152,7 +159,7 @@ const adminsOf = (modules, file, game, race) => modules['naval-admins'].loadNava
 const missingOf = (result) => (result.inputs ? result.inputs.missing.join('; ') : '')
 
 // A colony and its race worked by hand: 10.5 installations (10 count) at I = 1.2 x 1.1 x 0.9 x 0.99 x 0.9 x 1 (the sector bonus 1.4 counts a quarter of its excess), 8 modules at half the crew, a captain's 1.1 and the admin chain 1 + (1.2 - 1) x 0.05, rate 0.001, speed 500 %, radius 6000 km.
-const handSource = () => ({ installations: 10.5, radius: 6000, modifier: { governor: 1.2, sector: 1.4, efficiency: 0.9, radiation: 100, unrest: 10, status: 1 }, ships: [{ ShipID: 1, PopulationID: 1, ParentCommandID: 1, FleetSystemID: 5, crew: 0.5, captain: 1.1, captained: true, modules: 8 }] })
+const handSource = () => ({ installations: 10.5, radius: 6000, gravity: 1, modifier: { governor: 1.2, sector: 1.4, efficiency: 0.9, radiation: 100, unrest: 10, status: 1 }, ships: [{ ShipID: 1, PopulationID: 1, ParentCommandID: 1, FleetSystemID: 5, crew: 0.5, captain: 1.1, captained: true, modules: 8 }] })
 
 const handExpected = () => {
   const installations = 0.001 * 10 * (1.2 * 1.1 * 0.9 * 0.99 * 0.9 * 1)
@@ -850,6 +857,307 @@ const BREAKDOWN_FAULTS = [
   { module: 'terraform-limits', label: 'the stage that settles the water does not name it', from: 'lever: waterLever ? LEVER.WATER : null', to: 'lever: null', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
 ]
 
+// Public seams: the Production page's jobs catch omissions from the count and timeline; terraformFinish catches wrong stop cycles and climate branches. These source-arithmetic cases do not claim a played-save finishing-date oracle.
+const waterJob = (extra = {}) => ({ Gravity: 1, TerraformStatus: 1, MaxAtm: 0.25, GasName: 'Water Vapour', GasAtm: 0.125, GasAtmUnknown: 0, HydroID: 3, HydroExt: 20, AtmosPress: 1, SurfaceTemp: 369, BaseTemp: 350, Albedo: 1, DustLevel: 0, BodyClass: 1, BodyTypeID: 2, Eccentricity: 0, OrbitalDistance: 1, Year: 8760, StarLuminosity: 1, Atmosphere: [{ AtmosGasID: 7, GasAtm: 0.875, FrozenOut: 0, FreezingPoint: 63, GHGas: 0, AntiGHGas: 0 }, { AtmosGasID: 5, GasAtm: 0.125, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }], ...extra })
+const PRODUCTION_CHECKS = [
+  {
+    id: 'unlimited-job',
+    run: ({ page, production }) => {
+      const vm = instantiate(page, { $store: { getters: {}, state: {}, dispatch: async () => {} }, data: { terraforms: [{ PopulationID: 1, TerraformStatus: 1, MaxAtm: 0, GasName: 'Oxygen', GasAtm: 0.5 }], terraformSources: { raceRate: 0.001, speed: 100, colonies: { 1: handSource() } }, navalAdmins: { 1: adminOf() }, populationProductionModifiers: { 1: { MinConstructionPeriod: 86400 } }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }) } })
+
+      assert.equal(vm.terraformingJobs.length, 1, 'an adding target of 0 atm still adds gas')
+      const [job] = vm.terraformingJobs
+      const timeline = production.completionBins([job], { years: 10, bins: 10 }, ['terraforming'])
+
+      assert.equal(job.days, null, 'the running job has no completion date')
+      assert.equal(timeline.total, 0)
+      assert.deepEqual(timeline.skipped, { unknown: 0, idle: 1, done: 0 }, 'unlimited work is not reported as already done')
+    },
+  },
+  {
+    id: 'unlimited-finish',
+    run: ({ production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.1 })
+      const finish = production.terraformFinish({ MinConstructionPeriod: 31536000 }, { TerraformStatus: 1, MaxAtm: 0, GasName: 'Oxygen', GasAtm: 0.5 }, rate)
+
+      assert.equal(finish.result.value, null, 'an unlimited addition has no finite completion')
+      assert.equal(finish.idle, true, 'the job is omitted from completion bins, not counted as done')
+      assert.ok(finish.note.includes('No stop target'))
+      assert.equal(production.terraformFinish({}, { GasName: 'Water Vapour', TerraformStatus: 1, MaxAtm: 0 }, rate).result.value, null, 'the zero-target branch needs no climate or period to establish no completion')
+    },
+  },
+  {
+    id: 'gravity-finish',
+    run: ({ production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
+      const modifiers = { MinConstructionPeriod: 31536000 }
+      const ordinary = { TerraformStatus: 1, MaxAtm: 1, GasName: 'Oxygen', GasAtm: 0.5, GasAtmUnknown: 0 }
+
+      // Population.ProcessTerraforming:1057 returns before any update below Helpers.cs:861's 0.1 g minimum, including clearing empty removals. Equality is eligible; an unknown gravity is not assumed eligible.
+      for (const job of [ordinary, waterJob(), ...[null, 0].map((GasAtm) => ({ ...ordinary, TerraformStatus: 0, MaxAtm: 0, GasAtm }))]) {
+        const blocked = production.terraformFinish(modifiers, { ...job, Gravity: 0.05 }, rate)
+
+        assert.equal(blocked.result.value, null, '0.05 g cannot complete any selected gas order')
+        assert.equal(blocked.idle, true, 'the selected order is not already completed')
+        assert.ok(blocked.note.includes('gravity') && blocked.note.includes('No completion'), 'the reason is stated in plain words')
+        assert.deepEqual(production.completionBins([{ days: blocked.result.value, finishIdle: blocked.idle }], { years: 10, bins: 10 }, ['terraforming']).skipped, { unknown: 0, idle: 1, done: 0 })
+
+        for (const Gravity of [0.1, 1]) {
+          assert.ok(production.terraformFinish(modifiers, { ...job, Gravity }, rate).result.value > 0, `${Gravity} g permits a future finish`)
+        }
+
+        for (const Gravity of [null, undefined]) {
+          const unknown = production.terraformFinish(modifiers, { ...job, Gravity }, rate)
+
+          assert.equal(unknown.result.value, null)
+          assert.equal(unknown.idle, false, 'unknown eligibility is a missing input, not a known stalled order')
+          assert.ok(unknown.result.inputs.missing.some((text) => text.includes('gravity')))
+        }
+      }
+    },
+  },
+  {
+    id: 'gravity-inputs',
+    needs: [FIXTURE.file],
+    run: async ({ page, production }) => {
+      const colony = await firstOf(FIXTURE.file, `select PopulationID, SystemBodyID from FCT_Population where GameID = ${FIXTURE.gameId} and RaceID = ${FIXTURE.raceId} and SystemBodyID > 0 limit 1`)
+      const copy = mutatedOf(FIXTURE.file, [`update FCT_SystemBody set Gravity = 0.05 where SystemBodyID = ${colony.SystemBodyID}`])
+
+      try {
+        const terraform = { PopulationID: colony.PopulationID, TerraformStatus: 1, MaxAtm: 1, GasName: 'Oxygen', GasAtm: 0.5, GasAtmUnknown: 0, Gravity: 1 }
+        const vm = instantiate(page, { $store: { getters: {}, state: {}, dispatch: async () => {} }, database: copy, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId, data: { terraforms: [terraform], navalAdmins: { 1: adminOf() }, populationProductionModifiers: { [colony.PopulationID]: { MinConstructionPeriod: 31536000 } }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }) } })
+
+        for (const gravity of [0.05, 0.1, 1, null]) {
+          await copy.query(`update FCT_SystemBody set Gravity = ${gravity === null ? 'null' : gravity} where SystemBodyID = ${colony.SystemBodyID}`)
+          const sources = await vm.runAsync('terraformSources')
+
+          vm.terraformSources = { raceRate: 0.001, speed: 100, colonies: { [colony.PopulationID]: { ...handSource(), gravity: sources.colonies[colony.PopulationID].gravity } } }
+          assert.equal(vm.terraformingJobs.length, 1, 'a selected order is kept even when it cannot advance')
+          const [job] = vm.terraformingJobs
+          const bins = production.completionBins([job], { years: 10, bins: 10 }, ['terraforming'])
+
+          assert.ok(job.rateResult.value > 0, 'the real capacity producer supplies positive held capacity')
+
+          if (gravity === 0.05) {
+            assert.equal(job.days, null, 'the page uses the saved low gravity, not merely positive capacity')
+            assert.ok(job.status.note?.includes('No completion') && job.status.note.includes('gravity'), 'the page identifies known blocked gravity rather than missing eligibility')
+            assert.deepEqual(bins.skipped, { unknown: 0, idle: 1, done: 0 })
+          } else if (gravity === null) {
+            assert.equal(job.days, null, 'unknown saved gravity never means eligible')
+            assert.ok(job.finishResult.inputs.missing.some((text) => text.includes('gravity')))
+            assert.deepEqual(bins.skipped, { unknown: 1, idle: 0, done: 0 })
+          } else {
+            assert.ok(job.days > 0, 'the minimum and above permit a finite finish')
+            assert.equal(bins.total + bins.later, 1)
+          }
+        }
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  {
+    id: 'target-cycle',
+    run: ({ production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
+      const modifiers = { MinConstructionPeriod: 31536000 }
+      const job = { Gravity: 1, TerraformStatus: 1, MaxAtm: 1, GasName: 'Oxygen', GasAtm: 0.5 }
+
+      assert.equal(production.terraformFinish(modifiers, job, rate).result.value, 1825, '0.5 + 4 × 0.125 = 1 is not past the adding target; the fifth year stops')
+      assert.equal(production.terraformFinish(modifiers, { ...job, TerraformStatus: 0, GasAtm: 1.5 }, rate).result.value, 1460, 'removing stops on equality after four years')
+      assert.equal(production.terraformFinish(modifiers, { ...job, GasAtm: null, GasAtmUnknown: 0, MaxAtm: 0.0625 }, rate).result.value, 730, 'the first increment creates a missing gas; the second checks its target')
+      assert.deepEqual([...provenance.getRule('production.jobCount').versions], ['3.2.x'])
+      assert.deepEqual([...provenance.getRule('production.terraformFinish').versions], ['3.2.x'])
+      assert.deepEqual([...provenance.getRule('production.timeline').versions], ['2.7.x'], 'the broad timeline still depends on unrepaired research, training and industrial forecasts')
+    },
+  },
+  {
+    id: 'decimal-add',
+    run: ({ page, production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.1 })
+      const terraform = { PopulationID: 1, Gravity: 1, TerraformStatus: 1, MaxAtm: 0.6, GasName: 'Oxygen', GasAtm: 0.3 }
+      const modifiers = { MinConstructionPeriod: 31536000 }
+
+      // Population.ProcessTerraforming:1098-1099: repeated double additions give 0.4, 0.5, 0.6, 0.7; equality on the third increment does not stop addition.
+      assert.equal(production.terraformFinish(modifiers, terraform, rate).result.value, 1460, 'non-binary addition needs four increments, not the quotient-rounded three')
+      assert.equal(production.terraformFinish(modifiers, { ...terraform, GasAtm: 0.1, MaxAtm: 0.3 }, rate).result.value, 730, '0.1 + 0.1 + 0.1 exceeds 0.3 after two updates; no blanket extra increment or rounding')
+      const source = { installations: 1, radius: 1, gravity: 1, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, ships: [] }
+      const vm = instantiate(page, { $store: { getters: {}, state: {}, dispatch: async () => {} }, data: { terraforms: [terraform], terraformSources: { raceRate: 0.1 / (EARTH_ATMOSPHERE_UNITS / (4 * PI)), speed: 100, colonies: { 1: source } }, navalAdmins: {}, populationProductionModifiers: { 1: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }) } })
+      const [job] = vm.terraformingJobs
+      const bins = production.completionBins([job], { years: 6, bins: 6 }, ['terraforming'])
+
+      assert.equal(job.rateResult.value, 0.1, 'the public capacity input gives the stated annual step')
+      assert.equal(job.days, 1460)
+      assert.deepEqual(bins.counts.terraforming, [0, 0, 0, 0, 1, 0], 'the job lands in year four, not year three')
+    },
+  },
+  {
+    id: 'decimal-remove',
+    run: ({ page, production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.1 })
+      const terraform = { PopulationID: 1, Gravity: 1, TerraformStatus: 0, MaxAtm: 0.3, GasName: 'Oxygen', GasAtm: 0.6 }
+      const modifiers = { MinConstructionPeriod: 31536000 }
+
+      // Population.ProcessTerraforming:1074-1077: repeated double subtractions give 0.5, 0.4, 0.30000000000000004, 0.20000000000000004; the third remains above the target.
+      assert.equal(production.terraformFinish(modifiers, terraform, rate).result.value, 1460, 'non-binary removal needs four increments, not the quotient-rounded three')
+      const source = { installations: 1, radius: 1, gravity: 1, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, ships: [] }
+      const vm = instantiate(page, { $store: { getters: {}, state: {}, dispatch: async () => {} }, data: { terraforms: [terraform], terraformSources: { raceRate: 0.1 / (EARTH_ATMOSPHERE_UNITS / (4 * PI)), speed: 100, colonies: { 1: source } }, navalAdmins: {}, populationProductionModifiers: { 1: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }) } })
+      const [job] = vm.terraformingJobs
+      const bins = production.completionBins([job], { years: 6, bins: 6 }, ['terraforming'])
+
+      assert.equal(job.rateResult.value, 0.1)
+      assert.equal(job.days, 1460)
+      assert.deepEqual(bins.counts.terraforming, [0, 0, 0, 0, 1, 0])
+    },
+  },
+  {
+    id: 'empty-removal',
+    run: ({ page, production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
+      const modifiers = { MinConstructionPeriod: 31536000 }
+
+      // Population.ProcessTerraforming:1065-1088,1107-1110: a selected ordinary-gas removal is cleared only during the next production tick, whether no atmosphere row exists or a present row starts at zero pressure.
+      for (const GasAtm of [null, 0]) {
+        const terraform = { Gravity: 1, PopulationID: 1, TerraformStatus: 0, MaxAtm: 0, GasName: 'Oxygen', GasAtm, GasAtmUnknown: 0 }
+
+        assert.equal(production.terraformFinish(modifiers, terraform, rate).result.value, 365, `${GasAtm === null ? 'absent' : 'present-zero'} gas still needs the first assumed increment to clear the selected order`)
+        const vm = instantiate(page, { $store: { getters: {}, state: {}, dispatch: async () => {} }, data: { terraforms: [terraform], terraformSources: { raceRate: 0.001, speed: 100, colonies: { 1: handSource() } }, navalAdmins: { 1: adminOf() }, populationProductionModifiers: { 1: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }) } })
+
+        assert.equal(vm.terraformingJobs.length, 1, 'the selected removal remains visible before the tick')
+        const [job] = vm.terraformingJobs
+        const timeline = production.completionBins([job], { years: 4, bins: 2 }, ['terraforming'])
+
+        assert.equal(job.status.id, 'running', 'the selected order is still running')
+        assert.equal(job.rateNote, 'Removing')
+        assert.equal(job.days, 365, 'the displayed finish is the next assumed increment')
+        assert.equal(timeline.total, 1)
+        assert.deepEqual(timeline.counts.terraforming, [1, 0])
+        assert.deepEqual(timeline.skipped, { unknown: 0, idle: 0, done: 0 }, 'the timeline must not count the selected order as already done')
+      }
+    },
+  },
+  {
+    id: 'water-temperature',
+    run: ({ production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
+      const modifiers = { MinConstructionPeriod: 31536000 }
+
+      // At 369 K the first cycle condenses 0.1 atm: gas 0.025, pressure 0.9, hydro 24; adding 0.125 leaves gas 0.15 and pressure 1.025. The source update gives 350 × 1.1025 = 385.875 K and a vapour hydrosphere. Next cycle cannot condense; it evaporates 0.1 atm then adds 0.125, passing 0.25.
+      assert.equal(production.terraformFinish(modifiers, waterJob(), rate).result.value, 730, 'the increment warms the body above the condensation gate')
+      assert.equal(production.terraformFinish(modifiers, waterJob({ SurfaceTemp: 370, MaxAtm: 0.1875 }), rate).result.value, 365, 'above 369 K the initial cycle cannot condense')
+      assert.equal(production.terraformFinish(modifiers, waterJob({ MaxAtm: 0.1875 }), rate).result.value, 730, 'at exactly 369 K the initial cycle does condense')
+      assert.equal(production.terraformFinish(modifiers, waterJob({ SurfaceTemp: null }), rate).result.status, 'unavailable', 'an unknown temperature is not a cold body')
+    },
+  },
+  {
+    id: 'water-thaw',
+    run: ({ production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.001 })
+      const job = waterJob({ MaxAtm: 0.002999, GasAtm: 0, HydroID: 4, AtmosPress: 0.999, SurfaceTemp: 270, BaseTemp: 325.67, Atmosphere: [{ AtmosGasID: 7, GasAtm: 0.999, FrozenOut: 0, FreezingPoint: 63, GHGas: 0, AntiGHGas: 0 }, { AtmosGasID: 5, GasAtm: 0, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }] })
+
+      // SystemBody.ProcessHydrosphereTransition:2507-2514 and Game.ProcessWaterVapourEvaporation:27464-27475: the first addition leaves pressure 1 and vapour 0.001; thaw refills 0.001, leaving extent 19.96 before albedo rises to 1.02994. Temperature is 325.67 × 1.1001 × 1.02994 = 368.99615783598 K, not 369.01765401 K. Next condensation leaves vapour 0.001997996, so the second addition reaches only 0.002997996; the third increment passes the target.
+      assert.equal(production.terraformFinish({ MinConstructionPeriod: 31536000 }, job, rate).result.value, 1095, 'thaw evaporation precedes albedo, preserving next-increment condensation and a third-increment finish')
+    },
+  },
+  {
+    id: 'water-giants',
+    run: ({ production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
+      const modifiers = { MinConstructionPeriod: 31536000 }
+      const job = waterJob({ MaxAtm: 0.1875, SurfaceTemp: 300, BaseTemp: 300, Atmosphere: [{ AtmosGasID: 7, GasAtm: 0.875, FrozenOut: 0, FreezingPoint: 63, GHGas: 1, AntiGHGas: 0 }, { AtmosGasID: 5, GasAtm: 0.125, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }] })
+
+      // SystemBody.UpdateSurfaceTemp:2024-2027: both giant types stay at BaseTemp = 300 K, ignoring the non-neutral atmosphere. First condensation/addition leaves gas 0.15 and pressure 1.025; ordinary-body temperature would be 300 × (1 + 1.025 / 10 + 0.875) = 593.25 K. Giants keep condensing, reaching 0.175 then 0.2 atm: the third increment passes 0.1875, not the ordinary body's second.
+      for (const BodyTypeID of [4, 5]) {
+        assert.equal(production.terraformFinish(modifiers, { ...job, BodyTypeID }, rate).result.value, 1095, `body type ${BodyTypeID} stays at its base temperature`)
+      }
+
+      assert.equal(production.terraformFinish(modifiers, job, rate).result.value, 730, 'ordinary bodies still apply greenhouse warming')
+      assert.equal(production.terraformFinish(modifiers, { ...job, BodyTypeID: null }, rate).result.status, 'unavailable', 'an unknown body type cannot silently take the ordinary climate branch')
+    },
+  },
+  {
+    id: 'water-inputs',
+    needs: [FIXTURE.file],
+    run: async ({ page, production, provenance }) => {
+      const colony = await firstOf(FIXTURE.file, `select PopulationID, SystemBodyID from FCT_Population where GameID = ${FIXTURE.gameId} and RaceID = ${FIXTURE.raceId} and SystemBodyID > 0 limit 1`)
+      const copy = mutatedOf(FIXTURE.file, [
+        `update FCT_Population set TerraformingGasID = 5, TerraformStatus = 1, MaxAtm = 0.1875 where PopulationID = ${colony.PopulationID}`,
+        `update FCT_Star set Luminosity = 1 where StarID = (select StarID from FCT_SystemBody where SystemBodyID = ${colony.SystemBodyID})`,
+        `update FCT_SystemBody set BaseTemp = 100, DistanceToParent = ${(255 / 350) ** 2}, BodyClass = 1, BodyTypeID = 2, Eccentricity = 0, Albedo = 1, DustLevel = 0, SurfaceTemp = 369, HydroID = 3, HydroExt = 20, AtmosPress = 1 where SystemBodyID = ${colony.SystemBodyID}`,
+        `delete from FCT_AtmosphericGas where SystemBodyID = ${colony.SystemBodyID}`,
+        insertGas(FIXTURE.gameId, colony.SystemBodyID, 7, 0.875, 0),
+        insertGas(FIXTURE.gameId, colony.SystemBodyID, 5, 0.125, 0),
+      ])
+
+      try {
+        const vm = instantiate(page, { $store: { getters: {}, state: {}, dispatch: async () => {} }, database: copy, GameID: FIXTURE.gameId, RaceID: FIXTURE.raceId })
+        const job = (await vm.runAsync('terraforms')).find((row) => row.PopulationID === colony.PopulationID)
+        const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
+
+        assert.equal(production.terraformFinish({ MinConstructionPeriod: 31536000 }, job, rate).result.value, 730, 'the live read supplies the evolving climate, including base temperature from distance rather than the stale stored column')
+        await copy.query('update DIM_Gases set GHGas = 1 where GasID = 7')
+
+        for (const BodyTypeID of [4, 5]) {
+          await copy.query(`update FCT_SystemBody set BodyTypeID = ${BodyTypeID}, DistanceToParent = ${(255 / 300) ** 2}, SurfaceTemp = 300 where SystemBodyID = ${colony.SystemBodyID}`)
+          const giant = (await vm.runAsync('terraforms')).find((row) => row.PopulationID === colony.PopulationID)
+
+          assert.equal(production.terraformFinish({ MinConstructionPeriod: 31536000 }, giant, rate).result.value, 1095, `the live read distinguishes giant type ${BodyTypeID} before forecasting its climate`)
+        }
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  {
+    id: 'ordinary-limit',
+    run: ({ production, provenance }) => {
+      const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 1 })
+      const modifiers = { MinConstructionPeriod: 31536000 }
+      const job = { Gravity: 1, TerraformStatus: 1, MaxAtm: 99999, GasName: 'Oxygen', GasAtm: 0 }
+
+      assert.equal(production.terraformFinish(modifiers, job, rate).result.value, 36500000, 'a finish on increment 100,000 is included')
+      assert.equal(production.terraformFinish(modifiers, { ...job, TerraformStatus: 0, GasAtm: 100000, MaxAtm: 0 }, rate).result.value, 36500000, 'removal on the last searched increment is included')
+      const beyond = production.terraformFinish(modifiers, { ...job, MaxAtm: 100000 }, rate)
+
+      assert.equal(beyond.result.value, null, 'no completion beyond the explicit increment cap is claimed')
+      assert.equal(beyond.idle, true)
+      assert.ok(beyond.note.includes('100,000 increments'), 'the bound is disclosed, not described as never finishing')
+    },
+  },
+]
+const PRODUCTION_FAULTS = [
+  { file: 'pages/production.vue', from: 'colonies[terraform.PopulationID] && hasTerraformers(colonies[terraform.PopulationID])', to: '!(terraform.TerraformStatus && terraform.MaxAtm === 0) && colonies[terraform.PopulationID] && hasTerraformers(colonies[terraform.PopulationID])', fails: ['unlimited-job'] },
+  { file: 'utilities/production.js', from: 'if (status && terraform.MaxAtm === 0) {', to: 'if (false) {', fails: ['unlimited-finish'] },
+  { file: 'utilities/production.js', from: 'done = gas > terraform.MaxAtm && terraform.MaxAtm > 0', to: 'done = gas >= terraform.MaxAtm && terraform.MaxAtm > 0', fails: ['target-cycle'] },
+  { file: 'utilities/production.js', from: 'gas = step\n        present = true', to: 'gas = step\n        present = true\n        done = gas > terraform.MaxAtm && terraform.MaxAtm > 0', fails: ['target-cycle'] },
+  { file: 'utilities/production.js', from: '(gas <= terraform.MaxAtm && terraform.MaxAtm > 0)', to: '(gas < terraform.MaxAtm && terraform.MaxAtm > 0)', fails: ['target-cycle'] },
+  { file: 'utilities/production.js', from: 'body.SurfaceTemp <= 369 && water.GasAtm > humidity', to: 'water.GasAtm > humidity', fails: ['water-temperature'] },
+  { file: 'utilities/production.js', from: 'body.SurfaceTemp <= 369 && water.GasAtm > humidity', to: 'body.SurfaceTemp < 369 && water.GasAtm > humidity', fails: ['water-temperature'] },
+  { file: 'utilities/production.js', from: 'updateWaterClimate(body, water)', to: 'void body', fails: ['water-temperature'] },
+  { file: 'utilities/production.js', from: 'const CONDENSATION_PER_YEAR = 0.1', to: 'const CONDENSATION_PER_YEAR = 0.05', fails: ['water-temperature'] },
+  { file: 'pages/production.vue', from: 'row.BaseTemp = isKnownNumber(distance) && distance > 0 && isKnownNumber(row.StarLuminosity) && row.StarLuminosity > 0 ? climateBaseTemp(row) : null', to: 'row.BaseTemp = 100', fails: ['water-inputs'] },
+  { file: 'utilities/production.js', from: 'evaporateWater(body, water, 0)\n    body.Albedo += 0.0015 * body.HydroExt', to: 'body.Albedo += 0.0015 * body.HydroExt\n    evaporateWater(body, water, 0)', fails: ['water-thaw'] },
+  { file: 'utilities/production.js', from: 'body.BodyTypeID === BODY_TYPE.GAS_GIANT || body.BodyTypeID === BODY_TYPE.SUPERJOVIAN', to: 'false', fails: ['water-giants'] },
+  { file: 'pages/production.vue', from: 'FCT_SystemBody.BodyTypeID, FCT_SystemBodyName.Name as SystemBodyName', to: 'null as BodyTypeID, FCT_SystemBodyName.Name as SystemBodyName', fails: ['water-inputs'] },
+  { file: 'utilities/production.js', from: 'compute: () => (cycle * period) / SECONDS_PER_DAY', to: 'compute: () => (status || terraform.GasAtm > 0 ? cycle * period : 0) / SECONDS_PER_DAY', fails: ['empty-removal'] },
+  { file: 'utilities/production.js', from: 'isNumber(terraform.Gravity) && terraform.Gravity < 0.1', to: 'false', fails: ['gravity-finish'] },
+  { file: 'utilities/production.js', from: 'terraform.Gravity < 0.1', to: 'terraform.Gravity <= 0.1', fails: ['gravity-finish'] },
+  { file: 'utilities/production.js', from: "...(isNumber(terraform.Gravity) ? [] : ['the body\\'s gravity'])", to: '...[]', fails: ['gravity-finish'] },
+  { file: 'pages/production.vue', from: 'Gravity: colonies[terraform.PopulationID].gravity', to: 'Gravity: 1', fails: ['gravity-inputs'] },
+  { file: 'utilities/terraform-capacity.js', from: 'gravity: row.Gravity', to: 'gravity: null', fails: ['gravity-inputs'] },
+  { file: 'pages/production.vue', from: 'FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.SurfaceTemp', to: 'FCT_SystemBody.Radius, null as Gravity, FCT_SystemBody.SurfaceTemp', fails: ['water-inputs'] },
+  { file: 'utilities/production.js', from: 'gas += step', to: 'gas = terraform.GasAtm + cycle * step', fails: ['decimal-add'] },
+  { file: 'utilities/production.js', from: 'gas -= step', to: 'gas = terraform.GasAtm - cycle * step', fails: ['decimal-remove'] },
+  { file: 'utilities/production.js', from: 'gas += step', to: 'gas = Math.round((gas + step) * 1e12) / 1e12', fails: ['decimal-add'] },
+  { file: 'utilities/production.js', from: 'cycle <= ORDINARY_GAS_INCREMENT_CAP', to: 'cycle < ORDINARY_GAS_INCREMENT_CAP', fails: ['ordinary-limit'] },
+]
+
+const productionModules = async (sources = {}) => {
+  const loaded = await loadModules(['pages/production', 'utilities/production', 'utilities/provenance'], { stubs: PRODUCTION_STUBS, sources })
+
+  return { page: loaded['pages/production'].default, production: loaded['utilities/production'], provenance: loaded['utilities/provenance'] }
+}
+
 const main = async () => {
   let passed = 0
   let total = 0
@@ -925,6 +1233,29 @@ const main = async () => {
     })
   }
 
+  const production = await productionModules()
+
+  for (const { id, run, needs = [] } of PRODUCTION_CHECKS) {
+    if (!present(...needs)) {
+      skip(`production ${id}`, needs)
+      continue
+    }
+
+    await check(`production ${id}`, () => run(production))
+  }
+
+  for (const { file, from, to, fails } of mutating() ? PRODUCTION_FAULTS : []) {
+    await check(`production planted fault ${from}`, async () => {
+      refusePlanting(from)
+      const text = fs.readFileSync(path.join(root, 'src', 'renderer', file), 'utf8')
+      const source = plantedPatch(file, text, from, to)
+      const planted = await productionModules({ [file.replace(/\.(js|vue)$/, '')]: source })
+      const results = await runChecks(PRODUCTION_CHECKS.filter(({ id }) => fails.includes(id)).map(({ id, run }) => ({ id, name: id, run: () => run(planted) })), {})
+
+      judged(results, from)
+      assert.ok(caughtAll(results, { name: from }), 'the production assertions still pass')
+    })
+  }
   await Promise.allSettled([...handles.values()].map(async (handle) => (await handle).close()))
 
   for (const failure of failures) {

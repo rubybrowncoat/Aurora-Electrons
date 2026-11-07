@@ -1677,22 +1677,22 @@ const defineCases = (modules) => {
 
   invariant('production', 'a terraforming finish with no rate says why, and one with a rate of 0 is idle', () => {
     const rate = rateOf(colonyOf({ installations: 10 }))
-    const job = { TerraformStatus: 1, MaxAtm: 1, GasAtm: 0.5, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
+    const job = { Gravity: 1, TerraformStatus: 1, MaxAtm: 1, GasAtm: 0.5, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
     const finish = production.terraformFinish(colonyModifiers, job, rate)
 
     assert.equal(finish.result.status, 'estimated')
-    assert.ok(Math.abs(finish.result.value - (0.5 / (rate.value / 365))) < 1e-9)
+    assert.ok(finish.result.value > 0.5 / (rate.value / 365) && finish.result.value <= 0.5 / (rate.value / 365) + colonyModifiers.MinConstructionPeriod / 86400)
     assert.equal(production.terraformFinish(colonyModifiers, job, rateOf(colonyOf(), { speed: null })).result.status, 'unavailable')
     assert.equal(production.terraformFinish(colonyModifiers, job, rateOf(colonyOf({ installations: 0 }))).idle, true)
     assert.equal(production.terraformFinish(colonyModifiers, { ...job, TerraformStatus: null }, rate).result.status, 'unavailable')
   })
 
-  invariant('production', 'a gas with no row in the body\'s atmosphere is 0 atm and a row with a null pressure is unavailable, naming the pressure, never a finish of 0 days', () => {
+  invariant('production', 'an eligible selected removal with no gas row still needs the next increment; a row with a null pressure is unavailable, naming the pressure', () => {
     const rate = rateOf(colonyOf({ installations: 10 }))
-    const removing = { TerraformStatus: 0, MaxAtm: 0, GasAtm: null, GasAtmUnknown: 0, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
+    const removing = { Gravity: 1, TerraformStatus: 0, MaxAtm: 0, GasAtm: null, GasAtmUnknown: 0, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
     const absent = production.terraformFinish(colonyModifiers, removing, rate)
 
-    assert.equal(absent.result.value, 0)
+    assert.equal(absent.result.value, colonyModifiers.MinConstructionPeriod / 86400)
     assert.ok(absent.result.assumptions.some((text) => text.includes('0 atm')))
 
     const unknown = production.terraformFinish(colonyModifiers, { ...removing, GasAtmUnknown: 1 }, rate)
@@ -1702,7 +1702,7 @@ const defineCases = (modules) => {
     assert.equal(production.terraformFinish(colonyModifiers, { ...removing, GasAtmUnknown: undefined }, rate).result.status, 'unavailable')
     assert.equal(production.terraformFinish(colonyModifiers, { ...removing, GasAtm: 0.5, GasAtmUnknown: 0 }, rate).result.status, 'estimated')
 
-    const vapour = { ...removing, MaxAtm: 0.1, GasName: 'Water Vapour', HydroID: 3, HydroExt: 20, AtmosPress: 1 }
+    const vapour = { ...removing, MaxAtm: 0.1, GasName: 'Water Vapour', HydroID: 3, HydroExt: 20, AtmosPress: 1, SurfaceTemp: 300, BaseTemp: 300, Albedo: 1, DustLevel: 0, BodyClass: 1, BodyTypeID: 2, Eccentricity: 0, Atmosphere: [{ AtmosGasID: 7, GasAtm: 1, FrozenOut: 0, FreezingPoint: 63, GHGas: 0, AntiGHGas: 0 }] }
 
     assert.equal(production.terraformFinish(colonyModifiers, { ...vapour, GasAtmUnknown: 1 }, rate).result.status, 'unavailable')
     assert.notEqual(production.terraformFinish(colonyModifiers, { ...vapour, GasAtmUnknown: 0 }, rate).result.status, 'unavailable')

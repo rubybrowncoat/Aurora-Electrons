@@ -1,6 +1,7 @@
 // The calculations behind the Production page: what each colony can build, research and train, what is idle, and when each job finishes. Every figure is a provenance result (utilities/provenance.js): a missing input gives an unavailable result naming it, never 0, and a job that is not making progress gives an unavailable finish that says so. The colony's production modifiers and its construction, ordnance and light naval capacity come from the production-modifiers mixin (rule `production.populationCapacity`).
 
 import { admitQueued, forecastColonySteps, FUEL, HORIZON_DAYS } from './industry-cycle'
+import { BODY_TYPE, GAS, HYDROSPHERE, hydrosphereAtTemperature, surfaceTemperature } from './habitability'
 import { TERMINATION, UNPACED } from './search-run'
 import { MINERALS, projectShortages } from './minerals'
 import { capacityKind } from './production-types'
@@ -20,16 +21,18 @@ const CONDENSATION_TO_HYDRO_RATE = 40
 const WATER_VAPOUR_IN_ATMOSPHERE = 0.01
 // How far ahead the water vapour estimate looks.
 export const WATER_VAPOUR_HORIZON = 200
+const ORDINARY_GAS_INCREMENT_CAP = 100000
 
 const ESTIMATE = 'The rate is not compared with a saved figure of the job.'
 
+// Population.ProcessTerraforming (Population.cs:1053-1059, 1098-1103): an adding target of zero does not stop the job.
 registerRule({
   id: 'production.jobCount',
-  versions: ['2.7.x'],
+  versions: PRODUCTION_VERSIONS,
   units: 'jobs',
   verification: 'confirmed',
   structure: ['FCT_ResearchProject', 'FCT_IndustrialProjects.Queue, Pause', 'FCT_ShipyardTask', 'FCT_Shipyard.TaskType, PauseActivity', 'FCT_GroundUnitTraining', 'FCT_Population.TerraformingGasID, MaxAtm'],
-  note: 'A count of the save\'s research projects, industrial projects, shipyard tasks and activities, ground training tasks and terraforming colonies. Queued jobs are counted apart from the running ones; a colony adding a gas up to 0 atm has no terraforming job.',
+  note: 'A count of the save\'s research projects, industrial projects, shipyard tasks and activities, ground training tasks and terraforming colonies. Queued jobs are counted apart from the running ones; an adding target of 0 atm means unlimited addition, so it still counts as a job.',
 })
 
 registerRule({
@@ -139,8 +142,18 @@ registerRule({
   { key: 'ship', versions: ['3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
   { key: 'training', versions: ['2.7.x'], note: 'The task\'s remaining build points over its rate, in days.' },
-  { key: 'terraform', versions: ['2.7.x'], note: 'The pressure still to add or remove over the local rate, in days; for water vapour over liquid water, the construction cycles it takes as the vapour condenses and the oceans evaporate. Not within 200 years reads as no date.' },
 ].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}` }))
+
+// Population.ProcessTerraforming (Population.cs:1057-1130; minimum gravity in Helpers.cs:861), Game.ProcessConstructionCycleStrategicUpdates (Game.cs:23908-23909, 23984), ProcessWaterVapourCondensation/Evaporation (Game.cs:27382-27499) and SystemBody.ProcessHydrosphereTransition/UpdateAtmosPress/UpdateSurfaceTemp (SystemBody.cs:2020-2045, 2415-2524).
+registerRule({
+  id: 'production.terraformFinish',
+  versions: PRODUCTION_VERSIONS,
+  units: 'days',
+  verification: 'estimated',
+  structure: ['production.terraformRate', 'FCT_Game.MinConstructionPeriod', 'FCT_Population.TerraformStatus, MaxAtm', 'FCT_SystemBody.Gravity, BodyTypeID, BodyClass, SurfaceTemp, HydroID, HydroExt, AtmosPress, Albedo, DustLevel, DistanceToParent, OrbitalDistance, Eccentricity, Year', 'FCT_Star.Luminosity', 'FCT_AtmosphericGas.GasAtm, FrozenOut', 'DIM_Gases.FreezingPoint, GHGas, AntiGHGas'],
+  note: 'Below 0.1 g, no terraforming progress or order clearing occurs, so there is no completion while that gravity holds. At or above that minimum, addition stops only above a positive target. Removal stops at a positive pressure no higher than a positive target; it also stops when the gas is gone, except that water vapour removal keeps running while surface water remains. An eligible selected removal of absent or zero-pressure gas clears on the next increment. Zero is an unlimited adding target. A missing gas is created in the first increment and its adding target is checked from the next. Ordinary gas pressure is updated increment by increment, with no date if it does not finish within 100,000 increments. Water condenses only at or below 369 K, then surface water evaporates, before terraforming. After each water increment, temperature, water phase, albedo and gas freezing are recalculated. Thaw replenishes atmospheric humidity before the remaining surface water raises albedo. Gas giants and superjovians keep their base temperature regardless of the atmosphere. The finish is the end of that increment; water without a finish within 200 years has no date.',
+  assumptions: ['The gravity and rate hold and each future increment lasts the minimum construction period', 'The ordinary-gas forecast looks ahead at most 100,000 increments', 'For the water forecast, the present orbital distance, dust and other gas amounts hold while temperature, gas freezing and water phase evolve each increment', 'The water forecast looks ahead at most 200 years'],
+})
 
 registerRule({
   id: 'production.timeline',
@@ -1102,68 +1115,177 @@ export const trainingRate = (capacity, training) => {
   return combine({ rule, parts: { capacity }, compute: (values) => (values.capacity * training.TaskPercentage) / 100, inputs: { present: ['the task\'s share of the capacity'] } })
 }
 
-// How many construction cycles until adding or removing water vapour on a body with liquid water ends, as the game runs them: the terraformers change the gas each cycle and the job ends once it passes the target; vapour above the air's humidity then condenses into the oceans, up to 0.1 atm a year, and the oceans evaporate up to it. `step`: atm the terraformers move a cycle; `years`: a cycle's length. Null when that takes more than WATER_VAPOUR_HORIZON years.
+// The strategic water update precedes terraforming (Game.ProcessConstructionCycleStrategicUpdates). Liquid water evaporates to its humidity; a vapour hydrosphere evaporates at most 4 percent of coverage a year, or 0.1 atm.
+const evaporateWater = (body, water, years) => {
+  if (!(body.HydroExt > 0) || ![HYDROSPHERE.LIQUID, HYDROSPHERE.VAPOUR].includes(body.HydroID)) {
+    return false
+  }
+
+  const liquid = body.HydroID === HYDROSPHERE.LIQUID
+  const target = liquid ? body.AtmosPress * (body.HydroExt / 100) * WATER_VAPOUR_IN_ATMOSPHERE : body.HydroExt / CONDENSATION_TO_HYDRO_RATE
+  const amount = Math.max(0, liquid ? target - water.GasAtm : Math.min(target - water.GasAtm, years * 4 / CONDENSATION_TO_HYDRO_RATE))
+
+  if (!(amount > 0)) {
+    return false
+  }
+
+  water.GasAtm += amount
+  body.HydroExt -= amount * CONDENSATION_TO_HYDRO_RATE
+  body.AtmosPress = Math.max(0, body.Atmosphere.reduce((sum, gas) => sum + gas.GasAtm, 0))
+
+  return true
+}
+
+// Population.ProcessTerraforming ends each increment with RecalculateTotalAtmosphericPressure, ProcessHydrosphereTransition and UpdateAtmosPress. Reuse the shared dampened temperature, but count each greenhouse flag independently as SystemBody.UpdateSurfaceTemp does.
+const updateWaterClimate = (body, water) => {
+  const temperature = () => {
+    // SystemBody.UpdateSurfaceTemp:2024-2027 bypasses every atmospheric, albedo, dust and orbital-dampening factor for both giant types.
+    if (body.BodyTypeID === BODY_TYPE.GAS_GIANT || body.BodyTypeID === BODY_TYPE.SUPERJOVIAN) {
+      body.SurfaceTemp = body.BaseTemp
+
+      return
+    }
+
+    const greenhouse = body.Atmosphere.reduce((sum, gas) => sum + (!gas.FrozenOut && gas.GHGas ? gas.GasAtm : 0), 0)
+    const anti = body.Atmosphere.reduce((sum, gas) => sum + (!gas.FrozenOut && gas.AntiGHGas ? gas.GasAtm : 0), 0)
+
+    body.SurfaceTemp = surfaceTemperature(body, Math.min(3, 1 + body.AtmosPress / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti))
+  }
+
+  body.AtmosPress = Math.max(0, body.Atmosphere.reduce((sum, gas) => sum + gas.GasAtm, 0))
+  temperature()
+  const was = body.HydroID
+
+  body.HydroID = hydrosphereAtTemperature(body.SurfaceTemp)
+
+  // SystemBody.ProcessHydrosphereTransition:2455-2514: thaw refills humidity before its albedo step; ice-to-vapour and liquid/vapour-to-ice retain their distinct branches.
+  if (was === HYDROSPHERE.ICE_SHEET && body.HydroID === HYDROSPHERE.LIQUID) {
+    evaporateWater(body, water, 0)
+    body.Albedo += 0.0015 * body.HydroExt
+    temperature()
+  } else if ([HYDROSPHERE.LIQUID, HYDROSPHERE.VAPOUR].includes(was) && body.HydroID === HYDROSPHERE.ICE_SHEET) {
+    body.Albedo -= 0.0015 * body.HydroExt
+    temperature()
+  } else if (was !== HYDROSPHERE.NONE && was !== body.HydroID && body.HydroExt > 0 && body.HydroID === HYDROSPHERE.VAPOUR) {
+    if (was === HYDROSPHERE.ICE_SHEET) {
+      body.Albedo += 0.0015 * body.HydroExt
+    }
+
+    temperature()
+  } else if (was === HYDROSPHERE.VAPOUR && body.HydroID === HYDROSPHERE.LIQUID) {
+    evaporateWater(body, water, 0)
+    temperature()
+  }
+
+  const pressure = body.AtmosPress
+
+  body.Atmosphere.forEach((gas) => { gas.FrozenOut = body.SurfaceTemp < gas.FreezingPoint })
+  body.AtmosPress = body.Atmosphere.reduce((sum, gas) => sum + (gas.FrozenOut ? 0 : gas.GasAtm), 0) || pressure / 20
+
+  if (body.AtmosPress !== pressure) {
+    temperature()
+  }
+}
+
+// The water forecast at uniform increments, with the source's order and stop comparisons. Its climate evolves after each increment; the present orbital distance, dust and other gas amounts are held. Null means no finish within the horizon, not proof that the job can never end.
 export const waterVapourCycles = (terraform, step, years) => {
-  let gas = terraform.GasAtm || 0
-  let pressure = terraform.AtmosPress
-  let hydro = terraform.HydroExt
-  const cycles = Math.ceil(WATER_VAPOUR_HORIZON / years)
+  const body = { ...terraform, Atmosphere: terraform.Atmosphere.map((gas) => ({ ...gas })) }
+  let water = body.Atmosphere.find((gas) => gas.AtmosGasID === GAS.WATER_VAPOUR)
+  let present = !!water
+
+  if (!water) {
+    water = { AtmosGasID: GAS.WATER_VAPOUR, GasAtm: 0, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }
+    body.Atmosphere.push(water)
+  }
+
+  const cycles = Math.floor(WATER_VAPOUR_HORIZON / years)
 
   for (let cycle = 1; cycle <= cycles; cycle++) {
-    if (terraform.TerraformStatus) {
-      gas += step
-      pressure += step
+    const humidity = body.HydroID === HYDROSPHERE.LIQUID ? body.AtmosPress * (body.HydroExt / 100) * WATER_VAPOUR_IN_ATMOSPHERE : 0
 
-      if (gas > terraform.MaxAtm) {
+    if (body.SurfaceTemp <= 369 && water.GasAtm > humidity) {
+      const condensed = Math.min(years * CONDENSATION_PER_YEAR, water.GasAtm - humidity)
+
+      water.GasAtm -= condensed
+      body.AtmosPress = Math.max(0, body.AtmosPress - condensed)
+      body.HydroExt += condensed * CONDENSATION_TO_HYDRO_RATE
+      present = water.GasAtm > 0
+    }
+
+    present = evaporateWater(body, water, years) || present
+
+    if (terraform.TerraformStatus) {
+      water.GasAtm += step
+
+      if (present && water.GasAtm > terraform.MaxAtm && terraform.MaxAtm > 0) {
         return cycle
       }
-    } else {
-      const removed = Math.min(step, gas)
 
-      gas -= removed
-      pressure -= removed
+      present = true
+    } else if (present) {
+      water.GasAtm -= step
 
-      if (gas <= 0) {
-        if (!(hydro > 0)) {
+      if (water.GasAtm > 0) {
+        if (water.GasAtm <= terraform.MaxAtm && terraform.MaxAtm > 0) {
           return cycle
         }
-      } else if (gas <= terraform.MaxAtm && terraform.MaxAtm > 0) {
+      } else if (body.HydroExt === 0) {
         return cycle
+      } else {
+        water.GasAtm = 0
       }
+    } else if (body.HydroExt === 0) {
+      return cycle
     }
 
-    const humidity = pressure * (hydro / 100) * WATER_VAPOUR_IN_ATMOSPHERE
-
-    if (gas > humidity) {
-      const condensed = Math.min(years * CONDENSATION_PER_YEAR, gas - humidity)
-
-      gas -= condensed
-      pressure -= condensed
-      hydro += condensed * CONDENSATION_TO_HYDRO_RATE
-    }
-
-    const target = pressure * (hydro / 100) * WATER_VAPOUR_IN_ATMOSPHERE
-
-    if (hydro > 0 && target > gas) {
-      hydro -= (target - gas) * CONDENSATION_TO_HYDRO_RATE
-      pressure += target - gas
-      gas = target
-    }
+    updateWaterClimate(body, water)
   }
 
   return null
 }
 
-// A terraforming job's finish as { result, idle, note }: the pressure still to move over the local rate, or the construction cycles water vapour takes over liquid water. `note` says why a water vapour job has no date (not within WATER_VAPOUR_HORIZON years). `terraform`: the colony's row (TerraformStatus, MaxAtm, GasAtm, GasAtmUnknown, GasName, HydroID, HydroExt, AtmosPress); `GasAtmUnknown` is 1 where the body's atmosphere has a row for the gas whose pressure is null, 0 where the row is absent (the gas is not there: 0 atm).
+// A terraforming job's finish as { result, idle, note }: the first uniform increment that satisfies the source's stopping comparison, with strategic water updates and evolving climate for water vapour. The flattened body row carries the shared climate fields and Atmosphere for water, and GasAtmUnknown distinguishes an absent selected gas (0) from a row with unknown pressure (1).
 export const terraformFinish = (modifiers, terraform, rate) => {
   const rule = 'production.terraformFinish'
-  const waterOnSurface = terraform.GasName === 'Water Vapour' && terraform.HydroID === 3
+  const waterOnSurface = terraform.GasName === 'Water Vapour'
   const status = flagOf(terraform.TerraformStatus)
+
+  if (status && terraform.MaxAtm === 0) {
+    const note = 'No stop target: addition continues'
+
+    return { result: unavailable({ rule, missing: ['a positive stop target (0 atm means unlimited addition)'], present: rate.inputs.present }), idle: true, note }
+  }
+
+  // Population.ProcessTerraforming (Population.cs:1057) and Helpers.cs:861: no gas update or order clearing below 0.1 g.
+  if (isNumber(terraform.Gravity) && terraform.Gravity < 0.1) {
+    const note = 'No completion while body gravity is below 0.1 g'
+
+    return { result: unavailable({ rule, missing: ['body gravity of at least 0.1 g'], present: rate.inputs.present }), idle: true, note }
+  }
+
   const gasUnknown = !isNumber(terraform.GasAtm) && terraform.GasAtmUnknown !== 0
-  const missing = [...(status === null ? ['whether the colony adds or removes the gas'] : []), ...(isNumber(terraform.MaxAtm) ? [] : ['the target pressure']), ...(gasUnknown ? ['the pressure of the gas in the body\'s atmosphere'] : [])]
+  const missing = [...modifierGaps(modifiers, ['MinConstructionPeriod']), ...(isNumber(terraform.Gravity) ? [] : ['the body\'s gravity']), ...(status === null ? ['whether the colony adds or removes the gas'] : []), ...(isNumber(terraform.MaxAtm) ? [] : ['the target pressure']), ...(gasUnknown ? ['the pressure of the gas in the body\'s atmosphere'] : [])]
 
   if (waterOnSurface) {
-    missing.push(...modifierGaps(modifiers, ['MinConstructionPeriod']), ...(isNumber(terraform.HydroExt) ? [] : ['the hydrographic extent']), ...(isNumber(terraform.AtmosPress) ? [] : ['the atmospheric pressure']))
+    const climateFields = [['HydroID', 'water phase'], ['HydroExt', 'water extent'], ['AtmosPress', 'atmospheric pressure'], ['SurfaceTemp', 'surface temperature'], ['BaseTemp', 'base temperature'], ['BodyTypeID', 'body type'], ['Albedo', 'albedo'], ['DustLevel', 'dust level'], ['BodyClass', 'body class'], ['Eccentricity', 'orbital eccentricity']]
+    const moon = terraform.BodyClass === 2
+    const eccentricity = moon ? terraform.ParentEccentricity : terraform.Eccentricity
+
+    if (moon) {
+      climateFields.push(['ParentEccentricity', 'planet orbital eccentricity'])
+    }
+
+    if (eccentricity > 0) {
+      climateFields.push(['StarLuminosity', 'star luminosity'], ...(moon ? [['ParentOrbitalDistance', 'planet orbital distance'], ['ParentYear', 'planet orbital year']] : [['OrbitalDistance', 'orbital distance'], ['Year', 'orbital year']]))
+    }
+
+    missing.push(...climateFields.filter(([key]) => !isNumber(terraform[key])).map(([, label]) => `the body's ${label}`))
+
+    if (!Array.isArray(terraform.Atmosphere)) {
+      missing.push('the body\'s atmosphere')
+    } else if (terraform.Atmosphere.some((gas) => ['AtmosGasID', 'GasAtm', 'FrozenOut', 'FreezingPoint', 'GHGas', 'AntiGHGas'].some((key) => !isNumber(gas[key])))) {
+      missing.push('the atmosphere\'s pressures, phases and greenhouse properties')
+    }
   }
 
   if (!isAvailable(rate)) {
@@ -1174,26 +1296,59 @@ export const terraformFinish = (modifiers, terraform, rate) => {
     return { result: unavailable({ rule, missing: [...new Set(missing)], present: rate.inputs.present }), idle: false, note: undefined }
   }
 
-  const assumptions = isNumber(terraform.GasAtm) ? [] : ['A gas not in the body\'s atmosphere counts as 0 atm']
-  const gas = isNumber(terraform.GasAtm) ? terraform.GasAtm : 0
+  const assumptions = ['The gravity and rate hold and each future increment lasts the minimum construction period', ...(isNumber(terraform.GasAtm) ? [] : ['A gas not in the body\'s atmosphere counts as 0 atm'])]
+  const period = modifiers.MinConstructionPeriod
 
-  if (waterOnSurface) {
-    const period = modifiers.MinConstructionPeriod
-
-    if (!(period > 0)) {
-      return { result: unavailable({ rule, missing: ['a construction period above 0'], present: rate.inputs.present }), idle: false, note: undefined }
-    }
-
-    const cycles = waterVapourCycles({ ...terraform, GasAtm: gas }, (rate.value * period) / SECONDS_PER_YEAR, period / SECONDS_PER_YEAR)
-
-    if (cycles === null) {
-      return { result: unavailable({ rule, missing: [`a finish within ${WATER_VAPOUR_HORIZON} years (the vapour condenses into the oceans)`], present: rate.inputs.present }), idle: true, note: `Not within ${WATER_VAPOUR_HORIZON} years: the vapour condenses into the oceans` }
-    }
-
-    return { result: combine({ rule, parts: { rate }, compute: () => (cycles * period) / SECONDS_PER_DAY, inputs: { present: ['the pressure, hydrographic extent and target'] }, assumptions }), idle: false, note: undefined }
+  if (!(period > 0)) {
+    return { result: unavailable({ rule, missing: ['a construction period above 0'], present: rate.inputs.present }), idle: false, note: undefined }
   }
 
-  return { result: combine({ rule, parts: { rate }, compute: (values) => Math.max(0, status ? terraform.MaxAtm - gas : gas - terraform.MaxAtm) / (values.rate / DAYS_PER_YEAR), inputs: { present: ['the pressure and target'] }, assumptions }), idle: false, note: undefined }
+  if (waterOnSurface) {
+    const years = period / SECONDS_PER_YEAR
+
+    const cycles = waterVapourCycles(terraform, rate.value * years, years)
+
+    if (cycles === null) {
+      const note = `Not within ${WATER_VAPOUR_HORIZON} years under the forecast climate`
+
+      return { result: unavailable({ rule, missing: [`a finish within ${WATER_VAPOUR_HORIZON} years under the forecast climate`], present: rate.inputs.present, assumptions }), idle: true, note }
+    }
+
+    return { result: combine({ rule, parts: { rate }, compute: () => (cycles * period) / SECONDS_PER_DAY, inputs: { present: ['the atmosphere, climate, hydrographic extent, target and construction period'] }, assumptions: [...assumptions, 'Temperature, gas freezing and water phase are recalculated after each increment; orbital distance, dust and other gas amounts stay at their present values'] }), idle: false, note: undefined }
+  }
+
+  const step = (rate.value * period) / SECONDS_PER_YEAR
+  let gas = isNumber(terraform.GasAtm) ? terraform.GasAtm : 0
+  let present = isNumber(terraform.GasAtm)
+
+  // Population.ProcessTerraforming (Population.cs:1074-1077, 1098-1099, 1113-1121): apply each double update before testing; a quotient or multiplication by the cycle count changes floating-point boundary crossings.
+  for (let cycle = 1; cycle <= ORDINARY_GAS_INCREMENT_CAP; cycle++) {
+    let done = false
+
+    if (status) {
+      if (present) {
+        gas += step
+        done = gas > terraform.MaxAtm && terraform.MaxAtm > 0
+      } else {
+        gas = step
+        present = true
+      }
+    } else {
+      if (present) {
+        gas -= step
+      }
+
+      done = !present || gas <= 0 || (gas <= terraform.MaxAtm && terraform.MaxAtm > 0)
+    }
+
+    if (done) {
+      return { result: combine({ rule, parts: { rate }, compute: () => (cycle * period) / SECONDS_PER_DAY, inputs: { present: ['the gravity, pressure, target and construction period'] }, assumptions }), idle: false, note: undefined }
+    }
+  }
+
+  const note = `Not within ${ORDINARY_GAS_INCREMENT_CAP.toLocaleString('en-US')} increments at the held rate`
+
+  return { result: unavailable({ rule, missing: [`a finish within ${ORDINARY_GAS_INCREMENT_CAP.toLocaleString('en-US')} increments at the held rate`], present: rate.inputs.present, assumptions }), idle: true, note }
 }
 
 // The jobs binned by the day they finish, over `years` in `bins` bins: { counts: { [id]: [per bin] }, later, total, binDays, skipped: { unknown, idle, done }, result }. A job is a row of the job table: { days (null for none), finishIdle (true when a null `days` is a job not progressing rather than a missing input), type (its bar), shortage (it goes in the short bar) }. A job finishing within no bin counts as `later`; one with no date is `skipped`, as `unknown` (an input is missing), `idle` (paused, no capacity, never starts) or `done` (0 days left). `ids`: the bars, 'short' is added.

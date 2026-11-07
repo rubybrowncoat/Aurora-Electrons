@@ -124,6 +124,7 @@
           </v-data-table>
           <div class="panel-foot caption text--secondary">
             Use it to spot stalled work and shortages. An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or light naval capacity, from one stock of minerals and fuel shared by every project at that colony, so a project builds only as far as what is left goes. An Engineering, Ordnance or Ground Unit Project develops a component, missile or ground unit class the race designed, for twice its stored development cost, and draws on construction capacity (ordnance capacity for an Ordnance Project); the line under the job gives the item, its cost and its minerals. A Light Naval or Space Station project takes the components in the colony's stock when it is made, a whole batch of each; the lines under it give what they credited a unit against the class's cost, the minerals they took off, what that saves at the project's rate and what the credit says of the Use Components box, which an industrial project does not store, while a construction, refit or automatic refit task shows its box as stored. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it, and paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
+            <p class="mt-2 mb-0">Terraforming has no completion while body gravity stays below 0.1 g; unknown gravity leaves the finish unknown. Eligible jobs finish at the end of an assumed minimum construction increment: addition must pass a positive target, while a target of 0 means unlimited addition and has no finish date. Ordinary gas pressure is updated each increment, with no date if it does not finish within 100,000 increments. Gravity and the rate are held. Water vapour is forecast with condensation only at or below 369 K, followed by evaporation and terraforming. Temperature, water phase, albedo and gas freezing are recalculated each water increment; orbital distance, dust and other gas amounts are held at their present values. A water job not finishing within 200 years has no date under those assumptions.</p>
           </div>
         </v-card>
 
@@ -244,6 +245,7 @@ import { sourcesOf } from '../utilities/component-calc'
 import { fitsDouble } from '../utilities/decimal'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { NO_DEVELOPMENT_ITEMS, developmentTerms, loadDevelopmentItems } from '../utilities/development-projects'
+import { climateBaseTemp } from '../utilities/habitability'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
@@ -689,11 +691,11 @@ export default {
     terraformingJobs() {
       const { raceRate, speed, colonies } = this.terraformSources
 
-      return this.terraforms.filter((terraform) => !(terraform.TerraformStatus && terraform.MaxAtm === 0) && colonies[terraform.PopulationID] && hasTerraformers(colonies[terraform.PopulationID])).map((terraform) => {
+      return this.terraforms.filter((terraform) => colonies[terraform.PopulationID] && hasTerraformers(colonies[terraform.PopulationID])).map((terraform) => {
         const modifiers = this.populationProductionModifiers[terraform.PopulationID]
         const breakdown = terraformBreakdown({ raceRate, speed, source: colonies[terraform.PopulationID], admins: this.navalAdmins })
         const rate = breakdown.rate
-        const finish = terraformFinish(modifiers, terraform, rate)
+        const finish = terraformFinish(modifiers, { ...terraform, Gravity: colonies[terraform.PopulationID].gravity }, rate)
         const waterOnSurface = terraform.GasName === 'Water Vapour' && terraform.HydroID === 3
         const adding = flagOf(terraform.TerraformStatus)
         const status = jobStatus({ paused: false, rate, stalled: { label: 'No capacity' } })
@@ -702,7 +704,7 @@ export default {
           key: `terraforming-${terraform.PopulationID}`,
           type: 'terraforming',
           PopulationID: terraform.PopulationID,
-          name: `${terraform.GasName || 'Unknown gas'} to ${isKnownNumber(terraform.MaxAtm) ? terraform.MaxAtm : UNKNOWN_TEXT} atm`,
+          name: adding && terraform.MaxAtm === 0 ? `${terraform.GasName || 'Unknown gas'} without a stop target` : `${terraform.GasName || 'Unknown gas'} to ${isKnownNumber(terraform.MaxAtm) ? terraform.MaxAtm : UNKNOWN_TEXT} atm`,
           detail: waterOnSurface ? `Hydrographic extent ${this.count(terraform.HydroExt, 1)}%` : '',
           rate,
           finish,
@@ -1218,7 +1220,27 @@ export default {
           return []
         }
 
-        const [terraforms] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_Population left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.TerraformingGasID != 0`)
+        const [terraforms] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.Albedo, FCT_SystemBody.DustLevel, FCT_SystemBody.DistanceToParent, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, FCT_SystemBody.Year, VIR_Parent.DistanceToParent as ParentDistanceToParent, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, VIR_Parent.Eccentricity as ParentEccentricity, VIR_Parent.Year as ParentYear, FCT_Star.Luminosity as StarLuminosity, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_Population left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.TerraformingGasID != 0`)
+
+        if (terraforms.some((row) => row.GasName === 'Water Vapour')) {
+          const [gases] = await this.database.query(`select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.FreezingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas from FCT_AtmosphericGas left join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID where FCT_AtmosphericGas.GameID = ${this.GameID} and exists (select 1 from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = 5)`)
+          const atmospheres = new Map()
+
+          gases.forEach((gas) => {
+            const rows = atmospheres.get(gas.SystemBodyID) || []
+
+            rows.push(gas)
+            atmospheres.set(gas.SystemBodyID, rows)
+          })
+          terraforms.forEach((row) => {
+            if (row.GasName === 'Water Vapour') {
+              const distance = row.BodyClass === 2 ? row.ParentDistanceToParent : row.DistanceToParent
+
+              row.BaseTemp = isKnownNumber(distance) && distance > 0 && isKnownNumber(row.StarLuminosity) && row.StarLuminosity > 0 ? climateBaseTemp(row) : null
+              row.Atmosphere = atmospheres.get(row.SystemBodyID) || []
+            }
+          })
+        }
 
         return terraforms
       }),
