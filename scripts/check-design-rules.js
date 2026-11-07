@@ -470,7 +470,7 @@ const checkJumpDrives = async (context) => {
 
 // Per class: its rows of components as the save stores them, joined to their design components. `missing` counts class rows whose design component is not in the save.
 const classComponentRows = async (database, parameters) => {
-  const rows = await all(database, 'select FCT_ClassComponent.ClassID, FCT_ClassComponent.ComponentID, FCT_ClassComponent.NumComponent, FCT_ClassComponent.ChanceToHit, FCT_ShipDesignComponents.SDComponentID, FCT_ShipDesignComponents.Name, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.Size, FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.Cost from FCT_ClassComponent inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ClassComponent.ClassID left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ShipClass.GameID = :game and FCT_ShipClass.RaceID = :race order by FCT_ClassComponent.ClassID, FCT_ClassComponent.ChanceToHit, FCT_ClassComponent.ComponentID', parameters)
+  const rows = await all(database, 'select FCT_ClassComponent.ClassID, FCT_ClassComponent.ComponentID, FCT_ClassComponent.NumComponent, FCT_ClassComponent.ChanceToHit, FCT_ShipDesignComponents.SDComponentID, FCT_ShipDesignComponents.Name, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.Size, FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.Cost, FCT_ShipDesignComponents.NoMaintFailure from FCT_ClassComponent inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ClassComponent.ClassID left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ShipClass.GameID = :game and FCT_ShipClass.RaceID = :race order by FCT_ClassComponent.ClassID, FCT_ClassComponent.ChanceToHit, FCT_ClassComponent.ComponentID', parameters)
   const classes = new Map()
 
   for (const row of rows) {
@@ -550,7 +550,7 @@ const checkMaintenance = async (context) => {
     }
 
     if (!row.Commercial && rules.isAvailable(allocation)) {
-      const repairCost = rules.averageRepairCost({ components: entry.rows.map((component) => ({ chanceToHit: component.ChanceToHit, cost: component.Cost })), maxDacRoll: row.MaxDACRoll })
+      const repairCost = rules.averageRepairCost({ components: entry.rows.map((component) => ({ chanceToHit: component.ChanceToHit, cost: component.Cost, noMaintFailure: component.NoMaintFailure })), maxDacRoll: row.MaxDACRoll })
       const life = rules.maintenanceLifeSeries({ commercial: row.Commercial, baseFailureChance: row.BaseFailureChance, averageRepairCost: repairCost.value, maintSupplies: row.MaintSupplies })
 
       if (rules.isAvailable(life)) {

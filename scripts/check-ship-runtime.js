@@ -24,7 +24,7 @@ const { inParallel } = require('./lib/check-pool')
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
 
-const FILES = { runtime: inRenderer('utilities', 'ship-runtime.js') }
+const FILES = { runtime: inRenderer('utilities', 'ship-runtime.js'), rules: inRenderer('utilities', 'design-rules.js') }
 const ORIGINALS = Object.fromEntries(Object.entries(FILES).map(([name, file]) => [name, fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')]))
 
 const memo = (make) => {
@@ -50,7 +50,7 @@ const SCHEMA = ({ old = false, v26 = false, noHit = false } = {}) => `
   create table FCT_ShipClass (ShipClassID integer, ClassName text, GameID integer, RaceID integer, CargoCapacity real, ColonistCapacity real, Size real, Crew integer, MaxSpeed integer, EnginePower real, FuelEfficiency real, FuelCapacity real, MilitaryEngines integer${old ? '' : ', PlannedDeployment real, MaintSupplies real, BaseFailureChance real, MaxDACRoll integer, Commercial integer, MoraleCheckRequired integer, CommercialHangar integer, SupplyShip integer'});
   create table FCT_Ship (ShipID integer, GameID integer, RaceID integer, ShipName text, FleetID integer, ShipClassID integer, CurrentCrew integer, Fuel real, OverhaulFactor real, MaintenanceState integer, MothershipID integer, TractorTargetShipID integer, TractorParentShipID integer, TractorTargetShipyardID integer${old ? '' : ', ShipSeniorCO integer, LastOverhaul real, LastShoreLeave real, GradePoints real, CrewMorale real, CurrentMaintSupplies real'});
   create table FCT_ClassComponent (ClassID integer, ComponentID integer, NumComponent integer${old || noHit ? '' : ', ChanceToHit integer'});
-  create table FCT_ShipDesignComponents (SDComponentID integer, ComponentTypeID integer, ComponentValue real, SpecialFunction integer, Cost real);
+  create table FCT_ShipDesignComponents (SDComponentID integer, ComponentTypeID integer, ComponentValue real, SpecialFunction integer, Cost real, NoMaintFailure integer);
   create table FCT_DamagedComponent (ShipID integer, GameID integer, ComponentID integer, Number integer);
   create table FCT_ShipyardTask (TaskID integer, GameID integer, RaceID integer, ShipID integer, Paused integer);
   create table FCT_Population (PopulationID integer${old ? '' : ', AlienArtifacts integer'});
@@ -96,13 +96,13 @@ const SHIPS = [
   vessel(60, 'Elsewhere', 10, { GameID: 2 }),
 ]
 
-// Warship parts: armour to a chance-to-hit of 4 costing 10 and a hull part to 10 costing 20, so a failure costs 10 x 0.4 + 20 x 0.6 = 16 MSP. Ship 9 has engineering damaged (component 200, DIM_ComponentType 31).
+// Warship parts: two failure-eligible parts, thresholds 4 and 10, costing 10 and 20, so a failure costs 10 x 0.4 + 20 x 0.6 = 16 MSP. Ship 9 has engineering damaged (component 200, DIM_ComponentType 31).
 const world = ({ old = false, v26 = false, noHit = false, edits = '' } = {}) => `${insert('FCT_Game', [{ GameID: GAME, GameTime: NOW, ...(old ? {} : { NoOverhauls: 0 }), ...(old || v26 ? {} : { LostColonies: 0, GenerateNonOxygenRaces: 0, NoShieldTechnology: 0, OrbitalMovementInSubPulse: 0 }) }, { GameID: 2, GameTime: 5, ...(old ? {} : { NoOverhauls: 0 }), ...(old || v26 ? {} : { LostColonies: 0, GenerateNonOxygenRaces: 0, NoShieldTechnology: 0, OrbitalMovementInSubPulse: 0 }) }])}
   ${insert('FCT_Race', [{ RaceID: RACE, ...(old ? {} : { GameID: GAME, NPR: 0 }), CargoShuttleLoadModifier: 1.5 }, { RaceID: FOE, ...(old ? {} : { GameID: GAME, NPR: 0 }), CargoShuttleLoadModifier: 1.5 }])}
   ${insert('FCT_Fleet', [{ FleetID: 5, FleetName: 'Fleet', Speed: 500, UseMaximumSpeed: 1, ParentCommandID: 10, ShippingLine: 0, CycleMoves: 1 }, { FleetID: 6, FleetName: 'Raiders', Speed: 500, UseMaximumSpeed: 1, ParentCommandID: 11, ShippingLine: 0, CycleMoves: 1 }])}
   ${insert('FCT_ShipClass', CLASSES.map((row) => (old ? Object.fromEntries(Object.entries(row).filter(([key]) => !['PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip'].includes(key))) : row)))}
   ${insert('FCT_Ship', SHIPS.map((row) => (old ? Object.fromEntries(Object.entries(row).filter(([key]) => !['LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies'].includes(key))) : row)))}
-  ${insert('FCT_ShipDesignComponents', [{ SDComponentID: 300, ComponentTypeID: 5, ComponentValue: 1, SpecialFunction: 0, Cost: 10 }, { SDComponentID: 301, ComponentTypeID: 5, ComponentValue: 1, SpecialFunction: 0, Cost: 20 }, { SDComponentID: 200, ComponentTypeID: 31, ComponentValue: 1, SpecialFunction: 0, Cost: 5 }])}
+  ${insert('FCT_ShipDesignComponents', [{ SDComponentID: 300, ComponentTypeID: 5, ComponentValue: 1, SpecialFunction: 0, Cost: 10, NoMaintFailure: 0 }, { SDComponentID: 301, ComponentTypeID: 5, ComponentValue: 1, SpecialFunction: 0, Cost: 20, NoMaintFailure: 0 }, { SDComponentID: 200, ComponentTypeID: 31, ComponentValue: 1, SpecialFunction: 0, Cost: 5, NoMaintFailure: 0 }])}
   ${insert('FCT_ClassComponent', [{ ClassID: 10, ComponentID: 300, NumComponent: 1, ChanceToHit: 4 }, { ClassID: 10, ComponentID: 301, NumComponent: 1, ChanceToHit: 10 }, { ClassID: 20, ComponentID: 300, NumComponent: 1, ChanceToHit: 5 }].map((row) => (old || noHit ? Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'ChanceToHit')) : row)))}
   ${insert('FCT_DamagedComponent', [{ ShipID: 9, GameID: GAME, ComponentID: 200, Number: 1 }])}
   ${edits}
@@ -169,7 +169,7 @@ const worldOf = (edits = []) => {
     text[edit.target] = patched(FILES[edit.target], text[edit.target], change.from, change.to)
   })
 
-  const modules = memo(() => loadUtilities(['ship-runtime', 'provenance'], { sources: { 'ship-runtime': text.runtime } }))
+  const modules = memo(() => loadUtilities(['ship-runtime', 'design-rules', 'provenance'], { sources: { 'ship-runtime': text.runtime, 'design-rules': text.rules } }))
 
   return { text, modules }
 }
@@ -243,6 +243,86 @@ check('provenance', 'observed figures are confirmed, the rates calculated from t
   assert.equal(unknown.status, 'unavailable')
   assert.equal(unknown.value, null)
   assert.ok(unknown.inputs.missing.length > 0, 'it names what is missing')
+})
+
+check('eligible-repair-cost', 'only failure-eligible threshold slices contribute cost or normalization, while every threshold advances the roll', async (w) => {
+  const { 'design-rules': rules, provenance } = await w.modules()
+  const pair = [{ chanceToHit: 5, cost: 100, noMaintFailure: 1 }, { chanceToHit: 10, cost: 10, noMaintFailure: 0 }]
+  const cost = rules.averageRepairCost({ components: pair, maxDacRoll: 10 })
+
+  near(cost.value, 10, 'an immune 100-MSP half and an eligible 10-MSP half')
+  assert.equal(cost.status, 'estimated')
+  assert.equal(provenance.ruleSupports(cost.rule.id, '3.2.x'), true)
+  near(rules.averageRepairCost({ components: pair.map((row) => ({ ...row, noMaintFailure: Boolean(row.noMaintFailure) })), maxDacRoll: 10 }).value, 10, 'boolean flags')
+  const mixed = [{ chanceToHit: 0, cost: 9999, noMaintFailure: true }, { chanceToHit: 2, cost: 10, noMaintFailure: false }, { chanceToHit: 7, cost: 500, noMaintFailure: 1 }, { chanceToHit: 10, cost: 30, noMaintFailure: 0 }, { chanceToHit: 12, cost: 5000, noMaintFailure: true }]
+  const before = JSON.stringify(mixed)
+
+  near(rules.averageRepairCost({ components: [...mixed].reverse(), maxDacRoll: 12 }).value, 22, '(2 x 10 + 3 x 30) / (2 + 3), ignoring zero-width and immune slices')
+  assert.equal(JSON.stringify(mixed), before, 'no input row changes')
+  near(rules.averageRepairCost({ components: [{ chanceToHit: 10, cost: null, noMaintFailure: true }], maxDacRoll: 10 }).value, 0, 'all immune: no eligible cost is needed')
+  near(rules.averageRepairCost({ components: [{ chanceToHit: 10, cost: 0, noMaintFailure: false }], maxDacRoll: 10 }).value, 0, 'eligible free parts')
+
+  for (const noMaintFailure of [null, undefined, 2]) {
+    const unknown = rules.averageRepairCost({ components: [{ chanceToHit: 10, cost: 10, noMaintFailure }], maxDacRoll: 10 })
+
+    assert.equal(unknown.status, 'unavailable')
+    assert.ok(unknown.inputs.missing.some((text) => /immune/.test(text)))
+  }
+
+  assert.equal(rules.averageRepairCost({ components: [{ chanceToHit: 10, cost: null, noMaintFailure: false }], maxDacRoll: 10 }).status, 'unavailable', 'an eligible cost is required')
+})
+
+check('eligible-maintenance-life', 'the yearly life series uses the eligible average, a strict exhaustion boundary, a partial final year and the existing 200-year horizon', async (w) => {
+  const { 'design-rules': rules, provenance } = await w.modules()
+  const repairCost = rules.averageRepairCost({ components: [{ chanceToHit: 5, cost: 100, noMaintFailure: true }, { chanceToHit: 10, cost: 10, noMaintFailure: false }], maxDacRoll: 10 })
+  const life = (maintSupplies) => rules.maintenanceLifeSeries({ commercial: false, baseFailureChance: 100, averageRepairCost: repairCost.value, maintSupplies })
+  const series = life(30)
+
+  assert.equal(series.status, 'estimated')
+  assert.equal(provenance.ruleSupports(series.rule.id, '3.2.x'), true)
+  assert.equal(series.value.life, 2)
+  assert.equal(series.value.firstYear, 10)
+  assert.equal(series.value.fiveYear, 150)
+  assert.deepEqual(series.value.years.map(({ supplyUse, fundedFraction }) => [supplyUse, fundedFraction]), [[10, 1], [20, 1], [30, 0]])
+  assert.equal(life(15).value.life, 1.25)
+  assert.equal(life(0).value.life, 0)
+  assert.equal(rules.maintenanceLifeSeries({ commercial: false, baseFailureChance: 100, averageRepairCost: 1, maintSupplies: 20100 }).status, 'unavailable', 'supplies not exhausted within the horizon give no life estimate')
+  assert.equal(rules.maintenanceLifeSeries({ commercial: false, baseFailureChance: 100, averageRepairCost: 0, maintSupplies: 30 }).status, 'unavailable', 'zero-cost failures give no finite life estimate')
+})
+
+check('eligible-runtime-draw', 'the real class query carries maintenance immunity into repair cost, class life and the ship draw without losing the input provenance', async (w) => {
+  const { provenance } = await w.modules()
+  const edits = `update FCT_ShipDesignComponents set NoMaintFailure = 1, Cost = 100 where SDComponentID = 300;
+    update FCT_ShipDesignComponents set Cost = 10 where SDComponentID = 301;
+    update FCT_ClassComponent set ChanceToHit = 5 where ClassID = 10 and ComponentID = 300;
+    update FCT_ShipClass set BaseFailureChance = 100, MaintSupplies = 30 where ShipClassID = 10;
+    update FCT_Ship set LastOverhaul = ${NOW - YEAR} where ShipID = 1;`
+  const ship = byId(await read(w, await newDatabase(edits)))[1]
+
+  near(ship.class.repairCost.value, 10)
+  near(ship.class.life.value.life, 2)
+  near(ship.maintenance.supplyDraw.value, 10)
+  assert.equal(ship.maintenance.supplyDraw.status, 'estimated')
+  assert.equal(provenance.ruleSupports(ship.maintenance.supplyDraw.rule.id, '3.2.x'), true)
+  assert.ok(ship.maintenance.supplyDraw.inputs.present.includes('component maintenance immunity'), 'the eligible-cost inputs survive composition')
+
+  const allImmune = byId(await read(w, await newDatabase(`${edits} update FCT_ShipDesignComponents set NoMaintFailure = 1;`)))[1]
+
+  assert.equal(allImmune.class.repairCost.value, 0)
+  assert.equal(allImmune.maintenance.supplyDraw.value, 0)
+  assert.equal(allImmune.class.life.status, 'unavailable', 'no finite life when there is no eligible cost')
+
+  for (const sql of ['update FCT_ShipDesignComponents set NoMaintFailure = null where SDComponentID = 300;', 'alter table FCT_ShipDesignComponents drop column NoMaintFailure;']) {
+    const unread = byId(await read(w, await newDatabase(sql)))[1]
+
+    for (const result of [unread.class.repairCost, unread.class.life, unread.maintenance.supplyDraw]) {
+      assert.equal(result.status, 'unavailable')
+      assert.equal(result.value, null)
+    }
+
+    assert.ok(unread.maintenance.supplyDraw.inputs.missing.some((text) => /immune/.test(text)), 'the missing flag reaches the draw, not a numeric default')
+    assert.equal(unread.maintenance.failureNow.status, 'estimated', 'the independent failure rate remains available')
+  }
 })
 
 check('rates', 'the clocks, the age, the failure rate at the present clock, the supply draw and the crew performance are the ones AE-106-01 works out from what the save holds', async (w) => {
@@ -790,6 +870,17 @@ check('classes', 'the class\'s own figures and its life estimate are shared by i
 // ---- Planted faults ------------------------------------------------------------------------------------------------------
 // Each plants one change in the module, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const FAULTS = [
+  ['repair-immune slices are included', 'rules', 'if (row.noMaintFailure === false || row.noMaintFailure === 0) {', 'if (true) {', ['eligible-repair-cost', 'eligible-runtime-draw']],
+  ['eligible costs are divided by the whole damage roll', 'rules', 'weighted / eligible', 'weighted / Number(maxDacRoll)', ['eligible-repair-cost', 'eligible-runtime-draw']],
+  ['an immune slice does not advance the previous threshold', 'rules', 'previous = Number(row.chanceToHit)', 'if (!row.noMaintFailure) { previous = Number(row.chanceToHit) }', ['eligible-repair-cost']],
+  ['eligible slice widths are counted as components', 'rules', 'eligible += width', 'eligible += 1', ['eligible-repair-cost']],
+  ['components are used in input order', 'rules', '[...rows].sort((a, b) => a.chanceToHit - b.chanceToHit)', '[...rows]', ['eligible-repair-cost']],
+  ['a missing immunity flag is accepted', 'rules', 'rows.every((row) => KIND_FLAGS.includes(row.noMaintFailure))', 'true', ['eligible-repair-cost']],
+  ['an empty eligible roll has a made-up positive cost', 'rules', 'eligible > 0 ? weighted / eligible : 0', 'eligible > 0 ? weighted / eligible : 1', ['eligible-repair-cost', 'eligible-runtime-draw']],
+  ['the runtime loader drops the immunity flag', 'runtime', 'noMaintFailure: row.NoMaintFailure', 'noMaintFailure: 0', ['eligible-runtime-draw']],
+  ['the missing immunity column is read as eligible', 'runtime', "designs.has('NoMaintFailure') ? 'FCT_ShipDesignComponents.NoMaintFailure' : 'null'", "designs.has('NoMaintFailure') ? 'FCT_ShipDesignComponents.NoMaintFailure' : '0'", ['eligible-runtime-draw']],
+  ['the supply draw drops its percent conversion', 'runtime', 'values.repairCost * values.failureNow / 100', 'values.repairCost * values.failureNow', ['eligible-runtime-draw']],
+  ['the supply draw discards the repair-cost inputs', 'runtime', 'combine({ rule: SUPPLY_DRAW, parts: { repairCost, failureNow }, compute: (values) => values.repairCost * values.failureNow / 100 })', 'ofRule({ rule: SUPPLY_DRAW, value: repairCost.value === null ? 0 : repairCost.value * failureNow.value / 100 })', ['eligible-runtime-draw']],
   ['the clock runs the wrong way', 'runtime', 'context.gameTime - value : null', 'value - context.gameTime : null', ['rates', 'docked']],
   ['a military hangar moves the age the wrong way', 'runtime', 'value: 1 - HANGAR_CLOCK_MULTIPLIER', 'value: 1 + HANGAR_CLOCK_MULTIPLIER', ['clock-modes']],
   ['a commercial hangar advances the clock too', 'runtime', '} else if (hangared && !carrierCommercial) {', '} else if (hangared) {', ['clock-modes']],

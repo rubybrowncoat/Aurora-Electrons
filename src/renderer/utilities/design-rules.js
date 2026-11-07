@@ -355,14 +355,15 @@ export const damageAllocation = ({ components }) => {
   return ofRule({ rule, value: { chanceToHit, maxDacRoll: total }, inputs: { present } })
 }
 
-// The average MSP a failure costs a class: each component's cost weighted by the share of the damage roll it covers, which is the difference between its chance-to-hit threshold and the one before it (components in threshold order, armour at 0 first) over `maxDacRoll`. `components` as { chanceToHit, cost }. The weights are those slices of the roll, not the components' counts or sizes: a component's slice is its size times its count rounded up. A class with no roll, thresholds past the roll, or only free components gives no figure, never 0.
+// The average MSP a failure costs a class: advance through every damage allocation threshold, but weight only components that can suffer maintenance failures, dividing their weighted costs by their total eligible slice width. `components` as { chanceToHit, cost, noMaintFailure }, with an explicit immunity flag on every row. The weights are threshold differences, not component counts or sizes. A class with no eligible slices or only free eligible parts has an average cost of 0; an unread flag or invalid damage allocation gives no figure.
 export const averageRepairCost = ({ components, maxDacRoll }) => {
   const rule = 'design.averageRepairCost'
   const rows = Array.isArray(components) ? components : []
   const { present, missing } = gather([
     ['components', rows.length > 0, 'components'],
     ['component thresholds', rows.length > 0 && rows.every((row) => nonNegative(row.chanceToHit)), 'a chance-to-hit threshold of zero or more for every component'],
-    ['component costs', rows.length > 0 && rows.every((row) => nonNegative(row.cost)), 'a cost of zero or more for every component'],
+    ['component maintenance immunity', rows.length > 0 && rows.every((row) => KIND_FLAGS.includes(row.noMaintFailure)), 'whether every component is immune to maintenance failures'],
+    ['component costs', rows.length > 0 && rows.every((row) => row.noMaintFailure === true || row.noMaintFailure === 1 || nonNegative(row.cost)), 'a cost of zero or more for every component eligible for maintenance failures'],
     ['damage roll', nonNegative(maxDacRoll), 'the class\'s damage roll'],
   ])
 
@@ -380,17 +381,20 @@ export const averageRepairCost = ({ components, maxDacRoll }) => {
 
   let previous = 0
   let weighted = 0
+  let eligible = 0
 
   for (const row of [...rows].sort((a, b) => a.chanceToHit - b.chanceToHit)) {
-    weighted += Number(row.cost) * ((Number(row.chanceToHit) - previous) / Number(maxDacRoll))
+    if (row.noMaintFailure === false || row.noMaintFailure === 0) {
+      const width = Number(row.chanceToHit) - previous
+
+      eligible += width
+      weighted += Number(row.cost) * width
+    }
+
     previous = Number(row.chanceToHit)
   }
 
-  if (!(weighted > 0)) {
-    return unavailable({ rule, present, missing: ['a component cost above zero: a failure of a class whose parts are free draws no supplies'] })
-  }
-
-  return ofRule({ rule, value: weighted, inputs: { present } })
+  return ofRule({ rule, value: eligible > 0 ? weighted / eligible : 0, inputs: { present } })
 }
 
 // A class's expected maintenance life as the class window works it out, one row a year of an unmaintained clock that is never reset: in year n the failure rate is `baseFailureChance` x n / 100 and the supplies spent that year are `averageRepairCost` times it, so the draw grows by the same step every year; the loop stops in the year the running total passes `maintSupplies`. Returns { life, firstYear, fiveYear, years: [{ year, failureRate, supplyUse, cumulative, remaining, fundedFraction }] } where `life` is the whole years before that year plus the part of it the remainder pays for, to 2 decimals (the game's rounding), `firstYear` the first year's spend and `fiveYear` the game's 5-year figure (15 times it, the sum of years 1 to 5). The last row is the year the supplies run out: `fundedFraction` below 1, `cumulative` the supplies spent. `commercial` is true or false (or 1 or 0 as the save stores it) and has no default; a commercial class has no life. A missing input, no failure (a zero rate or repair cost), or supplies that outlast the 200 years give no figure. This is the class's expected series on a fresh clock: it knows nothing of a ship's actual clock, crew, commanders, location coverage or the supplies it holds now (see `incrementFailureChance`).
@@ -1660,19 +1664,19 @@ registerRule({
 
 registerRule({
   id: 'design.averageRepairCost',
-  versions: ['2.7.x'],
+  versions: DESIGN_VERSIONS,
   units: 'MSP',
   verification: 'estimated',
-  structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost'],
-  note: 'Each component\'s cost weighted by the difference of its damage allocation threshold and the one before it over damage allocation roll. The thresholds and the roll it weighs by are reproduced by the damage allocation rule, but the save stores no repair cost to compare the figure with.',
+  structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost, NoMaintFailure'],
+  note: 'Every damage allocation threshold advances the roll. Only components eligible for maintenance failures contribute their cost times their threshold slice, divided by the total eligible slice width. No eligible slices or only free eligible components gives an average cost of zero.',
 })
 
 registerRule({
   id: 'design.maintenanceLifeSeries',
-  versions: ['2.7.x'],
+  versions: DESIGN_VERSIONS,
   units: 'years, MSP',
   verification: 'estimated',
-  structure: ['FCT_ShipClass.BaseFailureChance, MaintSupplies, Commercial'],
+  structure: ['design.averageRepairCost', 'FCT_ShipClass.BaseFailureChance, MaintSupplies, Commercial'],
   note: 'The class window\'s yearly supply series on a fresh, never-overhauled clock: the spend in year n is the average repair cost times the failure rate times n, summed until the supplies run out, over at most 200 years. The save stores no maintenance life to compare it with, and the series is an expectation, not a promise of when a ship fails.',
   assumptions: ['The ship\'s maintenance clock starts at zero and is never reset', 'Failures draw the average repair cost, not a particular component\'s'],
 })
