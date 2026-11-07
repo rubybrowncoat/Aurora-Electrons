@@ -1,4 +1,4 @@
-import { isKnownNumber, UNKNOWN_TEXT } from './math'
+import { isKnownNumber, rangeFigure, rangeText, UNKNOWN_TEXT } from './math'
 import { MINERALS } from './minerals'
 import { ORDNANCE_FACTORY_MODULE } from './ordnance-modules'
 import { STATUS, envelope, getRule, isAvailable, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
@@ -432,7 +432,7 @@ const measureColumns = (heading, { showUnit = true } = {}) => [
 const optional = (value, decimals = 2) => column('', value, (item, f) => f.count(item[value], decimals), { none: positive(value) })
 const missileValue = (text, value, extra = {}) => ({ ...optional(value), text, better: HIGH, ...extra })
 
-const speciesRange = (item, f, value, deviation, decimals, offset = 0) => `${f.count(item[value] - item[deviation] - offset, decimals)} – ${f.count(item[value] + item[deviation] - offset, decimals)}`
+const speciesRange = (item, f, value, deviation, decimals, offset = 0) => rangeText(item[value] - item[deviation] - offset, item[value] + item[deviation] - offset, { format: (number) => rangeFigure(f.count(number, decimals), { negative: number < 0 }) })
 
 const nameColumn = { text: 'Name', value: 'Name', numeric: false }
 

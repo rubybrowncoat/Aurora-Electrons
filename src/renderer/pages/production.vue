@@ -247,7 +247,7 @@ import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { NO_DEVELOPMENT_ITEMS, developmentTerms, loadDevelopmentItems } from '../utilities/development-projects'
 import { climateBaseTemp } from '../utilities/habitability'
 import { tracked } from '../utilities/load-tracking'
-import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
+import { UNKNOWN_TEXT, isKnownNumber, rangeFigure, rangeText as measureRange } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { GFCC_INSTALLATION, boxLineShown, boxLines, categoryOf, completionBins, componentCredit, creditLines, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedRemaining, queuedResearch, researchRate, shipRate, shipTaskFinish, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, taskUseComponents, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
@@ -1013,7 +1013,7 @@ export default {
 
     // The units a stock covers, as a range where the order the game takes the colony's projects in moves them.
     coverText(shortage) {
-      return shortage.coveredMost !== undefined && shortage.coveredMost > shortage.covered ? `${this.units(shortage.covered)} to ${this.units(shortage.coveredMost)}` : this.units(shortage.covered)
+      return shortage.coveredMost !== undefined && shortage.coveredMost > shortage.covered ? measureRange(shortage.covered, shortage.coveredMost, { format: (value) => rangeFigure(this.units(value), { negative: value < 0 }) }) : this.units(shortage.covered)
     },
 
     // The line under a project of a colony the cycle forecast cannot run: what the save leaves out, and that arrivals entered are not counted.

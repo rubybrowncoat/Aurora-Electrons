@@ -338,11 +338,11 @@ import { activeAppearance } from '../utilities/appearance'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, gateHarvesterRows, harvesterReport, loadMspFacilities, loadMspPopulation, maintenanceLocations, maintenanceSupplyTotals, refineryYield, soriumLasts } from '../utilities/logistics'
+import { MSP_MINERALS, columnTotal, compact, compactFigure, fullPowerBurn, gateHarvesterRows, harvesterReport, loadMspFacilities, loadMspPopulation, maintenanceLocations, maintenanceSupplyTotals, refineryYield, soriumLasts } from '../utilities/logistics'
 import { POOL_WORDS, SETTLED_POINTS, loadMaintenanceShips, periodDays, shipFigures } from '../utilities/maintenance-pools'
 import { donorTexts, loadFuelDonors, tankerReport } from '../utilities/fuel-donors'
 import { fuelReserveOf } from '../utilities/resource-reserves'
-import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal, separatedNumber } from '../utilities/math'
+import { UNKNOWN_TEXT, isKnownNumber, rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sortNullLast, totalOf } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
@@ -603,7 +603,7 @@ export default {
         },
         {
           label: 'Burned (estimate)',
-          total: `${this.litres(totals.low)} – ${this.litres(totals.high)}`,
+          total: this.litresRange(totals.low, totals.high),
           lines: [line('Lifetime average', totals.lifetime, 'primary'), line('Moving now, full power', totals.moving, 'primary')],
         },
       ]
@@ -751,7 +751,7 @@ export default {
         {
           label: 'Fuel per year',
           value: this.signedLitres(fuelNet),
-          note: `Made ${this.litres(fuel.production)}${fuel.refineriesUnknown ? ` (${fuel.refineriesUnknown} ${fuel.refineriesUnknown === 1 ? 'colony' : 'colonies'} not counted)` : ''}${fuel.harvestersUnknown ? ` (${fuel.harvestersUnknown} harvesters have no figure, so the total and the balance are not given: ${fuel.harvestersGaps.join('; ')}; the known output of the rest is ${this.litres(fuel.refineries === null ? null : fuel.refineries + fuel.harvestersKnown)})` : ''}, burned about ${this.litres(fuel.low)}–${this.litres(fuel.high)}${fuelDown && fuel.stock > 0 && !fuel.stockUnknown ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
+          note: `Made ${this.litres(fuel.production)}${fuel.refineriesUnknown ? ` (${fuel.refineriesUnknown} ${fuel.refineriesUnknown === 1 ? 'colony' : 'colonies'} not counted)` : ''}${fuel.harvestersUnknown ? ` (${fuel.harvestersUnknown} harvesters have no figure, so the total and the balance are not given: ${fuel.harvestersGaps.join('; ')}; the known output of the rest is ${this.litres(fuel.refineries === null ? null : fuel.refineries + fuel.harvestersKnown)})` : ''}, burned about ${this.litresRange(fuel.low, fuel.high)}${fuelDown && fuel.stock > 0 && !fuel.stockUnknown ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
           title: `Refineries: ${describeResult(this.refineryTotals.result)}${this.harvesterRows.length ? ` Harvesters, fit in tanks: ${fuel.harvestersUnknown ? `${fuel.harvestersUnknown} of ${this.harvesterRows.length} have no figure, so the fuel made and the balance are not given.` : 'every harvester has a figure.'}` : ''}`,
           icon: fuelNet === null ? null : fuelDown ? 'mdi-trending-down' : 'mdi-trending-up',
           iconColor: fuelDown ? 'error' : 'success',
@@ -883,6 +883,10 @@ export default {
     },
     litres(value) {
       return isKnownNumber(value) ? `${compact(value)} L` : UNKNOWN_TEXT
+    },
+    // A range of litres with the unit once, after the second figure: `5–9 L`, `5.3 M to 9.2 M L`.
+    litresRange(low, high) {
+      return rangeText(low, high, { format: (value) => compactFigure(value, ' L') })
     },
     signedLitres(value) {
       return isKnownNumber(value) ? `${value < 0 ? '−' : '+'}${this.litres(Math.abs(value))}` : UNKNOWN_TEXT

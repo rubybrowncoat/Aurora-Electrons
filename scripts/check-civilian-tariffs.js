@@ -21,7 +21,7 @@ const { fixtureTriple, playedTriple } = require('./lib/fixtures')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const pagesDirectory = path.join(root, 'src', 'renderer', 'pages')
-const MODULES = ['civilian-tariff', 'shipping-runway', 'provenance', 'finances']
+const MODULES = ['civilian-tariff', 'shipping-runway', 'provenance', 'finances', 'math']
 const FILE = 'civilian-tariff.js'
 
 let failures = 0
@@ -291,7 +291,7 @@ const compileMethods = (source, names, values) => vm.compileFunction(`return ({$
 const attempt = (test) => test()
 
 // The pages' wiring, on the text of the pages: [[name, held]]. Each statement must hold of the real pages and fail of a page with one gate cut out.
-const wiring = ({ finances, information, utility, tariff, provenance }) => {
+const wiring = ({ finances, information, utility, tariff, provenance, math }) => {
   const heading = finances.indexOf('<span>Civilian shipping-line payouts')
   const panel = between(finances.slice(finances.lastIndexOf('<v-card', heading)), '<v-card', '</v-card>')
   const summary = (/\bdata-summary="([^"]*)"/.exec(panel) || [])[1]
@@ -377,7 +377,7 @@ const wiring = ({ finances, information, utility, tariff, provenance }) => {
 
   const noteOf = (shippingTax, fields) => {
     const methods = compileMethods(noteSource, ['payoutRows', 'isAvailable', 'describeTariffVersion'], [tariff.payoutRows, provenance.isAvailable, tariff.describeTariffVersion])
-    const context = { destination: { key: 'place' }, CivilianShippingLinesActive: true, formulaVersion: '3.2.x', civilianRuns: [{ status: 'ok', km: 1.3e9 }], shippingTaxState: { loading: false, failed: false, error: '', value: shippingTax }, amountText: (value) => tariff.amountText(value), distance: (km) => `${km / 1e9} bn km`, ...fields }
+    const context = { destination: { key: 'place' }, CivilianShippingLinesActive: true, formulaVersion: '3.2.x', civilianRuns: [{ status: 'ok', km: 1.3e9 }], shippingTaxState: { loading: false, failed: false, error: '', value: shippingTax }, amountText: (value) => tariff.amountText(value), amountRange: (low, high) => math.rangeText(low, high, { format: (value) => math.rangeFigure(tariff.amountText(value), { negative: value < 0 }) }), distance: (km) => `${km / 1e9} bn km`, distanceRange: (low, high) => math.rangeText(low, high, { format: (km) => math.rangeFigure(math.countText(km / 1e9, 2), { magnitude: 'bn', unit: ' km' }) }), ...fields }
 
     return methods.payoutNote.call(context)
   }
@@ -477,7 +477,7 @@ const wiring = ({ finances, information, utility, tariff, provenance }) => {
     const low = tariff.amountText(0.00015 * 0.75 * 0.5)
     const high = tariff.amountText(0.00015 * 3 * 0.75 * 0.5)
 
-    return (note && note.text.includes(`${low} to ${high}`)) || (note ? note.text : 'no note')
+    return (note && note.text.includes(`${low}–${high}`)) || (note ? note.text : 'no note')
   }))
   add('Transport: an unread tax gives no amount paid to the line, naming what is missing, and a pending or failed read says so', () => attempt(() => {
     const noRate = { rate: null, missing: 'the race\'s shipping line tax', npr: null }
@@ -650,7 +650,7 @@ const PAGE_MUTATIONS = [
   ['Finances no longer says the units are carried the whole leg', 'finances', ', with every unit carried the whole leg', '', ['Finances, player:']],
   ['Transport leaves the saved tax out of the note', 'information', 'const taxRate = shippingTax ? shippingTax.rate : null', 'const taxRate = 0', ['Transport, player: with a tax of 25 %']],
   ['Transport leaves the saved race kind out of the note', 'information', 'const npr = shippingTax ? shippingTax.npr : null', 'const npr = false', ['Transport, computer-run empire: the receipt is halved']],
-  ['Transport shows the fare as what the line is paid', 'information', 'const low = this.amountText(row.receipt.value)', 'const low = this.amountText(row.fare.value)', ['Transport, player: with a tax of 25 %']],
+  ['Transport shows the fare as what the line is paid', 'information', 'const low = row.receipt.value', 'const low = row.fare.value', ['Transport, player: with a tax of 25 %']],
   ['Transport falls back on the selection flag for the race kind', 'information', 'const npr = shippingTax ? shippingTax.npr : null', 'const npr = !!this.RaceNPR', ['neither page takes the race kind']],
   ['Transport ignores a failed tax read', 'information', 'typeof read === \'string\'', 'false', ['Transport: an unread tax']],
   ['Transport keeps the previous race\'s tax through the switch', 'information', 'const current = held && held.GameID === this.GameID && held.RaceID === this.RaceID && held.generation === generation', 'const current = !!held', ['Transport: a race switch before the tax reread starts', 'Transport: another copy of the save with the same game and race']],
@@ -887,7 +887,7 @@ const plantedCase = async (label, [file, GameID, RaceID], mods) => {
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
   const utilities = await loadUtilities(MODULES)
-  const mods = { tariff: utilities['civilian-tariff'], provenance: utilities.provenance, finances: utilities.finances, runway: utilities['shipping-runway'] }
+  const mods = { tariff: utilities['civilian-tariff'], provenance: utilities.provenance, finances: utilities.finances, runway: utilities['shipping-runway'], math: utilities.math }
 
   console.log('Synthetic checks')
 
@@ -906,7 +906,7 @@ const run = async () => {
   console.log('\nPages')
 
   const utility = readSource('src/renderer/utilities/civilian-tariff.js')
-  const pages = { finances: fs.readFileSync(path.join(pagesDirectory, 'finances.vue'), 'utf8'), information: fs.readFileSync(path.join(pagesDirectory, 'information.vue'), 'utf8'), utility, tariff: mods.tariff, provenance: mods.provenance }
+  const pages = { finances: fs.readFileSync(path.join(pagesDirectory, 'finances.vue'), 'utf8'), information: fs.readFileSync(path.join(pagesDirectory, 'information.vue'), 'utf8'), utility, tariff: mods.tariff, provenance: mods.provenance, math: mods.math }
 
   for (const [name, held] of wiring(pages)) {
     check(name, held === true)

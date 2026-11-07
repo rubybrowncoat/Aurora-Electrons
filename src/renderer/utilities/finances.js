@@ -64,7 +64,7 @@ registerRule({
   units: 'wealth/yr',
   verification: 'estimated',
   structure: WEALTH_STRUCTURE,
-  note: 'The window\'s total scaled to 365 days by the time the window spans. Over the 30 days to today the scaled income of one save checked was within 0.01% of the stored annual wealth figure (26324711 against 26325265); over 365 days it was 0.8% under. In another save the scaled income was 9% to 12% above the stored figure (256977 to 265046 against 237291), so the two do not agree there; the stored figure\'s own definition is not known here. The scaling itself is checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
+  note: 'The window\'s total scaled to 365 days by the time the window spans. Over the 30 days to today the scaled income of one save checked was within 0.01% of the stored annual wealth figure (26324711 against 26325265); over 365 days it was 0.8% under. In another save the scaled income was 9–12% above the stored figure (256977 to 265046 against 237291), so the two do not agree there; the stored figure\'s own definition is not known here. The scaling itself is checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the rate over the window holds for a year'],
 })
 

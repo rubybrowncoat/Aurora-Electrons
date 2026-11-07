@@ -4,7 +4,7 @@ import { crewFraction } from './crew'
 import { ZERO, add, fitsDouble, floorRatio, fromDouble, fromString, multiply, toNumber } from './decimal'
 import { loadOrbitalCensus } from './orbital-census'
 import { maintenanceClusters, shipFigures } from './maintenance-pools'
-import { roundToDecimal } from './math'
+import { rangeFigure, roundToDecimal } from './math'
 import { fleetCommandChain } from './minerals'
 import { MINING_BONUS, MINING_WITHHELD } from './mining-data'
 import { UNVERIFIED_SAVE, combine, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
@@ -537,19 +537,27 @@ export const harvesterReport = (ships, { admins, horizon, version = null }) => {
   }
 }
 
-// Litres or items at a readable precision: 2.5 bn, 1.2 M, 3.4 k.
-export const compact = (value) => {
+// Litres or items at a readable precision, the number and its magnitude suffix apart for a range (`unit` is written beside it, its spacing included): { number: '5.3', magnitude: 'M', unit: ' L' }, so that `rangeText` writes the unit once.
+export const compactFigure = (value, unit = '') => {
   const size = Math.abs(value)
+  const negative = value < 0
 
   if (size >= 1e9) {
-    return `${roundToDecimal(value / 1e9, 2)} bn`
+    return rangeFigure(roundToDecimal(value / 1e9, 2), { magnitude: 'bn', unit, negative })
   } else if (size >= 1e6) {
-    return `${roundToDecimal(value / 1e6, 1)} M`
+    return rangeFigure(roundToDecimal(value / 1e6, 1), { magnitude: 'M', unit, negative })
   } else if (size >= 1e3) {
-    return `${roundToDecimal(value / 1e3, 1)} k`
+    return rangeFigure(roundToDecimal(value / 1e3, 1), { magnitude: 'k', unit, negative })
   }
 
-  return `${roundToDecimal(value, 0)}`
+  return rangeFigure(roundToDecimal(value, 0), { unit, negative })
+}
+
+// Litres or items at a readable precision: 2.5 bn, 1.2 M, 3.4 k.
+export const compact = (value) => {
+  const figure = compactFigure(value)
+
+  return figure.magnitude ? `${figure.number} ${figure.magnitude}` : figure.number
 }
 
 // The rule registry for the Logistics page's figures, with the evidence in docs/plans/aurcalcs/build-2.md § Logistics.

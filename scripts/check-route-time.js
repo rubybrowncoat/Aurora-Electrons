@@ -994,7 +994,7 @@ const fixtures = (world) => {
     near(walked.total.hi, simulate(highs, SHOCK.hi + time.RETRY_SLACK).total)
     near(rows.reduce((sum, row) => sum + row.flight, 0), walked.flight)
     near(rows.reduce((sum, row) => sum + row.flightHi, 0), walked.flightHi)
-    rows.forEach((row) => assert.equal(vm.flightText(row.flight, row.flightHi).includes(' to '), row.flight !== row.flightHi, 'a flight is a range exactly when its two cases differ'))
+    rows.forEach((row) => assert.equal(/ to |–/.test(vm.flightText(row.flight, row.flightHi)), row.flight !== row.flightHi, 'a flight is a range exactly when its two cases differ'))
     assert.ok(rows.some((row) => row.flight !== row.flightHi))
 
     const last = vm.detailRows[vm.detailRows.length - 1]
@@ -1002,6 +1002,16 @@ const fixtures = (world) => {
     assert.deepEqual(last.elapsed, { lo: walked.total.lo, hi: walked.total.hi }, 'the clock of the table ends where the walk does')
     assert.equal(vm.flightText(undefined, undefined), '—')
     assert.equal(vm.flightText(null, null), '—')
+  })
+
+  add('page: a range of spans written by the page\'s own formatter shows its unit once when both ends carry the same single unit, and keeps each end\'s own text when an end carries two parts', () => {
+    const vm = pageOver()
+
+    assert.equal(vm.spanRange(5, 9), '5–9 s')
+    assert.equal(vm.spanRange(120, 180), '2–3 min')
+    assert.equal(vm.spanRange(7200, 10800), '2–3 h')
+    assert.equal(vm.spanRange(200, 250), '3 min 20 s to 4 min 10 s')
+    assert.equal(vm.spanRange(8, 8), '8 s')
   })
 
   const haulFixture = (actions = [1, 1]) => ({
@@ -1670,7 +1680,7 @@ const MUTATIONS = [
   { name: 'a cycle of Hauling leaves the speed mode out of the clock of its flights', target: 'hauling', find: '{ speed: fleet.Speed, holdsSpeed: timing.holdsSpeed, speedIn:', replace: '{ speed: fleet.Speed, speedIn:', fails: ['held'] },
   { name: 'the year of Hauling counts the moving time at its lowest case', target: 'hauling', find: 'const movingSeconds = walk ? walk.flightHi :', replace: 'const movingSeconds = walk ? walk.flight :', fails: ['held'] },
   { name: 'the cycle of Transport counts the flying at its lowest case', target: 'transport', find: 'const travelSeconds = timed ? timed.flightHi :', replace: 'const travelSeconds = timed ? timed.flight :', fails: ['fuel'] },
-  { name: 'the flight of a leg is shown at its lowest case only', target: 'routes', find: 'flight === flightHi ? this.span(flight) :', replace: 'true ? this.span(flight) :', fails: ['page'] },
+  { name: 'the flight of a leg is shown at its lowest case only', target: 'routes', find: 'this.spanRange(flight, flightHi)', replace: 'this.spanRange(flight, flight)', fails: ['page'] },
   { name: 'the clock of a leg table takes each flight at its lowest case', target: 'routes', find: '{ lo: timing.flight, hi: timing.flightHi }', replace: '{ lo: timing.flight, hi: timing.flight }', fails: ['page'] },
   { name: 'a transit keeps only the cap of the system it leaves', target: 'route-time', find: '[...slow.filter((held) => held.speed < cap), { speed: cap, budget: SUBPULSE_MAX }]', replace: '[{ speed: cap, budget: SUBPULSE_MAX }]', fails: ['carry', 'ready'] },
   { name: 'the search keeps one state at a jump point', target: 'jump-graph', find: '.some((kept) => firstOnly || covers(kept, state))', replace: '.some(() => true)', fails: ['caps'] },

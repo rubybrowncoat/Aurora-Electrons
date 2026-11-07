@@ -576,14 +576,14 @@ const motionOf = async (ctx) => {
   const constantText = page.slice(page.indexOf('const stopOf ='), page.indexOf('\n', page.indexOf('const capitalised =')))
   // eslint-disable-next-line no-new-func
   const constants = new Function('serviceSeconds', `${constantText}\nreturn { stopOf, sumOf, serviceOf, capitalised }`)(ctx.mod.serviceSeconds)
-  const dependency = { ...loaded['route-position'], ...loaded['route-plan'], ...loaded['jump-graph'], ...loaded['orbit-propagation'], ...loaded['route-time'], ...loaded['safe-routes'], ...loaded.transport, ...ctx.fp, ...ctx.mod, ...loaded['load-tracking'], ...constants, SECONDS_PER_DAY: 86400 }
+  const dependency = { ...loaded['route-position'], ...loaded['route-plan'], ...loaded['jump-graph'], ...loaded['orbit-propagation'], ...loaded['route-time'], ...loaded['safe-routes'], ...loaded.transport, ...loaded.math, ...ctx.fp, ...ctx.mod, ...loaded['load-tracking'], ...constants, SECONDS_PER_DAY: 86400 }
   const keys = Object.keys(dependency).filter((key) => /^[A-Za-z_$][\w$]*$/.test(key) && key !== 'default')
   const viewText = page.slice(page.indexOf('    ledgerFields(ledger) {'), page.indexOf('    // The round trip sailed cycle after cycle'))
   // eslint-disable-next-line no-new-func
-  const methods = new Function(...keys, `return { ${ROW_METHODS.map((name) => methodText(page, name)).join('\n')}\n${viewText} }`)(...keys.map((key) => dependency[key]))
+  const methods = new Function(...keys, `return { ${ROW_METHODS.map((name) => methodText(page, name)).join('\n')}\n${viewText}\n${methodText(page, 'spanRange')} }`)(...keys.map((key) => dependency[key]))
   const format = fs.readFileSync(path.join(root, 'src/renderer/mixins/count-format.js'), 'utf8')
   // eslint-disable-next-line no-new-func
-  const counts = new Function('countText', 'isKnownNumber', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.isKnownNumber)
+  const counts = new Function('countText', 'figureText', 'isKnownNumber', 'rangeFigure', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.figureText, loaded.math.isKnownNumber, loaded.math.rangeFigure)
   const rocks = [rockOf(10, 0.02, 90, 48), rockOf(20, 0.04, 270, 96)]
   // The orbits three times as far and as slow, for the case in which only the closing fill has hours that are not known.
   const wide = rocks.map((rock) => rockOf(rock.id, rock.distance * 3, rock.bearing, rock.year * 3))
@@ -848,7 +848,7 @@ const viewOfPage = async (ctx) => {
   const methods = new Function(...keys, `return { ${['ledgerViewOf', 'servicePartOf'].map((name) => methodText(page, name)).join('\n')} }`)(...keys.map((key) => dependency[key]))
   const format = fs.readFileSync(path.join(root, 'src/renderer/mixins/count-format.js'), 'utf8')
   // eslint-disable-next-line no-new-func
-  const counts = new Function('countText', 'isKnownNumber', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.isKnownNumber)
+  const counts = new Function('countText', 'figureText', 'isKnownNumber', 'rangeFigure', `return { ${format.slice(format.indexOf('    count(value,'), format.lastIndexOf('\n  },'))} }`)(loaded.math.countText, loaded.math.figureText, loaded.math.isKnownNumber, loaded.math.rangeFigure)
   const vm = { ...methods, ...counts, separator: '\'' }
 
   return (ledger) => vm.ledgerViewOf(ledger)
@@ -1005,6 +1005,11 @@ const readerChecks = {
       [`${before} 1 h 2 min`, { seconds: 3720, qualified: true, range: false }],
       [`1 h 2 min ${after}`, { seconds: 3720, qualified: true, range: false }],
       ['1 h to 2 h', { seconds: 7200, qualified: false, range: true }],
+      ['5–9 s', { seconds: 9, qualified: false, range: true }],
+      ['36–48 h', { seconds: 48 * 3600, qualified: false, range: true }],
+      ['12.5–14.2 d', { seconds: 14.2 * 86400, qualified: false, range: true }],
+      ['3 min 20 s to 4 min 10 s', { seconds: 250, qualified: false, range: true }],
+      ['5 s to 1 min 5 s', { seconds: 65, qualified: false, range: true }],
       ['37.3 d to 37.3 d', { seconds: 37.3 * 86400, qualified: false, range: true }],
       ['0 h to 1 h', { seconds: 3600, qualified: false, range: true }],
       ['4.1 mo', { seconds: 4.1 * (30.4 * 86400), qualified: false, range: false }],
@@ -1033,6 +1038,8 @@ const readerChecks = {
       [`${before} 1 h to 2 h`, null],
       [`1 h to ${before} 2 h`, null],
       ['1 h to 2 h to 3 h', null],
+      ['5 to 9', null],
+      ['5 s–9', null],
       ['2 h to 1 h', null],
       ['1 h 1 min to 1 h', null],
     ]
@@ -1041,9 +1048,9 @@ const readerChecks = {
     assert.deepEqual(readBy(parseSpan), [], 'the reader reads each form as the grammar says')
 
     const lastEndOnly = (text, words) => {
-      const end = parseEnd(String(text).split(' to ').pop(), words)
+      const end = parseEnd(String(text).split(/ to |–/).pop(), words)
 
-      return end && { ...end, range: String(text).includes(' to ') }
+      return end && { ...end, range: / to |–/.test(String(text)) }
     }
     const anyWord = (text, words) => {
       const end = parseEnd(text, { ...words, before: (String(text).match(/^([A-Za-z ]*?)\s*\d/) || [null, ''])[1] || words.before })
@@ -1983,9 +1990,19 @@ const parseEnd = (text, bound) => {
   return figures && (!before || before === bound.before) && (!after || after === bound.after) && !(before && after) ? { seconds, qualified: Boolean(before || after) } : null
 }
 
-// A written duration read whole: one duration, or a range "a to b" of two plain ones (neither end carries a qualifier, the lower end not over the upper), of which the upper end is the value. `range` says which form was read. Null where any part of the text, an end of a range included, does not read.
+// The one unit a written duration names ("9 s" → "s", "4 min 10 s" → null, which names two), so that a range may write its unit once, after the second figure.
+const UNIT_WORDS = ['min', 'mo', 's', 'h', 'd', 'y']
+const endUnit = (text) => {
+  const words = String(text).trim().split(/\s+/).filter((word) => UNIT_WORDS.includes(word))
+
+  return words.length === 1 ? words[0] : null
+}
+
+// A written duration read whole: one duration, or a range "a to b" of two plain ones (neither end carries a qualifier, the lower end not over the upper), of which the upper end is the value. A range may write its unit once, after the second figure ("5–9 s", "36–48 h"), each end otherwise carrying its own ("3 min 20 s to 4 min 10 s", "5 s to 1 min 5 s"). `range` says which form was read. Null where any part of the text, an end of a range included, does not read.
 const parseSpan = (text, bound) => {
-  const ends = String(text).split(' to ').map((end) => parseEnd(end, bound))
+  const parts = String(text).split(/ to |–/)
+  const unit = endUnit(parts[parts.length - 1])
+  const ends = parts.map((end, index) => parseEnd(/[A-Za-z]/.test(end) || index === parts.length - 1 || !unit ? end : `${end.trim()} ${unit}`, bound))
 
   return ends.length > 2 || ends.includes(null) ? null : ends.length === 1 ? { ...ends[0], range: false } : ends.some((end) => end.qualified) || ends[0].seconds > ends[1].seconds ? null : { ...ends[1], range: true }
 }
@@ -1999,7 +2016,7 @@ const secondsOf = (text, bound, { range = false } = {}) => {
 
 // The precision a written duration is drawn in, in seconds, from its last unit as the page's formatter writes it: to the second below an hour, to the minute with hours (the minutes are cut), to a tenth of a day, of a month of 30.4 days or of a year beyond. A range is read by its upper end.
 const precisionOf = (text) => {
-  const units = [...String(text).split(' to ').pop().matchAll(/\d (d|h|min|s|mo|y)(?=\s|$)/g)].map((found) => found[1])
+  const units = [...String(text).split(/ to |–/).pop().matchAll(/\d (d|h|min|s|mo|y)(?=\s|$)/g)].map((found) => found[1])
   const unit = units[units.length - 1]
 
   return unit === 'y' ? 0.06 * 365 * 86400 : unit === 'mo' ? 0.06 * 30.4 * 86400 : unit === 'd' ? 0.06 * 86400 : units.includes('h') ? 60 : 1
@@ -2550,7 +2567,7 @@ const PAGE_FAULTS = [
   { name: 'the Retry of the reserve records leaves out a repository that did not open', file: READER, change: swap('this.$asyncComputed.reserveRecords.update()', 'this.retryReserves()'), fails: ['unread'] },
   { name: 'the Retry of the reserve reads leaves out a read that failed', file: READER, change: swap('if (this.reserveFailedKeys.length) {', 'if (false) {'), fails: ['unread'] },
   { name: 'the Retry of the reserve records leaves out records that could not be read', file: READER, change: swap('this.reservesChanged()', 'void 0'), fails: ['unread'] },
-  { name: 'a word before the lower end of a range of the round trip, drawn as a range whatever its ends', change: swap('(low === high ? this.span(low) : `${this.span(low)} to ${this.span(high)}`)', '`nonsense ${this.span(low)} to ${this.span(high)}`'), fails: ['cycle'] },
+  { name: 'a word before the lower end of a range of the round trip, drawn as a range whatever its ends', change: swap('const range = (low, high) => this.spanRange(low, high)', 'const range = (low, high) => `nonsense ${this.spanRange(low, high)}`'), fails: ['cycle'] },
   { name: 'the hours of the fill of a colony drawn as a range from nothing in the ledger block, the upper end the right one', change: swap(HOURS_OF_PART, "`${part.bound === 'at-least' ? `${SERVICE_BOUNDS['at-least'].before} ` : '0 s to '}${this.span(part.hours * 3600)}`"), fails: ['ledger'] },
   { name: 'the share of the limiting ship drawn with a digit before it, a figure that contains the right one', change: swap('with ${this.count(limiting.share * 100)}%`', 'with 1${this.count(limiting.share * 100)}%`'), fails: ['ledger'] },
   { name: 'the return share of a row drawn with a digit before it', change: swap('returns with {{ count(item.returnShare * 100) }}%', 'returns with 1{{ count(item.returnShare * 100) }}%'), fails: ['ledger'] },

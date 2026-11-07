@@ -83,7 +83,7 @@
 import LoadState from '../page/LoadState.vue'
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 import countFormat from '../../mixins/count-format'
-import { UNKNOWN_TEXT } from '../../utilities/math'
+import { UNKNOWN_TEXT, rangeFigure, rangeText } from '../../utilities/math'
 import { sortNullLast } from '../../utilities/production'
 import { valueOrNull } from '../../utilities/provenance'
 
@@ -170,7 +170,7 @@ export default {
         return UNKNOWN_TEXT
       }
 
-      return delivery.firstDay === delivery.lastDay ? `Day ${delivery.firstDay}` : `Days ${delivery.firstDay} to ${delivery.lastDay}`
+      return delivery.firstDay === delivery.lastDay ? `Day ${delivery.firstDay}` : `Days ${rangeText(delivery.firstDay, delivery.lastDay, { format: (value) => rangeFigure(this.count(value)) })}`
     },
 
     deliveryText(delivery) {

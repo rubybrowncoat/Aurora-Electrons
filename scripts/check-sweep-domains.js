@@ -365,7 +365,7 @@ const synthetic = ({ domain, search, rules }) => {
     const inTons = describeSweep(made, { unit: 'tons' })
     const back = describeSweep(made)
 
-    return made.signature === before && same(made.toArray(), values) === true && inHs.unit === 'HS' && inTons.unit === 'tons' && inTons.first === 50 && inTons.last === 615 && inTons.count === inHs.count && same(back, inHs) === true && /1 to 12\.3 HS/.test(inHs.text) && /50 to 615 tons/.test(inTons.text) && Object.isFrozen(made) ? true : `${inTons.first} ${inTons.last} ${inTons.text}`
+    return made.signature === before && same(made.toArray(), values) === true && inHs.unit === 'HS' && inTons.unit === 'tons' && inTons.first === 50 && inTons.last === 615 && inTons.count === inHs.count && same(back, inHs) === true && /1–12\.3 HS/.test(inHs.text) && /50–615 tons/.test(inTons.text) && Object.isFrozen(made) ? true : `${inTons.first} ${inTons.last} ${inTons.text}`
   })
 
   add('a domain entered in tons is the same canonical domain as the one entered in HS (5 to 50 tons by 5 is 0.1 to 1 HS by 0.1)', () => {

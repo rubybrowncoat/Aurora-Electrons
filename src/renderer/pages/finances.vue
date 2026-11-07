@@ -218,7 +218,7 @@ import { HISTORY_DAYS, SECONDS_PER_DAY, buildLedger, reasonText, statusText } fr
 import { branchStore } from '../utilities/history'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { chartGridColor, hierarchyView } from '../utilities/map-hierarchy'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { rangeFigure, rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
 import { ruleSupports, valueOrNull } from '../utilities/provenance'
 import { loadShippingTax } from '../utilities/shipping-runway'
 import { ledgerEvidence, recordedAnchors, reconcileTreasury, residualLabel, wealthLogSql } from '../utilities/treasury-anchors'
@@ -427,7 +427,7 @@ export default {
         return 'cycle'
       }
 
-      return longestCycleDays > cycle.value ? `${this.daysText(cycle.value)} to ${this.daysText(longestCycleDays)}` : this.daysText(cycle.value)
+      return longestCycleDays > cycle.value ? rangeText(cycle.value, longestCycleDays, { format: (value) => this.daysFigure(value) }) : this.daysText(cycle.value)
     },
 
     coverageText() {
@@ -726,8 +726,13 @@ export default {
       return this.treasury ? gameTime(this.treasury.StartYear, seconds).format('YYYY-MM-DD') : ''
     },
     // A length in days, in hours when it is under a day.
+    daysFigure(value) {
+      return value < 1 ? rangeFigure(roundToDecimal(value * 24, 1), { unit: ' hours' }) : rangeFigure(roundToDecimal(value, 1), { unit: ' days' })
+    },
     daysText(value) {
-      return value < 1 ? `${roundToDecimal(value * 24, 1)} hours` : `${roundToDecimal(value, 1)} days`
+      const figure = this.daysFigure(value)
+
+      return `${figure.number}${figure.unit}`
     },
     // A residual as the table prints it: 0 only for a balanced window, so a residual that is not 0 never reads as 0.
     residualText(value) {

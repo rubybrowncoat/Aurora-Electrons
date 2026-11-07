@@ -323,7 +323,7 @@ import { WORKER_TOLERANCE, attentionResult, outlookColonies, people as peopleOf,
 import { loadColonyEnvironments, orbitalPopulationResult, withColonyEnvironment } from '../utilities/colony-environment'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { industryUsage, prepareForecast } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
@@ -1155,7 +1155,7 @@ export default {
       const earliest = Math.round(event.earliest)
       const latest = Math.round(event.latest)
 
-      return `${event.approximate ? 'About day' : 'Day'} ${earliest === latest ? earliest : `${earliest} to ${latest}`}`
+      return `${event.approximate ? 'About day' : 'Day'} ${rangeText(earliest, latest)}`
     },
     eventEffect(event) {
       const workers = event.delta * event.units

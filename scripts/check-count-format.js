@@ -25,7 +25,7 @@ const built = (text, math) => {
   const body = text.replace(/^import .*$/gm, '').replace('export default {', 'return {')
 
   // eslint-disable-next-line no-new-func
-  return new Function('mapGetters', 'countText', 'isKnownNumber', 'thousandsSeparator', body)(() => ({}), math.countText, math.isKnownNumber, math.thousandsSeparator)
+  return new Function('mapGetters', 'countText', 'figureText', 'isKnownNumber', 'rangeFigure', 'thousandsSeparator', body)(() => ({}), math.countText, math.figureText, math.isKnownNumber, math.rangeFigure, math.thousandsSeparator)
 }
 
 // A component of the mixin with the setting set to `name`.
@@ -76,14 +76,14 @@ const CHECKS = [
 // The planted faults: the text of the mixin to find (exactly once) and what replaces it. Each must make a check fail.
 /* eslint-disable no-template-curly-in-string */
 const MUTATIONS = [
-  ['the years are written with no grouping', '`${this.count(days / 365, 1)} y`', '`${Math.round(days / 365 * 10) / 10} y`'],
-  ['the years are grouped with the apostrophe whatever the setting', '`${this.count(days / 365, 1)} y`', '`${countText(days / 365, 1)} y`'],
-  ['the years are written to a whole number', '`${this.count(days / 365, 1)} y`', '`${this.count(days / 365)} y`'],
-  ['a year is 360 days', '`${this.count(days / 365, 1)} y`', '`${this.count(days / 360, 1)} y`'],
-  ['a month is 30 days', '`${this.count(days / 30.4, 1)} mo`', '`${this.count(days / 30, 1)} mo`'],
+  ['the years are written with no grouping', 'rangeFigure(this.count(days / 365, 1), { unit: \' y\' })', 'rangeFigure(`${Math.round(days / 365 * 10) / 10}`, { unit: \' y\' })'],
+  ['the years are grouped with the apostrophe whatever the setting', 'rangeFigure(this.count(days / 365, 1), { unit: \' y\' })', 'rangeFigure(countText(days / 365, 1), { unit: \' y\' })'],
+  ['the years are written to a whole number', 'rangeFigure(this.count(days / 365, 1), { unit: \' y\' })', 'rangeFigure(this.count(days / 365), { unit: \' y\' })'],
+  ['a year is 360 days', 'rangeFigure(this.count(days / 365, 1), { unit: \' y\' })', 'rangeFigure(this.count(days / 360, 1), { unit: \' y\' })'],
+  ['a month is 30 days', 'rangeFigure(this.count(days / 30.4, 1), { unit: \' mo\' })', 'rangeFigure(this.count(days / 30, 1), { unit: \' mo\' })'],
   ['months run to a year', '} else if (days < 730) {', '} else if (days < 365) {'],
   ['a value that is not known is taken for a number', 'if (!isKnownNumber(days)) {', 'if (false) {'],
-  ['a span of seconds counts its days in hours', 'return this.duration(seconds / 86400)', 'return this.duration(seconds / 3600)'],
+  ['a span of seconds counts its days in hours', 'return this.durationFigure(seconds / 86400)', 'return this.durationFigure(seconds / 3600)'],
 ]
 /* eslint-enable no-template-curly-in-string */
 

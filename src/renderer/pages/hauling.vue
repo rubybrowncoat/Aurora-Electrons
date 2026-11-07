@@ -266,7 +266,7 @@ import { timeHauls } from '../utilities/msp-supply'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, unreadResult } from '../utilities/safe-routes'
 import { ofRule, unavailable } from '../utilities/provenance'
 import { allLoaded, tracked } from '../utilities/load-tracking'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { rangeFigure, rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
 import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
@@ -465,7 +465,7 @@ export default {
         const flown = simulation === first ? flownRoute : null
         const walk = flown ? flownWalk : heldWalk
         const year = flown ? routeYear(sailing, flown, cargo, handling, delay, walk) : held
-        const waitText = year && year.waitDays !== null ? (year.waitLowDays === year.waitDays ? `${this.fixed(year.waitDays * 24, 1)} hours` : `${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} hours`) : ''
+        const waitText = year && year.waitDays !== null ? (year.waitLowDays === year.waitDays ? `${this.fixed(year.waitDays * 24, 1)} hours` : rangeText(year.waitLowDays * 24, year.waitDays * 24, { format: (value) => rangeFigure(this.fixed(value, 1), { unit: ' hours' }) })) : ''
         const speedText = profile.status === 'ok' ? `${this.count(profile.cruise)} km/s` : 'no speed'
         const savedText = profile.status === 'ok' && Number.isFinite(profile.savedSpeed) && profile.savedSpeed !== profile.cruise ? `(saved ${this.count(profile.savedSpeed)})` : ''
         const capital = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`

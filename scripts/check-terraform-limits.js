@@ -1337,7 +1337,9 @@ check('leverComponent', 'the body detail words the lever of a stage and of a ste
   const { stages } = found.result
   const percent = (value) => Number((value * 100).toFixed(1))
   const degrees = (kelvin) => Number((kelvin - 273).toFixed(1))
-  const effectText = (stage, lever) => `Raises the dampening by ${lever}: from ${percent(stage.effect.dampening.from)}% to ${percent(stage.effect.dampening.to)}%, periapsis from ${degrees(stage.effect.periapsis.from)} to ${degrees(stage.effect.periapsis.to)} °C, apoapsis from ${degrees(stage.effect.apoapsis.from)} to ${degrees(stage.effect.apoapsis.to)} °C.`
+  // The page words a directional change from one temperature to another as "from A to B", the unit once at the end, whether or not the two read the same.
+  const swing = (from, to) => `${degrees(from)} to ${degrees(to)} °C`
+  const effectText = (stage, lever) => `Raises the dampening by ${lever}: from ${percent(stage.effect.dampening.from)}% to ${percent(stage.effect.dampening.to)}%, periapsis from ${swing(stage.effect.periapsis.from, stage.effect.periapsis.to)}, apoapsis from ${swing(stage.effect.apoapsis.from, stage.effect.apoapsis.to)}.`
   const air = stages.find(({ lever, step }) => lever === 'pressure' && step)
   const water = stages.find(({ lever, step }) => lever === 'water' && step)
   const settle = stages[stages.length - 1]

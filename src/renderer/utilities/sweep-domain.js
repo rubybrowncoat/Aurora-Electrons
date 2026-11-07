@@ -7,6 +7,8 @@
 // Validation is field-local: `errors` holds a message for each of `min`, `max`, `step` and `limits` that is wrong, and `domain` for a problem of the whole range; a domain with any error has no values and must not run. A value must be a finite number, a count a whole number, a figure no finer than the kind's resolution (unless `snap: 'inward'` cuts it, which the domain reports as a `cut`), a step above 0, `min` not above `max`, and each bound inside the `limits` (the researched or fixed `{ min, max, source }` of the figure) when given.
 
 // A figure is read exactly. Text typed in a field is its decimal digits, and a number given by code is the shortest decimal that gives the number back, so a figure is converted to scaled units as a ratio of whole numbers (BigInt) and is on a tick of the kind's resolution only when the ratio is whole: no tolerance relative to the magnitude is ever applied, and typed text that is not on a tick is cut inward (a minimum up, a maximum down) or refused, exactly. A number given by code is read to within ULPS units in the last place of a tick (the error of the arithmetic that made it, as 0.1 + 0.2 is 0.3), so such a bound can sit up to ULPS ulps outside the figure it was given (a numeric maximum of 0.2999999999999999 reads as 0.3 where the text '0.2999999999999999' floors to 0.299). The values a domain generates are checked once built: a stretch of the grid with more than one value, and the gap between neighbouring stretches or to an endpoint tried between steps, must each be at least twice the unit in the last place of the figures involved, in the canonical and the entered unit, or its neighbouring values would be one double (an error on the step, or on the bound whose inclusion collides); a stretch that holds no value is not tested. The only range limit is that a scaled figure is a whole number a double holds exactly.
+import { rangeFigure, rangeText } from './math'
+
 const MAX_SCALED = BigInt(Number.MAX_SAFE_INTEGER)
 const ULPS = 2
 const MAX_EXPONENT = 1000
@@ -497,7 +499,7 @@ export const describeSweep = (domain, { unit, format = (value) => plain(value, 6
   const steps = ranges.length > 1 ? `steps of ${ranges.map((range) => `${format(range.step)}${suffix}`).join(', ')}` : ranges.length === 1 ? `steps of ${format(ranges[0].step)}${suffix}` : ''
   const total = `${domain.count} ${domain.count === 1 ? 'value' : 'values'}`
 
-  const text = domain.count === 1 ? `${format(first)}${suffix}, 1 value` : `${format(first)} to ${format(last)}${suffix}${steps ? ` in ${steps}` : ''}, ${total}`
+  const text = domain.count === 1 ? `${format(first)}${suffix}, 1 value` : `${rangeText(first, last, { format: (value) => rangeFigure(format(value), { unit: suffix }) })}${steps ? ` in ${steps}` : ''}, ${total}`
 
   return { ok: true, problems: [], count: domain.count, first, last, unit: unitText, ranges, notes, text }
 }
