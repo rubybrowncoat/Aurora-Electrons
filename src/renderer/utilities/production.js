@@ -128,21 +128,21 @@ registerRule({
   assumptions: ['The date is approximate: the game\'s own steps are not reproduced exactly'],
 })
 
-// The cycle forecast debits what a build takes from the colony's stock as the game does: every one of the eleven balances is floored at 0 after the subtraction, so a build rounded up to 4 decimals past what a mineral's stock covers leaves 0, never a negative balance that would hold back the next cycle and take from what arrives. The shipyard and scaled debits floor the same way. docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since the earlier line lists this floor (B341, B355), the creation of the Light Naval and Space Station projects (B343, `production.componentCredit`), the development project types and the ordnance capacity term as its changes to industrial production, and no other step of the cycle.
+// Each mineral-limited request is floored to four decimals before fuel and conversion limits. Mineral balances remain nonnegative after debit.
 registerRule({
   id: 'production.industryFinish',
   versions: LINE_VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['production.industryRate'],
-  note: `The project's remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony's production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony's one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A build takes its minerals off the stock and leaves no balance below 0: a build rounded up past what a mineral's stock covers leaves 0. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes. ${ESTIMATE}`,
+  note: `The colony's industrial projects run cycle by cycle, each building its share of capacity capped by the amount left and by the minerals remaining after earlier projects. That request is floored to four decimals before separate fuel and conversion limits. The finish is the end of the completing cycle. Mineral balances remain nonnegative. A queued project starts when a project of its kind finishes and its whole share fits, and builds from the next cycle. The order of projects is not saved: where stock is contested the forecast reports the earliest and range over the orders tried. For colonies with missing inputs, the fallback is remaining points over rate without mineral simulation, with continuous queue starts. ${ESTIMATE}`,
 })
 
 ;[
   { key: 'research', versions: PRODUCTION_VERSIONS, note: 'The remaining research points over the project\'s effective rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs and scientist but its own field bonuses. The game carries unused time into that tech; the date is continuous time and the game completes it at the end of the first increment at or after it.', assumptions: ['The current labs, scientist, colony output and racial field bonuses stay fixed throughout the queue'] },
   { key: 'ship', versions: ['3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
-  { key: 'training', versions: ['2.7.x'], note: 'The task\'s remaining build points over its rate, in days.' },
+  { key: 'training', versions: ['2.7.x'], note: 'The absolute difference between total and completed build points over the task\'s rate, in days.' },
 ].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`], assumptions = [] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}`, assumptions }))
 
 // The terraforming job, with the strategic water update (condensation and evaporation of water vapour) before it and, at the end of each increment, the hydrosphere transition, atmospheric pressure and surface temperature updates; terraforming has a minimum gravity of 0.1 g.
@@ -176,7 +176,7 @@ registerRule({
 
 registerRule({
   id: 'production.stockCover',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'units',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.Amount, PartialCompletion, FuelRequired and the mineral columns', 'FCT_Population mineral stockpiles and FuelStockpile', 'production.industryFinish'],
@@ -599,7 +599,7 @@ export const finishDays = ({ rule, rate, remaining, remainingName, paused = fals
     return idle(rule, 'a rate above 0 (no capacity or share to work with)', rate.inputs.present)
   }
 
-  return { result: combine({ rule, parts, compute: (values) => (ahead ? values.ahead : 0) + ((remaining / values.rate) * DAYS_PER_YEAR) / divisor, inputs: { present: [remainingName] } }), idle: false }
+  return { result: combine({ rule, parts, compute: (values) => (ahead ? values.ahead : 0) + (((rule === 'production.trainingFinish' ? Math.abs(remaining) : remaining) / values.rate) * DAYS_PER_YEAR) / divisor, inputs: { present: [remainingName] } }), idle: false }
 }
 
 // A job's status from its pause flag and its rate result (or, for work whose rate alone does not say, its finish `{ result, idle }`): paused, running, stalled (`stalled` is its { label, note }) or unknown while the pause flag or the rate is not known.
@@ -907,8 +907,8 @@ function* forecastFigures({ projects, capacities, cycleDays, entered }, engine, 
       `A production cycle is taken as the game's construction period (${cycleDays.toFixed(2)} days); cycles played over a longer increment end later`,
       ...(entered.length ? [`${entered.length === 1 ? 'An arrival' : `${entered.length} arrivals`} of stock entered by hand ${entered.length === 1 ? 'is' : 'are'} counted; nothing else arrives`] : ['No minerals arrive: the colony\'s stock is all there is']),
       ...(range ? [engine.orders.exhaustive ? `The order the game takes the colony's projects in each cycle is not saved: ${engine.orders.tried} orders tried (every order), the project finishes ${range.latest === null ? 'in some of them and never in others' : 'between the earliest and the latest of them'}` : `The order the game takes the colony's projects in each cycle is not saved and too many projects compete for the stock to try every order: ${engine.orders.tried} orders were sampled, so the date is the earliest of those, not a bound, and another order may finish this project earlier or later`] : []),
-      ...(sensitive ? [`A cycle builds only ${sensitive.units.toFixed(5)} of a unit and the game rounds a build to 4 decimals, up to ${(sensitive.error * 100).toFixed(0)}% of it, so a small error in the capacity or the cycle length moves this date by a large share of itself`] : []),
-      'The game\'s arithmetic is reproduced exactly (decimals of 28 digits, the build rounded to 4 decimals with a tie to the even digit, the figures of the save read to 15 digits); the one thing it takes from the app is the colony\'s capacity, worked out from its installations and modifiers rather than read from the game, so a build within the precision of that figure of a midpoint of the rounding could round the other way',
+      ...(sensitive ? [`A cycle requests only ${sensitive.units.toFixed(5)} of a unit; flooring to four decimals loses less than ${(sensitive.error * 100).toFixed(0)}% of that request, so small capacity or cycle-length changes can substantially move the date`] : []),
+      'The arithmetic uses exact decimals of up to 28 places, mineral-limited builds floored to four decimals and saved doubles read to 15 significant digits. Capacity is calculated from installations and modifiers, not read as a saved rate; uncertainty near a four-decimal boundary can change the build',
     ]
 
     const present = ['the units left and the points a unit takes', 'the colony\'s stock of each mineral and the fuel, shared by its projects', 'the share of the capacity each project holds']

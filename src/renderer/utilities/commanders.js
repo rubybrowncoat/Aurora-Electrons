@@ -1,7 +1,7 @@
 // Commander maths for the Commanders page: assignments, bonuses and better candidates. Sources and checks: docs/plans/aurcalcs/build-3.md § Commanders. Every figure the page calculates is a provenance result (utilities/provenance.js). A count that leaves out commanders whose stored value is missing says so, and an assignment that cannot be rated for a missing bonus is unavailable and names the commander and the field: a missing value is never read as a neutral 1, a 0 or an idle post.
 
 import { gameTime } from './aurora'
-import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
+import { UNKNOWN_TEXT, isKnownNumber } from './math'
 import { STATUS, combine, envelope, getRule, isAvailable, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
 import { NO_RESEARCH_WORDS } from './research-data'
 
@@ -231,11 +231,11 @@ registerRule({
 
 registerRule({
   id: AGE,
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'years',
   verification: 'estimated',
   structure: ['FCT_Species.GraduationAge', 'FCT_Commander.CareerStart', 'FCT_Game.GameTime', 'FCT_CommanderHistory.GameTime (last record, for the dead)'],
-  note: 'Age in years: the species\' graduation age plus the time since the career began, to the game time or, for a commander who died, to the last career record. It is not compared with an age the game shows. A commander with no stored graduation age, career start or end time has no age.',
+  note: 'Age in whole years: the species\' graduation age plus the elapsed career years rounded down, to the game time or, for a commander who died, to the last career record. A commander with no stored graduation age, career start or end time has no age.',
 })
 
 registerRule({
@@ -848,11 +848,11 @@ export const killsResult = (person) => {
 // Medals a commander holds, as a result of 'commanders.medals': the awards added, 0 for a commander with no award rows (`Medals` null), unavailable for awards with no stored amount.
 export const medalsResult = (person) => (person.Medals === null || person.Medals === undefined ? ofRule({ rule: MEDALS, value: 0, inputs: { present: ['no award rows'] } }) : isKnownNumber(person.MedalCount) ? ofRule({ rule: MEDALS, value: Number(person.MedalCount), inputs: { present: ['NumAwarded'] } }) : unavailable({ rule: MEDALS, missing: [`the number of awards of the medals of ${person.Name}`] }))
 
-// A commander's age in years, as a result of 'commanders.age': the species' graduation age plus the years from `CareerStart` to `until` (a game time), to one decimal. `untilName` names `until` when it is missing. Unavailable naming the graduation age, career start or end time that is not stored.
+// A commander's age in whole years, as a result of 'commanders.age': graduation age plus elapsed career years rounded down. `untilName` names the end time when it is missing.
 export const ageResult = (person, until, untilName = 'the game time') => {
   const missing = [...(isKnownNumber(person.GraduationAge) ? [] : [`the graduation age of ${person.Name}`]), ...(isKnownNumber(person.CareerStart) ? [] : [`the career start of ${person.Name}`]), ...(isKnownNumber(until) ? [] : [untilName])]
 
-  return missing.length ? unavailable({ rule: AGE, missing }) : ofRule({ rule: AGE, value: roundToDecimal(Number(person.GraduationAge) + (Number(until) - Number(person.CareerStart)) / SECONDS_PER_YEAR, 1), inputs: { present: ['graduation age', 'CareerStart', untilName] } })
+  return missing.length ? unavailable({ rule: AGE, missing }) : ofRule({ rule: AGE, value: Number(person.GraduationAge) + Math.floor((Number(until) - Number(person.CareerStart)) / SECONDS_PER_YEAR), inputs: { present: ['graduation age', 'CareerStart', untilName] } })
 }
 
 // A bound of the age range as a number, or null when it is off: a field left empty, text that is not a number and a negative figure are no bound.
@@ -883,7 +883,7 @@ export const rosterChoices = (people) => {
   }
 }
 
-// The commanders of the roster that pass its filters. `people` are the commanders of the chosen type; the filters are the search over names and assignments, the unassigned-only switch, the research field (scientists), a bonus held, the post (CommandType), the rank (RankLevel) and the age range (both bounds inclusive, on the age as the roster shows it to one decimal). A filter that is off passes everyone.
+// The commanders of the roster that pass its filters. `people` are the commanders of the chosen type; the filters are the search over names and assignments, the unassigned-only switch, the research field (scientists), a bonus held, the post (CommandType), the rank (RankLevel) and the age range (both bounds inclusive, on the age as the roster shows it in whole years). A filter that is off passes everyone.
 // A commander whose value is not stored for an active filter (no post, no rank, an age that cannot be worked out) is neither inside nor outside it: left out of the rows and counted, never read as 0 or as another post. Gives { kept: [{ person, age }] (age the result of `ageResult`), notRated: { post, rank, age } }. A commander who falls outside another filter on a stored value is not counted: `notRated` is of those who would otherwise show.
 export const rosterFilter = (people, { search = '', unassignedOnly = false, fieldId = null, typeId = null, bonusId = null, post = null, rank = null, ageMin = null, ageMax = null }) => {
   const text = (search || '').toLowerCase()

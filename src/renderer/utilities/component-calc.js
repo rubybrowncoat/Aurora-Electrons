@@ -7,7 +7,7 @@ import { isAvailable, registerRule } from './provenance'
 
 registerRule({
   id: 'production.componentPlan',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'share of the construction capacity',
   verification: 'estimated',
   structure: ['FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.Cost and the mineral columns', 'FCT_PopComponent.Amount', 'FCT_IndustrialProjects.Queue, Percentage, ProductionType', 'production.populationCapacity', 'the production cycle forecast'],
@@ -29,8 +29,6 @@ const EPSILON = 1e-9
 const SECONDS_PER_DAY = 86400
 // The whole of a colony's capacity, in hundredths of a percent.
 const WHOLE_CAPACITY = 100 * SHARE_STEP
-// The game rounds the units a cycle builds to 4 decimals: a build is at most this much above the exact one.
-const BUILD_ROUNDING = 0.00005
 // What a bound is relaxed by so that a float's last place never makes it exceed the true one, in hundredths of a percent.
 const ROUNDING_SLACK = 1e-6
 // How many steps the share is swept in where the colony's minerals are contested and the range is too wide to scan, which the bisection cannot be trusted to find the least of.
@@ -213,9 +211,9 @@ export const heldShare = (projects) => {
 // The cycles of a colony's production, in days; null when the colony's modifiers do not give the game's construction period.
 const cycleDaysOf = (colony) => (colony.modifiers && isNumber(colony.modifiers.MinConstructionPeriod) && colony.modifiers.MinConstructionPeriod > 0 ? colony.modifiers.MinConstructionPeriod / SECONDS_PER_DAY : null)
 
-// The least hundredths of a percent of the capacity a project of `row.units` units at `row.cost` build points a unit can hold and still be done in `cycles` cycles of `cycleDays` days: each cycle builds at most the exact build plus the half of the last place the game rounds a build to, and at least one hundredth. This is a bound no run of the forecast can go under, which the plain division of the build points by the capacity and the time is not: rounding a small build up to 4 decimals makes a slow project faster than it.
+// A conservative share floor: flooring a cycle's build can only reduce its exact request, never increase it. Each project also holds at least one hundredth of a percent.
 const floorOf = (row, capacity, cycles, cycleDays) => {
-  const perCycle = row.units / cycles - BUILD_ROUNDING
+  const perCycle = row.units / cycles
 
   if (perCycle <= 0) {
     return 1
@@ -372,17 +370,17 @@ const uncontested = (colony, rows) => {
       ...rows.map((row) => [row.units, name === 'Fuel' ? 0 : row.minerals[name]]),
     ]
 
-    return needs.every(([units, each]) => isNumber(units) && isNumber(each)) && needs.reduce((all, [units, each]) => all + (units + BUILD_ROUNDING) * each, 0) <= stockOfRow(name)
+    return needs.every(([units, each]) => isNumber(units) && isNumber(each)) && needs.reduce((all, [units, each]) => all + units * each, 0) <= stockOfRow(name)
   })
 }
 
-// Whether the batch alone needs more of some mineral than the colony's stock holds, so that with nothing arriving no share of the capacity finishes it, whatever the colony's other projects do: they only take from the stock. A build counts its units less the rounding of a build to 4 decimals in its favour, and a stock the save leaves out is not known to be short.
+// A batch cannot finish without its full mineral requirement. Missing stock is not a proven shortage.
 const batchShort = (colony, rows) => {
   const stock = colony.projects.length ? colony.projects[0] : null
 
   return MINERALS.some((mineral) => {
     const held = stock ? stock[`Stock${mineral.name}`] : colony.minerals ? colony.minerals[mineral.name] : null
-    const needed = rows.reduce((all, row) => all + Math.max(0, row.units - BUILD_ROUNDING) * row.minerals[mineral.name], 0)
+    const needed = rows.reduce((all, row) => all + row.units * row.minerals[mineral.name], 0)
 
     return isNumber(held) && needed > held + EPSILON
   })
@@ -390,7 +388,7 @@ const batchShort = (colony, rows) => {
 
 // The calculator: `input` is { parts, hulls, stock, deadline (days from now), colony: { populationId, projects (the colony's industrial projects as the page reads them), capacities ({ construction, ordnance, fighter } production.populationCapacity results), modifiers, arrivals, npr, minerals ({ [mineral]: tonnes, Fuel }) } }, a generator that yields where the `pace` says the time is up and returns:
 // { status, requirements, deadline, floorShare, capacity, held (the share the colony's projects out of the queue hold), available, required, requiredExact, unreachable, shortfall, allocation, finish, stalled (the mineral that holds the batch up), displaced, gaps, why }
-// `status`: 'covered' (the stock holds every component a project would build), 'feasible' (a share the colony can give finishes the batch by the deadline), 'infeasible' (none does: every share the colony can give was tried, or the search was not needed, and none finishes the batch), 'searchLimited' (the colony's minerals are contested, the range of shares the colony can give is too wide to try a share at a time, and none of the shares tried finishes the batch: one not tried may, so nothing is claimed of the colony's capacity, and `shortfall` is null), 'unknown' (the save leaves out a figure the answer rests on, named in `gaps`). `floorShare` is what no schedule can go below: each project builds at most its share of the capacity over the cycles up to the deadline, with the game's rounding of a build to 4 decimals counted in its favour, and holds at least one hundredth of a percent. `required` is the least share, to a hundredth of a percent, that the forecast finishes the batch by the deadline with (`requiredExact` true); where the colony cannot give it, it is the share the colony's other projects would have to leave free (a share of up to the whole capacity), and `shortfall` is the share and the build points a year the colony lacks. Where even the whole capacity is not enough, `required` is null and `unreachable` true (and `stalled` names a mineral the stock runs out of), except where `floorShare` alone passes the whole capacity: `required` is then `floorShare` with `requiredExact` false, a least and not the share found. Where status is 'searchLimited', `required` and `release` are a share found above the share free, by the same search, and a smaller one may do it. `finish` is the batch at the share the colony can give: `latest` is when the last project finishes in the worst order of the colony's projects, exact; `earliest` is no earlier than any order can finish the batch (the latest of the projects' own earliest dates, which different orders give), a bound unless `earliestExact`.
+// Status distinguishes covered, feasible, infeasible, search-limited and unknown plans. The floor share divides the exact work by capacity and whole cycles: flooring cannot increase a build. Required share is proved least only by a complete search. Finish dates retain the forecast's order ranges and sampled-order limits.
 // More of the plan: `requiredKind` ('exact': the least share, established, by a bisection where the colony's minerals are not contested and by trying every hundredth from the floor up where they are and the range is narrow enough; 'found': a share the forecast finishes the batch with, found by a sweep of the shares where the colony's minerals are contested, so a smaller one may exist; 'floor': the floor above the whole capacity), `contested` (the minerals the colony's projects and the batch share could run short, so the deadline can be met at a share and missed at a larger one), `release` (where `required` is above the share free: the shares the colony's other projects out of the queue are taken to release, [{ id, name, paused, from, to }], paused ones first and then the others, the newest project first, the order in which the forecast was run), `settled` (true only where the share search up to the whole capacity was complete or the batch is proved impossible: every share was tried or bisected, the colony has no capacity, the deadline is before the first cycle, or a mineral is short with nothing arriving; false for an 'unknown' plan, a 'found' share, a 'searchLimited' plan and an unreachable or infeasible one whose search above the share free was a sweep) and, where status is 'infeasible' or 'searchLimited' and `unreachable` is true, that no share tried finished the batch (every share where the minerals are not contested; the shares probed where they are and the range was wide).
 export function* planSteps(input, pace) {
   const { parts, hulls, stock, deadline, colony } = input

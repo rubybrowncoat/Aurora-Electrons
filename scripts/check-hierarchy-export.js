@@ -820,10 +820,10 @@ const pureSuite = async (mods, into) => {
   await add('filter-post', 'the post filter keeps the commanders whose post it is; one whose post is not stored is left out and counted, never read as another post', () => same(filtered({ post: 1 }), { ids: 'BCGN', notRated: unrated(1, 0, 0) }) && same(filtered({ post: 0 }), { ids: 'AFH', notRated: unrated(1, 0, 0) }))
   await add('filter-rank', 'the rank filter keeps the commanders of the rank; one with no stored rank is left out and counted, never read as the lowest', () => same(filtered({ rank: 2 }), { ids: 'BEGN', notRated: unrated(0, 1, 0) }) && same(filtered({ rank: 1 }), { ids: 'AH', notRated: unrated(0, 1, 0) }))
   await add('filter-age', 'the age range keeps commanders inside it, both bounds included; one whose age cannot be worked out is left out and counted, never read as 0', () => same(filtered({ ageMin: 30, ageMax: 30 }), { ids: 'BC', notRated: unrated(0, 0, 3) }) && same(filtered({ ageMin: 35 }), { ids: 'DEFI', notRated: unrated(0, 0, 3) }) && same(filtered({ ageMax: 29.9 }), { ids: 'A', notRated: unrated(0, 0, 3) }) && same(filtered({ ageMin: 0 }).ids, 'ABCDEFI'))
-  await add('filter-age-edge', 'the bounds are compared on the age as the roster shows it, to one decimal', () => {
-    const edge = [officer(30, 'Officer J', { post: 0, rank: 1, age: 29.96 }), officer(31, 'Officer K', { post: 0, rank: 1, age: 29.94 }), officer(32, 'Officer L', { post: 0, rank: 1, age: 30 })]
+  await add('filter-age-edge', 'the bounds are compared on the age as the roster shows it, in whole years', () => {
+    const edge = [officer(30, 'Officer J', { post: 0, rank: 1, age: 29 }, { CareerStart: GAME_TIME - 0.96 * 31536000 }), officer(31, 'Officer K', { post: 0, rank: 1, age: 29 }, { CareerStart: GAME_TIME - 0.94 * 31536000 }), officer(32, 'Officer L', { post: 0, rank: 1, age: 30 })]
 
-    return filtered({ ageMin: 30 }, edge).ids === 'JL' && filtered({ ageMax: 29.9 }, edge).ids === 'K' && filtered({ ageMin: 29.9, ageMax: 29.9 }, edge).ids === 'K' && filtered({ ageMin: 30, ageMax: 30 }, edge).ids === 'JL'
+    return filtered({ ageMin: 30 }, edge).ids === 'L' && filtered({ ageMax: 29.9 }, edge).ids === 'JK' && filtered({ ageMin: 29, ageMax: 29 }, edge).ids === 'JK' && filtered({ ageMin: 30, ageMax: 30 }, edge).ids === 'L'
   })
   await add('filter-combine', 'the filters narrow together; a commander outside one filter on a stored value is not counted as unrated by the others', () => same(filtered({ post: 1, rank: 2, ageMin: 30 }), { ids: 'B', notRated: unrated(1, 0, 2) }) && same(filtered({ post: 8, rank: 2 }), { ids: '', notRated: unrated(1, 0, 0) }) && same(filtered({ post: 1, ageMin: 40 }), { ids: '', notRated: unrated(1, 0, 2) }))
   await add('filter-inputs', 'the roster\'s other filters still apply with the new ones', () => {
@@ -2191,10 +2191,10 @@ const rosterSave = async (database, GameID, RaceID) => {
   const [ranks] = await database.query(`select RankType, max(Priority) as Lowest from FCT_Ranks where GameID = ${GameID} and RaceID = ${RaceID} group by RankType`)
   const lowest = new Map(ranks.map((row) => [row.RankType, row.Lowest]))
   const facts = new Map(rows.map((row) => {
-    const age = [row.GraduationAge, row.CareerStart, row.GameTime].every((value) => typeof value === 'number') ? row.GraduationAge + (row.GameTime - row.CareerStart) / 31536000 : null
+    const age = [row.GraduationAge, row.CareerStart, row.GameTime].every((value) => typeof value === 'number') ? row.GraduationAge + Math.floor((row.GameTime - row.CareerStart) / 31536000) : null
     const level = typeof row.Priority === 'number' && lowest.has(row.RankType) ? lowest.get(row.RankType) - row.Priority + 1 : null
 
-    return [row.CommanderID, { post: row.CommandType, level, age: age === null ? null : Math.round(age * 10) / 10, tie: age !== null && Math.abs(((age * 10) % 1) - 0.5) < 1e-6 }]
+    return [row.CommanderID, { post: row.CommandType, level, age, tie: false }]
   }))
   const problems = []
   let compared = 0
