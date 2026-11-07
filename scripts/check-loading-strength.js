@@ -495,7 +495,7 @@ check('fleet-timer', 'both component unloads to a fleet time the selected tonnes
 
 check('component-display', 'a rendered components-only route reports delivered components not counted in tonnage, never no cargo; mixed freight keeps that qualification', async (w) => {
   const page = await w.page()
-  const base = { FleetID: 5, OrderDelay: 0, Jumps: 0, X: 0, Y: 0, ExitX: 0, ExitY: 0, ExitSystemID: 3, SystemID: 3, DestinationType: 2, MaxItems: 0 }
+  const base = { FleetID: 5, OrderDelay: 0, Jumps: 0, MinDistance: 0, X: 0, Y: 0, ExitX: 0, ExitY: 0, ExitSystemID: 3, SystemID: 3, DestinationType: 2, MaxItems: 0 }
   const load = { ...base, MoveActionID: 237, ActionName: 'Load All Ship Components', Description: 'Mars', PopulationID: 7, PopName: 'Mars', ShuttleCapacity: 1 }
   const unload = { ...base, MoveActionID: 189, ActionName: 'Unload All Ship Components', Description: 'Venus', PopulationID: 8, PopName: 'Venus', ShuttleCapacity: 0, X: 1000000, ExitX: 1000000 }
   const carrier = ship({ MaxSpeed: 1000, EnginePower: 20, UndamagedEnginePower: 20, FuelEfficiency: 0.5, FuelCapacity: 1e9, Fuel: 1e9, OverhaulFactor: 1, GradePoints: 100, CrewMorale: 1, SensorDelay: 0, MothershipID: 0, TractorTargetShipID: 0, TractorParentShipID: 0, TractorTargetShipyardID: 0, MilitaryEngines: 0, ShuttleTechnology: 1.5, FleetSpeed: 1000, UseMaximumSpeed: 1 })

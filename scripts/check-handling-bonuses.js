@@ -980,7 +980,7 @@ const classesOf = (node) => (node.staticClass ? JSON.parse(node.staticClass).spl
 // The data a page's rows read, with the officers' read in the state `state` (undefined while it loads, a message when it failed, null once it succeeded).
 const loadErrorsOf = (state) => new Proxy({}, { get: (_target, key) => (key === 'handlingSupport' ? state : null), has: () => true })
 
-const PLACE_ORDER = { FleetID: 5, OrderDelay: 0, ActionName: 'Load', Jumps: 0, X: 0, Y: 0, ExitX: 0, ExitY: 0, ExitSystemID: 3, SystemID: 3, DestinationType: 0 }
+const PLACE_ORDER = { FleetID: 5, OrderDelay: 0, ActionName: 'Load', Jumps: 0, MinDistance: 0, X: 0, Y: 0, ExitX: 0, ExitY: 0, ExitSystemID: 3, SystemID: 3, DestinationType: 0 }
 const ORDERS = [{ ...PLACE_ORDER, MoveActionID: 62, Description: 'Mars: Load', PopName: 'Mars', PopulationID: 7, ShuttleCapacity: 1, ServiceNames: 'Spaceport' }, { ...PLACE_ORDER, MoveActionID: 63, ActionName: 'Unload', Description: 'Venus: Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0 }]
 const CYCLE = { FleetID: 5, FleetName: 'Cycle', CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: TECH, Speed: 1000, FuelPerHour: 1 }
 const REACH = { route: { km: 1e6, jumps: 0 }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }

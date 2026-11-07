@@ -9,6 +9,24 @@ import { NEBULA_GAP, carriedDelay, elapsedResult, routeEvents, searchTiming, tim
 // A system's own place is its centre, (0, 0); any other place is where the save has it, and a place with no position there reaches nothing (`searchRoutes`).
 const positionOf = (place) => (place.kind === 'system' ? { SystemID: place.SystemID, Xcor: 0, Ycor: 0 } : { SystemID: place.SystemID, Xcor: place.Xcor, Ycor: place.Ycor })
 
+// Where a minimum-distance order arrives, or null when its minimum is unread: offset the destination towards the position the fleet leaves, without clamping an offset larger than the gap. A coincident destination is first moved 100 km on both axes to give the offset its bearing.
+export const offsetOrderPosition = (from, target, minimum) => {
+  if (!Number.isFinite(minimum)) {
+    return null
+  }
+
+  if (!(minimum > 0)) {
+    return target
+  }
+
+  const coincident = from.Xcor === target.Xcor && from.Ycor === target.Ycor
+  const Xcor = target.Xcor + (coincident ? 100 : 0)
+  const Ycor = target.Ycor + (coincident ? 100 : 0)
+  const fraction = minimum / Math.hypot(Xcor - from.Xcor, Ycor - from.Ycor)
+
+  return { ...target, Xcor: Xcor - (Xcor - from.Xcor) * fraction, Ycor: Ycor - (Ycor - from.Ycor) * fraction }
+}
+
 // `stops`: places ({ key, kind, name, SystemID, Xcor, Ycor }) in order, or for a stop that can't be told `{ key, name, unavailable: true }`. `options` are `searchRoutes`'s (`order`, `canTransit`, `canEnter`, `lagrangePoints`). A leg runs from where the fleet is after the one before: a place is its own position, but a system is where its route arrives, the jump point it comes in through (a leg that starts at a system centre is only the first). A leg into or out of an unavailable stop has no route, and neither joins the stops either side of it. Returns:
 // - `legs`: one per leg, { index, from, to, start, route, steps, unavailable, closing }, `index` being that of the stop it leaves, `start` the position it is flown from (null out of an unavailable stop), `route` { jumps, km, from, end } or null when no explored route joins them, and `steps` its `routeLegs`.
 // - `jumps` and `km`: the totals of the legs that have a route; `missing` counts the ones that haven't, those of unavailable stops too.

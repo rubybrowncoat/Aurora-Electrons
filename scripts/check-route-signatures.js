@@ -104,8 +104,8 @@ const ACTIONS = {
 }
 
 // The colony of system n is population 100 + n on body 1000 + n; the jump points between systems a and b are 1000 a + b (leaving a) and 1000 b + a (entering b), moved by `via` for another pair.
-const stop = (system, action, extra = {}) => ({ StartSystemID: system, MoveActionID: action, DestinationType: 2, DestinationID: 1000 + system, PopulationID: 100 + system, PopulationRaceID: RACE, ...extra })
-const jump = (from, to, via = 0) => ({ StartSystemID: from, MoveActionID: 1, DestinationType: 1, DestinationID: via + from * 1000 + to, NewSystemID: to, NewWarpPointID: via + to * 1000 + from })
+const stop = (system, action, extra = {}) => ({ StartSystemID: system, MoveActionID: action, DestinationType: 2, DestinationID: 1000 + system, PopulationID: 100 + system, PopulationRaceID: RACE, MinDistance: 0, ...extra })
+const jump = (from, to, via = 0) => ({ StartSystemID: from, MoveActionID: 1, DestinationType: 1, DestinationID: via + from * 1000 + to, NewSystemID: to, NewWarpPointID: via + to * 1000 + from, MinDistance: 0 })
 const spec = (load) => (Array.isArray(load) ? load : [load])
 
 // One cycle between the colonies of two systems: load there, cross, unload here, cross back. `load` and `unload` are an action or [action, extra fields of the order].
@@ -116,7 +116,7 @@ const MINERALS = () => loop(223, 63)
 const RING = () => [stop(1, 223), jump(1, 2), stop(2, 63), stop(2, 223), jump(2, 3), stop(3, 63), jump(3, 1)]
 const RING_BACK = () => [stop(1, 223), jump(1, 3), stop(3, 63), stop(3, 223), jump(3, 2), stop(2, 63), jump(2, 1)]
 
-const blank = { MoveOrderID: 0, FleetID: 0, MoveOrder: 0, MoveActionID: 0, StartSystemID: 0, DestinationType: 0, DestinationID: 0, PopulationID: 0, PopulationRaceID: null, DestinationItemType: 0, DestinationItemID: 0, MaxItems: 0, MinQuantity: 0, OrderDelay: 0, OrderDelayRemaining: 0, Arrived: 0, NewSystemID: 0, NewWarpPointID: 0, Description: '' }
+const blank = { MoveOrderID: 0, FleetID: 0, MoveOrder: 0, MoveActionID: 0, StartSystemID: 0, DestinationType: 0, DestinationID: 0, PopulationID: 0, PopulationRaceID: null, DestinationItemType: 0, DestinationItemID: 0, MaxItems: 0, MinDistance: 0, MinQuantity: 0, OrderDelay: 0, OrderDelayRemaining: 0, Arrived: 0, NewSystemID: 0, NewWarpPointID: 0, Description: '' }
 
 const rotated = (list, by) => [...list.slice(by % (list.length || 1)), ...list.slice(0, by % (list.length || 1))]
 
@@ -289,7 +289,7 @@ add('shapes', 'a queue is a route, empty, untraceable (with why), closed, a fixe
   assert.deepEqual([shapes.empty, shapes.closed, shapes.finite, shapes.route].map((record) => record.route === null), [true, false, false, false], 'a queue with no orders has no route')
   assert.equal(shapes.finite.route.repeats, 2, 'the repeats of the queue that repeats twice')
   assert.deepEqual(Object.keys(m.raw.SHAPES).sort(), ['closed', 'empty', 'finite-repeat', 'route', 'untraceable'], 'the shapes that are named')
-  assert.deepEqual(Object.keys(m.raw.PROBLEMS).sort(), ['chain', 'one-order', 'start-unknown'], 'the problems that are named')
+  assert.deepEqual(Object.keys(m.raw.PROBLEMS).sort(), ['chain', 'offset-unknown', 'one-order', 'start-unknown'], 'the problems that are named')
 })
 
 add('flows', 'a cycle moves what its loads and unloads say, read over two passes so that what is held on entering the cycle is credited to its source', ({ m }) => {
@@ -895,6 +895,88 @@ const fill = (db, { game = 1, race = RACE } = {}) => {
   Object.entries(ACTIONS).forEach(([id, action]) => db.run('insert into DIM_MoveAction values (?, ?, ?, ?, ?, ?)', [Number(id), action.name, action.item, action.quantity ? 1 : 0, action.minimum ? 1 : 0, action.transit ? 1 : 0]))
 }
 
+add('distance-offset', 'minimum-distance settings distinguish route service and survive the saved-order and template reads', async ({ m }) => {
+  const parts = (minimum) => MINERALS().map((order, index) => index === 1 ? { ...order, MinDistance: minimum } : order)
+  const plain = recordOf(m, 1, parts(0))
+  const offset = recordOf(m, 2, parts(2.5))
+  const rotated = recordOf(m, 3, parts(2.5), { rotate: 2 })
+  const other = recordOf(m, 4, parts(3.5))
+
+  assert.deepEqual(partitionOf(m, [plain, offset, rotated, other]), [[1], [2, 3], [4]], 'the offset is a distance, not a rounded cargo minimum or pacing')
+  const db = queueDatabase()
+
+  try {
+    fill(db)
+    db.run('alter table FCT_MoveOrders add column MinDistance real')
+    db.run('alter table FCT_MoveOrderTemplate add column MinDistance real')
+    db.run('update FCT_MoveOrders set MinDistance = 2.5 where FleetID = 1')
+    db.run("insert into FCT_OrderTemplate values (50, 'Offset', 1, 1, 7)")
+    db.run('insert into FCT_MoveOrderTemplate (OrderTemplateID, GameID, MoveIndex, MoveActionID, StartSystemID, DestinationType, DestinationID, MinDistance) values (50, 1, 1, 1, 1, 1, 1002, 3.5)')
+    const loaded = await m.queues.loadRouteQueues(database(db), { GameID: 1, RaceID: RACE })
+
+    assert.ok(loaded.orders.filter((order) => order.FleetID === 1).every((order) => order.MinDistance === 2.5), 'the saved queues carry their offset')
+    assert.equal(loaded.templates[0].orders[0].MinDistance, 3.5, 'a content match reads the template offset too')
+  } finally {
+    db.close()
+  }
+})
+
+add('distance-offset-unknown', 'missing and NULL minimum distances never identify duplicate fleets or matching templates; known zero does', async ({ m }) => {
+  const known = storedOf(1, MINERALS())
+  const fleet = { FleetID: 1, FleetName: 'Read queue', CycleMoves: 1 }
+  const describe = (orders) => m.sig.describeFleet(fleet, orders, { actions: ACTIONS, raceId: RACE })
+  const index = (orders) => m.sig.templateIndex([{ OrderTemplateID: 50, TemplateName: 'Read template', orders: orders.map((order, at) => ({ ...order, MoveIndex: at + 1, NewJumpPointID: order.NewWarpPointID })) }], { actions: ACTIONS, raceId: RACE })
+
+  for (const value of [undefined, null]) {
+    const orders = known.map((order, at) => at === 1 ? { ...order, MinDistance: value } : order)
+    const record = describe(orders)
+
+    assert.equal(record.shape, 'untraceable')
+    assert.equal(record.problem, 'offset-unknown')
+    assert.ok(m.raw.PROBLEMS[record.problem].includes('minimum distance'))
+    assert.equal(record.route, null)
+    assert.equal(m.sig.signatureOf(orders.map((order) => m.sig.orderParts(order, ACTIONS, RACE))), null, 'the signature primitive cannot key an unknown setting')
+    assert.deepEqual(partitionOf(m, [describe(known), record]), [[1]], 'no duplicate service is asserted')
+    assert.equal(index(orders).size, 0, 'an unknown template cannot match a known route')
+  }
+
+  assert.equal(index(known).has(describe(known).route.key), true, 'a known-zero template matches')
+  const db = queueDatabase()
+
+  try {
+    fill(db)
+    db.run("insert into FCT_OrderTemplate values (50, 'Read template', 1, 1, 7)")
+    storedOf(1, MINERALS()).forEach((order, at) => db.run('insert into FCT_MoveOrderTemplate (OrderTemplateID, GameID, MoveIndex, MoveActionID, StartSystemID, DestinationType, DestinationID, PopulationID, NewSystemID, NewJumpPointID) values (50, 1, ?, ?, ?, ?, ?, ?, ?, ?)', [at + 1, order.MoveActionID, order.StartSystemID, order.DestinationType, order.DestinationID, order.PopulationID, order.NewSystemID, order.NewWarpPointID]))
+    for (const state of ['missing column', 'NULL cell', 'known zero']) {
+      if (state === 'NULL cell') {
+        db.run('alter table FCT_MoveOrders add column MinDistance real')
+        db.run('alter table FCT_MoveOrderTemplate add column MinDistance real')
+      } else if (state === 'known zero') {
+        db.run('update FCT_MoveOrders set MinDistance = 0')
+        db.run('update FCT_MoveOrderTemplate set MinDistance = 0')
+      }
+
+      const loaded = await m.queues.loadRouteQueues(database(db), { GameID: 1, RaceID: RACE })
+      const orders = loaded.orders.filter((order) => order.FleetID === 1)
+      const record = describe(orders)
+      const templates = m.sig.templateIndex(loaded.templates, { actions: loaded.actions, raceId: RACE })
+
+      assert.ok(orders.every((order) => order.MinDistance === (state === 'known zero' ? 0 : null)), `${state}: the queue reader preserves the setting explicitly`)
+      assert.ok(loaded.templates[0].orders.every((order) => order.MinDistance === (state === 'known zero' ? 0 : null)), `${state}: the template reader preserves the setting`)
+      assert.equal(record.route !== null, state === 'known zero', `${state}: the real queue read only establishes known service`)
+      assert.equal(templates.size, state === 'known zero' ? 1 : 0, `${state}: only known templates can match`)
+      const audit = m.audit.auditOf({ queues: loaded, raceId: RACE })
+
+      assert.equal(audit.groups.length, state === 'known zero' ? 1 : 0, `${state}: unknown read never creates duplicate groups`)
+      if (state !== 'known zero') {
+        assert.ok(audit.broken.filter((one) => one.shape === 'untraceable').every((one) => one.problem === 'offset-unknown'))
+      }
+    }
+  } finally {
+    db.close()
+  }
+})
+
 add('loader', 'the loader reads the queues of the race in the game from a save, the flags of the actions, the conditional and standing orders and the templates, and says why it reads none from a save without the conditional orders table', async ({ m }) => {
   const db = queueDatabase()
 
@@ -904,6 +986,8 @@ add('loader', 'the loader reads the queues of the race in the game from a save, 
   db.run('insert into FCT_FleetStandingOrder values (1, 5, 1, 1), (1, 6, 2, 1), (2, 5, 1, 1), (6, 5, 1, 1)')
   db.run('insert into FCT_OrderTemplate values (50, \'Mineral run\', 1, 1, 7), (51, \'Of another race\', 1, 1, 8), (52, \'Of another game\', 1, 2, 7)')
   db.run('insert into FCT_MoveOrderTemplate values (50, 1, 1, 223, 1, 2, 1001, 101, 0, 0, 0, 0, 30, 0, 0), (50, 1, 2, 1, 1, 1, 1002, 0, 0, 0, 0, 0, 0, 2, 2001), (51, 1, 1, 223, 1, 2, 1001, 101, 0, 0, 0, 0, 0, 0, 0)')
+  db.run('alter table FCT_MoveOrders add column MinDistance real default 0')
+  db.run('alter table FCT_MoveOrderTemplate add column MinDistance real default 0')
 
   const queues = await m.queues.loadRouteQueues(database(db), { GameID: 1, RaceID: RACE })
 
@@ -1072,6 +1156,13 @@ const H = 'history'
 
 // { name, file, find (the text, once) or at (a pattern, once) with to, fails: the ids of the checks one of which must fail by a value }
 const MUTATIONS = [
+  { name: 'the minimum-distance offset is not part of route service', file: S, find: 'const offset = order.MinDistance > 0 ?', to: 'const offset = false ?', fails: ['distance-offset'] },
+  { name: 'the saved queues do not read minimum distance', file: Q, find: "'MaxItems', 'MinDistance', 'MinQuantity'", to: "'MaxItems', 'MinQuantity'", fails: ['distance-offset'] },
+  { name: 'the templates do not read minimum distance', file: Q, find: "${own('MinDistance')}, ", to: '', fails: ['distance-offset'] },
+  { name: 'an unknown order minimum silently defaults to zero in service identity', file: S, find: 'Number.isFinite(order.MinDistance) ? `${present(order.MoveActionID)}${item}${quantity}${minimum}${offset}` : null', to: '`${present(order.MoveActionID)}${item}${quantity}${minimum}${offset}`', fails: ['distance-offset-unknown'] },
+  { name: 'an unknown order minimum is traceable', file: S, find: 'queue.some((order) => !Number.isFinite(order.MinDistance))', to: 'false', fails: ['distance-offset-unknown'] },
+  { name: 'a missing saved minimum column silently defaults to zero', file: Q, find: 'order.has(name) ? `FCT_MoveOrders.${name}` : `null as ${name}`', to: 'order.has(name) ? `FCT_MoveOrders.${name}` : `0 as ${name}`', fails: ['distance-offset-unknown'] },
+  { name: 'a missing template minimum column silently defaults to zero', file: Q, find: 'order.has(name) ? `FCT_MoveOrderTemplate.${name}` : `null as ${name}`', to: 'order.has(name) ? `FCT_MoveOrderTemplate.${name}` : `0 as ${name}`', fails: ['distance-offset-unknown'] },
   { name: 'a queue is keyed as saved, not at its least rotation', file: S, find: 'const { offset, rotated, delays } = leastRotation(keys, parts.map((part) => part.pacing))', to: 'const offset = 0\n  const rotated = keys\n  const delays = parts.map((part) => part.pacing)', fails: ['rotation', 'period', 'links'] },
   { name: 'the head position does not follow the rotation', file: S, find: 'headPosition: ((length - offset) % length) % period,', to: 'headPosition: 0,', fails: ['rotation'] },
   { name: 'the key is not reduced to its period', file: S, find: 'const period = periodOf(rotated)\n', to: 'const period = length\n', fails: ['period'] },

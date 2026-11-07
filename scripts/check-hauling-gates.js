@@ -53,6 +53,8 @@ const copies = () => {
   FOLDER = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-hauling-gates-'))
 
   const intactFile = path.join(FOLDER, 'intact.db')
+  const nullFile = path.join(FOLDER, 'null-minimum.db')
+  const missingFile = path.join(FOLDER, 'missing-minimum.db')
 
   fs.copyFileSync(path.join(root, SAVE), intactFile)
 
@@ -67,9 +69,18 @@ const copies = () => {
   const gate = { AetherGateID: ADDED_GATE, SystemID: first.StartSystemID, Xcor: GATE_PLACE[0], Ycor: GATE_PLACE[1] }
 
   edit.run(`insert into FCT_AetherGates (AetherGateID, GameID, SystemID, Xcor, Ycor, CreationTime, CooldownTime) values (${gate.AetherGateID}, ${GAME}, ${gate.SystemID}, ${gate.Xcor}, ${gate.Ycor}, 0, 0)`)
-  edit.run(`insert into FCT_MoveOrders (MoveOrderID, GameID, RaceID, FleetID, MoveActionID, MoveOrder, StartSystemID, DestinationType, DestinationID, NewWarpPointID) values (${ADDED_ORDER}, ${GAME}, ${RACE}, ${fleet.FleetID}, 1, ${fleet.Last + 1}, ${gate.SystemID}, 14, ${gate.AetherGateID}, 0)`)
+  edit.run(`insert into FCT_MoveOrders (MoveOrderID, GameID, RaceID, FleetID, MoveActionID, MoveOrder, StartSystemID, DestinationType, DestinationID, NewWarpPointID, MinDistance) values (${ADDED_ORDER}, ${GAME}, ${RACE}, ${fleet.FleetID}, 1, ${fleet.Last + 1}, ${gate.SystemID}, 14, ${gate.AetherGateID}, 0, 12345)`)
   edit.close()
-  COPIES = { intact: new Database(intactFile, { readonly: true }), gate, fleet }
+  fs.copyFileSync(intactFile, nullFile)
+  fs.copyFileSync(intactFile, missingFile)
+  const nullEdit = new Database(nullFile)
+  const missingEdit = new Database(missingFile)
+
+  nullEdit.run(`update FCT_MoveOrders set MinDistance = null where MoveOrderID = ${ADDED_ORDER}`)
+  missingEdit.run('alter table FCT_MoveOrders drop column MinDistance')
+  nullEdit.close()
+  missingEdit.close()
+  COPIES = { intact: new Database(intactFile, { readonly: true }), nullMinimum: new Database(nullFile, { readonly: true }), missingMinimum: new Database(missingFile, { readonly: true }), gate, fleet }
 
   return COPIES
 }
@@ -77,6 +88,8 @@ const copies = () => {
 const closeCopies = () => {
   if (COPIES) {
     COPIES.intact.close()
+    COPIES.nullMinimum.close()
+    COPIES.missingMinimum.close()
     COPIES = null
   }
 
@@ -188,11 +201,28 @@ const intactChecks = {
 
     assert.equal(added.length, 1, 'the one order to a gate')
     assert.equal(added[0].DestinationID, gate.AetherGateID, 'the gate the order goes to')
+    assert.equal(added[0].MinDistance, 12345, 'the saved minimum distance reaches the route calculation')
+    assert.ok(rows.some((row) => row.MinDistance === 0), 'known-zero saved settings survive the real read')
     assert.deepEqual(PLACE.map((name) => added[0][name]), [gate.SystemID, gate.Xcor, gate.Ycor, gate.SystemID, gate.Xcor, gate.Ycor], 'the place of the order and the place the fleet is after it are the gate\'s stored place')
   },
 }
 
-const CHECKS = [intactChecks]
+const unknownChecks = {
+  id: 'unknown-minimum',
+  name: 'the real page read keeps a NULL minimum unknown and the capability gate names a missing minimum column',
+  run: async ({ read }) => {
+    const nullable = read.nullMinimum
+    const missing = read.missingMinimum
+
+    assert.equal(nullable.loadError, null, 'a NULL cell is a successful read, not zero')
+    assert.equal(nullable.rows.find((row) => row.DestinationType === 14).MinDistance, null)
+    assert.ok([...missing.report.missing, ...missing.report.degraded].some((input) => input.key === 'orders' && input.fields.includes('FCT_MoveOrders.MinDistance')), 'the capability report names the unread minimum-distance column')
+    assert.ok(missing.loadError, 'the tracked read reports the missing required column')
+    assert.equal(missing.rows, null, 'no false offset-free queue is read')
+  },
+}
+
+const CHECKS = [intactChecks, unknownChecks]
 
 // ---------- the faults and the rewrites ----------
 
@@ -206,6 +236,8 @@ const swap = (from, to) => (text) => {
 
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
+  { name: 'the hauling orders discard minimum distance', file: 'hauling', change: swap('FCT_MoveOrders.OrderDelay, FCT_MoveOrders.MinDistance, FCT_Population.PopName', 'FCT_MoveOrders.OrderDelay, FCT_Population.PopName'), fails: ['intact'] },
+  { name: 'the hauling read silently replaces NULL minimum distance with zero', file: 'hauling', change: swap('FCT_MoveOrders.OrderDelay, FCT_MoveOrders.MinDistance, FCT_Population.PopName', 'FCT_MoveOrders.OrderDelay, coalesce(FCT_MoveOrders.MinDistance, 0) as MinDistance, FCT_Population.PopName'), fails: ['unknown-minimum'] },
   { name: 'the place of an order does not take the aether gate\'s', file: 'hauling', change: swap(", 'VIR_Destination', 'VIR_AetherGate']", ", 'VIR_Destination']"), fails: ['intact'] },
   { name: 'the place of an order to a body is not read', file: 'hauling', change: swap("const DESTINATIONS = ['FCT_SystemBody', ", 'const DESTINATIONS = ['), fails: ['intact'] },
   { name: 'the gate of an order is joined on the order\'s item, not its destination', file: 'hauling', change: swap('VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID', 'VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationItemID'), fails: ['intact'] },
@@ -238,7 +270,7 @@ const results = async (variant, ids) => {
     throw new HarnessError('the copy has no aether gates table')
   }
 
-  const read = { intact: await readOf({ caps, page }, db.intact) }
+  const read = { intact: await readOf({ caps, page }, db.intact), nullMinimum: await readOf({ caps, page }, db.nullMinimum), missingMinimum: await readOf({ caps, page }, db.missingMinimum) }
 
   return await runChecks(CHECKS.filter(({ id }) => !ids || ids.includes(id)), { read, db })
 }

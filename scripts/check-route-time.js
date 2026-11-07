@@ -522,6 +522,82 @@ const fixtures = (world) => {
     })
   })
 
+  add('order-offset: a minimum-distance arrival changes the next leg and every yearly hauling consumer', () => {
+    const orders = [[0, 0, 0], [10, 0, 2], [10, 10, 0]].map(([X, Y, MinDistance], index) => ({ X, Y, ExitX: X, ExitY: Y, SystemID: 1, ExitSystemID: 1, MinDistance, label: String(index) }))
+    const route = hauling.walkRoute(orders)
+    const handling = { seconds: 10, stops: orders.map(() => ({ seconds: 10 / 3 })), blocked: [], unknown: [], versionSupported: true }
+    const fleet = { Speed: 2, FuelPerHour: 3600 }
+    const walk = hauling.cycleWalk(orders, fleet, route, handling, { shock: SHOCK, dust: {}, armour: 5 })
+    const year = hauling.routeYear(fleet, route, { perTrip: { minerals: 3, installations: 2, colonists: 7 } }, handling, 0, walk)
+
+    assert.equal(route.problem, null)
+    ;[8, 10.198039027185569, 14.142135623730951].forEach((km, index) => near(route.legs[index].km, km))
+    near(route.km, 32.34017465091652)
+    near(walk.km, 32.34017465091652)
+    near(year.cycleDays, 0.000302894529229841)
+    near(year.trips, 1205039.9224049123)
+    near(year.minerals + year.installations, 6025199.6120245615)
+    near(year.colonists, 8435279.456834387)
+    near(year.fuel, 19485600.77595088)
+    const results = hauling.routeResults(route, year, handling, walk)
+
+    near(results.cycle.value, year.cycleDays)
+    near(results.freight.value, 6025199.6120245615)
+    near(results.colonists.value, 8435279.456834387)
+    near(results.fuel.value, 19485600.77595088)
+    ;['routeDistance', 'cycleTime', 'freightMoved', 'colonistsMoved', 'fleetFuelPerYear', 'deliveries'].forEach((name) => assert.deepEqual(m.provenance.getRule(`hauling.${name}`).versions, ['3.2.x']))
+  })
+
+  add('order-offset-edges: coincident destinations, offsets larger than the gap, the closing order and transit exits keep their position semantics', () => {
+    const at = (X, Y, MinDistance = 0, extra = {}) => ({ X, Y, ExitX: X, ExitY: Y, SystemID: 1, ExitSystemID: 1, MinDistance, label: `${X},${Y}`, ...extra })
+    const legs = (orders) => hauling.walkRoute(orders).legs.map((leg) => leg.km)
+    const coincident = hauling.walkRoute([at(0, 0), at(0, 0, 100)])
+
+    near(coincident.km, 82.842712474619)
+    coincident.legs.forEach((leg) => near(leg.km, 41.4213562373095))
+    assert.deepEqual(legs([at(0, 0), at(10, 0, 15)]), [5, 5], 'an offset beyond the departure is not zero or a negative distance')
+    assert.deepEqual(legs([at(10, 0, 2), at(0, 0)]), [8, 8], 'a closing order with an offset also sets the first departure')
+    assert.deepEqual(legs([at(0, 0), at(10, 0, 2)]), [8, 8], 'rotating that queue changes no flight')
+    assert.deepEqual(legs([at(0, 0), at(10, 0, 2, { Jumps: 1, ExitX: 20 })]), [8, 20], 'a transit leaves from its far exit, not the offset entry')
+    assert.deepEqual(legs([at(0, 0), at(10, 0, -2)]), [10, 10], 'only positive offsets apply')
+    assert.deepEqual(legs([at(0, 0, 2), at(10, 0, 2)]), [8, 6], 'an all-offset traversal is seeded once at the first saved exit, without a hidden convergence pass')
+  })
+
+  add('order-offset-unknown: an unread minimum distance is not a zero offset or a yearly capacity', () => {
+    const at = (X, extra = {}) => ({ X, Y: 1000, ExitX: X, ExitY: 1000, SystemID: 1, ExitSystemID: 1, MinDistance: 0, ...extra })
+    const handling = { seconds: 10, stops: [{ seconds: 5 }, { seconds: 5 }], blocked: [], unknown: [], versionSupported: true }
+    const fleet = { Speed: 2, FuelPerHour: 3600 }
+    const cargo = { perTrip: { minerals: 3, installations: 2, colonists: 7 } }
+    const from = { Xcor: 1000, Ycor: 1000 }
+    const target = { Xcor: 1010, Ycor: 1000 }
+
+    for (const value of [undefined, null]) {
+      const orders = [at(1000), at(1010, { MinDistance: value })]
+      const route = hauling.walkRoute(orders)
+
+      assert.equal(route.km, null, 'a missing setting cannot establish a distance')
+      assert.deepEqual(route.legs, [])
+      assert.ok(route.problem.includes('minimum distance'))
+      assert.ok(route.missing.some((input) => input.includes('minimum distance')))
+      assert.equal(m.plan.offsetOrderPosition(from, target, value), null, 'the geometry helper does not interpret unknown as nonpositive')
+      assert.equal(hauling.cycleWalk(orders, fleet, route, handling, { shock: SHOCK, dust: {}, armour: 5 }), null)
+      assert.equal(hauling.routeYear(fleet, route, cargo, handling), null)
+      const results = hauling.routeResults(route, null, handling)
+
+      Object.values(results).forEach((result) => {
+        assert.equal(result.status, 'unavailable')
+        assert.equal(result.value, null)
+        assert.deepEqual(result.inputs.missing, route.missing)
+      })
+    }
+
+    const route = hauling.walkRoute([at(1000), at(1010)])
+
+    assert.equal(route.km, 20, 'known zero still measures the full flight')
+    assert.ok(hauling.routeYear(fleet, route, cargo, handling))
+    assert.deepEqual(m.plan.offsetOrderPosition(from, target, 0), target)
+  })
+
   add('dust: a nebula caps a fleet\'s speed by its thinnest armour, a system with no known armour has no known speed and the loader reads only the race\'s surveyed systems', async () => {
     const at = (armour, dust) => time.speedIn({ speed: SPEED, dust, armour })
 
@@ -1502,6 +1578,15 @@ const fixtures = (world) => {
 
 // Each planted fault names the source to change, the text to find (`find`/`replace`, or `at` and `to`) and the checks, by key, that must fail. Anchors are code, never wording.
 const MUTATIONS = [
+  { name: 'an unknown order minimum silently defaults to zero', target: 'hauling', find: 'const unread = orders.findIndex((order) => !Number.isFinite(order.MinDistance))', replace: 'orders = orders.map((order) => ({ ...order, MinDistance: order.MinDistance ?? 0 }))\n  const unread = orders.findIndex((order) => !Number.isFinite(order.MinDistance))', fails: ['order-offset-unknown'] },
+  { name: 'the offset geometry silently defaults an unknown minimum to zero', target: 'route-plan', find: 'if (!Number.isFinite(minimum)) {\n    return null\n  }', replace: 'minimum = minimum ?? 0', fails: ['order-offset-unknown'] },
+  { name: 'minimum-distance orders ignore the offset', target: 'route-plan', find: 'if (!(minimum > 0)) {', replace: 'if (true) {', fails: ['order-offset', 'order-offset-edges'] },
+  { name: 'coincident offset destinations are not separated first', target: 'route-plan', find: 'from.Xcor === target.Xcor && from.Ycor === target.Ycor', replace: 'false', fails: ['order-offset-edges'] },
+  { name: 'the coincident offset separates only the horizontal coordinate', target: 'route-plan', find: 'const Ycor = target.Ycor + (coincident ? 100 : 0)', replace: 'const Ycor = target.Ycor', fails: ['order-offset-edges'] },
+  { name: 'an offset is clamped to the gap', target: 'route-plan', find: 'minimum / Math.hypot(Xcor - from.Xcor, Ycor - from.Ycor)', replace: 'Math.min(1, minimum / Math.hypot(Xcor - from.Xcor, Ycor - from.Ycor))', fails: ['order-offset-edges'] },
+  { name: 'the next order leaves from the destination centre', target: 'hauling', find: '{ ...target, system: order.SystemID, label: order.label }', replace: '{ Xcor: order.X, Ycor: order.Y, system: order.SystemID, label: order.label }', fails: ['order-offset'] },
+  { name: 'a transit leaves from its offset entry', target: 'hauling', find: 'position = exits(order) ?', replace: 'position = false ?', fails: ['order-offset-edges'] },
+  { name: 'the first saved order is always the cycle anchor', target: 'hauling', find: 'Math.max(0, orders.findIndex((order) => !(order.MinDistance > 0) || exits(order)))', replace: '0', fails: ['order-offset-edges'] },
   { name: 'the search takes the flight alone as the time of a jump point', target: 'jump-graph', find: 'const waited = Math.max(0, delay - flight.seconds)', replace: 'const waited = 0', fails: ['longer', 'table'] },
   { name: 'the search adds the delay to the flight instead of overlapping them', target: 'jump-graph', find: 'const waited = Math.max(0, delay - flight.seconds)', replace: 'const waited = delay', fails: ['longer', 'table'] },
   { name: 'the search prices an unknown shock as none', target: 'jump-graph', find: 'if (delay === null || flight.seconds === Infinity) {', replace: 'if (flight.seconds === Infinity) {', fails: ['unknown'] },

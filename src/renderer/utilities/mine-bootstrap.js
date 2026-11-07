@@ -36,7 +36,7 @@ registerRule({
   assumptions: ['the idle share stays as it is', 'the whole idle share goes to the mines', 'the mineral stock covers the recipe'],
 })
 
-// The repaired labour split still erases B11/B06 inputs, and route timing also retains B12. Keep the registration retained until those families release every erased primitive.
+// The repaired labour split still erases B11/B06 inputs. Keep the registration retained until those families release every erased primitive.
 registerRule({
   id: 'mineBootstrap.import',
   versions: ['2.7.x'],

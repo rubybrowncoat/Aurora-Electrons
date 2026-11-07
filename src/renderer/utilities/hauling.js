@@ -2,6 +2,7 @@
 
 import { bonusProvenance, mergeFactors } from './handling-bonuses'
 import { ofRule, registerRule, unavailable } from './provenance'
+import { offsetOrderPosition } from './route-plan'
 import { RETRY_ASSUMPTION, SQUADRON_ASSUMPTION, flyEvent, handleEvent, heldSpeedIn, nebulaGapOf, speedIn, timingGaps, transitModeOf, unsupportedGaps, waitResult, walkEvents } from './route-time'
 import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, loadingRulesHold, missingInputsOf, stopHandling } from './transport'
 import { ITEM_LOADS, ITEM_UNLOADS } from './cargo-actions'
@@ -51,54 +52,57 @@ export const CARGO_TRANSFER = 'The cargo of this cycle is not worked out: the co
 
 // The rules this module implements, registered once (utilities/provenance.js). Loading time is `transport.handlingTime`, whose strength and landing rules the Hauling page shares with Transport. Evidence: docs/plans/backlog/evidence/AE-080-01.md.
 const HAULING_VERSIONS = ['3.2.x']
+export const ORDER_OFFSET_ASSUMPTION = 'a cycle with a minimum-distance order keeps the destinations at their saved positions; moving-body arrivals with an offset are not predicted'
+export const CYCLE_START_ASSUMPTION = 'a cycle starts at a saved exit fixed by a transit or an order without a distance offset; when none exists, one traversal starts at the first saved exit and the yearly forecast assumes that traversal repeats'
 
 registerRule({
   id: 'hauling.routeDistance',
-  versions: ['2.7.x'],
+  versions: HAULING_VERSIONS,
   units: 'km',
-  verification: 'confirmed',
-  structure: ['FCT_MoveOrders', 'FCT_JumpPoint', 'FCT_LagrangePoint', 'FCT_SystemBody'],
-  note: 'The straight legs between the places a fleet\'s orders name, through the jump points and Lagrange points they cross, as the game measures a fleet\'s orders. A route with an order whose place the save no longer holds is not traced and has no distance.',
+  verification: 'estimated',
+  structure: ['FCT_MoveOrders.MinDistance', 'FCT_JumpPoint', 'FCT_LagrangePoint', 'FCT_SystemBody'],
+  note: 'The legs of a repeating queue, each starting at the preceding arrival or transit exit. A positive minimum distance offsets the destination towards the departure position, even beyond it when the minimum exceeds the gap; a coincident destination is first displaced 100 km on both axes. A route with a missing destination or minimum-distance setting has no distance.',
+  assumptions: [ORDER_OFFSET_ASSUMPTION, CYCLE_START_ASSUMPTION],
 })
 
 registerRule({
   id: 'hauling.cycleTime',
-  versions: ['2.7.x'],
+  versions: HAULING_VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Fleet.Speed', 'FCT_MoveOrders.OrderDelay', 'FCT_ShipClass.CargoCapacity, ColonistCapacity'],
   note: 'Moving time at the fleet\'s set speed plus loading and unloading as the stop handling time gives them plus the orders\' own delays plus, for each transit through a jump point, the wait for the jump shock the fleet\'s ships draw where the fleet\'s crew is read, counted at its upper case. Loading counts the officers\' Logistics bonuses, and a cycle comes out long when a bonus is not known; refuelling and overhauls are not counted.',
-  assumptions: ['full loads, or the amounts set on the orders', 'the fleet\'s set speed all the way', 'no refuelling or overhaul stops'],
+  assumptions: ['full loads, or the amounts set on the orders', 'the fleet\'s set speed all the way', 'no refuelling or overhaul stops', ORDER_OFFSET_ASSUMPTION, CYCLE_START_ASSUMPTION],
 })
 
 registerRule({
   id: 'hauling.freightMoved',
-  versions: ['2.7.x'],
+  versions: HAULING_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.CargoCapacity'],
   note: 'The minerals and installations a cycle carries, followed through the orders and the hold (a tonne of mineral takes two cargo points), times the cycles a year. Ship components a cycle loads and unloads take the hold\'s space and the stops\' time but are not counted as freight. The capacity arithmetic is exact; the cycles a year are estimated.',
-  assumptions: ['the colony has the stock a load asks for'],
+  assumptions: ['the colony has the stock a load asks for', ORDER_OFFSET_ASSUMPTION, CYCLE_START_ASSUMPTION],
 })
 
 registerRule({
   id: 'hauling.colonistsMoved',
-  versions: ['2.7.x'],
+  versions: HAULING_VERSIONS,
   units: 'colonists/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.ColonistCapacity'],
   note: 'The colonists a cycle unloads, followed through the orders and the berths, times the cycles a year. The capacity arithmetic is exact; the cycles a year are estimated.',
-  assumptions: ['the colony has the colonists a load asks for'],
+  assumptions: ['the colony has the colonists a load asks for', ORDER_OFFSET_ASSUMPTION, CYCLE_START_ASSUMPTION],
 })
 
 registerRule({
   id: 'hauling.fleetFuelPerYear',
-  versions: ['2.7.x'],
+  versions: HAULING_VERSIONS,
   units: 'L/yr',
   verification: 'estimated',
   structure: ['FCT_ShipClass.FuelEfficiency, Size', 'FCT_ClassComponent', 'FCT_DamagedComponent', 'FCT_Fleet.Speed, UseMaximumSpeed'],
   note: 'Litres an hour of each ship under its own power: its undamaged engine power x fuel use per engine-power hour x the share of its own top speed the fleet sails at, summed over those ships (a ship in a hangar or under tow burns none), x hours under way x cycles a year. The fleet sails at its saved speed held to what its slowest ship can reach. Refuelling and overhauls are not counted.',
-  assumptions: ['each ship burns at its own share of its own top speed, not at full power', 'the fleet\'s saved speed (held to its maximum) all the way'],
+  assumptions: ['each ship burns at its own share of its own top speed, not at full power', 'the fleet\'s saved speed (held to its maximum) all the way', ORDER_OFFSET_ASSUMPTION, CYCLE_START_ASSUMPTION],
 })
 
 registerRule({
@@ -113,12 +117,12 @@ registerRule({
 
 registerRule({
   id: 'hauling.deliveries',
-  versions: ['2.7.x'],
+  versions: HAULING_VERSIONS,
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_MoveOrders.PopulationID'],
   note: 'Each unload is credited with the cargo the fleet holds when it gets there, times the cycles a year.',
-  assumptions: ['every cycle delivers the same load'],
+  assumptions: ['every cycle delivers the same load', ORDER_OFFSET_ASSUMPTION, CYCLE_START_ASSUMPTION],
 })
 
 // How far a repeating route's figures can be trusted, as provenance results { cycle, freight, colonists, fuel }: the rules' own status when the route has a year, unavailable naming what is missing when a ship's eligibility or a timing input isn't known (`handling.unknown`), and null otherwise (a route that can't be traced, can't load or isn't moving says why in its own note).
@@ -131,6 +135,10 @@ export const routeResults = (route, year, handling, walk = null) => {
     colonists: unavailable({ rule: 'hauling.colonistsMoved', missing }),
     fuel: unavailable({ rule: 'hauling.fleetFuelPerYear', missing }),
   })
+
+  if (route.missing && route.missing.length) {
+    return unknown(route.missing)
+  }
 
   if (year) {
     return {
@@ -152,42 +160,47 @@ export const routeResults = (route, year, handling, walk = null) => {
 // Where an order sends the fleet (`X`, `Y`, `SystemID`) and where it is afterwards (`ExitX`, `ExitY`, `ExitSystemID`): the same point, unless the order goes through a jump point or jumps between Lagrange points and leaves it on the far side. Positions are in-system km, each destination where the save has it now. An order whose destination the save no longer holds (or a jump point whose far side is uncharted) has none.
 const hasPoint = (order) => order.X !== null && order.X !== undefined && order.ExitX !== null && order.ExitX !== undefined
 
-const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
+const distance = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
 
-// Legs of one cycle of `orders` (in MoveOrder sequence), closing back to the first order's point. Returns { legs: [{ from, to, km }], km, problem }: `problem` names why a route can't be walked (an order without a position, or a cycle that ends in another system).
+// Legs of one cycle in MoveOrder sequence, each leaving the preceding arrival (or the far side of a transit). Start at an order with no offset, or a transit exit, so the closing arrival also fixes the start. If every order has an offset, the first saved exit seeds the traversal; it is not a claim of a settled repeating orbit.
 export const walkRoute = (orders) => {
-  const legs = []
-  let position = null
-
-  for (const order of orders) {
-    if (!hasPoint(order)) {
-      return { legs: [], km: null, problem: `"${order.Description || order.ActionName}" has no position the app can read` }
-    }
-
-    const target = { x: order.X, y: order.Y, system: order.SystemID, label: order.label }
-
-    if (position) {
-      if (position.system !== target.system) {
-        return { legs: [], km: null, problem: `"${order.Description || order.ActionName}" starts in another system than the order before it ends` }
-      }
-
-      legs.push({ from: position.label, to: target.label, km: distance(position, target) })
-    }
-
-    position = { x: order.ExitX, y: order.ExitY, system: order.ExitSystemID, label: order.exitLabel || order.label }
-  }
-
   if (!orders.length) {
     return { legs: [], km: null, problem: 'No orders' }
   }
 
-  const first = orders[0]
+  const missing = orders.find((order) => !hasPoint(order))
 
-  if (position.system !== first.SystemID) {
-    return { legs: [], km: null, problem: 'The last order ends in another system than the first one starts' }
+  if (missing) {
+    return { legs: [], km: null, problem: `"${missing.Description || missing.ActionName}" has no position the app can read` }
   }
 
-  legs.push({ from: position.label, to: first.label, km: distance(position, { x: first.X, y: first.Y }) })
+  const unread = orders.findIndex((order) => !Number.isFinite(order.MinDistance))
+
+  if (unread !== -1) {
+    const input = `the minimum distance of order ${unread + 1}`
+
+    return { legs: [], km: null, problem: `${input.charAt(0).toUpperCase()}${input.slice(1)} is not in the save`, missing: [input] }
+  }
+
+  const exits = (order) => order.Jumps || order.ExitSystemID !== order.SystemID || order.ExitX !== order.X || order.ExitY !== order.Y
+  const anchor = Math.max(0, orders.findIndex((order) => !(order.MinDistance > 0) || exits(order)))
+  const first = orders[anchor]
+  const legs = new Array(orders.length)
+  let position = { Xcor: first.ExitX, Ycor: first.ExitY, system: first.ExitSystemID, label: first.exitLabel || first.label }
+
+  for (let step = 1; step <= orders.length; step++) {
+    const index = (anchor + step) % orders.length
+    const order = orders[index]
+
+    if (position.system !== order.SystemID) {
+      return { legs: [], km: null, problem: `"${order.Description || order.ActionName}" starts in another system than the order before it ends` }
+    }
+
+    const target = offsetOrderPosition(position, { Xcor: order.X, Ycor: order.Y }, order.MinDistance)
+
+    legs[(index + orders.length - 1) % orders.length] = { from: position.label, to: order.label, km: distance(position, target) }
+    position = exits(order) ? { Xcor: order.ExitX, Ycor: order.ExitY, system: order.ExitSystemID, label: order.exitLabel || order.label } : { ...target, system: order.SystemID, label: order.label }
+  }
 
   return { legs, km: legs.reduce((sum, leg) => sum + leg.km, 0), problem: null }
 }
