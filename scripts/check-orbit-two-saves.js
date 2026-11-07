@@ -1,9 +1,9 @@
 /*
-  Measures the real orbital propagation against a pair of played saves of one campaign, matched by SystemBodyID, without changing either save. --from and --to name the pair: A, B, C1 or C2 for the four registered saves (A and B, then the two branches from B), or the path of a save relative to the repository root, whose game is the one with the latest clock. The defaults are A and B, the pair this check was written for; B-C1 is a second witness on the same terms, A-B and B-C1 span one load and A-C1 two; a pair ending in C2 is evidence-only: the load history of C2 is not stated (the saved bearings fit two loads after B and three after A) and its sub-pulse cadence (60 s against 1800 s) fails the witness's cadence guard, so no C2 pair is registered in the gate. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
+  Measures the real orbital propagation against an ancestral pair of played saves of one campaign, matched by SystemBodyID only after validating the complete ledger prefix, without changing either save. --from and --to name A, B, C1 or C2 for the four registered saves (A and B, then the parallel branches C1 and C2 from B), or the path of a save relative to the repository root, whose game is the one with the latest clock. Defaults remain A-B. The gate reads A-B, B-C1, A-C1, B-C2 and A-C2 at the fixture-calibrated forced-update level differences 1, 1, 2, 2 and 3; C1-C2 is not an ancestral pair. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
 
   Snapshots reach the later save's GameTime from the earlier save's baseline: full elapsed circular/moon-own bearings, whole eccentric calls plus a local remainder, never movement-phase calls. The private stateAt and clockOf seams are exported only in the loaded source copy. horizon:false measures short-period bodies too, without changing the arithmetic or MAX_CALLS; out-of-horizon measurements and every other refusal remain disclosed. All campaign systems are read, not just the race's surveyed subset.
 
-  --load-count=N explicitly supplies a nonnegative integer inferred load-history assumption, not a stored fact or a fitted value. Without it the numerical pair comparisons are evidence-only. Conditional bearing assertions assume automatic source sub-pulse selection (an unsaved manual override cannot be excluded). The source load path forces 60 seconds without advancing GameTime. Product residuals never insert those loads; only circular/moon-own conditional bearings use their placement-independent total. Eccentric bounds carry the extra time without inventing a replay order. Diameter-capped bounds are uninformative, not trajectory confirmation. The old one-metre coordinate counts remain diagnostics only.
+  Fixture levels are source-compatible calibration from raw saved bearings and GameTime, not historical load counts or proof of a unique past. --load-count=N is an explicit nonnegative integer scenario override, never canonical gate evidence. An unregistered pair without an override remains numerical evidence-only. Ordinary played updates may partition increments at any positive integer-second lengths; neither endpoint's stored cadence/mode nor automatic selection reconstructs that history. The source load path forces 60 seconds without advancing GameTime. Product residuals never insert those loads; only circular/moon-own conditional bearings use their placement-independent total. Eccentric bounds carry the extra time without inventing a replay order. The model assumes enabled orbital motion throughout and uniform global forced updates, not an absence of unrecorded edits or switching proved by the endpoints. Diameter-capped bounds are uninformative, not trajectory confirmation. The old one-metre coordinate counts remain diagnostics only.
 */
 const fs = require('fs')
 const path = require('path')
@@ -21,7 +21,6 @@ const sourceFile = path.join(root, 'src/renderer/utilities/orbit-propagation.js'
 const KM = 149600000
 const ROUNDING_KM = 0.001
 const U = 2 ** -53
-const MAX_SOURCE_CALL = 21600
 const FAMILIES = ['fixed', 'circular', 'moon', 'trojan', 'eccentric', 'unsupported']
 const IMMUTABLE = ['systemId', 'starId', 'bodyClass', 'trojan', 'distance', 'year', 'eccentricity', 'direction', 'parentId', 'parentType', 'fixed', 'fixedParentId']
 const MUTANTS = [
@@ -64,13 +63,10 @@ const readSave = (fixture) => {
   }
 }
 
-// Automatic selection, IncrementManager.cs 55-122; Game.cs 23616-23618 selects one second for a five-second increment with OneSecondSubPulse. Under automatic selection a shortened saved increment cannot imply more calls than Length/s(Length), since s is non-decreasing (the five-second override is the minimum). The source maximum is 21600, not the largest pulse implied by this shortened ledger.
-const sourcePulse = (length, oneSecond) => length === 5 && oneSecond === 1 ? 1 : length < 61 ? 5 : length < 201 ? 10 : length < 401 ? 20 : length < 1201 ? 60 : length < 3601 ? 120 : length < 10801 ? 360 : length < 28801 ? 900 : length < 86401 ? 1800 : length < 432001 ? 7200 : 21600
-
-// Bearing-space source roundoff, conditional on the stated automatic pulse and load model. Each saved subtraction/wrap has half-ulp scale max(360,incrMax); K bounds ordinary subtractions, n forced subtractions, and W+1 the wraps. Three game turn operations cost <= 3u*adv. The app evaluates 360*seconds/(Year*3600), subtracts from a bearing in [0,360), then wraps: the large subtraction has magnitude <= adv+360; the first remainder is <360 in magnitude, +360 is <720, and the final remainder is <360. The combined app arithmetic is covered by 4u*(adv+360), including the <720 addition, rather than pretending the large subtraction rounds only at 360. See the evidence for the operation accounting and premises; no coordinate tolerance enters this assertion.
+// Bearing-space source roundoff under the calibrated/scenario uniform-update model, without a historical cadence premise. Each ordinary played call is at least one integer second, so K=T bounds ordinary subtractions; n forced subtractions and W+1 wraps enter separately. Every call is no longer than its completed increment, or 60 seconds for a forced call, giving hMax=max(largest Length,60). Each saved subtraction/wrap has half-ulp scale max(360,incrMax). Three game turn operations cost <= 3u*adv. The app evaluates 360*seconds/(Year*3600), subtracts from a bearing in [0,360), then wraps: the large subtraction has magnitude <= adv+360; the first remainder is <360 in magnitude, +360 is <720, and the final remainder is <360. The combined app arithmetic is covered by 4u*(adv+360), including the <720 addition, rather than pretending the large subtraction rounds only at 360. See AE-310-06-H1 for the source accounting; no coordinate tolerance enters this assertion.
 const bearingBound = (body, context) => {
   const adv = 360 * (context.elapsed + 60 * context.loadCount) / (body.year * 3600)
-  const incrMax = 360 * MAX_SOURCE_CALL / (body.year * 3600)
+  const incrMax = 360 * context.maxSourceCall / (body.year * 3600)
   const halfUlp = 2 ** (Math.floor(Math.log2(Math.max(360, incrMax))) - 53)
   const wraps = Math.floor(adv / 360) + 1
 
@@ -92,9 +88,40 @@ const cadenceBound = (body, context) => {
   return { km: Math.min(diameter, raw) + ROUNDING_KM, informative: raw < diameter }
 }
 
-const measure = async (pair, loadCount, mutation = null) => {
+const measure = async (pair, loadModel, mutation = null) => {
   const a = readSave(pair.from.fixture)
   const b = readSave(pair.to.fixture)
+  const loadCount = loadModel.count
+  const inputs = [a, b].map((save, index) => ({ file: save.file, sha256: save.sha256, clock: save.clock, oneSecondSubPulse: save.oneSecondSubPulse, bodies: Object.keys(save.orbits.bodies).length, orbitalWitnessLevel: [pair.from.fixture, pair.to.fixture][index].orbitalWitnessLevel ?? null }))
+  const assertions = []
+  const check = (id, description, work) => {
+    try {
+      work()
+      assertions.push({ id, description, ok: true })
+    } catch (error) {
+      assertions.push({ id, description, ok: false, error: error.message })
+    }
+  }
+  const elapsed = b.clock.gameTime - a.clock.gameTime
+  const ledger = b.increments.slice(a.increments.length)
+
+  // Refuse branches before matching reused body IDs, loading propagation or planting a mutant. The whole prefix matters, not just equal rows somewhere in the later history.
+  check('ledger', 'valid-pair ancestry: the complete earlier ledger is the later prefix and positive integer increments partition an ordered same-game interval', () => {
+    assert.equal(a.gameId, b.gameId, 'invalid-pair campaign: both saves must hold the same game')
+    assert.ok(Number.isSafeInteger(a.clock.gameTime) && a.clock.gameTime >= 0 && Number.isSafeInteger(b.clock.gameTime) && elapsed > 0, 'invalid-pair chronology: positive ordered integer GameTimes required')
+    assert.deepEqual(b.increments.filter((row) => row.GameTime < a.clock.gameTime), a.increments, 'invalid-pair ancestry: the later ledger must preserve the complete earlier (GameTime, Length) prefix')
+    assert.equal(a.increments[a.increments.length - 1].GameTime + a.increments[a.increments.length - 1].Length, a.clock.gameTime, 'the earlier ledger must end at its GameTime')
+    assert.ok(ledger.length > 0, 'the later ledger must extend the earlier prefix')
+    assert.equal(ledger[0].GameTime, a.clock.gameTime, 'the first increment after the prefix must start at the earlier GameTime')
+    assert.ok(ledger.every((row) => Number.isSafeInteger(row.GameTime) && Number.isSafeInteger(row.Length) && row.Length > 0), 'every played increment must have a positive finite integer-second length')
+    ledger.forEach((row, i) => assert.equal(row.GameTime + row.Length, i + 1 === ledger.length ? b.clock.gameTime : ledger[i + 1].GameTime, 'played increments must partition the interval contiguously'))
+  })
+  const invalidPair = () => ({ invalidPair: true, inputs, sourceSha256: sha256(sourceFile), loadModel: { ...loadModel, numericalStatus: 'invalid pair; no matching, trajectory computation or mutants' }, assertions })
+
+  if (!assertions[0].ok) {
+    return invalidPair()
+  }
+
   let source = fs.readFileSync(sourceFile, 'utf8').replace(/\r\n/g, '\n')
 
   if (mutation) {
@@ -109,37 +136,20 @@ const measure = async (pair, loadCount, mutation = null) => {
   }
 
   const orbit = (await loadUtilities(['orbit-propagation'], { sources: { 'orbit-propagation': `${source}\nexport { stateAt, clockOf };\n` } }))['orbit-propagation']
-  const elapsed = b.clock.gameTime - a.clock.gameTime
   const length = orbit.callLength(a.clock)
   const calls = Math.floor(elapsed / length)
-  const ledger = b.increments.filter((row) => row.GameTime >= a.clock.gameTime && row.GameTime < b.clock.gameTime)
   const remainder = elapsed - calls * length
-  const context = { elapsed, loadCount, remainder, squaredCalls: calls * length ** 2 + remainder ** 2, squaredIncrements: ledger.reduce((sum, row) => sum + row.Length ** 2, 0), sourceCalls: ledger.reduce((sum, row) => sum + row.Length / sourcePulse(row.Length, a.oneSecondSubPulse), 0) }
-  const assertions = []
-  const check = (id, description, work) => {
-    try {
-      work()
-      assertions.push({ id, description, ok: true })
-    } catch (error) {
-      assertions.push({ id, description, ok: false, error: error.message })
-    }
-  }
+  const maximumIncrement = Math.max(...ledger.map((row) => row.Length))
+  const context = { elapsed, loadCount, remainder, squaredCalls: calls * length ** 2 + remainder ** 2, squaredIncrements: ledger.reduce((sum, row) => sum + row.Length ** 2, 0), sourceCalls: elapsed, maxSourceCall: Math.max(maximumIncrement, 60) }
 
-  check('ledger', 'saved increments exactly partition the clock interval', () => {
-    assert.ok(ledger.length > 0)
-    assert.equal(a.gameId, b.gameId, 'both saves hold the same game')
-    assert.equal(ledger[0].GameTime, a.clock.gameTime)
-    ledger.forEach((row, i) => assert.equal(row.GameTime + row.Length, i + 1 === ledger.length ? b.clock.gameTime : ledger[i + 1].GameTime))
-    assert.ok(ledger.every((row) => row.Length > 0 && row.Length % sourcePulse(row.Length, a.oneSecondSubPulse) === 0), 'every saved length divides by its source-selected automatic pulse')
-  })
-  check('cadence', 'both saves have the same enabled orbital cadence, within the exact call budget', () => {
+  check('cadence', 'enabled endpoint motion and the actual earlier-save forecast fit the inclusive evaluation budget', () => {
     assert.equal(a.clock.orbitalMotion, 1)
     assert.equal(b.clock.orbitalMotion, 1)
-    assert.equal(a.clock.orbitalMovementInSubPulse, b.clock.orbitalMovementInSubPulse)
-    assert.equal(a.clock.subPulseLength, b.clock.subPulseLength)
-    assert.equal(a.oneSecondSubPulse, b.oneSecondSubPulse)
-    assert.ok(length > 0 && calls > 0 && calls + (remainder > 0 ? 1 : 0) <= orbit.MAX_CALLS)
+    assert.ok(Number.isFinite(length) && length > 0 && calls >= 0 && calls + (remainder > 0 ? 1 : 0) <= orbit.MAX_CALLS)
   })
+  if (!assertions[1].ok) {
+    return invalidPair()
+  }
   const common = Object.values(a.orbits.bodies).filter((body) => b.orbits.bodies[body.id])
   const rows = []
   const snapshotClock = orbit.clockOf({ clock: a.clock })
@@ -227,7 +237,7 @@ const measure = async (pair, loadCount, mutation = null) => {
   check('primary-stars', 'matched primary star positions are unchanged', () => assert.ok(Object.values(a.orbits.stars).filter((star) => star.component === 1).every((star) => b.orbits.stars[star.id] && Object.is(star.xcor, b.orbits.stars[star.id].xcor) && Object.is(star.ycor, b.orbits.stars[star.id].ycor))))
   check('fixed', 'any fixed bodies have bit-identical saved coordinates (zero bodies is unexercised)', () => assert.ok(measured('fixed').every((row) => row.coordinatesIdentical)))
   if (loadCount !== null) {
-    check('circular-bearing', 'conditional circular bearings fit the source-arithmetic bound with the supplied inferred load count and automatic pulse selection', () => assert.equal(bearingFailures('circular').length, 0, `${bearingFailures('circular').length} circular bearings exceed their derived bound`))
+    check('circular-bearing', 'conditional circular bearings fit the source-arithmetic bound at the fixed calibrated/scenario count without a historical cadence premise', () => assert.equal(bearingFailures('circular').length, 0, `${bearingFailures('circular').length} circular bearings exceed their derived bound`))
     check('moon-bearing', 'conditional moon-own bearings fit the source-arithmetic bound independently of parent coordinate error', () => assert.equal(bearingFailures('moon').length, 0, `${bearingFailures('moon').length} moon bearings exceed their derived bound`))
     check('eccentric-bound', 'unadjusted product eccentric residuals fit the conditional increment-partition and forced-load-time bound', () => assert.equal(eccentricFailures.length, 0, `${eccentricFailures.length} eccentric residuals exceed their cadence bound`))
   }
@@ -241,10 +251,10 @@ const measure = async (pair, loadCount, mutation = null) => {
   })
 
   return {
-    inputs: [a, b].map((save) => ({ file: save.file, sha256: save.sha256, clock: save.clock, oneSecondSubPulse: save.oneSecondSubPulse, bodies: Object.keys(save.orbits.bodies).length })),
+    inputs,
     sourceSha256: sha256(sourceFile),
-    loadModel: { count: loadCount, status: loadCount === null ? 'absent; numerical trajectory comparisons are evidence-only' : 'inferred explicit input, not stored; no event placement assumed', automaticPulseSelection: 'conditional, not stored; no unsaved manual override assumed', numericalStatus: loadCount === null ? 'evidence-only' : 'conditional source-derived assertions' },
-    cadence: { elapsed, length, calls, remainder, evaluations: calls + (remainder > 0 ? 1 : 0), repeatedSeconds: calls * length, increments: ledger.length, sourceCallUpperBound: context.sourceCalls, maxSourceCall: MAX_SOURCE_CALL, squaredCalls: context.squaredCalls, squaredIncrements: context.squaredIncrements, maximumIncrement: Math.max(...ledger.map((row) => row.Length)) },
+    loadModel,
+    cadence: { elapsed, length, calls, remainder, evaluations: calls + (remainder > 0 ? 1 : 0), repeatedSeconds: calls * length, increments: ledger.length, sourceCallUpperBound: context.sourceCalls, maxSourceCall: context.maxSourceCall, squaredCalls: context.squaredCalls, squaredIncrements: context.squaredIncrements, maximumIncrement },
     matched: common.length,
     newInTo: Object.keys(b.orbits.bodies).filter((id) => !a.orbits.bodies[id]).length,
     absentFrom: Object.keys(a.orbits.bodies).filter((id) => !b.orbits.bodies[id]).length,
@@ -286,44 +296,50 @@ const main = async () => {
 
   const loadIndex = options.findIndex((arg) => arg === '--load-count' || arg.startsWith('--load-count='))
   const loadText = loadIndex < 0 ? null : options[loadIndex] === '--load-count' ? options[loadIndex + 1] : options[loadIndex].slice('--load-count='.length)
-  const loadCount = loadIndex < 0 ? null : Number(loadText)
+  const calibrated = Number.isSafeInteger(pair.from.fixture.orbitalWitnessLevel) && Number.isSafeInteger(pair.to.fixture.orbitalWitnessLevel)
+  const loadCount = loadIndex < 0 ? calibrated ? pair.to.fixture.orbitalWitnessLevel - pair.from.fixture.orbitalWitnessLevel : null : Number(loadText)
 
   assert.ok(loadIndex < 0 || (typeof loadText === 'string' && loadText.trim() !== '' && Number.isSafeInteger(loadCount) && loadCount >= 0), '--load-count requires an explicit nonnegative safe integer; it is never fitted or rounded')
+  const loadModel = { count: loadCount, status: loadIndex >= 0 ? 'explicit scenario override; not canonical gate evidence; registry levels unchanged' : calibrated ? 'fixture-calibrated relative forced-update levels; not historical load counts or a unique history' : 'no registered calibration; numerical trajectory comparisons are evidence-only', numericalStatus: loadIndex >= 0 ? 'scenario only; not canonical gate evidence' : calibrated ? 'canonical calibrated source-consistency assertions' : 'evidence-only' }
   const child = process.argv.find((arg) => arg.startsWith('--child='))
 
   if (child) {
     const index = Number(child.slice('--child='.length))
 
     assert.ok(Number.isInteger(index) && index >= 0 && index < MUTANTS.length, 'a declared mutant index is required')
-    console.log(`RESULT ${JSON.stringify(await measure(pair, loadCount, MUTANTS[index]))}`)
+    console.log(`RESULT ${JSON.stringify(await measure(pair, loadModel, MUTANTS[index]))}`)
     return
   }
 
-  const result = await measure(pair, loadCount)
+  const result = await measure(pair, loadModel)
 
-  console.log(`Matched ${result.matched}; skipped ${result.newInTo} bodies new in ${pair.to.label}; absent from ${pair.to.label} ${result.absentFrom}`)
-  console.log(`Snapshot: ${result.cadence.calls} whole calls of ${result.cadence.length} s plus ${result.cadence.remainder} s local remainder (${result.cadence.evaluations} evaluations); GameTime epoch; product inserts no loads`)
-  console.log(`LOAD MODEL ${JSON.stringify(result.loadModel)}; source call upper bound K=${result.cadence.sourceCallUpperBound}, maximum source call ${MAX_SOURCE_CALL} s`)
-  result.families.forEach((family) => console.log(JSON.stringify(family)))
-  Object.entries(result.refusals).forEach(([code, count]) => console.log(`LIMITATION ${count} explicit ${code} refusals; not counted as position matches`))
+  if (result.invalidPair) {
+    console.log('INVALID PAIR: no matching, trajectory computation or mutants')
+  } else {
+    console.log(`Matched ${result.matched}; skipped ${result.newInTo} bodies new in ${pair.to.label}; absent from ${pair.to.label} ${result.absentFrom}`)
+    console.log(`Snapshot: ${result.cadence.calls} whole calls of ${result.cadence.length} s plus ${result.cadence.remainder} s local remainder (${result.cadence.evaluations} evaluations); GameTime epoch; product inserts no loads`)
+    console.log(`LOAD MODEL ${JSON.stringify(result.loadModel)}; ordinary source call upper bound K=T=${result.cadence.sourceCallUpperBound}, maximum source call hMax=${result.cadence.maxSourceCall} s; endpoint clock settings are observations, not historical cadence`)
+    result.families.forEach((family) => console.log(JSON.stringify(family)))
+    Object.entries(result.refusals).forEach(([code, count]) => console.log(`LIMITATION ${count} explicit ${code} refusals; not counted as position matches`))
+  }
   const checks = [...result.assertions]
   const mutants = []
 
-  if (mutating()) {
+  if (!result.invalidPair && mutating()) {
     for (const [index, mutation] of MUTANTS.entries()) {
-      const childResult = await runChild(__filename, [`--child=${index}`, ...(loadCount === null ? [] : [`--load-count=${loadCount}`]), ...(from === null ? [] : [`--from=${from}`]), ...(to === null ? [] : [`--to=${to}`])], { limit: 180000 })
+      const childResult = await runChild(__filename, [`--child=${index}`, ...(loadIndex < 0 ? [] : [`--load-count=${loadCount}`]), ...(from === null ? [] : [`--from=${from}`]), ...(to === null ? [] : [`--to=${to}`])], { limit: 180000 })
       const actual = lastJson(childResult, 'RESULT ')
       const head = result.assertions.find((check) => check.id === mutation.criterion)
       const mutant = actual.assertions.find((check) => check.id === mutation.criterion)
       const ok = childResult.code === 0 && head && head.ok && mutant && !mutant.ok
 
-      const entry = { id: `mutant-${index}`, description: mutation.name, ok: !!ok, criterion: mutation.criterion, childCode: childResult.code, head, mutant, failures: mutation.criterion === 'eccentric-bound' ? actual.eccentricBounds.failures : actual.families.find((family) => family.family === 'circular').conditionalBearing?.failures, status: loadCount === null ? 'diagnostic; no numerical credit without explicit load model' : ok ? 'head-true/mutant-false conditional credit' : 'not credited', error: ok || loadCount === null ? undefined : `no independent credit: head ${JSON.stringify(head)}, mutant ${JSON.stringify(mutant)}` }
+      const entry = { id: `mutant-${index}`, description: mutation.name, ok: !!ok, criterion: mutation.criterion, childCode: childResult.code, head, mutant, failures: mutation.criterion === 'eccentric-bound' ? actual.eccentricBounds.failures : actual.families.find((family) => family.family === 'circular').conditionalBearing?.failures, status: loadCount === null ? 'diagnostic; no numerical credit without calibrated/scenario load model' : ok ? 'head-true/mutant-false conditional credit' : 'not credited', error: ok || loadCount === null ? undefined : `no independent credit: head ${JSON.stringify(head)}, mutant ${JSON.stringify(mutant)}` }
 
       mutants.push(entry)
       if (loadCount !== null) {
         checks.push(entry)
       } else {
-        console.log(`DIAGNOSTIC ${mutation.name}: numerical mutant credit absent without --load-count`)
+        console.log(`DIAGNOSTIC ${mutation.name}: numerical mutant credit absent without fixture calibration or --load-count scenario`)
       }
     }
   }

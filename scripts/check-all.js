@@ -51,9 +51,9 @@ const supportsGroups = (name) => GROUPS_SCRIPTS.has(name)
 // The slowest scripts start first, so the longest one does not begin last and run on alone.
 const FIRST = ['check-event-archive.js', 'check-section-accents.js', 'check-history-backup.js', 'check-map-hierarchy.js', 'check-warning-snoozes.js', 'check-legacy-consumption.js']
 const ARGS = { 'check-design-rules.js': ['--fixtures'] }
-// The scripts whose gate is several invocations of the same script, one per entry, each printed on its own line and each able to fail the gate: the two-save witness measures one pair per run, because a run carries one explicit load count, so the gate runs the three pairs of the played campaign rather than letting the first pair stand for the others.
+// The scripts whose gate is several invocations of the same script, one per entry, each printed on its own line and each able to fail the gate: the two-save witness reads one ancestral pair per run and resolves its forced-update count from fixture calibration. A-B carries the three original mutants; the other four pairs are head-only even in the full gate. Quick mode is head-only for all five.
 const PAIRS = {
-  'check-orbit-two-saves.js': [['--from=A', '--to=B', '--load-count=1'], ['--from=B', '--to=C1', '--load-count=1'], ['--from=A', '--to=C1', '--load-count=2']],
+  'check-orbit-two-saves.js': [['--from=A', '--to=B'], ['--from=B', '--to=C1', '--no-mutations'], ['--from=A', '--to=C1', '--no-mutations'], ['--from=B', '--to=C2', '--no-mutations'], ['--from=A', '--to=C2', '--no-mutations']],
 }
 
 const option = (name) => {
