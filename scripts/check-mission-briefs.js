@@ -609,10 +609,16 @@ const alternativeChecks = (m) => {
 
       return equal(read(military), [100, 20, 24, 'military', 40]) && equal(read(commercial), [100, 20, 24, 'commercial', 40]) && military.pinned && mb.figureOf(military, 'cargoTons', {}).status === 'confirmed' ? true : short([read(military), read(commercial)])
     }],
-    ['alternative: the stored class figures a played save gives back are registered for the line of the played saves', () => {
-      const versions = ['brief.classCargo', 'brief.classDeployment', 'brief.classClassification'].map((id) => pv.getRule(id).versions.join())
+    ['alternative: the game-tied brief figures are registered for the supported line', () => {
+      const ids = ['brief.setSize', 'brief.setPayloadSpace', 'brief.classSize', 'brief.classPayloadSpace', 'brief.rangeKm', 'brief.cruiseEndurance', 'brief.classCargo', 'brief.classHangar', 'brief.classDeployment', 'brief.classClassification', 'brief.engineClassification']
+      const versions = ids.map((id) => pv.getRule(id).versions.join())
 
-      return versions.every((version) => version === '3.2.x') ? true : short(versions)
+      return versions.every((version) => version === '3.2.x') && ids.every((id) => pv.ruleSupports(id, '3.2.0') === true && pv.ruleSupports(id, '2.7.1') === false) ? true : short(versions)
+    }],
+    ['alternative: an unmodelled figure is registered independently of the save', () => {
+      const id = 'brief.notModelled'
+
+      return equal(pv.getRule(id).versions, ['x']) && pv.ruleSupports(id, '3.2.0') === true && pv.ruleSupports(id, '2.7.1') === true ? true : short(pv.getRule(id).versions)
     }],
     ['alternative: a saved class is unknown for what the save lacks, never 0', () => {
       const none = mb.propulsionAlternative(rowOf(m, 'class', { pinned: true }), null)
@@ -1611,7 +1617,9 @@ const MUTATIONS = [
   { name: 'a designed set taking the figures of a class', find: 'cargoTons: pinned ? stored(', replace: 'cargoTons: classFigures ? stored(', file: 'mission-briefs.js', fails: ['alternative: the class figures of a set that is not pinned are ignored', 'alternative: a propulsion set is unknown for cargo'] },
   { name: 'every set with a commercial engine military', find: 'else if (row.type === \'Military\') {', replace: 'else if (true) {', file: 'mission-briefs.js', fails: ['alternative: the classification of a set'] },
   { name: 'a commercial class read as military', find: 'value: commercial ? \'commercial\' : \'military\'', replace: 'value: commercial ? \'military\' : \'commercial\'', file: 'mission-briefs.js', fails: ['alternative: a saved class gives its cargo'] },
-  { name: 'the stored class figures labelled for the earlier line', find: "const STORED_VERSIONS = ['3.2.x']", replace: "const STORED_VERSIONS = ['2.7.x']", file: 'mission-briefs.js', fails: ['alternative: the stored class figures a played save gives back'] },
+  { name: 'the game-tied brief figures labelled for the earlier line', find: "const VERSIONS = ['3.2.x']", replace: "const VERSIONS = ['2.7.x']", file: 'mission-briefs.js', fails: ['alternative: the game-tied brief figures are registered'] },
+  { name: 'the game-tied brief figures labelled independently of the save', find: "const VERSIONS = ['3.2.x']", replace: "const VERSIONS = ['x']", file: 'mission-briefs.js', fails: ['alternative: the game-tied brief figures are registered'] },
+  { name: 'an unmodelled figure restricted to the supported line', find: "'A figure this alternative does not give: it is unknown, never 0', '', [], ['x'])", replace: "'A figure this alternative does not give: it is unknown, never 0', '', [], ['3.2.x'])", file: 'mission-briefs.js', fails: ['alternative: an unmodelled figure is registered independently'] },
   { name: 'a class figure the save lacks read as 0', find: 'cargoCapacity: numberOrNull(row.CargoCapacity),', replace: 'cargoCapacity: Number(row.CargoCapacity) || 0,', file: 'mission-briefs.js', fails: ['class figures: the loader reads what the save stores'] },
   { name: 'a class figure that is not stored read as 0 in the alternative', find: 'return value === null ? unavailable({ rule, units, missing: [`The save stores no $' + '{words} for this class`] })', replace: 'return value === null ? ofRule({ rule, value: 0, units, inputs: { present: [name] } })', file: 'mission-briefs.js', fails: ['alternative: a saved class is unknown for what the save lacks'] },
   { name: 'a hypothetical level not carried into the size', find: ': envelope({ value: row.totalHS, status: stateOf(STATUS.ASSUMED), rule: \'brief.setSize\', units: \'HS\', inputs: { present: [\'hull\', \'engines\', \'fuel tanks\'] }, assumptions: basis.assumptions })', replace: ': envelope({ value: row.totalHS, status: STATUS.ASSUMED, rule: \'brief.setSize\', units: \'HS\', inputs: { present: [\'hull\', \'engines\', \'fuel tanks\'] } })', file: 'mission-briefs.js', fails: ['alternative: a hypothetical tech level carries'] },

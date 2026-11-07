@@ -20,7 +20,7 @@ export const MAX_AXES = 3
 export const KM_PER_BN = 1e9
 export const CARGO_POINTS_PER_HS = 50
 
-const VERSIONS = ['2.7.x']
+const VERSIONS = ['3.2.x']
 
 const EMPTY_LIST = Object.freeze([])
 
@@ -45,9 +45,6 @@ export const hangarTonsOfCapacity = (capacity) => capacity * TONS_PER_HS
 
 // ---- Rules ---------------------------------------------------------------------------------------------------------
 
-// The stored class figures a played save of the line gives back through a read of the class rows made apart from the loader (scripts/check-mission-briefs.js with --stock on a played save).
-const STORED_VERSIONS = ['3.2.x']
-
 const rule = (id, verification, note, units, assumptions = [], versions = VERSIONS) => registerRule({ id, versions, note, units, verification, assumptions })
 
 rule('brief.setSize', STATUS.ASSUMED, 'The finished size of a designed set: the hull entered or taken from a saved class, with the engines and tanks the planner sized', 'HS', ['The hull is the size entered, or the size of the saved class it was taken from'])
@@ -56,12 +53,12 @@ rule('brief.classSize', STATUS.CONFIRMED, 'A saved class\'s size, as the save st
 rule('brief.classPayloadSpace', STATUS.CONFIRMED, 'A saved class\'s stored size less the stored sizes of its engines and fuel tanks', 'HS')
 rule('brief.rangeKm', STATUS.CONFIRMED, 'The range in billions of km times 1,000,000,000', 'km')
 rule('brief.cruiseEndurance', STATUS.ASSUMED, 'The fuel held over the burn at the cruise power the brief names', 'days', ['The cruise power is the one the brief names'])
-rule('brief.classCargo', STATUS.CONFIRMED, 'A saved class\'s cargo capacity as the save stores it, in tons: each hold stores 50 points to the HS of its size and a point is a ton', 'tons', [], STORED_VERSIONS)
+rule('brief.classCargo', STATUS.CONFIRMED, 'A saved class\'s cargo capacity as the save stores it, in tons: each hold stores 50 points to the HS of its size and a point is a ton', 'tons')
 rule('brief.classHangar', STATUS.CONFIRMED, 'A saved class\'s hangar capacity as the save stores it, in HS of the ships it holds', 'HS')
-rule('brief.classDeployment', STATUS.CONFIRMED, 'A saved class\'s planned deployment, as the save stores it', 'months', [], STORED_VERSIONS)
-rule('brief.classClassification', STATUS.CONFIRMED, 'A saved class is commercial or military as the save stores it', '', [], STORED_VERSIONS)
+rule('brief.classDeployment', STATUS.CONFIRMED, 'A saved class\'s planned deployment, as the save stores it', 'months')
+rule('brief.classClassification', STATUS.CONFIRMED, 'A saved class is commercial or military as the save stores it', '')
 rule('brief.engineClassification', STATUS.CONFIRMED, 'A class with a military engine is military; a class with commercial engines only is not decided by them (every component, 1 HS of engineering and 3 months of deployment decide it)', '')
-rule('brief.notModelled', STATUS.ASSUMED, 'A figure this alternative does not give: it is unknown, never 0', '')
+rule('brief.notModelled', STATUS.ASSUMED, 'A figure this alternative does not give: it is unknown, never 0', '', [], ['x'])
 
 // ---- What a brief asks ---------------------------------------------------------------------------------------------
 
