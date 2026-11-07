@@ -213,7 +213,7 @@ const EXTRA_READS = Object.freeze({
     outlook: `FCT_MassDriverPackets(GameID RaceID ${MINERAL_LIST})`,
     BodyDetail: FLEET_COMMAND_READS,
   }),
-  '/logistics': Object.freeze({ page: START_DELAY_READS, colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
+  '/logistics': Object.freeze({ page: START_DELAY_READS, colonies: `FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID) ${ORBITAL_CENSUS_READS}`, fuelDonors: FUEL_DONOR_READS, ResourceReserves: RESERVE_PANEL_READS, mspSupply: MASS_DRIVER_READS }),
   '/minerals': Object.freeze({ page: 'FCT_IndustrialProjects(* Amount GameID PopulationID RaceID) FCT_MassDriverPackets(* DestID GameID RaceID) FCT_Population(* Reserve* GameID PopulationID RaceID) FCT_ShipyardTask(* CompletedBP GameID PopulationID RaceID TaskTypeID TotalBP)' }),
   '/colony-outlook': Object.freeze({ bootstrapSources: BUILDABILITY_READS, page: START_DELAY_READS }),
   '/routes': Object.freeze({ page: START_DELAY_READS, positionFacts: ANCHORED_OBJECT_READS }),

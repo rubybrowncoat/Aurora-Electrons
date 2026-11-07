@@ -102,7 +102,7 @@ const copy = () => {
   return database
 }
 const closeAll = () => OPEN.splice(0).forEach((database) => database.close())
-const loaderOf = (database) => ({ query: async (sql) => [database.query(sql).all()] })
+const loaderOf = (database) => ({ query: async (sql, options = {}) => [database.query(sql.replace(/:(GameID|RaceID)\b/g, (_, key) => String(options.replacements[key]))).all()] })
 const rowsOf = (database, sql) => database.query(sql).all()
 
 // ---- The captured tab (specimen S4) --------------------------------------------------------------------------------------

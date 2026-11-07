@@ -55,7 +55,8 @@ const swap = (from, to) => (text) => {
 
 const SHIP = { ShipID: 1, ShipName: 'Ship', FleetID: 1, FleetName: 'Fleet', SystemID: 1, SystemName: 'Sol', OrbitBodyID: 1, Xcor: 0, Ycor: 0, AssignedPopulationID: 0, ShipClassID: 1, ClassName: 'Class', Size: 2, Cost: 4000, Commercial: 0, SupplyShip: 0, MinimumSupplies: 0, ClassSupplies: 0, MaintPriority: 5, CurrentMaintSupplies: 0, MaintenanceState: 0, LastOverhaul: 0, MothershipID: 0, CarrierCommercialHangar: null, Modules: 0, Bays: 0 }
 const ship = (id, changes = {}) => ({ ...SHIP, ShipID: id, ShipName: `Ship ${id}`, FleetID: id, FleetName: `Fleet ${id}`, ...changes })
-const colony = (id, changes = {}) => ({ PopulationID: id, PopName: `Colony ${id}`, SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceFacilities: 1, MaintenanceStockpile: 0, Population: 1, ...changes })
+const POPULATED = { value: true, status: 'estimated', inputs: { present: ['the shared population census'], missing: [] }, assumptions: [] }
+const colony = (id, changes = {}) => ({ PopulationID: id, PopName: `Colony ${id}`, NPR: 0, SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceFacilities: 1, MaintenanceStockpile: 0, MspPopulated: POPULATED, ...changes })
 const FULL_COLONY = { MSPProduction: 10, MaintProdStatus: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 10.9, WarningMSP: 0, SystemBodyID: 1 }
 // A ship that asks 60 MSP a day at full coverage: a class cost of 365 x 4 x 60.
 const DAILY_60 = 87600

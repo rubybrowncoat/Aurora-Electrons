@@ -2,7 +2,7 @@
 //
 // A figure the save does not give is null, never 0: a stock that is not recorded has no run, a production that cannot be worked out is not counted, and a packet or a haul whose time is not known is listed as untimed and never counted. The days are those of the maintenance supply ledger: a packet takes its distance over its speed, a haul the days its freighters need for every trip (utilities/msp-supply.js `packetArrival`, `timeHauls`).
 
-import { LITRES_PER_TON, MSP_MINERALS, mspOutput, mspProduction, refineryOutput, refineryYield, soriumLasts } from './logistics'
+import { LITRES_PER_TON, MSP_MINERALS, loadMspFacilities, loadMspPopulation, mspActiveProduction, mspOutput, refineryOutput, refineryYield, soriumLasts } from './logistics'
 import { MINERALS } from './minerals'
 import { packetArrival } from './msp-supply'
 import { PLAN_SCENARIO } from './resource-ledger'
@@ -21,13 +21,15 @@ export const loadClassMinimums = async (database, { GameID, RaceID }) => {
   return Object.freeze(rows.map((row) => Object.freeze({ ShipClassID: row.ShipClassID, ClassName: row.ClassName, MinimumFuel: isNumber(row.MinimumFuel) ? row.MinimumFuel : null, MinimumSupplies: isNumber(row.MinimumSupplies) ? row.MinimumSupplies : null, Ships: row.Ships })))
 }
 
-const SUPPLY_SQL = 'select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.Sorium, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite, FCT_Race.MSPProduction, FCT_Race.FuelProduction, coalesce(VIR_Installations.MaintenanceFacilities, 0) as MaintenanceFacilities, coalesce(VIR_Installations.Refineries, 0) as Refineries from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.MaintenanceValue * FCT_PopulationInstallations.Amount) as MaintenanceFacilities, sum(DIM_PlanetaryInstallation.RefineryProductionValue * FCT_PopulationInstallations.Amount) as Refineries from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = :GameID and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = :GameID and FCT_Population.RaceID = :RaceID'
+const SUPPLY_SQL = 'select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.SystemBodyID, FCT_Race.NPR, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.Sorium, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite, FCT_Race.MSPProduction, FCT_Race.FuelProduction, coalesce(VIR_Installations.Refineries, 0) as Refineries from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.RefineryProductionValue * FCT_PopulationInstallations.Amount) as Refineries from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = :GameID and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = :GameID and FCT_Population.RaceID = :RaceID'
 
 // What the supplies feeds need of each colony that a host other than the Logistics page does not read: the stockpiles of fuel and maintenance supplies, whether each production is on, the refineries and maintenance facilities, the racial rates and the stocks the two productions draw on, as the Logistics page reads them. The read throws when it fails, so a colony whose production was not read is never taken for one that makes nothing.
 export const loadSupplyState = async (database, { GameID, RaceID }) => {
   const [rows] = await database.query(SUPPLY_SQL, { replacements: { GameID, RaceID } })
+  const facilities = await loadMspFacilities(database, { GameID, RaceID, colonies: rows })
+  const colonies = await loadMspPopulation(database, { GameID, RaceID, colonies: facilities })
 
-  return Object.freeze(rows.map((row) => Object.freeze({ ...row })))
+  return Object.freeze(colonies.map((row) => Object.freeze({ ...row })))
 }
 
 const SUPPLY_COLUMNS = { fuel: 'MinimumFuel', msp: 'MinimumSupplies' }
@@ -71,7 +73,7 @@ export const supplyFeeds = ({ colonies, modifierOf, place = () => '', classes = 
   const lasts = soriumLasts(colony, capacity)
   const output = mspOutput(colony, modifier)
   const limits = MSP_MINERALS.map((mineral) => (isNumber(colony[mineral.name]) ? Math.max(0, colony[mineral.name]) / mineral.perMsp : null))
-  const makes = isAvailable(output) ? (colony.MaintProdStatus ? valueOrNull(mspProduction(colony, modifier)) : 0) : null
+  const makes = isAvailable(output) ? valueOrNull(mspActiveProduction(colony, modifier)) : null
   const base = { sourceId: colony.PopulationID, sourceName: colony.PopName, place: place(colony), arrivals: [], withdrawals: [] }
 
   return [

@@ -229,6 +229,13 @@ const fakeSave = (save, { failing = [] } = {}) => {
         throw new Error(`no such table: ${failed}`)
       }
 
+      if (sql.startsWith('select rowid as CensusRowID')) {
+        return [sql.includes('FCT_Population.*') ? (save.supply || []).map((row, index) => ({ ...row, CensusRowID: index + 1, GameID: GAME, RaceID: RACE })) : []]
+      }
+
+      if (sql.startsWith('select FCT_PopulationInstallations.PopID,')) {
+        return [(save.supply || []).map((row) => ({ PopID: row.PopulationID, Amount: row.MaintenanceFacilities, MaintenanceValue: 1 }))]
+      }
       if (sql.includes('from FCT_Ship left join')) {
         return [(save.ships || []).map((row) => ({ ShipID: row.id, ShipName: row.name, Constructed: row.constructed, ClassName: row.className }))]
       }
@@ -310,7 +317,8 @@ const rowsOf = (ledger, key = '1:Duranium') => ledger.rows.find((row) => row.key
 const planned = (day, amount, id = 'haul:h1:Duranium') => ({ id, label: 'Haul to Mars', scenario: 'Hauling plan', day, amount })
 
 // A colony row as the pages read it: every mineral stock and reserve, and what the supply ledger needs.
-const colonyRow = (id, name, extra = {}) => ({ PopulationID: id, PopName: name, SystemName: 'Sol', ...Object.fromEntries(MINERAL_NAMES.flatMap((mineral) => [[mineral, 0], [`Reserve${mineral}`, 0]])), ...extra })
+const POPULATED = { value: true, status: 'estimated', inputs: { present: ['the shared population census'], missing: [] }, assumptions: [] }
+const colonyRow = (id, name, extra = {}) => ({ PopulationID: id, PopName: name, NPR: 0, Population: 1, MspPopulated: POPULATED, SystemName: 'Sol', ...Object.fromEntries(MINERAL_NAMES.flatMap((mineral) => [[mineral, 0], [`Reserve${mineral}`, 0]])), ...extra })
 
 // ---------- the table the player reads ----------
 
@@ -323,7 +331,9 @@ const haulingRow = () => {
   return { ...row, SystemID: 1, MassDriverDest: 0, Xcor: 0, Ycor: 0, ShuttleCapacity: 0, ServiceNames: '', MassDrivers: 0 }
 }
 
-const supplyRowOf = (m, extra = {}) => ({ PopulationID: 10, PopName: 'Earth Prime', MaintenanceStockpile: 0, MaintProdStatus: 1, FuelStockpile: 0, FuelProdStatus: 1, Sorium: 0, Duranium: 10, Uridium: 1000, Gallicite: 1000, MSPProduction: 1, FuelProduction: 0, MaintenanceFacilities: 365 / m.lg.mspProduction({ MaintenanceFacilities: 1, MSPProduction: 1 }, 1).value, Refineries: 0, ...extra })
+// 365 whole facilities at 1 BP/year, 4 MSP/BP and a 0.25 production modifier make exactly 1 MSP/day.
+const DAILY_MSP_MODIFIER = 0.25
+const supplyRowOf = (extra = {}) => ({ PopulationID: 10, PopName: 'Earth Prime', NPR: 0, Population: 1, MspPopulated: POPULATED, MaintenanceStockpile: 0, MaintProdStatus: 1, FuelStockpile: 0, FuelProdStatus: 1, Sorium: 0, Duranium: 10, Uridium: 1000, Gallicite: 1000, MSPProduction: 1, FuelProduction: 0, MaintenanceFacilities: 365, Refineries: 0, ...extra })
 
 // The panel as a host gives it its props, over a repository and the colonies of a save: loaded the way the reads of the mixin load them. `loaded` is what those reads gave, which a mount in the browser is given as it is.
 const mountPanel = async (ctx, { kind = 'supplies', colonies = [], w = world(ctx.m), save = SAVE(), where = scope(), failing = [], supply = [], data = {} } = {}) => {
@@ -349,7 +359,7 @@ const hauled = (days, tonnes) => {
 }
 
 // The minerals panel as the Hauling page hands it its colony, over the supplies and the production rates the panel reads itself.
-const surfaced = (m, { records = [], modifiers = true, supplyExtra = {}, showAll = false, expand = ['10:Duranium'] } = {}) => ({ kind: 'minerals', colonies: [haulingRow()], supply: [supplyRowOf(m, supplyExtra)], modifiers: modifiers ? { 10: { OverallProductionModifier: 1 } } : {}, showAll, records, expand })
+const surfaced = ({ records = [], modifiers = true, supplyExtra = {}, showAll = false, expand = ['10:Duranium'] } = {}) => ({ kind: 'minerals', colonies: [haulingRow()], supply: [supplyRowOf(supplyExtra)], modifiers: modifiers ? { 10: { OverallProductionModifier: DAILY_MSP_MODIFIER } } : {}, showAll, records, expand })
 
 const USE_RECORDS = [{ scenario: 'Beta', resources: ['msp'], plans: [plan('p1', 'Use', 95, 101, 'msp')] }, { scenario: 'Watch', resources: ['Duranium'], reserves: { Duranium: 1 } }]
 
@@ -366,9 +376,9 @@ const CELL_FIXTURES = {
   looseHaul: () => hauled(null, 100),
   lateHaul: () => hauled(5, 100),
   spareHaul: () => hauled(5, 40),
-  shortInput: (m) => surfaced(m, { records: [{ scenario: 'Late', resources: ['Duranium'], plans: [plan('p1', 'Ship', 10, 101, 'Duranium')] }], supplyExtra: { MaintenanceStockpile: null } }),
-  unknownUse: (m) => surfaced(m, { records: USE_RECORDS, modifiers: false, showAll: true }),
-  knownUse: (m) => surfaced(m, { records: USE_RECORDS, showAll: true }),
+  shortInput: () => surfaced({ records: [{ scenario: 'Late', resources: ['Duranium'], plans: [plan('p1', 'Ship', 10, 101, 'Duranium')] }], supplyExtra: { MaintenanceStockpile: null } }),
+  unknownUse: () => surfaced({ records: USE_RECORDS, modifiers: false, showAll: true }),
+  knownUse: () => surfaced({ records: USE_RECORDS, showAll: true }),
   waitingSupplies: () => ({ kind: 'supplies', colonies: [], waiting: true, records: [], expand: [] }),
   waitingMinerals: () => ({ kind: 'minerals', colonies: [], waiting: true, records: [], expand: [] }),
   embeddedMinerals: () => ({ kind: 'minerals', colonies: stockRows(), embedded: true, showAll: true, records: [], expand: [] }),
@@ -880,9 +890,8 @@ const ledger = (ctx) => {
   })
 
   add('combined: production draws on the same mineral stocks as the planned withdrawals, after them, so an export of an input leaves nothing to make from and the production is short of it, naming the exporter', () => {
-    const unit = m.lg.mspProduction({ MaintenanceFacilities: 1, MSPProduction: 1 }, 1).value
-    const colonies = [colonyRow(10, 'Earth', { Duranium: 10, Uridium: 1000, Gallicite: 1000, FuelStockpile: 0, MaintenanceStockpile: 0, MaintProdStatus: 1, MaintenanceFacilities: 365 / unit, MSPProduction: 1 })]
-    const feeds = (support = false) => [...m.rf.supplyFeeds({ colonies, modifierOf: () => 1 }), ...m.rf.mineralFeeds({ colonies }).map((one) => ({ ...one, support }))]
+    const colonies = [colonyRow(10, 'Earth', { Duranium: 10, Uridium: 1000, Gallicite: 1000, FuelStockpile: 0, MaintenanceStockpile: 0, MaintProdStatus: 1, MaintenanceFacilities: 365, MSPProduction: 1 })]
+    const feeds = (support = false) => [...m.rf.supplyFeeds({ colonies, modifierOf: () => DAILY_MSP_MODIFIER }), ...m.rf.mineralFeeds({ colonies }).map((one) => ({ ...one, support }))]
     const use = entry('Beta', [plan('p1', 'Use', 95, 101, 'msp')], {}, 10)
     const export_ = entry('Alpha', [plan('p1', 'Export', 10, 0, 'Duranium')], {}, 10)
     const both = run({ feeds: feeds(), entries: [export_, use] })
@@ -934,9 +943,8 @@ const ledger = (ctx) => {
     return same(fuel.productionInputs, [{ key: '10:Sorium', perUnit: 1 / 2000 }]) === true && near(fuel.production, 730000) && lost && lost.served === 0 && near(lost.short, 20000) && lost.kind === 'competing' && same(lost.rivals.drew, ['Alpha']) === true && sorium.run.taken === 10 && sorium.run.used === 0 && rowsOf(both, '10:fuel').run.produced === 0 && alone.shortfalls.length === 0 && near(used.run.used, 10) && near(used.run.final, 0) && near(rowsOf(alone, '10:fuel').run.produced, 20000) && near(rowsOf(fallback, '10:fuel').run.produced, 20000) && near(rowsOf(delivered, '10:fuel').run.produced, 40000) ? true : short([lost, sorium && sorium.run, alone.shortfalls, used && used.run, rowsOf(fallback, '10:fuel').run.produced, rowsOf(delivered, '10:fuel').run.produced])
   })
   add('combined: a withdrawal of an input on the tick of the shortfall is no rival of it, since the production runs after the tick\'s withdrawals, and one on an earlier tick is', () => {
-    const unit = m.lg.mspProduction({ MaintenanceFacilities: 1, MSPProduction: 1 }, 1).value
-    const colonies = [colonyRow(10, 'Earth', { Duranium: 10, Uridium: 1000, Gallicite: 1000, FuelStockpile: 0, MaintenanceStockpile: 0, MaintProdStatus: 1, MaintenanceFacilities: 365 / unit, MSPProduction: 1 })]
-    const feeds = () => [...m.rf.supplyFeeds({ colonies, modifierOf: () => 1 }), ...m.rf.mineralFeeds({ colonies })]
+    const colonies = [colonyRow(10, 'Earth', { Duranium: 10, Uridium: 1000, Gallicite: 1000, FuelStockpile: 0, MaintenanceStockpile: 0, MaintProdStatus: 1, MaintenanceFacilities: 365, MSPProduction: 1 })]
+    const feeds = () => [...m.rf.supplyFeeds({ colonies, modifierOf: () => DAILY_MSP_MODIFIER }), ...m.rf.mineralFeeds({ colonies })]
     const use = entry('Beta', [plan('p1', 'Use', 100, 101, 'msp')], {}, 10)
     const export_ = entry('Alpha', [plan('p1', 'Export', 10, 0, 'Duranium')], {}, 10)
     const lostWith = (day) => run({ feeds: feeds(), entries: [export_, use, entry('Gamma', [plan('p1', 'Take', 1, day, 'Uridium')], {}, 10)] }).shortfalls.find((one) => one.key === '10:msp')
@@ -981,9 +989,8 @@ const ledger = (ctx) => {
     return alone(0.5) === 0 && near(alone(10), 6000) && near(alone(1), 2000) ? true : short([alone(0.5), alone(10), alone(1)])
   })
   add('combined: production takes its inputs whatever is known of its output (the stock known or not, the rate known, nil or not known) and of its inputs (filled later, spent in the period, one not in the save), for maintenance supplies and for fuel, and a rate that is not known is listed on the input, never read as none', () => {
-    const unit = m.lg.mspProduction({ MaintenanceFacilities: 1, MSPProduction: 1 }, 1).value
-    const supplies = ({ stock = 5, modifier = 1, status = 1, support = false, duranium = 10, uridium = 1000, arrivals = [] } = {}) => {
-      const colonies = [colonyRow(10, 'Earth', { Duranium: duranium, Uridium: uridium, Gallicite: 1000, FuelStockpile: 0, FuelProdStatus: 0, Refineries: 0, MaintenanceStockpile: stock, MaintProdStatus: status, MaintenanceFacilities: 365 / unit, MSPProduction: 1 })]
+    const supplies = ({ stock = 5, modifier = DAILY_MSP_MODIFIER, status = 1, support = false, duranium = 10, uridium = 1000, arrivals = [] } = {}) => {
+      const colonies = [colonyRow(10, 'Earth', { Duranium: duranium, Uridium: uridium, Gallicite: 1000, FuelStockpile: 0, FuelProdStatus: 0, Refineries: 0, MaintenanceStockpile: stock, MaintProdStatus: status, MaintenanceFacilities: 365, MSPProduction: 1 })]
 
       return [...m.rf.supplyFeeds({ colonies, modifierOf: () => modifier }).map((one) => ({ ...one, support })), ...m.rf.mineralFeeds({ colonies }).map((one) => (one.key === '10:Duranium' ? { ...one, arrivals } : one))]
     }
@@ -1432,14 +1439,18 @@ const loaders = (ctx) => {
   const statements = []
   const add = (name, test) => statements.push([name, test])
 
-  add('loaders: every statement of every read is a select, with the game and race as parameters', async () => {
+  add('loaders: every read is select-only; report rows use game and race parameters while the shared census retains its raw assignment roster', async () => {
     const database = fakeSave(SAVE())
 
     await m.rr.loadReserveObjects(database, { GameID: GAME, RaceID: RACE })
     await m.rf.loadClassMinimums(database, { GameID: GAME, RaceID: RACE })
     await m.rf.loadSupplyState(database, { GameID: GAME, RaceID: RACE })
 
-    return database.sent.length === 3 && database.sent.every((one) => /^select /i.test(one.sql) && !/\b(insert|update|delete|drop|alter|create)\b/i.test(one.sql) && one.replacements.GameID === GAME && one.replacements.RaceID === RACE) ? true : short(database.sent)
+    const scoped = database.sent.filter((one) => one.replacements)
+    const census = database.sent.filter((one) => !one.replacements)
+    const rawCensus = /^select rowid as CensusRowID, (FCT_\w+)\.\* from \1 order by rowid$/
+
+    return scoped.length === 4 && census.length > 0 && database.sent.every((one) => /^select /i.test(one.sql) && !/\b(insert|update|delete|drop|alter|create)\b/i.test(one.sql)) && scoped.every((one) => one.replacements.GameID === GAME && one.replacements.RaceID === RACE) && census.every((one) => rawCensus.test(one.sql)) ? true : short(database.sent)
   })
   add('loaders: the classes are those with ships, a column the save leaves null stays null and is not 0', async () => {
     const classes = await m.rf.loadClassMinimums(fakeSave(SAVE()), { GameID: GAME, RaceID: RACE })
@@ -1726,9 +1737,9 @@ const panel = (ctx) => {
 
     return loose.item.shortfalls.length === 0 && loose.item.run.untimed.length === 1 && arrival.item.run.untimed.length === 1 && late.item.shortfalls.length === 1 && near(late.item.shortfalls[0].short, 50) && spare.item.shortfalls.length === 0 && spare.item.run.untimed.length === 0 ? true : short([loose.item.run.untimed, arrival.item.run.untimed, late.item.shortfalls, spare.item.run.untimed])
   })
-  const supplyRow = (extra = {}) => supplyRowOf(m, extra)
+  const supplyRow = (extra = {}) => supplyRowOf(extra)
   const surface = async (kind, { records = [], modifiers = true, data = {}, supplyExtra = {} } = {}) => {
-    const { vm, w } = await mount({ kind, colonies: kind === 'supplies' ? [{ ...haulingRow(), ...supplyRow(supplyExtra) }] : [haulingRow()], supply: [supplyRow(supplyExtra)], data: kind === 'supplies' ? { modifierOf: () => 1, ...data } : { populationProductionModifiers: modifiers ? { 10: { OverallProductionModifier: 1 } } : {}, ...data } })
+    const { vm, w } = await mount({ kind, colonies: kind === 'supplies' ? [{ ...haulingRow(), ...supplyRow(supplyExtra) }] : [haulingRow()], supply: [supplyRow(supplyExtra)], data: kind === 'supplies' ? { modifierOf: () => DAILY_MSP_MODIFIER, ...data } : { populationProductionModifiers: modifiers ? { 10: { OverallProductionModifier: DAILY_MSP_MODIFIER } } : {}, ...data } })
 
     for (const record of records) {
       await kept(m, w, scope(), vm.reserveContext, { colonyId: 10, ...record })
@@ -1769,7 +1780,7 @@ const panel = (ctx) => {
   add('component: mounted as Hauling mounts it, on the colonies the page\'s own read returns and with no modifier handed in, the panel reads the supplies and the production rates itself, so the mineral the production took shows as a shortfall of the withdrawal it starved', async () => {
     const records = [{ scenario: 'Both', resources: ['msp', 'Duranium'], plans: [plan('p1', 'Use', 100, 101, 'msp'), plan('p2', 'Ship', 10, 101, 'Duranium')] }]
     const { colonies, plan: hauls, timed } = await haulingMount()
-    const { vm, w } = await mount({ kind: 'minerals', colonies, supply: [supplyRow()], data: { plan: hauls, timed, embedded: true, populationProductionModifiers: { 10: { OverallProductionModifier: 1 } } } })
+    const { vm, w } = await mount({ kind: 'minerals', colonies, supply: [supplyRow()], data: { plan: hauls, timed, embedded: true, populationProductionModifiers: { 10: { OverallProductionModifier: DAILY_MSP_MODIFIER } } } })
 
     for (const record of records) {
       await kept(m, w, scope(), vm.reserveContext, { colonyId: 10, ...record })
@@ -1800,7 +1811,14 @@ const panel = (ctx) => {
   })
   add('component: the colonies\' supplies and production rates are read for minerals alone, the panel waits on both, and a read that fails is named and shows no figure', async () => {
     const asked = []
-    const spy = { query: async (sql) => { asked.push(sql); return [[supplyRow()]] } }
+    const spy = {
+      query: async (sql) => {
+        asked.push(sql)
+        if (sql.startsWith('select FCT_PopulationInstallations.PopID,')) return [[{ PopID: supplyRow().PopulationID, Amount: supplyRow().MaintenanceFacilities, MaintenanceValue: 1 }]]
+        if (!sql.startsWith('select rowid as CensusRowID')) return [[supplyRow()]]
+        return [sql.includes('FCT_Population.*') ? [{ ...supplyRow(), CensusRowID: 1, GameID: GAME, RaceID: RACE }] : []]
+      },
+    }
     const alone = (kind, database) => instantiate(options, { boundary, $store: PAGE_STORE, database, GameID: GAME, RaceID: RACE, data: { ...BASE_DATA, kind, loadErrors: {} } })
     const read = await alone('minerals', spy).runAsync('reserveSupply')
     const supplies = alone('supplies', spy)
@@ -1814,7 +1832,7 @@ const panel = (ctx) => {
     const rates = await mount({ kind: 'minerals', data: { loadErrors: { ...clear, populationProductionModifiers: 'no rates' } } })
     const noSupply = await mount({ kind: 'minerals', data: { loadErrors: { ...clear, reserveSupply: 'no table' } } })
 
-    return read.colonies.length === 1 && read.database === spy && read.GameID === GAME && read.RaceID === RACE && asked.length === 1 && skipped === null && nobody === null && failure === 'boom' && failing.loadErrors.reserveSupply === 'boom' && same(supplies.reserveInputs, ['reserveObjects', 'reserveClasses']) === true && waiting.vm.state.loading === true && waiting.vm.view === null && unsettled.vm.state.loading === true && unsettled.vm.view === null && rates.vm.state.failed === named('populationProductionModifiers') && rates.vm.state.error === 'no rates' && rates.vm.view === null && noSupply.vm.state.failed === named('reserveSupply') && noSupply.vm.view === null ? true : short([asked.length, failure, waiting.vm.state, unsettled.vm.state, rates.vm.state, noSupply.vm.state])
+    return read.colonies.length === 1 && read.database === spy && read.GameID === GAME && read.RaceID === RACE && asked.filter((sql) => !sql.startsWith('select rowid as CensusRowID')).length === 2 && asked.filter((sql) => sql.includes('FCT_Population.*')).length === 1 && skipped === null && nobody === null && failure === 'boom' && failing.loadErrors.reserveSupply === 'boom' && same(supplies.reserveInputs, ['reserveObjects', 'reserveClasses']) === true && waiting.vm.state.loading === true && waiting.vm.view === null && unsettled.vm.state.loading === true && unsettled.vm.view === null && rates.vm.state.failed === named('populationProductionModifiers') && rates.vm.state.error === 'no rates' && rates.vm.view === null && noSupply.vm.state.failed === named('reserveSupply') && noSupply.vm.view === null ? true : short([asked.length, failure, waiting.vm.state, unsettled.vm.state, rates.vm.state, noSupply.vm.state])
   })
   add('component: a class minimum that is not recorded for every class is shown as at least the figure, with the classes that record none', async () => {
     const { vm } = await mount({ kind: 'supplies', colonies: stock(), data: { showAll: true } })

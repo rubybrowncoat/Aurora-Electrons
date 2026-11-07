@@ -1765,7 +1765,7 @@ const defineCases = (modules) => {
   })
 
   invariant('logistics', 'a refinery or maintenance facility makes 0 where it has no installations or is off, and has no figure rather than 0 where its modifier or rate is not in the save', () => {
-    const colony = { FuelProdStatus: 1, Refineries: 4, FuelProduction: 1000, MaintenanceFacilities: 5, MSPProduction: 10, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6 }
+    const colony = { NPR: 0, MspPopulated: modules.provenance.ofRule({ rule: 'logistics.mspPopulation', value: true }), FuelProdStatus: 1, Refineries: 4, FuelProduction: 1000, MaintenanceFacilities: 5, MSPProduction: 10, MaintProdStatus: 1, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6 }
 
     assert.equal(logistics.refineryOutput(colony, 1.5).value, 6000)
     assert.equal(logistics.refineryOutput(colony, null).status, 'unavailable')
@@ -1801,7 +1801,7 @@ const defineCases = (modules) => {
     assert.equal(logistics.soriumLasts(colony, logistics.refineryOutput(colony, null)).status, 'unavailable')
     assert.equal(logistics.soriumLasts({ ...colony, FuelProdStatus: 0 }, logistics.refineryOutput({ ...colony, FuelProdStatus: 0 }, 1)).status, 'unavailable')
 
-    const make = (id) => ({ PopulationID: id, SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 1 })
+    const make = (id) => ({ PopulationID: id, NPR: 0, MspPopulated: modules.provenance.ofRule({ rule: 'logistics.mspPopulation', value: true }), SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 0, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 1 })
     const ships = [rawShip({ Size: 2, Cost: 40 })]
     const place = (colonies, modifierOf) => logistics.maintenanceLocations({ colonies, ships, modifierOf, maintenanceCapacity: 1, economicModifier: 1 })[0]
     const mixed = place([make(1), make(2)], (id) => (id === 1 ? 1 : null))

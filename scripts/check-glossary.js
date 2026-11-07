@@ -316,7 +316,7 @@ const synthetic = (m, tree) => {
     }],
 
     ['the runway of a maintenance location is the stock and spare MSP over upkeep less production, as its definitions say', async () => {
-      const colony = { PopulationID: 1, SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 100, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 50, WarningMSP: 0 }
+      const colony = { PopulationID: 1, NPR: 0, MspPopulated: provenance.ofRule({ rule: 'logistics.mspPopulation', value: true }), SystemID: 1, Xcor: 0, Ycor: 0, SystemBodyID: 1, MaintenanceFacilities: 1, MSPProduction: 10, MaintProdStatus: 1, MaintenanceStockpile: 100, Mines: 0, Duranium: 1e6, Uridium: 1e6, Gallicite: 1e6, Efficiency: 1, CapacityModifier: 1, EconomicProdModifier: 1, MaintenanceCapacity: 50, WarningMSP: 0 }
       const ship = { ShipID: 1, ShipName: 'Ship', FleetID: 1, FleetName: 'Fleet', SystemID: 1, SystemName: 'System', OrbitBodyID: 1, Xcor: 0, Ycor: 0, AssignedPopulationID: 0, ShipClassID: 1, ClassName: 'Class', Size: 1, Commercial: 0, SupplyShip: 0, MinimumSupplies: 0, ClassSupplies: 0, MaintPriority: 0, CurrentMaintSupplies: 0, MaintenanceState: 0, LastOverhaul: 0, MothershipID: 0, CarrierCommercialHangar: null, Modules: 0, Bays: 0 }
       const placeOf = (upkeep) => logistics.maintenanceLocations({ colonies: [colony], ships: [{ ...ship, Cost: upkeep * 4 }, { ...ship, ShipID: 2, FleetID: 2, Size: 0, Cost: 0, Commercial: 1, SupplyShip: 1, CurrentMaintSupplies: 5 }], modifierOf: () => 1, maintenanceCapacity: 50, economicModifier: 1 })[0]
       const { production } = placeOf(0)
@@ -484,7 +484,7 @@ const MUTATIONS = [
   ['the shortage rule wants two tons', path.join('utilities', 'colony-minerals.js'), 'if (needs - stock >= 1) {', 'if (needs - stock >= 2) {', ['a mineral shortage is']],
   ['the haul plan stops counting packets as held', path.join('utilities', 'haul-plan.js'), 'const held = mineral.stock + mineral.inbound', 'const held = mineral.stock', ['a hauling shortfall counts']],
   ['the haul plan measures the reserve against the stock alone', path.join('utilities', 'haul-plan.js'), 'mineral.reserve - Math.max(held, mineral.needs)', 'mineral.reserve - held', ['a hauling shortfall counts']],
-  ['the MSP runway divides by upkeep', path.join('utilities', 'logistics.js'), '(stock.value + supply.value) / -net', '(stock.value + supply.value) / upkeep', ['the runway of a maintenance location']],
+  ['the MSP runway divides by upkeep', path.join('utilities', 'logistics.js'), '(values.stock + values.supply) / -values.net', '(values.stock + values.supply) / upkeep', ['the runway of a maintenance location']],
   ['a location that breaks even gets a runway', path.join('utilities', 'logistics.js'), 'net === null || net >= 0 ? null', 'net === null || net > 0 ? null', ['the runway of a maintenance location']],
   ['the net MSP is taken the wrong way round', path.join('utilities', 'logistics.js'), 'compute: (values) => values.production - values.upkeep', 'compute: (values) => values.upkeep - values.production', ['the runway of a maintenance location']],
   ['the mineral runway divides by the net itself', path.join('utilities', 'mineral-outlook.js'), '/ -values[\'yearly net\']', '/ values[\'yearly net\']', ['the runway of a mineral']],

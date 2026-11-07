@@ -1,6 +1,8 @@
 // Fuel and maintenance-supply maths for the Logistics page. Sources and checks: docs/plans/aurcalcs/build-2.md § Logistics.
 
 import { crewFraction } from './crew'
+import { ZERO, add, fitsDouble, floorRatio, fromDouble, fromString, multiply, toNumber } from './decimal'
+import { loadOrbitalCensus } from './orbital-census'
 import { maintenanceClusters, shipFigures } from './maintenance-pools'
 import { roundToDecimal } from './math'
 import { fleetCommandChain } from './minerals'
@@ -26,6 +28,33 @@ const MODIFIER_TEXT = 'the colony\'s production modifier'
 
 // What a production figure lacks of the colony's modifier and the `terms` ([value, text]) it multiplies with it.
 const productionGaps = (modifier, terms) => [...(isNumber(modifier) ? [] : [MODIFIER_TEXT]), ...terms.filter(([value]) => !isNumber(value)).map(([, text]) => text)]
+
+const ONE = fromString('1')
+const wholeFacilities = (colony) => colony.MspFacilityUnits === undefined ? (isNumber(colony.MaintenanceFacilities) && fitsDouble(colony.MaintenanceFacilities) ? floorRatio(fromDouble(colony.MaintenanceFacilities), ONE) : null) : colony.MspFacilityUnits
+
+// Convert every saved installation amount before weighting and adding in decimal; keep the whole-unit count exact even when the displayed sum rounds to a nearby integer.
+export const loadMspFacilities = async (database, { GameID, RaceID, colonies }) => {
+  const [rows] = await database.query('select FCT_PopulationInstallations.PopID, FCT_PopulationInstallations.Amount, DIM_PlanetaryInstallation.MaintenanceValue from FCT_PopulationInstallations inner join FCT_Population on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID and FCT_Population.GameID = FCT_PopulationInstallations.GameID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = :GameID and FCT_Population.RaceID = :RaceID order by FCT_PopulationInstallations.rowid', { replacements: { GameID, RaceID } })
+  const sums = new Map()
+
+  for (const row of rows) {
+    if (row.MaintenanceValue === 0) continue
+    const before = sums.has(row.PopID) ? sums.get(row.PopID) : ZERO
+
+    try {
+      sums.set(row.PopID, before !== null && isNumber(row.Amount) && isNumber(row.MaintenanceValue) ? add(before, multiply(fromDouble(row.Amount), fromDouble(row.MaintenanceValue))) : null)
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error
+      sums.set(row.PopID, null)
+    }
+  }
+
+  return colonies.map((colony) => {
+    const sum = sums.has(colony.PopulationID) ? sums.get(colony.PopulationID) : ZERO
+
+    return { ...colony, MaintenanceFacilities: sum === null ? null : toNumber(sum), MspFacilityUnits: sum === null ? null : floorRatio(sum, ONE) }
+  })
+}
 
 // L/yr while production is on: refineries x racial rate x the colony's production modifier, as a 'logistics.refineryOutput' result. A colony with no refineries or with production off makes 0 whatever else is missing; one whose switch, refineries, rate or modifier is not in the save has no figure. Matches the game's mineral ledger (Sorium for fuel refining) on every sample colony.
 export const refineryOutput = (colony, modifier) => {
@@ -66,17 +95,65 @@ export const soriumLasts = (colony, output) => {
   return combine({ rule, parts: { output }, compute: (values) => colony.Sorium / (values.output / LITRES_PER_TON), inputs: { present: ['the colony\'s Sorium stock'] } })
 }
 
-// MSP/yr the facilities make while production is on, as a 'logistics.mspProduction' result; a colony with no facilities makes 0 whatever else is missing. Also ledger-checked.
+// MSP/yr from whole facility units at the current rate; truncate the weighted unit sum before multiplying by the racial rate, modifier and MSP per BP. Fewer than one unit makes zero even when another production input is missing.
 export const mspProduction = (colony, modifier) => {
   const rule = 'logistics.mspProduction'
+  const facilities = wholeFacilities(colony)
 
-  if (colony.MaintenanceFacilities === 0) {
-    return ofRule({ rule, value: 0, inputs: { present: ['the colony has no maintenance facilities'] } })
+  if (facilities === 0) {
+    return ofRule({ rule, value: 0, inputs: { present: ['the colony has no whole maintenance facility units'] } })
   }
 
-  const missing = productionGaps(modifier, [[colony.MaintenanceFacilities, 'the colony\'s maintenance facilities'], [colony.MSPProduction, 'the race\'s maintenance production rate']])
+  const missing = productionGaps(modifier, [[facilities, 'the colony\'s maintenance facilities'], [colony.MSPProduction, 'the race\'s maintenance production rate']])
 
-  return missing.length ? unavailable({ rule, missing }) : ofRule({ rule, value: colony.MaintenanceFacilities * colony.MSPProduction * MSP_PER_BP * modifier, inputs: { present: [MODIFIER_TEXT, 'the colony\'s maintenance facilities', 'the race\'s maintenance production rate'] } })
+  return missing.length ? unavailable({ rule, missing }) : ofRule({ rule, value: facilities * colony.MSPProduction * MSP_PER_BP * modifier, inputs: { present: [MODIFIER_TEXT, 'the colony\'s maintenance facilities', 'the race\'s maintenance production rate'] } })
+}
+
+// NPR producers share their capital's minerals; these loaders do not provide that shared allocation.
+export const mspStockGaps = (colony) => colony.NPR === 1 || colony.NPR === true ? ['the shared NPR capital mineral stock and its allocation across producing colonies'] : colony.NPR === 0 || colony.NPR === false ? [] : ['whether the race is an NPR']
+
+// Actual output consumes the shared census gate, never a fresh surface-only or synthetic orbital total.
+export const mspPopulated = (colony) => colony.MspPopulated || unavailable({ rule: 'logistics.mspPopulation', missing: ['the colony\'s shared population census'] })
+
+// Actual production before the mineral draw; the potential rate remains mspProduction.
+export const mspActiveProduction = (colony, modifier) => {
+  const rule = 'logistics.mspProduction'
+  const populated = mspPopulated(colony)
+
+  if (colony.MaintProdStatus === 0) {
+    return ofRule({ rule, value: 0, inputs: { present: ['maintenance production is off'] } })
+  } else if (valueOrNull(populated) === false) {
+    return combine({ rule, parts: { populated }, compute: () => 0 })
+  } else if (!isNumber(colony.MaintProdStatus)) {
+    return unavailable({ rule, missing: ['whether maintenance production is on'] })
+  }
+
+  const production = mspProduction(colony, modifier)
+
+  return production.value === 0 ? production : combine({ rule, parts: { populated, production }, compute: (values) => values.populated ? values.production : 0 })
+}
+
+// Read the shared census once and retain both its population decision and selected-race attribution.
+export const loadMspPopulation = async (database, { GameID, RaceID, colonies }) => {
+  const census = await loadOrbitalCensus(database, { GameID, RaceID })
+  const rule = 'logistics.mspPopulation'
+
+  return colonies.map((colony) => {
+    const entry = census.get(colony.PopulationID)
+    let populated
+
+    if (!entry) {
+      populated = unavailable({ rule, missing: ['the colony\'s shared population census'] })
+    } else if (valueOrNull(entry.hasPopulation) === false) {
+      populated = combine({ rule, parts: { population: entry.hasPopulation }, compute: () => false })
+    } else {
+      const attribution = entry.raceMatches === true ? ofRule({ rule, value: true, inputs: { present: ['the colony belongs to the selected race'] } }) : unavailable({ rule, missing: ['the colony\'s race'] })
+
+      populated = combine({ rule, parts: { population: entry.hasPopulation, attribution }, compute: (values) => values.population && values.attribution })
+    }
+
+    return { ...colony, MspPopulated: populated }
+  })
 }
 
 // MSP a year the colony's present stock of each input mineral allows, null where the stockpile is not in the save. Mines on the colony's body add nothing here: a mine digs a finite amount a year from a deposit that may be slow or spent, so it is never read as unlimited supply (`allocateMsp`, msp-supply.js, counts what mining, packets and hauls add and when).
@@ -84,9 +161,9 @@ const mspMineralLimits = (colony) => MSP_MINERALS.map((mineral) => ({ name: mine
 
 // The input mineral whose present stock holds a producing colony furthest below its production (the first on a tie), null while production or a stockpile is not known or no mineral holds it below production.
 export const mspLimitingMineral = (colony, modifier) => {
-  const production = mspProduction(colony, modifier)
+  const production = mspActiveProduction(colony, modifier)
 
-  if (!colony.MaintProdStatus || !isAvailable(production)) {
+  if (!colony.MaintProdStatus || mspStockGaps(colony).length || !isAvailable(production)) {
     return null
   }
 
@@ -105,13 +182,18 @@ export const mspLimitingMineral = (colony, modifier) => {
 export const mspOutput = (colony, modifier) => {
   const rule = 'logistics.mspOutput'
 
-  if (!isNumber(colony.MaintProdStatus)) {
-    return unavailable({ rule, missing: ['whether maintenance production is on'] })
-  } else if (!colony.MaintProdStatus) {
-    return ofRule({ rule, value: 0, inputs: { present: ['maintenance production is off'] } })
+  const production = mspActiveProduction(colony, modifier)
+
+  if (!isAvailable(production) || production.value === 0) {
+    return combine({ rule, parts: { production }, compute: (values) => values.production })
   }
 
-  const production = mspProduction(colony, modifier)
+  const stockGaps = mspStockGaps(colony)
+
+  if (stockGaps.length) {
+    return unavailable({ rule, missing: stockGaps })
+  }
+
   const limits = mspMineralLimits(colony)
   const unknown = limits.filter((limit) => limit.msp === null).map((limit) => `the colony's stock of ${limit.name}`)
 
@@ -124,9 +206,16 @@ export const mspOutput = (colony, modifier) => {
 
 // The input minerals that hold a producing colony below full production; none while its production or a stockpile is not known.
 export const mspMineralShortfall = (colony, modifier) => {
-  const production = mspProduction(colony, modifier)
+  const production = mspActiveProduction(colony, modifier)
 
-  return colony.MaintProdStatus && isAvailable(production) ? mspMineralLimits(colony).filter(({ msp }) => msp !== null && msp < production.value).map(({ name }) => name) : []
+  return colony.MaintProdStatus && !mspStockGaps(colony).length && isAvailable(production) ? mspMineralLimits(colony).filter(({ msp }) => msp !== null && msp < production.value).map(({ name }) => name) : []
+}
+
+// Keep the missing actual-output inputs when every colony is unavailable, rather than replacing them with an unnamed missing total.
+const mspOutputTotal = (outputs) => {
+  const total = totalOf('logistics.mspOutput', outputs, 'colonies')
+
+  return total.unknown && !isAvailable(total.result) ? { ...total, result: unavailable({ rule: 'logistics.mspOutput', missing: [...new Set(outputs.flatMap((output) => output.inputs.missing))] }) } : total
 }
 
 // Tons the colony's facilities can maintain (docs `maintenance`, rule 6), as a number or null while any of its factors is not in the save (a colony with no facilities maintains 0 whatever else is missing). Never negative: a bombarded or rioting colony's modifier bottoms out at zero. The race's economic modifier is not a factor of the capacity: it multiplies the coverage of the tonnage there (`maintenanceLocations`).
@@ -188,12 +277,12 @@ export const maintenanceLocations = ({ colonies, ships, modifierOf, maintenanceC
     const upkeep = valueOrNull(upkeepResult)
     const outputs = location.colonies.map((colony) => mspOutput(colony, modifierOf(colony.PopulationID)))
     const potentials = location.colonies.map((colony) => mspProduction(colony, modifierOf(colony.PopulationID)))
-    const made = totalOf('logistics.mspOutput', outputs, 'colonies')
+    const made = mspOutputTotal(outputs)
     const possible = totalOf('logistics.mspProduction', potentials, 'colonies')
     const potential = valueOrNull(possible.result)
     const production = valueOrNull(made.result)
     // Output lost to input minerals running short, and which minerals.
-    const blocked = location.colonies.reduce((total, colony, index) => total + (colony.MaintProdStatus && isAvailable(potentials[index]) && isAvailable(outputs[index]) ? potentials[index].value - outputs[index].value : 0), 0)
+    const blocked = location.colonies.reduce((total, colony, index) => total + (colony.MaintProdStatus && valueOrNull(mspPopulated(colony)) === true && isAvailable(potentials[index]) && isAvailable(outputs[index]) ? potentials[index].value - outputs[index].value : 0), 0)
     const missing = [...new Set(location.colonies.flatMap((colony) => mspMineralShortfall(colony, modifierOf(colony.PopulationID))))]
     const stock = columnTotal(STOCK_RULE, location.colonies, 'MaintenanceStockpile', 'the colony\'s maintenance stockpile', 'colonies')
     const supplyRows = rows.filter((row) => row.designated !== false)
@@ -203,7 +292,7 @@ export const maintenanceLocations = ({ colonies, ships, modifierOf, maintenanceC
     const net = valueOrNull(netResult)
     const stockGaps = [stock.gap, supply.gap].filter(Boolean)
     // Years until the colonies' stock and the supply ships' stock run out; none to give while the net is not negative, unavailable while the stock is not whole.
-    const runwayResult = net === null || net >= 0 ? null : stockGaps.length ? unavailable({ rule: LOCATION_RULE, missing: stockGaps }) : ofRule({ rule: LOCATION_RULE, value: (stock.value + supply.value) / -net, inputs: { present: ['the stock and the supply ships\' stock', 'the net MSP a year'] } })
+    const runwayResult = net === null || net >= 0 ? null : stockGaps.length ? unavailable({ rule: LOCATION_RULE, missing: stockGaps }) : combine({ rule: LOCATION_RULE, parts: { stock: stock.result, supply: supply.result, net: netResult }, compute: (values) => (values.stock + values.supply) / -values.net, inputs: { present: ['the stock and the supply ships\' stock', 'the net MSP a year'] } })
 
     return {
       ...location,
@@ -247,7 +336,7 @@ export const maintenanceLocations = ({ colonies, ships, modifierOf, maintenanceC
 export const maintenanceSupplyTotals = (locations, modifierOf) => {
   const colonies = [...new Map(locations.flatMap((location) => location.colonies).map((colony) => [colony.PopulationID, colony])).values()]
   const ships = [...new Map(locations.flatMap((location) => location.shipRows).map((ship) => [ship.ShipID, { ...ship, ...shipFigures(ship) }])).values()]
-  const made = totalOf('logistics.mspOutput', colonies.map((colony) => mspOutput(colony, modifierOf(colony.PopulationID))), 'colonies')
+  const made = mspOutputTotal(colonies.map((colony) => mspOutput(colony, modifierOf(colony.PopulationID))))
   const possible = totalOf('logistics.mspProduction', colonies.map((colony) => mspProduction(colony, modifierOf(colony.PopulationID))), 'colonies')
   const stock = columnTotal(STOCK_RULE, colonies, 'MaintenanceStockpile', 'the colony\'s maintenance stockpile', 'colonies')
   const supply = columnTotal(STOCK_RULE, ships.filter((ship) => ship.designated !== false), 'SupplyMSP', 'the stock of the supply ships', 'ships', ['SupplyUnknown'])
@@ -490,11 +579,21 @@ registerRule({
 
 registerRule({
   id: 'logistics.mspProduction',
-  versions: ['2.7.x'],
+  versions: LOGISTICS_VERSIONS,
   units: 'MSP/yr',
   verification: 'confirmed',
   structure: ['FCT_Population.MaintenanceFacilities, MSPProduction, MaintProdStatus', 'the colony\'s production modifier'],
-  note: `Facilities times the racial rate times 4 MSP per BP times the production modifier, while production is on; ${LEDGER}.`,
+  note: 'Each saved installation amount is converted to decimal before weighting and summation. The weighted maintenance facility sum is truncated once to a whole count before multiplying by the racial BP rate, 4 MSP per BP and the production modifier. Whether production is on and what the available minerals allow are applied separately to the output.',
+})
+
+registerRule({
+  id: 'logistics.mspPopulation',
+  versions: LOGISTICS_VERSIONS,
+  units: '',
+  verification: 'estimated',
+  structure: ['population.orbitalCensus', 'the colony\'s selected-race attribution'],
+  note: 'Maintenance supply production runs only while the shared surface plus orbital population census proves a positive population belonging to the selected race. An undecided census or race leaves actual output unavailable unless production is independently excluded.',
+  assumptions: ['The shared census holds saved positions and assignments fixed; population stays at its present level'],
 })
 
 registerRule({
@@ -502,9 +601,9 @@ registerRule({
   versions: LOGISTICS_VERSIONS,
   units: 'MSP/yr',
   verification: 'estimated',
-  structure: ['FCT_Population stockpiles of the input minerals'],
-  note: 'The production figure (the maintenance supply production rule) held to what the present stock of the input minerals allows, naming the mineral that limits it. Mines on the colony\'s body are not read as unlimited supply: what mining, packets and hauls add, and when, is the supplied output of the incoming minerals, kept apart from this figure.',
-  assumptions: ['Only the colony\'s present stockpile supplies the input minerals'],
+  structure: ['FCT_Population stockpiles and surface population', 'FCT_Race.NPR', 'the Ark ships\' orbital population'],
+  note: 'With production on and surface plus orbital population positive, a player race\'s production is held to what the present input mineral stock allows, naming the limiting mineral. An NPR needs the shared capital mineral stock and its allocation across producing colonies, which this forecast does not read. Mining, packets and hauls are kept apart from this figure.',
+  assumptions: ['Only the present stockpile supplies the input minerals'],
 })
 
 registerRule({
@@ -546,11 +645,11 @@ registerRule({
 
 registerRule({
   id: 'logistics.maintenanceLocation',
-  versions: ['2.7.x'],
+  versions: LOGISTICS_VERSIONS,
   units: 'MSP/yr, t, years',
   verification: 'estimated',
   structure: ['FCT_Fleet.Xcor, Ycor, SystemID', 'FCT_ShipClass.Commercial, Size', 'FCT_Population maintenance columns', 'logistics.maintenancePool'],
-  note: 'Capacity, upkeep, net MSP and runway of the ships and colonies of one maintenance location, grouped as the game groups them. The documentation\'s worked example (100 kt in orbit against 80 kt of capacity gives 80 %) is reproduced; the figures are not compared with a stored total.',
+  note: 'Capacity, upkeep, net MSP and runway of the ships and colonies of one maintenance location, grouped as the game groups them. Ship upkeep is scaled by coverage. Runway divides the stock and supply ships\' stock by upkeep less the mineral-limited output from whole facility units; the production and stock results remain part of the estimate.',
   assumptions: ['Ships use the supplies of their location: its colonies, then its supply ships, then their own', 'A ship in a military hangar needs none'],
 })
 

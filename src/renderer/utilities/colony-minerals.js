@@ -153,10 +153,27 @@ export const worstState = (minerals) => {
 }
 
 // What each colony's queue still needs, by PopulationID: its industrial projects (per unit, times the units left; paused and queued ones too) and its shipyard tasks (their full cost, times the share of build points left). A scrap task needs nothing: the game neither checks the stock against its mineral figures nor spends them, and the other task types (construction, repair, refit) draw them. A term that cannot be worked out (a cost, an amount, the build points or the task type not recorded) is null and counted in the row's `Missing<mineral>`, so `colonyMineralResults` can tell a partial sum from a complete one.
-export const loadQueueNeeds = async (database, { GameID, RaceID }) => {
-  const [rows] = await database.query(`select VIR_Needs.PopulationID, ${sums('VIR_Needs')}, ${missingTerms('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, ${NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${GameID} and FCT_IndustrialProjects.RaceID = ${RaceID} union all select FCT_ShipyardTask.PopulationID, ${NAMES.map((name) => `case when FCT_ShipyardTask.TaskTypeID is null then null else FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP end as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} and (FCT_ShipyardTask.TotalBP is null or FCT_ShipyardTask.TotalBP > 0) and (FCT_ShipyardTask.TaskTypeID is null or FCT_ShipyardTask.TaskTypeID <> ${SCRAP_TASK})) as VIR_Needs group by VIR_Needs.PopulationID`)
+// With `byPhase`, retain the industrial/shipyard position around the mass-driver launch for the MSP ledger, beside the unchanged combined needs used by the haul planner.
+export const loadQueueNeeds = async (database, { GameID, RaceID, byPhase = false }) => {
+  const [rows] = await database.query(`select VIR_Needs.PopulationID, ${byPhase ? 'VIR_Needs.Phase, ' : ''}${sums('VIR_Needs')}, ${missingTerms('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, 'industrial' as Phase, ${NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${GameID} and FCT_IndustrialProjects.RaceID = ${RaceID} union all select FCT_ShipyardTask.PopulationID, 'shipyard' as Phase, ${NAMES.map((name) => `case when FCT_ShipyardTask.TaskTypeID is null then null else FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP end as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} and (FCT_ShipyardTask.TotalBP is null or FCT_ShipyardTask.TotalBP > 0) and (FCT_ShipyardTask.TaskTypeID is null or FCT_ShipyardTask.TaskTypeID <> ${SCRAP_TASK})) as VIR_Needs group by VIR_Needs.PopulationID${byPhase ? ', VIR_Needs.Phase' : ''}`)
 
-  return byPopulation(rows)
+  if (!byPhase) {
+    return byPopulation(rows)
+  }
+
+  const combined = {}
+
+  rows.forEach((row) => {
+    const total = combined[row.PopulationID] || { PopulationID: row.PopulationID }
+
+    NAMES.forEach((name) => {
+      total[name] = row[name] === null ? total[name] ?? null : (total[name] ?? 0) + row[name]
+      total[`Missing${name}`] = (total[`Missing${name}`] ?? 0) + row[`Missing${name}`]
+    })
+    combined[row.PopulationID] = total
+  })
+
+  return { combined: Object.freeze(combined), industrial: byPopulation(rows.filter((row) => row.Phase === 'industrial')), shipyard: byPopulation(rows.filter((row) => row.Phase === 'shipyard')) }
 }
 
 // Mass-driver packets in flight, by the PopulationID they are bound for, with each mineral's null terms counted in `Missing<mineral>`. A packet keeps the race that launched it when its destination changes hands and still lands there, so the race's packets are those it launched and those bound for one of its colonies in the game.
