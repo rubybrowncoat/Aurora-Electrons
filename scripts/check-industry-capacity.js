@@ -88,6 +88,68 @@ const CASES = [
     assert.equal(training.find((row) => row.id === 'colony:2').cells.staffed, '0.5')
     assert.ok(training.find((row) => row.id === 'colony:5').unevaluated)
   })],
+  ['decimal-factory-queries', async (m) => withIndustrialDatabase(async (database, exec) => {
+    await exec(`
+      delete from FCT_PopulationInstallations;
+      delete from FCT_Population;
+      delete from DIM_PlanetaryInstallation;
+      insert into DIM_PlanetaryInstallation values (1,1,1,1,0,0),(2,0.5,0.5,0.5,0,0),(3,0.9999999999999999,0.9999999999999999,0.9999999999999999,0,0),(4,null,null,null,0,0),${Array.from({ length: 10 }, (_, index) => `(${index + 20},1,1,1,0,0)`).join(',')};
+      insert into FCT_Population values ${Array.from({ length: 19 }, (_, index) => `(${index + 1},1,1,'Colony ${index + 1}',10,1,1,1)`).join(',')};
+      insert into FCT_PopulationInstallations values (1,1,0.9999999999999999,1),(2,1,0.9,1),(3,1,1,1),(4,1,1.5,1),(5,3,1,1),${Array.from({ length: 10 }, (_, index) => `(6,${index + 20},0.1,1)`).join(',')},(7,1,null,1),(8,4,1,1),(9,1,1,1),(9,4,1,1),(10,1,1,1),(10,2,null,1),(11,1,1,1),(12,1,1,1),(13,1,1,1),(14,1,1,1),(15,1,1,1),(16,1,1,1),(17,4,1,1),(18,999,1,1),(19,2,1.5,1);
+    `)
+    for (const [key, type] of [['free-construction-capacity', 0], ['free-ordnance-capacity', 1], ['free-fighter-capacity', 2]]) {
+      await exec(`
+        delete from FCT_IndustrialProjects;
+        insert into FCT_IndustrialProjects (ProjectID,GameID,RaceID,PopulationID,Queue,ProductionType,Percentage) values (11,1,1,11,0,${type},null),(12,1,1,12,null,${type},50),(13,1,1,13,0,null,50),(14,1,1,14,0,${type},100),(15,1,1,15,0,${type},99.99997),(16,1,1,16,0,${type},99.9999),(17,1,1,17,0,${type},100);
+      `)
+      const rows = await m['utilities/warnings/industry'].checks.find((check) => check.key === key).read({ database, GameID: 1, RaceID: 1, count: String })
+      const ids = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, ...(type === 0 ? [] : [15]), 16, 18]
+      assert.deepEqual(rows.map((row) => row.id), ids.map((id) => `colony:${id}`), key)
+      for (const id of [1, 3, 4, 5, 6, 16]) {
+        const row = rows.find((row) => row.id === `colony:${id}`)
+        assert.equal(row.cells.installations, '1', `${key}: decimal whole category at colony ${id}`)
+        assert.ok(!row.unevaluated, `${key}: known capacity at colony ${id}`)
+      }
+      assert.equal(rows.find((row) => row.id === 'colony:1').cells.free, '100%')
+      for (const id of [7, 8, 18]) {
+        const row = rows.find((row) => row.id === `colony:${id}`)
+        assert.ok(row.unevaluated, `${key}: unread count at colony ${id}`)
+        assert.ok(row.cells.installations.result, `${key}: unread count is not zero at colony ${id}`)
+      }
+      for (const id of [9, 10]) {
+        const row = rows.find((row) => row.id === `colony:${id}`)
+        assert.ok(!row.unevaluated, `${key}: known subtotal proves productive presence at colony ${id}`)
+        assert.ok(row.cells.installations.result, `${key}: productive presence does not fill a count gap at colony ${id}`)
+      }
+      for (const id of [11, 12, 13]) assert.ok(rows.find((row) => row.id === `colony:${id}`).unevaluated, `${key}: unread project input at colony ${id}`)
+    }
+  })],
+  ['decimal-training-query', async (m) => withIndustrialDatabase(async (database, exec) => {
+    await exec(`
+      delete from FCT_PopulationInstallations;
+      delete from FCT_Population;
+      insert into FCT_Population values ${Array.from({ length: 12 }, (_, index) => `(${index + 1},1,1,'Colony ${index + 1}',10,1,1,1)`).join(',')};
+      insert into FCT_PopulationInstallations values (1,17,0.9999999999999999,1),(2,17,0.9,1),(3,17,1,1),(4,17,1.5,1),(5,17,null,1),(6,17,1,1),(7,17,1,1),(8,17,1,1),(9,17,1,1),(10,null,1,1),(11,17,1,1),(12,17,1,1);
+      update FCT_Population set Population = 0 where PopulationID = 6;
+      update FCT_Population set Efficiency = null where PopulationID = 7;
+      update FCT_Population set Population = null where PopulationID = 9;
+      insert into FCT_GroundUnitTraining values (8,1,1,null),(11,1,1,100),(12,1,1,50);
+    `)
+    const rows = await m['utilities/warnings/industry'].checks.find((check) => check.key === 'idle-ground-training').read({ database, GameID: 1, RaceID: 1, count: String })
+    assert.deepEqual(rows.map((row) => row.id).sort(), [1, 3, 4, 5, 7, 8, 9, 10, 12].map((id) => `colony:${id}`).sort())
+    for (const id of [1, 3, 4]) {
+      const row = rows.find((row) => row.id === `colony:${id}`)
+      assert.equal(row.cells.staffed, '1')
+      assert.equal(row.cells.idle, '1')
+      assert.ok(!row.unevaluated)
+    }
+    assert.equal(rows[0].id, 'colony:1')
+    assert.equal(rows.find((row) => row.id === 'colony:1').cells.installed, '0.9999999999999999')
+    assert.equal(rows.find((row) => row.id === 'colony:4').cells.installed, '1.5')
+    assert.equal(rows.find((row) => row.id === 'colony:12').cells.idle, '0.5')
+    for (const id of [5, 7, 8, 9, 10]) assert.ok(rows.find((row) => row.id === `colony:${id}`).unevaluated, `unread training input at colony ${id}`)
+    assert.ok(rows.find((row) => row.id === 'colony:5').cells.staffed.result)
+  })],
   ['effective-training', (m) => {
     const production = m['utilities/production']
     const capacity = production.trainingCapacity({ OverallGroundUnitModifier: 10 }, { TrainingFacilities: 1.5 })
@@ -126,16 +188,18 @@ const FAULTS = [
   { name: 'read a different installation as a GFCC', target: 'utilities/production', from: 'export const GFCC_INSTALLATION = 17', to: 'export const GFCC_INSTALLATION = 18', fails: 'installation-queries' },
   { name: 'count an unrelated training-value installation', target: 'pages/production', from: 'FCT_PopulationInstallations.PlanetaryInstallationID = ${GFCC_INSTALLATION} then FCT_PopulationInstallations.Amount', to: 'FCT_PopulationInstallations.PlanetaryInstallationID > 0 then FCT_PopulationInstallations.Amount', fails: 'installation-queries' },
   { name: 'lose the saved pause flag in the actual query', target: 'pages/mineral-outlook', from: 'FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause, FCT_IndustrialProjects.Amount', to: 'FCT_IndustrialProjects.Queue, null as Pause, FCT_IndustrialProjects.Amount', fails: 'queue-page-read' },
-  { name: 'retain fractional productive factory totals', target: 'utilities/warnings/industry', from: 'cast(coalesce(sum(case when DIM_PlanetaryInstallation.${value} > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.${value} else 0 end), 0) as integer)', to: 'coalesce(sum(case when DIM_PlanetaryInstallation.${value} > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.${value} else 0 end), 0)', fails: 'installation-queries' },
-  { name: 'omit factory category weights', target: 'utilities/warnings/industry', from: 'FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.${value}', to: 'FCT_PopulationInstallations.Amount', fails: 'installation-queries' },
-  { name: 'staff raw rather than whole complexes', target: 'utilities/warnings/industry', from: 'cast(VIR_Complexes.Installed as integer) * FCT_Population.Efficiency', to: 'VIR_Complexes.Installed * FCT_Population.Efficiency', fails: 'installation-queries' },
+  { name: 'retain fractional productive factory totals', target: 'utilities/warnings/industry', from: 'wholeCapacity(null, population.CapacityTerms)', to: 'JSON.parse(population.CapacityTerms).reduce((total, term) => total + (term === null ? 0 : Number(term[0]) * Number(term[1])), 0)', fails: 'installation-queries' },
+  { name: 'omit factory category weights', target: 'utilities/warnings/industry', from: 'capacityTerms(`DIM_PlanetaryInstallation.${value}`,', to: "capacityTerms('1',", fails: 'installation-queries' },
+  { name: 'staff raw rather than whole complexes', target: 'utilities/warnings/industry', from: 'wholeCapacity(population.Installed)', to: 'population.Installed', fails: 'installation-queries' },
+  { name: 'truncate binary factory totals before decimal conversion', target: 'utilities/warnings/industry', from: 'wholeCapacity(null, population.CapacityTerms)', to: 'Math.trunc(JSON.parse(population.CapacityTerms).reduce((total, term) => total + (term === null ? 0 : Number(term[0]) * Number(term[1])), 0))', fails: 'decimal-factory-queries' },
+  { name: 'truncate binary GFCC amounts before decimal conversion', target: 'utilities/warnings/industry', from: 'wholeCapacity(population.Installed)', to: 'Math.trunc(population.Installed)', fails: 'decimal-training-query' },
 ]
 /* eslint-enable no-template-curly-in-string */
 const MODULES = ['utilities/minerals', 'utilities/production', 'utilities/mineral-outlook', 'utilities/provenance', 'utilities/warnings/industry', 'pages/production', 'pages/mineral-outlook', 'utilities/glossary']
 const failuresOf = async (m) => {
   const failures = []
   for (const [name, run] of CASES) {
-    try { await run(m) } catch (error) { failures.push({ name, message: error.message }) }
+    try { await run(m) } catch (error) { failures.push({ name, message: error.message, assertion: error.code === 'ERR_ASSERTION' }) }
   }
   return failures
 }
@@ -151,7 +215,7 @@ const main = async () => {
     const parts = text.split(fault.from)
     assert.equal(parts.length, 2, fault.name)
     const broken = await failuresOf(await loadModules(MODULES, { stubs: STUBS, modules: MODULE_STUBS, sources: { [fault.target]: parts.join(fault.to) } }))
-    const caught = !head.length && broken.some((entry) => entry.name === fault.fails)
+    const caught = !head.length && broken.some((entry) => entry.name === fault.fails && entry.assertion)
     checks++
     if (!caught) failures++
     console.log(`${caught ? 'PASS' : 'FAIL'}  caught ${fault.name}`)
