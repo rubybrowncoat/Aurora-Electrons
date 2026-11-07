@@ -3,7 +3,7 @@
 import { TARGET_STATES, targetOf } from './cmc-policy'
 import { crewFraction } from './crew'
 import { countText } from './math'
-import { withinOrbitalReach } from './minerals'
+import { wholeCapacity, withinOrbitalReach } from './minerals'
 import { registerRule, ruleSupports } from './provenance'
 
 const SITE_VERSIONS = ['3.2.x']
@@ -32,9 +32,9 @@ registerRule({
   versions: SITE_VERSIONS,
   units: 'verdict',
   verification: 'estimated',
-  structure: ['FCT_Fleet.OrbitBodyID, AssignedPopulationID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter, MineProduction', 'FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew, MiningModules', 'FCT_ClassComponent', 'FCT_DamagedComponent'],
-  note: 'Orbital mining modules add to the output of the race\'s colony on the body the fleet is at, when the fleet is assigned to that colony (an unassigned fleet is assigned to it), the body is no wider than the race\'s orbital mining limit and has a deposit; each undamaged module works at the share of the class crew aboard, so a ship with no crew aboard mines nothing. Read from the game\'s rules; the migrated Galactic Shogunate save has no orbital miner, so those cases are worked on rows changed in memory.',
-  assumptions: ['A fleet assigned to a colony that no longer exists is treated as unassigned.', 'Only fleets without move orders are judged; one with orders is moving or about to.'],
+  structure: ['FCT_Fleet.Xcor, Ycor, AssignedPopulationID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Xcor, Ycor, Radius', 'FCT_Race.MaximumOrbitalMiningDiameter, MineProduction', 'FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew, MiningModules', 'FCT_ClassComponent', 'FCT_DamagedComponent'],
+  note: 'Orbital mining uses same-race colonies within strictly less than one coordinate unit on each axis, without a system restriction; saved orbit-body IDs do not select the site. A matching saved assignment is kept, otherwise an unassigned fleet can join a unique nearby colony. Unread fleet or colony coordinates leave every otherwise possible association unknown. The body must fit the orbital mining diameter limit and have a deposit; undamaged modules work at the crew share. The migrated fixture has no orbital miner, so distinguishing cases use planted rows.',
+  assumptions: ['A fleet assigned to a colony that no longer exists is treated as unassigned.', 'Only fleets without move orders are judged; one with orders is moving or about to.', 'Saved positions and assignments are held fixed. Several coordinate-close colonies without a matching saved assignment leave the association unknown because the next colony-processing order is not stored.'],
 })
 
 registerRule({
@@ -71,6 +71,9 @@ const flag = (value) => (value === 1 || value === true ? 1 : value === 0 || valu
 
 // Whether a sum over installations is above 0: known when it is, or when no installation is unreadable.
 export const positive = (sum, gaps) => (known(sum) && sum > 0 ? 1 : known(sum) && !(gaps > 0) ? 0 : null)
+
+// Each mining category and driver total is cut to whole capacity before its productive presence is tested.
+const productive = (sum, gaps, terms) => positive(known(sum) ? wholeCapacity(sum, terms) : sum, gaps)
 
 // A prerequisite: `verdict` 1 (met), 0 (missing) or null (not known). One that rests on a rule tied to the formula version is `supported` only on a save that has one, and unknown on any other; `missing` is the text when it is lacking, `unknown` the text when not known and `inputs` the stored values that decide it.
 const prerequisite = (key, owner, verdict, { missing, unknown, inputs, supported = true }) => {
@@ -116,9 +119,9 @@ const DRIVER_INPUT = 'the amount or the type of an installation of the colony'
 
 // Whether a colony's mass drivers deliver to the destination it names: drivers here and, at a destination of the race in the same system, drivers there too. `target` is the destination's state (cmc-policy.js `targetOf`), `verdict` 1, 0 or null while a driver amount or the destination is not known.
 const driveOut = (row, RaceID) => {
-  const drivers = positive(row.Drivers, row.DriverGaps)
+  const drivers = productive(row.Drivers, row.DriverGaps, row.DriverTerms)
   const target = targetOf(row, RaceID)
-  const receiver = target === 'valid' ? positive(row.DestinationDrivers, row.DestinationGaps) : null
+  const receiver = target === 'valid' ? productive(row.DestinationDrivers, row.DestinationGaps, row.DestinationDriverTerms) : null
 
   return { drivers, target, receiver, verdict: target === null ? (drivers === 0 ? 0 : null) : target === 'valid' ? all(drivers, receiver) : 0 }
 }
@@ -151,12 +154,13 @@ const deliveryOf = (row, { RaceID, supported, senders }) => {
 }
 
 const surfaceOf = (row, { supported, count }) => {
-  const manned = positive(row.Manned, row.MineGaps)
-  const automated = positive(row.Automated, row.MineGaps)
-  const civilian = positive(row.Civilian, row.MineGaps)
+  const manned = productive(row.Manned, row.MineGaps, row.MannedTerms)
+  const automated = productive(row.Automated, row.MineGaps, row.AutomatedTerms)
+  const civilian = productive(row.Civilian, row.MineGaps, row.CivilianTerms)
   const capacity = any(manned, automated, civilian)
+  const installed = any(positive(row.Manned, row.MineGaps), positive(row.Automated, row.MineGaps), positive(row.Civilian, row.MineGaps))
 
-  if (capacity === 0) {
+  if (installed === 0) {
     return null
   }
 
@@ -167,12 +171,12 @@ const surfaceOf = (row, { supported, count }) => {
   const staffing = prerequisite('staffing', 'colony', manned === 0 ? 1 : efficiency, { missing: 'No workforce for the manned mines (the colony\'s efficiency is 0)', unknown: 'The colony\'s workforce is not known', inputs: ['the colony\'s efficiency'], supported: supported.surface })
   const common = all(...[deposit, radiation, production].map(verdictOf))
   const mannedWorks = all(manned, verdictOf(staffing))
-  const outputWorks = all(common, any(mannedWorks, automated))
-  const surfaceWorks = all(common, any(mannedWorks, automated, civilian))
+  const outputWorks = all(capacity, common, any(mannedWorks, automated))
+  const surfaceWorks = all(capacity, common, any(mannedWorks, automated, civilian))
 
   return {
-    prerequisites: [deposit, radiation, production, ...(manned === 0 ? [] : [staffing])],
-    idle: all(capacity, any(not(common), all(manned, not(verdictOf(staffing))))),
+    prerequisites: [deposit, radiation, production, ...(capacity === 1 ? [] : [prerequisite('capacity', 'colony', capacity, { missing: 'No whole unit of capacity in any mining category', unknown: 'The effective mining capacity is not known', inputs: [CAPACITY_INPUT], supported: supported.surface })]), ...(manned === 0 ? [] : [staffing])],
+    idle: all(installed, any(not(capacity), not(common), all(manned, not(verdictOf(staffing))))),
     works: surfaceWorks,
     outputWorks,
   }
@@ -188,9 +192,12 @@ const colonySites = (rows, fleets, options) => {
   const sendersBy = {}
 
   fleets.forEach((fleet) => {
-    if (fleet.colonyId !== null) {
-      ;(orbitalBy[fleet.colonyId] = orbitalBy[fleet.colonyId] || []).push(fleet)
-    }
+    const possible = fleet.row.LocationUnknown && fleet.row.LocationColonies ? fleet.row.LocationColonies.split(',').map(Number) : []
+    const colonies = fleet.colonyId !== null ? [fleet.colonyId] : possible
+
+    colonies.forEach((colonyId) => {
+      ;(orbitalBy[colonyId] = orbitalBy[colonyId] || []).push(fleet.row.LocationUnknown ? { ...fleet, producing: fleet.producing === 0 ? 0 : null } : fleet)
+    })
   })
 
   rows.forEach((row) => {
@@ -211,7 +218,7 @@ const colonySites = (rows, fleets, options) => {
     const output = any(surface ? surface.outputWorks : 0, orbitalWorks)
     const producing = any(surface ? surface.works : 0, orbitalWorks)
     const delivery = output === 0 ? null : deliveryOf(row, { RaceID: options.RaceID, supported: options.supported.delivery, senders: sendersBy[row.PopulationID] || [] })
-    const total = known(row.Manned) && known(row.Automated) && known(row.Civilian) && !(row.MineGaps > 0) ? row.Manned + row.Automated + row.Civilian : null
+    const total = known(row.Manned) && known(row.Automated) && known(row.Civilian) && !(row.MineGaps > 0) ? wholeCapacity(row.Manned, row.MannedTerms) + wholeCapacity(row.Automated, row.AutomatedTerms) + wholeCapacity(row.Civilian, row.CivilianTerms) : null
 
     return [{
       kind: 'colony',
@@ -221,7 +228,7 @@ const colonySites = (rows, fleets, options) => {
       orbital,
       capacity: total,
       capacityInputs: total === null ? [CAPACITY_INPUT] : [],
-      prerequisites: surface ? surface.prerequisites : [],
+      prerequisites: [...(surface ? surface.prerequisites : []), ...(output === null ? orbital.flatMap((fleet) => fleet.prerequisites.filter((need) => need.state === 'unknown')) : [])],
       idle: surface ? surface.idle : 0,
       producing,
       output,
@@ -255,8 +262,8 @@ const fleetSites = (rows, { supported, count }) => {
     const crewed = crewAboard.filter((_crew, index) => working[index] !== 0)
     const shipInputs = [...new Set(ships.flatMap((_ship, index) => [...(working[index] === null ? [SHIP_MODULES_INPUT, 'the class components of a ship', 'the damaged components of a ship'] : []), ...(working[index] !== 0 && crewAboard[index] === null ? CREW_INPUTS : [])]))]
     const needs = [
-      prerequisite('colony', 'fleet', colonyId === null ? 0 : 1, { missing: 'No colony of the race on this body to take the output', unknown: 'The colony on the body is not known', inputs: ['the colonies of the race'], supported: supported.orbital }),
-      prerequisite('assignment', 'fleet', assignment === 'unknown' ? null : assignment !== 'colony' || colonyId === null || assigned === colonyId ? 1 : 0, { missing: `Assigned to ${row.AssignedName || 'another colony'}, not to the colony on this body`, unknown: 'The colony the fleet is assigned to is not stored', inputs: ['the colony the fleet is assigned to'], supported: supported.orbital }),
+      prerequisite('colony', 'fleet', row.LocationUnknown ? null : colonyId === null ? 0 : 1, { missing: 'No colony of the race at these coordinates to take the output', unknown: 'The colony at the fleet\'s coordinates is not uniquely known', inputs: row.LocationInputs ? row.LocationInputs.split('|').filter(Boolean) : ['the fleet and colony coordinates and assignment'], supported: supported.orbital }),
+      prerequisite('assignment', 'fleet', assignment === 'unknown' ? null : assignment !== 'colony' || assigned === colonyId || (row.LocationUnknown && row.LocationColonies && row.LocationColonies.split(',').map(Number).includes(assigned)) || (colonyId === null && !row.LocationColonies) ? 1 : 0, { missing: `Assigned to ${row.AssignedName || 'another colony'}, not to the colony on this body`, unknown: 'The colony the fleet is assigned to is not stored', inputs: ['the colony the fleet is assigned to'], supported: supported.orbital }),
       prerequisite('diameter', 'fleet', (() => {
         const within = withinOrbitalReach(row.Diameter, row.MaximumDiameter)
 

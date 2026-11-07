@@ -83,7 +83,7 @@
                 <span v-else-if="item.idleReason" class="text-no-wrap" :class="item.idleReason === 'Turned off' ? 'text--secondary' : 'warning--text'">{{ item.idleReason }}</span>
                 <span v-else class="text--secondary">—</span>
               </template>
-              <template #[`item.Sorium`]="{ item }">{{ item.Sorium >= 1 ? tons(item.Sorium) : '—' }}</template>
+              <template #[`item.Sorium`]="{ item }">{{ item.Sorium > 0 ? tons(item.Sorium) : '—' }}</template>
               <template #[`item.soriumSort`]="{ item }">
                 <span v-if="item.soriumYears !== null" class="text-no-wrap" :class="{ 'warning--text': item.soriumYears < 5 }">{{ years(item.soriumYears) }}<provenance-mark :result="item.soriumResult" /></span>
                 <span v-else class="text--secondary">—<provenance-mark v-if="item.output === null" :result="item.soriumResult" /></span>
@@ -94,7 +94,7 @@
               </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Use it to see where fuel is made and where Sorium is about to run out. A refinery makes {{ litres(raceFuelProduction) }} a year, times the colony's production modifiers (governor, sector, workers, species), using a tonne of Sorium per 2,000 L. Refining stops when the Sorium runs out.
+              Use it to see where fuel is made and where Sorium is about to run out. Whole refinery capacity makes {{ litres(raceFuelProduction) }} a year, times the colony's production modifiers (governor, sector, workers, species), using a tonne of Sorium per 2,000 L. The annualised rate applies while Sorium remains, including stocks below one tonne; an actual increment can be stock-limited.
             </div>
           </v-card>
 
@@ -343,12 +343,14 @@ import { POOL_WORDS, SETTLED_POINTS, loadMaintenanceShips, periodDays, shipFigur
 import { donorTexts, loadFuelDonors, tankerReport } from '../utilities/fuel-donors'
 import { fuelReserveOf } from '../utilities/resource-reserves'
 import { UNKNOWN_TEXT, isKnownNumber, rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
+import { wholeCapacity } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sortNullLast, totalOf } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { MSP_HORIZONS, loadMspSupply, mspSupplyRows } from '../utilities/msp-supply'
 import { SUMMARY_COLUMNS, loadSummarySources, summaryRows } from '../utilities/empire-logistics'
+import { capacitySum, capacityTerms } from '../utilities/mining-data'
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
@@ -514,7 +516,7 @@ export default {
     // FUEL
 
     refineryRows() {
-      return this.colonies.filter((colony) => colony.FuelStockpile >= 1 || colony.Refineries >= 1).map((colony) => {
+      return this.colonies.filter((colony) => colony.FuelStockpile >= 1 || wholeCapacity(colony.Refineries, colony.RefineriesTerms) !== 0).map((colony) => {
         const outputResult = refineryYield(colony, this.modifierOf(colony.PopulationID))
         const output = valueOrNull(outputResult)
         const soriumResult = soriumLasts(colony, outputResult)
@@ -526,7 +528,7 @@ export default {
           place: this.place(colony),
           output,
           outputResult,
-          idleReason: colony.Refineries < 1 || output === null || output > 0 ? null : !colony.FuelProdStatus ? 'Turned off' : colony.Sorium < 1 ? 'No Sorium' : 'No workers',
+          idleReason: wholeCapacity(colony.Refineries, colony.RefineriesTerms) < 1 || output === null || output > 0 ? null : !colony.FuelProdStatus ? 'Turned off' : colony.Sorium <= 0 ? 'No Sorium' : 'No workers',
           soriumYears,
           soriumResult,
           soriumSort: soriumYears,
@@ -952,8 +954,8 @@ export default {
         }
 
         const colonies = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Race.NPR, FCT_Population.Efficiency, FCT_Population.SystemBodyID, FCT_Population.SystemID, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.WarningMSP, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.WarningFuel, FCT_Population.Sorium, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.ComponentNumber, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Race.MSPProduction, FCT_Race.MaintenanceCapacity, FCT_Race.FuelProduction, FCT_Race.EconomicProdModifier, max(0, min(1, 1 - coalesce(FCT_SystemBody.RadiationLevel, 0) / 10000.0)) * max(0, min(1, 1 - FCT_Population.UnrestPoints / 100.0)) * coalesce(DIM_PopPoliticalStatus.ProductionMod, 1) as CapacityModifier, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite,
-          coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.Refineries, 0) as Refineries, coalesce(VIR_Installations.Refuel, 0) as CanRefuel, coalesce(VIR_Installations.Resupply, 0) as CanResupply from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
-          left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.RefineryProductionValue * FCT_PopulationInstallations.Amount) as Refineries, sum(DIM_PlanetaryInstallation.MiningProductionValue * FCT_PopulationInstallations.Amount) as Mines, max(case when DIM_PlanetaryInstallation.MassRefuelling > 0 then 1 else 0 end) as Refuel, max(case when DIM_PlanetaryInstallation.MaintenanceValue > 0 or DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Resupply from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
+          case when VIR_Installations.PopID is null then 0 else VIR_Installations.Mines end as Mines, case when VIR_Installations.PopID is null then 0 else VIR_Installations.Refineries end as Refineries, VIR_Installations.RefineriesTerms, coalesce(VIR_Installations.Refuel, 0) as CanRefuel, coalesce(VIR_Installations.Resupply, 0) as CanResupply from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
+          left join (select FCT_PopulationInstallations.PopID, ${capacitySum('DIM_PlanetaryInstallation.RefineryProductionValue', 'DIM_PlanetaryInstallation.RefineryProductionValue > 0')} as Refineries, ${capacityTerms('DIM_PlanetaryInstallation.RefineryProductionValue', 'DIM_PlanetaryInstallation.RefineryProductionValue > 0')} as RefineriesTerms, ${capacitySum('DIM_PlanetaryInstallation.MiningProductionValue', 'DIM_PlanetaryInstallation.MiningProductionValue > 0')} as Mines, max(case when DIM_PlanetaryInstallation.MassRefuelling > 0 then 1 else 0 end) as Refuel, max(case when DIM_PlanetaryInstallation.MaintenanceValue > 0 or DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Resupply from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and (FCT_PopulationInstallations.Amount > 0 or FCT_PopulationInstallations.Amount is null) group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
 
         const facilities = await loadMspFacilities(this.database, { GameID: this.GameID, RaceID: this.RaceID, colonies })
         return await loadMspPopulation(this.database, { GameID: this.GameID, RaceID: this.RaceID, colonies: facilities })

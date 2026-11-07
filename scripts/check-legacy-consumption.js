@@ -968,7 +968,7 @@ const suite = (tree, saves, unsupported) => {
   }
   const synthetic = (id, name, run) => add(id, `SYNTHETIC ${name}`, run)
 
-  synthetic('synthetic-fuel', 'refineries at a colony with production on: 20 x 10 x 1.5 / 2000 t of Sorium a year, confirmed; production off or no refineries: 0; under 1 t of Sorium: 0', async () => {
+  synthetic('synthetic-fuel', 'refineries at a colony with production on: 20 x 10 x 1.5 / 2000 t of Sorium a year, confirmed; production off or no refineries: 0; positive sub-tonne Sorium: the same current rate', async () => {
     const on = await model({ colonies: [colony()] })
     const { valueOrNull } = on.provenance
     const sorium = on.fuel.byMineral.Sorium
@@ -979,7 +979,7 @@ const suite = (tree, saves, unsupported) => {
 
     const results = await Promise.all([colony({ FuelProdStatus: 0 }), colony({ Refineries: 0 }), colony({ Sorium: 0.5 }), colony({ Refineries: 0, FuelProdStatus: null })].map(async (item) => valueOrNull((await model({ colonies: [item] })).fuel.byMineral.Sorium)))
 
-    return results.every((value) => value === 0) ? true : `status off, no refineries, little Sorium, no refineries and no switch: ${results.join(', ')}`
+    return results.every((value, index) => near(value, [0, 0, 0.15, 0][index])) ? true : `status off, no refineries, little Sorium, no refineries and no switch: ${results.join(', ')}`
   })
 
   synthetic('synthetic-maintenance', 'facilities with production on: 40 x 5 x 4 x 1.5 MSP a year at 0.1, 0.05 and 0.1 t of Duranium, Uridium and Gallicite; production off: 0', async () => {
@@ -1440,7 +1440,7 @@ const RESULT_PREFIX = 'LEGACY-RESULT '
 
 // The mutations: [label, file, from, to, fails]. `fails` are the ids of the checks the mutation must break; only those are run, in a process of their own on a copy of the sources.
 const MUTATIONS = [
-  ['facilities are no longer cut to whole numbers', path.join('utilities', 'legacy-consumption.js'), '{ count: Math.trunc(value), fractional: Math.trunc(value) !== value }', '{ count: value, fractional: false }', ['synthetic-whole-facilities']],
+  ['facilities are no longer cut to whole numbers', path.join('utilities', 'legacy-consumption.js'), 'const count = isNumber(value) ? wholeCapacity(value, terms) : value', 'const count = value', ['synthetic-whole-facilities']],
   ['a scrap task takes its (negative) minerals', path.join('utilities', 'legacy-consumption.js'), 'task.TaskTypeID === TASK_TYPE_SCRAP) {\n    return idle', 'task.TaskTypeID === -1) {\n    return idle', ['synthetic-scrap-paused']],
   ['a paused task is built', path.join('utilities', 'legacy-consumption.js'), '} else if (task.Paused) {', '} else if (false) {', ['synthetic-scrap-paused']],
   ['a task builds past its remaining build points', path.join('utilities', 'legacy-consumption.js'), 'Math.min(values[\'the task\\\'s build rate\'], Math.max(0, task.TotalBP - task.CompletedBP))', 'values[\'the task\\\'s build rate\']', ['synthetic-task-cap']],
@@ -1448,7 +1448,7 @@ const MUTATIONS = [
   ['a refit builds the class it leaves, not the one it becomes', path.join('utilities', 'legacy-consumption.js'), 'FCT_ShipyardTask.TaskTypeID in (2, 4)', 'FCT_ShipyardTask.TaskTypeID in (-1)', ['loader-refit:fixture']],
   ['a retool ignores its slipways', path.join('utilities', 'legacy-consumption.js'), '(retool ? yard.Slipways : 1)', '1', ['synthetic-activities']],
   ['a colony with no maintenance switch makes nothing', path.join('utilities', 'legacy-consumption.js'), 'result = unavailable({ rule: MAINTENANCE, missing: [\'whether maintenance production is on\'], units: \'MSP/yr\' })', 'result = zero(MAINTENANCE, \'maintenance production is off\', \'MSP/yr\')', ['synthetic-unknown-status']],
-  ['a refinery with its production off still refines', path.join('utilities', 'logistics.js'), '} else if (!colony.FuelProdStatus || colony.Refineries === 0) {', '} else if (colony.Refineries === 0) {', ['synthetic-fuel']],
+  ['a refinery with its production off still refines', path.join('utilities', 'logistics.js'), '} else if (!colony.FuelProdStatus || refineries === 0) {', '} else if (refineries === 0) {', ['synthetic-fuel']],
   ['a use that lacks an input is counted as 0', path.join('utilities', 'mineral-outlook.js'), 'uses.filter((use) => use.enabled && use.result)', 'uses.filter((use) => use.enabled && use.result && use.result.value !== null)', ['synthetic-flow-switches', 'fallback-unknown']],
   ['a switched-off use still counts without a ledger', path.join('utilities', 'mineral-outlook.js'), 'uses.filter((use) => use.enabled && use.result)', 'uses.filter((use) => use.result)', ['synthetic-flow-switches', 'fallback-switches']],
   ['a switched-off use leaves the ledger\'s use alone', path.join('utilities', 'mineral-outlook.js'), 'spendGroups.filter((key) => !left.includes(key))', 'spendGroups', ['synthetic-flow-switches', 'ledger-no-model:fixture']],

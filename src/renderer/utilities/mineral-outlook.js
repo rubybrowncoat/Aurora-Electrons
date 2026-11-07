@@ -151,6 +151,9 @@ export const surfaceRateResult = (row, owned = true) => {
     return unavailable({ rule: 'mineral.surfaceRate', missing })
   }
 
+  const value = surfaceRate(row, owned)
+  if (!finite(value)) return unavailable({ rule: 'mineral.surfaceRate', missing: ['the installation amounts or mining values of the colony'] })
+
   const assumptions = []
   const manned = row.ManualMineCount > 0
   const mines = manned || row.AutomatedMineCount > 0 || row.CivilianMineCount > 0
@@ -167,7 +170,7 @@ export const surfaceRateResult = (row, owned = true) => {
     assumptions.push('automated mines are not slowed by a colony below full efficiency')
   }
 
-  return envelope({ value: surfaceRate(row, owned), status: assumptions.length ? STATUS.ESTIMATED : STATUS.CONFIRMED, rule: 'mineral.surfaceRate', inputs: { present: ['the colony\'s mines and modifiers'] }, assumptions })
+  return envelope({ value, status: assumptions.length ? STATUS.ESTIMATED : STATUS.CONFIRMED, rule: 'mineral.surfaceRate', inputs: { present: ['the colony\'s mines and modifiers'] }, assumptions })
 }
 
 const ORBITAL_FIELDS = ['MiningModules', 'MineProduction', 'CommanderBonus', 'Accessibility', 'Diameter', 'MaximumOrbitalMiningDiameter', 'ClassCrew']
@@ -175,7 +178,7 @@ const ORBITAL_FIELDS = ['MiningModules', 'MineProduction', 'CommanderBonus', 'Ac
 // What an orbital miner takes a year from the deposit its row names, as a result of 'mineral.orbitalRate' (`orbitalMinerRate`, with the naval admins' chain bonus). A column the row lacks makes it unavailable.
 export const orbitalRateResult = (row, navalAdmins) => {
   const chain = orbitalChainGap(row, navalAdmins)
-  const missing = [...labelled(ORBITAL_FIELDS, row), ...(row.ClassCrew > 0 ? labelled(['CurrentCrew'], row) : []), ...(chain ? [chain] : [])]
+  const missing = [...labelled(ORBITAL_FIELDS, row), ...(row.ClassCrew > 0 ? labelled(['CurrentCrew'], row) : []), ...(chain ? [chain] : []), ...(row.LocationUnknown ? (row.LocationInputs ? row.LocationInputs.split('|').filter(Boolean) : ['the orbital miner\'s coordinate-associated colony']) : [])]
 
   return missing.length ? unavailable({ rule: 'mineral.orbitalRate', missing }) : ofRule({ rule: 'mineral.orbitalRate', value: orbitalMinerRate(row, navalAdmins), inputs: { present: ['the ship\'s mining modules and crew'] } })
 }

@@ -1,8 +1,10 @@
 // The civilian mining complex policy audit of the Mineral Breakdown: per colony of the race whose complexes produce, whether the race buys or taxes their output, where a bought output goes by mass driver, which of the transfer's prerequisites are missing or not known, and what the other choice would change. The purchase and tax rates are game constants the save does not store, held to the version they were reproduced for. Evidence: docs/plans/backlog/evidence/AE-076-01.md.
 
-import { massDriverRateResult, surfaceRate } from './minerals'
-import { gateMiningRows, surfaceMiningQuery } from './mining-data'
-import { combine, isAvailable, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
+import { MINERALS, civilianPacketShare, massDriverRateResult, surfaceRate, wholeCapacity } from './minerals'
+import { capacityTerms, gateMiningRows, loadOrbitalMining, loadSurfaceMining } from './mining-data'
+import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlook'
+import { loadNavalAdmins } from './naval-admins'
+import { combine, isAvailable, ofRule, registerRule, ruleSupports, sumResults, unavailable } from './provenance'
 
 const POLICY_VERSIONS = ['3.2.x']
 
@@ -30,7 +32,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility', 'FCT_SystemBody.RadiationLevel', 'FCT_CommanderBonuses.BonusValue'],
-  note: 'What the complexes dig a year at each deposit\'s current accessibility: their capacity cut to a whole number, times the race\'s mine production, the accessibility, the governor\'s and a quarter of the sector commander\'s mining bonus and the radiation modifier; efficiency, stability and political status do not apply. Each colony that buys and exports in the saves it was checked on shipped exactly this output times the last update\'s length; a year ahead is an estimate, as accessibility falls past half a deposit.',
+  note: 'What the complexes dig a year at each deposit\'s current accessibility: their capacity accumulated from decimal installation amounts and cut to a whole number, times the race\'s mine production, the accessibility, the governor\'s and a quarter of the sector commander\'s mining bonus and the radiation modifier; efficiency, stability and political status do not apply. Each colony that buys and exports in the saves it was checked on shipped exactly this output times the last update\'s length; a year ahead is an estimate, as accessibility falls past half a deposit.',
 })
 
 registerRule({
@@ -62,11 +64,12 @@ registerRule({
 
 registerRule({
   id: 'cmcPolicy.throughput',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 't/yr',
   verification: 'estimated',
-  structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue, MiningProductionValue', 'FCT_MassDriverPackets.TotalSize, Speed'],
-  note: 'A bought output leaves each update in a packet of its own, whatever the source\'s drivers can send: in the saves it was checked on, colonies digging up to three times their drivers\' 5,000 t a year shipped their whole output. The drivers\' capacity limits what else ships, the stock above the reserve. A destination alone does not show what arrives, so the output and the capacity are compared only where both are known.',
+  structure: ['FCT_Population mineral stocks and reserves', 'surface and orbital mining rates', 'DIM_PlanetaryInstallation.MassDriverValue, MiningProductionValue'],
+  note: 'Bought civilian output tops up each local mineral reserve after other mining; only the remainder ships in its own packet, without the stock drivers\' capacity limit. The comparison uses a one-year estimate at held mining rates, not a known future update schedule or packet arrival.',
+  assumptions: ['Current accessibility and mining rates are held for one year. No other stock flows or reserve changes are modelled; actual updates can change the retained share.'],
 })
 
 registerRule({
@@ -109,30 +112,32 @@ const STAYS = ['none', 'gone']
 const INVALID = ['self', 'foreign', 'elsewhere']
 
 const known = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0
-const whole = (value) => Math.floor(value + 1e-9)
+const whole = wholeCapacity
 
-const installations = (GameID, condition, columns) => `select FCT_PopulationInstallations.PopID, ${columns} from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID}${condition} group by FCT_PopulationInstallations.PopID`
+const installations = (GameID, condition, columns) => `select FCT_PopulationInstallations.PopID, ${columns} from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID}${condition} group by FCT_PopulationInstallations.PopID`
 
 // Drivers by colony: the driver count (amount times driver value) and how many installation rows have an amount or a driver value not recorded.
-const DRIVER_COLUMNS = 'sum(case when DIM_PlanetaryInstallation.MassDriverValue > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue else 0 end) as Drivers, sum(case when FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MassDriverValue is null then 1 else 0 end) as Gaps'
+const DRIVER_COLUMNS = `sum(case when DIM_PlanetaryInstallation.MassDriverValue > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue else 0 end) as Drivers, sum(case when FCT_PopulationInstallations.Amount is not 0 and DIM_PlanetaryInstallation.MassDriverValue is not 0 and (FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MassDriverValue is null) then 1 else 0 end) as Gaps, ${capacityTerms('DIM_PlanetaryInstallation.MassDriverValue', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as DriverTerms`
 
 // The driver count and gaps of every colony of a game, as one row per PopID: the sub-select the policy rows and the Mineral Outlook's site routes read.
 export const driversByColony = (GameID) => installations(GameID, '', DRIVER_COLUMNS)
 
 // One row per colony of the race with civilian mining complexes: the stored choice, what decides whether the complexes produce, the colony's drivers and its destination with that colony's race, system and drivers.
-const policyQuery = ({ GameID, RaceID }) => `select FCT_Population.PopulationID, FCT_Population.SystemID, FCT_Population.PurchaseCivilianMinerals, FCT_Population.MassDriverDest, FCT_Race.NPR, FCT_Race.MineProduction, FCT_SystemBody.RadiationLevel, VIR_Civilian.Complexes, VIR_Civilian.CivilianCapacity, VIR_Civilian.Gaps as CivilianGaps, coalesce(VIR_Drivers.Drivers, 0) as Drivers, coalesce(VIR_Drivers.Gaps, 0) as DriverGaps, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount > 0) as Deposits, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount is null) as DepositGaps, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID, coalesce(VIR_DestinationDrivers.Drivers, 0) as DestinationDrivers, coalesce(VIR_DestinationDrivers.Gaps, 0) as DestinationDriverGaps from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID inner join (${installations(GameID, ' and DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0', 'sum(FCT_PopulationInstallations.Amount) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue) as CivilianCapacity, sum(case when FCT_PopulationInstallations.Amount is null then 1 else 0 end) as Gaps')}) as VIR_Civilian on VIR_Civilian.PopID = FCT_Population.PopulationID left join (${installations(GameID, '', DRIVER_COLUMNS)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_Population.MassDriverDest and VIR_Destination.GameID = FCT_Population.GameID and FCT_Population.MassDriverDest > 0 left join (${installations(GameID, '', DRIVER_COLUMNS)}) as VIR_DestinationDrivers on VIR_DestinationDrivers.PopID = VIR_Destination.PopulationID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (VIR_Civilian.Complexes > 0 or VIR_Civilian.Gaps > 0)`
+const policyQuery = ({ GameID, RaceID }) => `select FCT_Population.PopulationID, FCT_Population.SystemID, ${MINERALS.map((mineral) => `FCT_Population.${mineral.name}, FCT_Population.Reserve${mineral.name}`).join(', ')}, FCT_Population.PurchaseCivilianMinerals, FCT_Population.MassDriverDest, FCT_Race.NPR, FCT_Race.MineProduction, FCT_SystemBody.RadiationLevel, VIR_Civilian.Complexes, VIR_Civilian.ComplexesTerms, VIR_Civilian.CivilianCapacity, VIR_Civilian.CivilianCapacityTerms, VIR_Civilian.Gaps as CivilianGaps, coalesce(VIR_Drivers.Drivers, 0) as Drivers, VIR_Drivers.DriverTerms, coalesce(VIR_Drivers.Gaps, 0) as DriverGaps, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount > 0) as Deposits, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount is null) as DepositGaps, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID, coalesce(VIR_DestinationDrivers.Drivers, 0) as DestinationDrivers, VIR_DestinationDrivers.DriverTerms as DestinationDriverTerms, coalesce(VIR_DestinationDrivers.Gaps, 0) as DestinationDriverGaps from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID inner join (${installations(GameID, ' and (DIM_PlanetaryInstallation.CivilianInstallation = 1) is not 0 and (DIM_PlanetaryInstallation.MiningProductionValue > 0) is not 0 and (FCT_PopulationInstallations.Amount > 0) is not 0', `sum(FCT_PopulationInstallations.Amount) as Complexes, ${capacityTerms('1')} as ComplexesTerms, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue) as CivilianCapacity, ${capacityTerms('DIM_PlanetaryInstallation.MiningProductionValue')} as CivilianCapacityTerms, sum(case when FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.CivilianInstallation is null or DIM_PlanetaryInstallation.MiningProductionValue is null then 1 else 0 end) as Gaps`)}) as VIR_Civilian on VIR_Civilian.PopID = FCT_Population.PopulationID left join (${installations(GameID, '', DRIVER_COLUMNS)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_Population.MassDriverDest and VIR_Destination.GameID = FCT_Population.GameID and FCT_Population.MassDriverDest > 0 left join (${installations(GameID, '', DRIVER_COLUMNS)}) as VIR_DestinationDrivers on VIR_DestinationDrivers.PopID = VIR_Destination.PopulationID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (VIR_Civilian.Complexes > 0 or VIR_Civilian.Gaps > 0)`
 
 // The race's complex colonies (`colonies`, by policyQuery) and the deposit rows of its colonies with civilian capacity (`surface`, mining-data.js `surfaceMiningQuery`, with the Mining bonus left unknown for the `blocked` bonus IDs), for `cmcPolicyRows`.
-export const loadCmcPolicy = async (database, { GameID, RaceID, blocked = new Set() }) => {
-  const [[colonies], [surface]] = await Promise.all([
+export const loadCmcPolicy = async (database, { GameID, RaceID, blocked = new Set(), ranks = true }) => {
+  const [[colonies], surface, orbital] = await Promise.all([
     database.query(policyQuery({ GameID, RaceID })),
-    database.query(surfaceMiningQuery({ GameID, RaceID })),
+    loadSurfaceMining(database, { GameID, RaceID }),
+    loadOrbitalMining(database, { GameID, RaceID }),
   ])
+  const navalAdmins = orbital.length ? await loadNavalAdmins(database, { GameID, RaceID, bonusId: 6, share: 'Industrial', ranks, blocked }) : {}
 
-  return Object.freeze({ colonies: Object.freeze(colonies), surface: Object.freeze(gateMiningRows(surface, blocked).filter((row) => row.CivilianMineCount > 0)) })
+  return Object.freeze({ colonies: Object.freeze(colonies), surface: Object.freeze(gateMiningRows(surface, blocked).filter((row) => whole(row.CivilianMineCount, row.CivilianMineTerms) !== 0)), orbital: Object.freeze(gateMiningRows(orbital, blocked)), navalAdmins })
 }
 
-export const NO_CMC_POLICY = Object.freeze({ colonies: Object.freeze([]), surface: Object.freeze([]) })
+export const NO_CMC_POLICY = Object.freeze({ colonies: Object.freeze([]), surface: Object.freeze([]), orbital: Object.freeze([]), navalAdmins: Object.freeze({}) })
 
 const choiceOf = (row) => {
   if (row.NPR === 1) {
@@ -148,10 +153,11 @@ const choiceResult = (row, choice) => (choice ? ofRule({ rule: 'cmcPolicy.choice
 
 // Whether the complexes produce: true or false, or null while an input that could decide it is not recorded. One condition known to fail settles it as false.
 const productionResult = (row) => {
-  const capacityKnown = known(row.CivilianCapacity) && !(row.CivilianGaps > 0)
+  const capacity = whole(row.CivilianCapacity, row.CivilianCapacityTerms)
+  const capacityKnown = known(capacity) && !(row.CivilianGaps > 0)
   const depositsKnown = row.Deposits > 0 || !(row.DepositGaps > 0)
   const conditions = [
-    [capacityKnown ? whole(row.CivilianCapacity) >= 1 : null, 'the number of civilian mining complexes on the colony'],
+    [capacityKnown ? capacity >= 1 : null, 'the number of civilian mining complexes on the colony'],
     [known(row.MineProduction) ? row.MineProduction > 0 : null, 'the race\'s mine production'],
     [known(row.RadiationLevel) ? row.RadiationLevel < 10000 : null, 'the body\'s radiation level'],
     [depositsKnown ? row.Deposits > 0 : null, 'the amount of the deposits'],
@@ -184,12 +190,12 @@ const outputResult = (deposits) => {
     return unavailable({ rule: 'cmcPolicy.output', missing })
   }
 
-  const tons = live.reduce((total, row) => total + surfaceRate({ ...row, ManualMineCount: 0, AutomatedMineCount: 0 }, false), 0)
+  const tons = live.reduce((total, row) => total + surfaceRate({ ...row, ManualMineCount: 0, ManualMineTerms: null, AutomatedMineCount: 0, AutomatedMineTerms: null }, false), 0)
 
   return Number.isFinite(tons) ? ofRule({ rule: 'cmcPolicy.output', value: tons, inputs: { present: [...new Set(Object.values(OUTPUT_COLUMNS))] } }) : unavailable({ rule: 'cmcPolicy.output', missing: ['a mining modifier of the colony'] })
 }
 
-const complexesOf = (row) => (known(row.Complexes) && !(row.CivilianGaps > 0) ? whole(row.Complexes) : null)
+const complexesOf = (row) => (known(row.Complexes) && !(row.CivilianGaps > 0) ? whole(row.Complexes, row.ComplexesTerms) : null)
 
 // The rate a year for `complexes` at `perComplex`, or unavailable naming the rate when the save's version has none, or the complexes when their count is not recorded.
 const rateResult = (complexes, perComplex, version) => {
@@ -252,10 +258,33 @@ export const targetOf = (row, RaceID) => {
 const targetResult = (row, target) => (target ? ofRule({ rule: 'cmcPolicy.destination', value: target, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_Population.RaceID, SystemID'] } }) : unavailable({ rule: 'cmcPolicy.destination', missing: [Number.isInteger(row.MassDriverDest) ? 'the race or system of the destination colony' : 'the colony\'s mass driver destination'] }))
 
 // Whether a colony has a mass driver: true or false, or null when a driver installation's amount or value is not recorded.
-const driverResult = (drivers, gaps, where) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'cmcPolicy.drivers', value: whole(drivers) >= 1, inputs: { present: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'] } }) : unavailable({ rule: 'cmcPolicy.drivers', missing: [`the number of mass drivers or their driver value at ${where}`] }))
+const driverResult = (drivers, gaps, terms, where) => {
+  const count = whole(drivers, terms)
+  return known(count) && !(gaps > 0) ? ofRule({ rule: 'cmcPolicy.drivers', value: count >= 1, inputs: { present: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'] } }) : unavailable({ rule: 'cmcPolicy.drivers', missing: [`the number of mass drivers or their driver value at ${where}`] })
+}
 
-// The bought output against what the source's drivers can send: `state` 'unbought' (the output does not ship), 'stays' (no destination to ship to), 'invalid', 'unknown' (the output or the capacity is not known, `result` names which), 'within' or 'over' (the output above the drivers' capacity, which ships in full all the same; the capacity limits the stock above the reserve).
-const throughputOf = (choice, target, output, capacity) => {
+// Reserve allocation is per mineral, never against an aggregate stockpile: the other surface and orbital mining enters local stock before the civilian share is split.
+const shippedResult = (row, deposits, orbital, navalAdmins) => sumResults({
+  rule: 'cmcPolicy.throughput',
+  results: deposits.filter((deposit) => !(known(deposit.Amount) && deposit.Amount === 0)).map((deposit) => {
+    const mineral = MINERALS.find((mineral) => mineral.id === deposit.MaterialID)
+    const stock = mineral && row[mineral.name]
+    const reserve = mineral && row[`Reserve${mineral.name}`]
+    const inputs = { present: ['the colony\'s mineral stock and reserve'] }
+
+    if (!mineral || !known(stock) || !known(reserve)) {
+      return unavailable({ rule: 'cmcPolicy.throughput', missing: [`the ${mineral ? mineral.name : 'mineral'} stock and reserve of the colony`] })
+    }
+
+    const civilian = surfaceRateResult({ ...deposit, ManualMineCount: 0, ManualMineTerms: null, AutomatedMineCount: 0, AutomatedMineTerms: null }, false)
+    const extraction = miningSum([surfaceRateResult(deposit, false), ...orbital.filter((ship) => ship.MaterialID === deposit.MaterialID).map((ship) => orbitalRateResult(ship, navalAdmins))])
+
+    return combine({ rule: 'cmcPolicy.throughput', parts: { civilian, extraction }, compute: (values) => civilianPacketShare({ ...values, stock, reserve }), inputs })
+  }),
+})
+
+// Annualised bought output remaining after the one-year local-reserve top-up, compared with the separate stock-driver capacity.
+const throughputOf = (choice, target, output, capacity, shipped) => {
   if (choice !== 'buy') {
     return { state: choice ? 'unbought' : 'unknown', result: choice ? null : unavailable({ rule: 'cmcPolicy.throughput', missing: ['the colony\'s civilian mineral purchase setting'] }) }
   } else if (STAYS.includes(target)) {
@@ -266,9 +295,9 @@ const throughputOf = (choice, target, output, capacity) => {
     return { state: 'unknown', result: unavailable({ rule: 'cmcPolicy.throughput', missing: ['the mass driver destination'] }) }
   }
 
-  const result = combine({ rule: 'cmcPolicy.throughput', parts: { output, capacity }, compute: ({ output: tons, capacity: limit }) => ({ output: tons, capacity: limit, shipped: tons }) })
+  const result = combine({ rule: 'cmcPolicy.throughput', parts: { output, capacity, shipped }, compute: (values) => values })
 
-  return { state: isAvailable(result) ? (result.value.capacity >= result.value.output ? 'within' : 'over') : 'unknown', result }
+  return { state: isAvailable(result) ? (result.value.capacity >= result.value.shipped ? 'within' : 'over') : 'unknown', result }
 }
 
 const stateOf = ({ choice, producing, target, source, receiver, throughput, acknowledged }) => {
@@ -296,7 +325,7 @@ const stateOf = ({ choice, producing, target, source, receiver, throughput, ackn
 const verdictOf = (result) => (isAvailable(result) ? result.value : null)
 
 // The policy rows: one per complex colony whose complexes produce (or might: production not known), none for one whose complexes produce nothing, which `idle` counts. `RaceID` is the race the colonies belong to; `version` the save's formula version (capabilities.js `loadFormulaVersion`), which decides whether the rates hold; `acknowledged` the PopulationIDs whose taxation is acknowledged as intended.
-export const cmcPolicyRows = ({ colonies, surface }, { RaceID, version, acknowledged = [] }) => {
+export const cmcPolicyRows = ({ colonies, surface, orbital = [], navalAdmins = {} }, { RaceID, version, acknowledged = [] }) => {
   const depositsBy = {}
   const acknowledgedIds = new Set(acknowledged)
 
@@ -313,12 +342,12 @@ export const cmcPolicyRows = ({ colonies, surface }, { RaceID, version, acknowle
     const complexes = complexesOf(row)
     const output = complexes === null ? unavailable({ rule: 'cmcPolicy.output', missing: ['the number of civilian mining complexes on the colony'] }) : outputResult(depositsBy[row.PopulationID] || [])
     const target = targetOf(row, RaceID)
-    const capacity = massDriverRateResult(row.Drivers, row.DriverGaps)
-    const sourceDrivers = driverResult(row.Drivers, row.DriverGaps, 'the source')
-    const receiverDrivers = target && !STAYS.includes(target) ? driverResult(row.DestinationDrivers, row.DestinationDriverGaps, 'the destination') : null
+    const capacity = massDriverRateResult(row.Drivers, row.DriverGaps, row.DriverTerms)
+    const sourceDrivers = driverResult(row.Drivers, row.DriverGaps, row.DriverTerms, 'the source')
+    const receiverDrivers = target && !STAYS.includes(target) ? driverResult(row.DestinationDrivers, row.DestinationDriverGaps, row.DestinationDriverTerms, 'the destination') : null
     const source = verdictOf(sourceDrivers)
     const receiver = receiverDrivers ? verdictOf(receiverDrivers) : undefined
-    const throughput = throughputOf(choice, target, output, capacity)
+    const throughput = throughputOf(choice, target, output, capacity, shippedResult(row, depositsBy[row.PopulationID] || [], orbital.filter((ship) => ship.PopulationID === row.PopulationID), navalAdmins))
     const producing = verdictOf(production)
     const acknowledgeable = choice === 'tax' && producing === true
     const state = stateOf({ choice, producing, target, source, receiver: receiver === undefined ? true : receiver, throughput, acknowledged: acknowledgeable && acknowledgedIds.has(row.PopulationID) })

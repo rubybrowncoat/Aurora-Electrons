@@ -378,7 +378,7 @@ const sqlStatements = (m) => [
       db.close()
     }
   }],
-  ['sql: the fleet speeds are those of the race\'s fleets in orbit, a speed not stored staying null', async () => {
+  ['sql: the fleet speeds are those of the race\'s fleets including those with no saved orbit body, a speed not stored staying null', async () => {
     const db = memory()
 
     try {
@@ -387,7 +387,7 @@ const sqlStatements = (m) => [
 
       const rows = await db.all(m.common.fleetSpeedQuery({ GameID: 1, RaceID: 1 }))
 
-      assert.deepEqual(rows.map((row) => [row.FleetID, row.Speed]).sort((a, b) => a[0] - b[0]), [[1, 1], [5, null]])
+      assert.deepEqual(rows.map((row) => [row.FleetID, row.Speed]).sort((a, b) => a[0] - b[0]), [[1, 1], [2, 500], [5, null]])
     } finally {
       db.close()
     }
@@ -404,7 +404,9 @@ const fakeDatabase = ({ colonies, mines, fleets, speeds, formula = true, speedCo
     if (sql.includes('pragma_table_xinfo(\'FCT_Game\')')) {
       return [formula ? LINE_COLUMNS : []]
     } else if (sql.includes('pragma_table_info(\'FCT_Fleet\')')) {
-      return [[{ name: 'FleetID' }, { name: 'RaceID' }, ...(speedColumn ? [{ name: 'Speed' }] : [])]]
+      return [[{ name: 'FleetID' }, { name: 'RaceID' }, { name: 'Xcor' }, { name: 'Ycor' }, ...(speedColumn ? [{ name: 'Speed' }] : [])]]
+    } else if (sql.includes("pragma_table_info('FCT_SystemBody')")) {
+      return [[{ name: 'SystemBodyID' }, { name: 'Xcor' }, { name: 'Ycor' }]]
     } else if (sql.includes('as MannedMines')) {
       return [mines]
     } else if (sql.includes('FCT_Fleet.Speed from FCT_Fleet where')) {
@@ -735,10 +737,23 @@ const saveStatements = (m, held) => {
 
   const orbitalOracle = async (world, save) => {
     const supported = world.sites.supported.orbital
-    const rows = await scalar(world, `select distinct FCT_Fleet.FleetID, (select count(*) from FCT_SystemBodySurveys where FCT_SystemBodySurveys.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodySurveys.RaceID = FCT_Fleet.RaceID and FCT_SystemBodySurveys.GameID = FCT_Fleet.GameID) as Surveyed, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_MineralDeposit.GameID = FCT_Fleet.GameID and FCT_MineralDeposit.Amount > 0) as Deposits, FCT_SystemBody.Radius * 2 > FCT_Race.MaximumOrbitalMiningDiameter as Wide, (select count(*) from FCT_Population where FCT_Population.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_Population.RaceID = FCT_Fleet.RaceID and FCT_Population.GameID = FCT_Fleet.GameID) as Colonies from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID inner join FCT_Race on FCT_Race.RaceID = FCT_Fleet.RaceID and FCT_Race.GameID = FCT_Fleet.GameID where FCT_Fleet.RaceID = ${save.race} and FCT_Fleet.GameID = ${save.game} and FCT_Fleet.OrbitBodyID > 0 and FCT_Ship.MothershipID = 0 and FCT_ShipClass.MiningModules > 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID)`)
+    const fleets = await scalar(world, `select distinct FCT_Fleet.FleetID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.SystemID, FCT_Fleet.AssignedPopulationID from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.RaceID = ${save.race} and FCT_Fleet.GameID = ${save.game} and FCT_Ship.MothershipID = 0 and FCT_ShipClass.MiningModules > 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID)`)
+    const colonies = await scalar(world, `select PopulationID, SystemBodyID from FCT_Population where GameID = ${save.game} and RaceID = ${save.race}`)
+    const bodies = await scalar(world, `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.Radius * 2 > FCT_Race.MaximumOrbitalMiningDiameter as Wide, (select count(*) from FCT_SystemBodySurveys where FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.GameID = ${save.game} and FCT_SystemBodySurveys.RaceID = ${save.race}) as Surveyed, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_MineralDeposit.GameID = ${save.game} and FCT_MineralDeposit.Amount > 0) as Deposits from FCT_SystemBody inner join FCT_Race on FCT_Race.GameID = FCT_SystemBody.GameID and FCT_Race.RaceID = ${save.race} where FCT_SystemBody.GameID = ${save.game}`)
+    const rows = fleets.map((fleet) => {
+      const near = bodies.filter((body) => [fleet.Xcor, fleet.Ycor, body.Xcor, body.Ycor].every(Number.isFinite) && Math.abs(fleet.Xcor - body.Xcor) < 1 && Math.abs(fleet.Ycor - body.Ycor) < 1)
+      const nearby = colonies.filter((colony) => near.some((body) => body.SystemBodyID === colony.SystemBodyID))
+      const assigned = nearby.find((colony) => colony.PopulationID === fleet.AssignedPopulationID)
+      const colony = assigned || (nearby.length === 1 ? nearby[0] : null)
+      const physical = near.filter((body) => body.SystemID === fleet.SystemID)
+      const body = colony ? near.find((body) => body.SystemBodyID === colony.SystemBodyID) : physical.length === 1 ? physical[0] : null
+      const ambiguous = !assigned && nearby.length > 1
+
+      return { ...fleet, Surveyed: body ? body.Surveyed : null, Deposits: body ? body.Deposits : null, Wide: body ? body.Wide : null, Colonies: ambiguous ? null : nearby.length }
+    })
     const queued = rows.filter((row) => row.Wide === 1 || (supported && row.Colonies === 0) || (row.Surveyed > 0 && row.Deposits === 0))
 
-    return { rows, queued: queued.map((row) => `fleet:${row.FleetID}`), undecided: rows.filter((row) => !queued.includes(row) && row.Surveyed === 0).map((row) => `fleet:${row.FleetID}`) }
+    return { rows, queued: queued.map((row) => `fleet:${row.FleetID}`), undecided: rows.filter((row) => !queued.includes(row) && (row.Surveyed === 0 || row.Surveyed === null || row.Colonies === null)).map((row) => `fleet:${row.FleetID}`) }
   }
 
   const shown = (rows, unevaluated) => ids(rows.filter((row) => Boolean(row.unevaluated) === unevaluated))
@@ -890,7 +905,7 @@ const saveStatements = (m, held) => {
       assert.ok(textOf(row(limitAndGoneFleet).cells.reason).includes('No mineral deposit') && !textOf(row(limitAndGoneFleet).cells.reason).includes('km across'), textOf(row(limitAndGoneFleet).cells.reason))
       assert.ok(MISSING(row(limitAndGoneFleet).cells.reason.result).some((name) => name.includes('orbital mining diameter limit')))
       assert.ok(MISSING(row(limitFleet).unevaluated).some((name) => name.includes('orbital mining diameter limit')))
-      assert.equal(textOf(row(oneModuleFleet).cells.reason), 'No colony of the race on this body to take the output')
+      assert.equal(textOf(row(oneModuleFleet).cells.reason), 'No colony of the race at these coordinates to take the output')
       assert.equal(textOf(row(oneModuleFleet).cells.assets), `1 ship, 1 module (1 working), at ${world.ctx.count(speed.get(oneModuleFleet))} km/s`)
       assert.equal(row(damagedFleet), undefined, 'a fleet with only its modules damaged is not queued')
     }),
@@ -940,7 +955,7 @@ const MUTATIONS = [
   { name: 'automated mines counted as manned', file: C, find: 'DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount else 0 end) as AutomatedMines', replace: 'DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers >= 0 then FCT_PopulationInstallations.Amount else 0 end) as AutomatedMines', fails: ['sql'], real: ['real'] },
   { name: 'civilian complexes counted as mines', file: C, find: 'DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount else 0 end) as MannedMines', replace: 'DIM_PlanetaryInstallation.CivilianInstallation >= 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount else 0 end) as MannedMines', fails: ['sql'] },
   { name: 'the mine counts of every race', file: C, find: ' and FCT_Population.RaceID = ${RaceID}) group by FCT_PopulationInstallations.PopID', replace: ') group by FCT_PopulationInstallations.PopID', fails: ['sql'] },
-  { name: 'the fleet speeds of fleets out of orbit too', file: C, find: 'FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.OrbitBodyID > 0`', replace: 'FCT_Fleet.RaceID = ${RaceID}`', fails: ['sql'] },
+  { name: 'the fleet speeds require a saved orbit body', file: C, find: 'FCT_Fleet.RaceID = ${RaceID}`', replace: 'FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.OrbitBodyID > 0`', fails: ['sql'] },
   { name: 'the fleet speed never merged', file: C, find: 'Speed: speedOf.has(site.id) ? speedOf.get(site.id) : null', replace: 'Speed: null', fails: ['warning'] },
   { name: 'the fleet speed read without asking the save for the column', file: C, find: 'columns.some((column) => column.name === \'Speed\') ? rowsOf(ctx, fleetSpeedQuery(ctx)) : []', replace: 'rowsOf(ctx, fleetSpeedQuery(ctx))', fails: ['warning'] },
   { name: 'the fleet speed read by the shared mining loader', file: C, find: 'loadFormulaVersion(ctx.database)])\n  const minesOf', replace: 'loadFormulaVersion(ctx.database), rowsOf(ctx, fleetSpeedQuery(ctx))])\n  const minesOf', fails: ['warning'] },

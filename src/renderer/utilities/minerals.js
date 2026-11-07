@@ -5,6 +5,7 @@ import { forecastColony } from './industry-cycle'
 import { roundToDecimal, separatedNumber } from './math'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { capacityKind } from './production-types'
+import { ZERO, add, floor, fromDouble, multiply, toNumber } from './decimal'
 
 const MINERALS_VERSIONS = ['3.2.x']
 const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
@@ -107,11 +108,11 @@ registerRule({
 
 registerRule({
   id: 'minerals.massDriverRate',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
-  note: 'What a colony\'s mass drivers can send a year: 5,000 t per driver. The constant is the game\'s rule as documented; it was not compared with saved packets. A colony with no driver sends nothing, and one with no destination sends nothing whatever its drivers.',
+  note: 'What a colony\'s mass drivers can send a year: the whole driver count times 5,000 t, after converting each saved amount to decimal and accumulating its weighted capacity. A colony with no whole driver sends nothing, and one with no destination sends nothing whatever its drivers. This is capacity, not a measurement of packets sent.',
 })
 
 export const MINERALS = [
@@ -257,21 +258,36 @@ export const miningDistanceResult = (route, { origins, placed }) => {
 export const MASS_DRIVER_TONS = 5000
 
 // What a colony's `drivers` can send a year, as a result; unavailable when the driver count is not recorded, or when `gaps` of the installations it sums over (an amount or a driver value not recorded) are.
-export const massDriverRateResult = (drivers, gaps = 0) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'minerals.massDriverRate', value: drivers * MASS_DRIVER_TONS, inputs: { present: ['FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] }))
+export const massDriverRateResult = (drivers, gaps = 0, terms = null) => {
+  const count = wholeCapacity(drivers, terms)
+  return known(count) && !(gaps > 0) ? ofRule({ rule: 'minerals.massDriverRate', value: count * MASS_DRIVER_TONS, inputs: { present: ['FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] })
+}
+
+// Other mining enters local stock first; civilian output fills the remaining reserve shortfall before the remainder ships.
+export const civilianPacketShare = ({ civilian, extraction, stock, reserve }) => civilian - Math.min(civilian, Math.max(0, reserve - (stock + extraction - civilian)))
 
 export const SECONDS_PER_DAY = 86400
 
 // Accessibility never falls below this; the deposit is empty when it gets there.
 export const ACCESSIBILITY_FLOOR = 0.1
 
-// t/yr at the deposit's current accessibility, as the game works it out: each kind of capacity cut to a whole number; manned mines scale with the colony's efficiency, stability and political status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.
-const whole = (capacity) => Math.floor(capacity + 1e-9)
+// t/yr at the deposit's current accessibility, as the game works it out: each kind summed as decimal installation amounts times their weights, then cut to a whole number; manned mines scale with the colony's efficiency, stability and political status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.
+export const wholeCapacity = (capacity, terms = null) => {
+  if (terms === null || terms === undefined) return known(capacity) ? toNumber(floor(fromDouble(capacity))) : NaN
+  let total = ZERO
+  for (const term of JSON.parse(terms)) {
+    if (term === null) continue
+    if (term.includes(null)) return NaN
+    total = add(total, multiply(fromDouble(Number(term[0])), fromDouble(Number(term[1]))))
+  }
+  return toNumber(floor(total))
+}
 
 export const surfaceRate = (row, owned = true) => {
-  const manned = whole(row.ManualMineCount) * row.Efficiency * row.StabilityModifier * (row.PoliticalModifier ?? 1)
-  const civilian = owned && !row.PurchaseCivilianMinerals ? 0 : whole(row.CivilianMineCount)
+  const manned = wholeCapacity(row.ManualMineCount, row.ManualMineTerms) * row.Efficiency * row.StabilityModifier * (row.PoliticalModifier ?? 1)
+  const civilian = owned && !row.PurchaseCivilianMinerals ? 0 : wholeCapacity(row.CivilianMineCount, row.CivilianMineTerms)
 
-  return (manned + whole(row.AutomatedMineCount) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
+  return (manned + wholeCapacity(row.AutomatedMineCount, row.AutomatedMineTerms) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
 }
 
 // The workbook's orbital formula, plus the crew rule: the modules run at the crew share of utilities/crew.js. Null while the ship's crew or its class crew is not in the save, or the naval admin chain `adminBonus` is unknown (null). Compared with the saved ledger by scripts/check-orbital-mining.js: in the sampled saves it matches exactly at the last completed increment where the deposit's accessibility is not falling, while one later save has an unexplained discrepancy earlier in its window. On a deposit mined below half its original amount the ledger ran up to two 0.01 steps of accessibility above the estimate over those same increments, because the save holds the accessibility after the last mining step; that is an observation, not a bound on future error. A short crew, a damaged module and a ship with no commander or outside any naval admin command have no case in the saves; the modules counted are the class's, damage is not read.
@@ -285,7 +301,7 @@ export const orbitalRate = (row, adminBonus = 1) => {
 export const orbitalChainGap = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? navalAdminChain(navalAdmins, row.SystemID, row.NavalAdminCommandID).unknown : null)
 
 // t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine from orbit; null while the chain is unknown.
-export const orbitalMinerRate = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
+export const orbitalMinerRate = (row, navalAdmins) => (row.LocationUnknown ? null : row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
 
 // Mining the game's mineral ledger leaves out, t/yr by MaterialID: everything mined at a colony that buys its civilian complexes' output and ships it by mass driver (`MassDriverExport`, mining-data.js). The game records nothing for that colony, neither its own mines nor the complexes, and the shipment arrives as a mass-driver transfer, which isn't income. A mineral whose total includes a rate that is not known (a Mining bonus the save's lookup does not confirm, a naval admin chain the save does not settle) is null, never the smaller sum.
 export const unloggedMining = ({ surface, orbital, navalAdmins }) => {
@@ -294,8 +310,8 @@ export const unloggedMining = ({ surface, orbital, navalAdmins }) => {
     totals[row.MaterialID] = totals[row.MaterialID] === null || rate === null || !Number.isFinite(rate) ? null : (totals[row.MaterialID] || 0) + rate
   }
 
-  surface.filter((row) => row.MassDriverExport).forEach((row) => add(row, Number.isFinite(row.GovernorBonus) && Number.isFinite(row.SectorBonus) ? surfaceRate(row) : null))
-  orbital.filter((row) => row.MassDriverExport).forEach((row) => add(row, orbitalMinerRate(row, navalAdmins)))
+  surface.filter((row) => (row.MassDriverExport === 1 || row.MassDriverExport === null)).forEach((row) => add(row, row.MassDriverExport === null ? null : Number.isFinite(row.GovernorBonus) && Number.isFinite(row.SectorBonus) ? surfaceRate(row) : null))
+  orbital.filter((row) => (row.MassDriverExport === 1 || row.MassDriverExport === null)).forEach((row) => add(row, row.MassDriverExport === null ? null : orbitalMinerRate(row, navalAdmins)))
 
   return totals
 }

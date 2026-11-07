@@ -192,7 +192,7 @@ const rateResult = ({ deposit, body, race, complexes, count = null }) => combine
     radiation: fromSave('cmcCandidate.rate', body.RadiationLevel, 'the body\'s radiation level'),
     ...(count ? { count } : {}),
   },
-  compute: (values) => surfaceRate({ ManualMineCount: 0, AutomatedMineCount: 0, CivilianMineCount: values.complexes * values.complexMining, PurchaseCivilianMinerals: 1, Efficiency: 1, StabilityModifier: 1, MineProduction: values.mineProduction, Accessibility: values.accessibility, GovernorBonus: 1, SectorBonus: 1, RadiationModifier: 1 - values.radiation / 10000 }, false),
+  compute: (values) => surfaceRate({ ManualMineCount: 0, AutomatedMineCount: 0, CivilianMineCount: values.complexes * values.complexMining, CivilianMineTerms: JSON.stringify([[values.complexes, values.complexMining]]), PurchaseCivilianMinerals: 1, Efficiency: 1, StabilityModifier: 1, MineProduction: values.mineProduction, Accessibility: values.accessibility, GovernorBonus: 1, SectorBonus: 1, RadiationModifier: 1 - values.radiation / 10000 }, false),
 })
 
 const lifetimeOfDeposit = (deposit, rate) => combine({

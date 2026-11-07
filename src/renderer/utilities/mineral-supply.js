@@ -2,7 +2,7 @@
 
 import { TARGET_STATES, driversByColony, targetOf } from './cmc-policy'
 import { stockAndInbound } from './colony-minerals'
-import { MINERALS, massDriverRateResult } from './minerals'
+import { MINERALS, civilianPacketShare, massDriverRateResult, wholeCapacity } from './minerals'
 import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlook'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
@@ -101,7 +101,10 @@ const TRANSFER_LIST = Object.values(LEDGER_TYPES)
 const known = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0
 
 // Whether a colony has a mass driver: true or false, null when a driver installation's amount or value is not recorded.
-const hasDriver = (drivers, gaps) => (known(drivers) && !(gaps > 0) ? Math.floor(drivers + 1e-9) >= 1 : null)
+const hasDriver = (drivers, gaps, terms) => {
+  const count = wholeCapacity(drivers, terms)
+  return known(count) && !(gaps > 0) ? count >= 1 : null
+}
 
 // The minerals aboard ships: `cargo` is the page's read by material id, null for a material whose hold amount is not recorded; a material with no key has none aboard (0), and no read at all is unknown.
 const cargoResult = (cargo, materialId) => {
@@ -126,9 +129,6 @@ const reserveResult = (colony, mineral) => {
   return known(reserve) ? ofRule({ rule: 'minerals.colonyStock', value: reserve, inputs: { present: [`FCT_Population.Reserve${mineral.name}`] } }) : unavailable({ rule: 'minerals.colonyStock', missing: [`the ${mineral.name} reserve of the colony`] })
 }
 
-// What of the civilian output `civilian` of one mineral goes into the colony's packet, from the mineral's `extraction`, the colony's `stock` and its `reserve` (see the comment above mineralSupply.packetOutput): the stockpile takes the output of the other mines (`extraction` less `civilian`) first, the reserve's shortfall after that is never below 0, and the civilian output tops the stockpile up by the smaller of itself and that shortfall before the rest goes into the packet.
-const packetShare = ({ civilian, extraction, stock, reserve }) => civilian - Math.min(civilian, Math.max(0, reserve - (stock + extraction - civilian)))
-
 const driverText = (where) => `the number of mass drivers or their driver value at ${where}`
 const POLICY_COLUMN = 'the colony\'s civilian mineral purchase setting'
 
@@ -146,7 +146,7 @@ const reachOf = (colony) => {
 // One row per colony of the race: its name, system, destination (and the destination's name, race and system), its drivers, and its stock and reserve of every mineral.
 export const loadSiteRoutes = async (database, { GameID, RaceID }) => {
   const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name}, FCT_Population.Reserve${mineral.name}`).join(', ')
-  const [rows] = await database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${stocks}, coalesce(VIR_Drivers.Drivers, 0) as Drivers, coalesce(VIR_Drivers.Gaps, 0) as DriverGaps, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID from FCT_Population left join (${driversByColony(GameID)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_Population.MassDriverDest and VIR_Destination.GameID = FCT_Population.GameID and FCT_Population.MassDriverDest > 0 where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`)
+  const [rows] = await database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${stocks}, coalesce(VIR_Drivers.Drivers, 0) as Drivers, VIR_Drivers.DriverTerms, coalesce(VIR_Drivers.Gaps, 0) as DriverGaps, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID from FCT_Population left join (${driversByColony(GameID)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_Population.MassDriverDest and VIR_Destination.GameID = FCT_Population.GameID and FCT_Population.MassDriverDest > 0 where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`)
 
   return Object.freeze(rows)
 }
@@ -197,11 +197,12 @@ const unloadedOf = (flows, populationId, materialId) => observed('mineralSupply.
 export const routeResult = ({ colony, civilian, RaceID }) => {
   const target = colony ? targetOf(colony, RaceID) : null
   const reach = colony ? reachOf(colony) : null
+  if (civilian === null && reach !== false) return unavailable({ rule: 'mineralSupply.route', missing: ['whether the colony exports its civilian mining output'] })
   let stock = 'unknown'
   let missing = []
 
   if (colony) {
-    const source = hasDriver(colony.Drivers, colony.DriverGaps)
+    const source = hasDriver(colony.Drivers, colony.DriverGaps, colony.DriverTerms)
 
     if (reach === null) {
       missing = ['the colony\'s mass driver destination']
@@ -231,7 +232,7 @@ export const routeResult = ({ colony, civilian, RaceID }) => {
 }
 
 // The mining row with no manned or automated mines: what is left of its rate is the civilian complexes'.
-const CIVILIAN_ONLY = { ManualMineCount: 0, AutomatedMineCount: 0 }
+const CIVILIAN_ONLY = { ManualMineCount: 0, ManualMineTerms: null, AutomatedMineCount: 0, AutomatedMineTerms: null }
 
 // The sites of one mineral: one entry per colony with a mining row (a colony's mines, or the orbital miners assigned to it) on a deposit of `materialId`, most extracted first. `surface` and `orbital` are the rows of mining-data.js; `routes` the rows of `loadSiteRoutes`; `packets` the rows of colony-minerals.js `loadPacketsInFlight` (null when not read); `flows` the `transferFlows` of the ledger's moves. Each site has `extraction` (its mining rate), `packetOutput` (the civilian output that goes into a packet once the colony's stockpile is filled up to its reserve), `local` (what it adds to its own stockpile), `supply` (what leaves it for a destination by a route the save names), `capacity` (what its drivers can send, a limit on stock and not a throughput), `sent` and `loaded` (observed, from the ledger), `stock` (its own stockpile of the mineral now) and its `route`. `connection` is 'unconnected' with no packet route, else 'packets', 'driver', or 'unknown'.
 export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = null, RaceID, materialId, flows }) => {
@@ -252,7 +253,8 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
   const sites = [...groups.values()].map((entry) => {
     const colony = routeBy[entry.populationId]
     const results = colony ? resultsAt(colony, packets, materialId) : null
-    const civilian = [...entry.surface, ...entry.orbital].some((row) => Boolean(row.MassDriverExport))
+    const miningRows = [...entry.surface, ...entry.orbital]
+    const civilian = miningRows.some((row) => row.MassDriverExport === 1) ? true : miningRows.some((row) => row.MassDriverExport === null) ? null : false
     const route = routeResult({ colony, civilian, RaceID })
     const routed = isAvailable(route) ? route.value : null
     const extraction = miningSum([...entry.surface.map((row) => surfaceRateResult(row, true)), ...entry.orbital.map((row) => orbitalRateResult(row, navalAdmins))])
@@ -263,12 +265,14 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
     const reach = colony ? reachOf(colony) : null
     let packetOutput = noPackets
 
-    if (routed === null && (civilian || maybeBought)) {
+    if (civilian === null && reach !== false) {
+      packetOutput = unavailable({ rule: 'mineralSupply.packetOutput', missing: ['whether the colony exports its civilian mining output'] })
+    } else if (routed === null && (civilian || maybeBought)) {
       packetOutput = unavailable({ rule: 'mineralSupply.packetOutput', missing: route.inputs.missing })
     } else if (policyMissing && reach !== false) {
       packetOutput = unavailable({ rule: 'mineralSupply.packetOutput', missing: [POLICY_COLUMN] })
     } else if (routed !== null && routed.state === 'packets') {
-      packetOutput = combine({ rule: 'mineralSupply.packetOutput', parts: { civilian: miningSum(entry.surface.map((row) => surfaceRateResult({ ...row, ...CIVILIAN_ONLY }, true))), extraction, stock: results.stock, reserve: reserveResult(colony, mineral) }, compute: packetShare })
+      packetOutput = combine({ rule: 'mineralSupply.packetOutput', parts: { civilian: miningSum(entry.surface.map((row) => surfaceRateResult({ ...row, ...CIVILIAN_ONLY }, true))), extraction, stock: results.stock, reserve: reserveResult(colony, mineral) }, compute: civilianPacketShare })
     }
 
     const local = policyMissing ? unavailable({ rule: 'mineralSupply.localStock', missing: [POLICY_COLUMN] }) : combine({ rule: 'mineralSupply.localStock', parts: { extraction, packetOutput }, compute: ({ extraction: dug, packetOutput: shipped }) => dug - shipped })
@@ -289,14 +293,15 @@ export const siteSupply = ({ surface, orbital, navalAdmins, routes, packets = nu
       const driverPart = ships ? sent : routed.stock === 'none' ? ofRule({ rule: 'mineralSupply.supply', value: 0, inputs: { present: ['FCT_Population.MassDriverDest'] } }) : unavailable({ rule: 'mineralSupply.supply', missing: ['the number of mass drivers or their driver value'] })
 
       supply = combine({ rule: 'mineralSupply.supply', parts: { packets: packetOutput, drivers: driverPart }, compute: ({ packets: output, drivers: sentByDrivers }) => output + sentByDrivers })
-      capacity = ships ? massDriverRateResult(colony.Drivers, colony.DriverGaps) : routed.stock === 'none' ? ofRule({ rule: 'minerals.massDriverRate', value: 0, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] })
+      capacity = ships ? massDriverRateResult(colony.Drivers, colony.DriverGaps, colony.DriverTerms) : routed.stock === 'none' ? ofRule({ rule: 'minerals.massDriverRate', value: 0, inputs: { present: ['FCT_Population.MassDriverDest', 'FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] })
     }
 
     if (policyMissing && reach !== false) {
       supply = unavailable({ rule: 'mineralSupply.supply', missing: [POLICY_COLUMN] })
     }
 
-    const destination = routed && routed.destinationId ? { populationId: routed.destinationId, name: colony.DestinationName || null } : null
+    const destinationId = routed ? routed.destinationId : reach === true ? colony.MassDriverDest : null
+    const destination = destinationId ? { populationId: destinationId, name: colony.DestinationName || null } : null
 
     return {
       populationId: entry.populationId,

@@ -123,7 +123,7 @@ const PAGE_HELP = Object.freeze({
       'Civilian mining candidates ranks the surveyed bodies a complex could be founded on, by Headline or by Longevity preference with editable weights that Reset to defaults restores; neither order predicts the game\'s choice.',
       'Minerals in the colonies shows what each colony holds, reserves and needs; expand a colony for each mineral and the nearest colony with stock free to move.',
       'Civilian mining policy lists each colony whose complexes produce, whether the race buys or taxes the output and where a bought output is sent; Acknowledge as intended marks a taxed colony as meant, and the link opens the stockpiling check in Warnings.',
-      'A dash is a figure the save does not record, never 0, and the mark beside it names what is missing.',
+      'A dash is a figure the save does not record, never 0, and the mark beside it names what is missing; a mineral state is Unknown while an unread driver or destination could change whether its queue stock ships.',
     ],
     terms: ['deposit', 'accessibility', 'mining-rate', 'mineral-shortage', 'civilian-mining', 'mass-driver', 'ton', 'estimated-output'],
   },

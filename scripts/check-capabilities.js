@@ -722,8 +722,8 @@ const alteredChecks = async (capabilities, source) => {
   const unrelated = (result, ...routes) => Object.values(result.reports).filter((report) => !routes.includes(report.route)).every((report) => report.status === 'supported')
   // The reports other than `route` that are not supported, each only degraded and by an input that names `field` (a report that reads the field for another purpose, such as the naval commands' captains' ranks).
   const alsoReading = (result, route, field) => Object.values(result.reports).filter((report) => report.route !== route && !NAVAL_ADMIN_ROUTES.includes(report.route) && report.status !== 'supported').every((report) => report.status === 'unsupported' && report.missing.every((entry) => entry.fields.includes(field)))
-  const NAVAL_ADMIN_ROUTES = ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress', '/hauling', '/information']
-  const SEPARATE = ['/finances', '/routes', '/log', '/propulsion', '/map', '/lagrange', '/technologies', '/designed-tech', '/history', '/intelligence', '/minerals']
+  const NAVAL_ADMIN_ROUTES = ['/production', '/mineral-outlook', '/minerals', '/habitability', '/logistics', '/survey-progress', '/hauling', '/information']
+  const SEPARATE = ['/finances', '/routes', '/log', '/propulsion', '/map', '/lagrange', '/technologies', '/designed-tech', '/history', '/intelligence']
 
   try {
     const rankless = await copy('rank', ['alter table FCT_Commander drop column RankID'])
@@ -1213,6 +1213,7 @@ const rendererDirectory = path.join(repo, 'src', 'renderer')
 const SHARE_SOURCES = {
   '/production': 'pages/production.vue',
   '/mineral-outlook': 'pages/mineral-outlook.vue',
+  '/minerals': 'utilities/cmc-policy.js',
   '/habitability': 'utilities/colonization-data.js',
   '/logistics': 'pages/logistics.vue',
   '/colony-outlook': 'mixins/production-modifiers.js',
@@ -1716,7 +1717,7 @@ const dependencyChecks = async (capabilities, source, scan) => {
     { label: 'FCT_Population.ReserveDuranium dropped', table: 'FCT_Population', column: 'ReserveDuranium', readers: readersOf(scan, 'FCT_Population', 'ReserveDuranium'), supported: unaffected, unsupported: ['/minerals', '/hauling', '/mineral-outlook'] },
     { label: 'FCT_Population.FuelStockpile dropped', table: 'FCT_Population', column: 'FuelStockpile', readers: [...readersOf(scan, 'FCT_Population', 'FuelStockpile'), ...riftReaders('FuelStockpile'), ...panelReaders('FCT_Population', 'FuelStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress'], unsupported: ['/logistics', '/production'] },
     { label: 'FCT_Population.MaintenanceStockpile dropped', table: 'FCT_Population', column: 'MaintenanceStockpile', readers: [...readersOf(scan, 'FCT_Population', 'MaintenanceStockpile'), ...riftReaders('MaintenanceStockpile'), ...panelReaders('FCT_Population', 'MaintenanceStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress', '/production'], unsupported: ['/logistics'] },
-    { label: 'DIM_NavalAdminCommandType.Industrial dropped', table: 'DIM_NavalAdminCommandType', column: 'Industrial', readers: shared('Industrial'), supported: ['/survey-progress', '/minerals', '/hauling'], unsupported: sharing('Industrial') },
+    { label: 'DIM_NavalAdminCommandType.Industrial dropped', table: 'DIM_NavalAdminCommandType', column: 'Industrial', readers: shared('Industrial'), supported: ['/survey-progress', '/hauling'], unsupported: sharing('Industrial') },
     { label: 'DIM_NavalAdminCommandType.Survey dropped', table: 'DIM_NavalAdminCommandType', column: 'Survey', readers: shared('Survey'), supported: ['/production', '/mineral-outlook', '/habitability', '/logistics'], unsupported: ['/survey-progress'] },
     { label: 'DIM_NavalAdminCommandType.Logistics dropped', table: 'DIM_NavalAdminCommandType', column: 'Logistics', readers: shared('Logistics'), supported: ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress'] },
     { label: 'DIM_NavalAdminCommandType.Tactical dropped', table: 'DIM_NavalAdminCommandType', column: 'Tactical', readers: shared('Tactical'), none: true },
@@ -1731,7 +1732,7 @@ const dependencyChecks = async (capabilities, source, scan) => {
     const results = await dependencyResults(capabilities, cases)
 
     results.forEach(([statement, held, detail]) => check(`dependencies: ${statement}`, held, detail))
-    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/colony-outlook', '/habitability', '/logistics', '/mineral-outlook', '/production', '/shipyards'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
+    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/colony-outlook', '/habitability', '/logistics', '/mineral-outlook', '/minerals', '/production', '/shipyards'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
 
     if (mutating()) {
       const [label, file, from, to] = UNION

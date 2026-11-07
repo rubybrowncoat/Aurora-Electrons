@@ -200,7 +200,7 @@ const colonies = ({ app, orbital, surface, navalAdmins, damagedShips }) => {
 
     if (!row.MassDriverExport) {
       colony.mines = true
-      mineral.surface = addRate(mineral.surface, provenance.valueOrNull(outlook.surfaceRateResult({ ...row, CivilianMineCount: 0 })))
+      mineral.surface = addRate(mineral.surface, provenance.valueOrNull(outlook.surfaceRateResult({ ...row, CivilianMineCount: 0, CivilianMineTerms: null })))
     }
   })
 
@@ -254,8 +254,8 @@ const runRace = async (app, database, save, label, increments) => {
   }
 
   const navalAdmins = await naval.loadNavalAdmins(database, { ...ids, bonusId: mining.MINING_BONUS, share: 'Industrial' })
-  const orbital = await rowsOf(database, mining.orbitalMiningQuery(ids))
-  const surface = await rowsOf(database, mining.surfaceMiningQuery(ids))
+  const orbital = await mining.loadOrbitalMining(database, ids)
+  const surface = await mining.loadSurfaceMining(database, ids)
   const [{ AllMiners: allMiners }] = await rowsOf(database, `select count(distinct FCT_Ship.ShipID) as AllMiners from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID where FCT_Ship.GameID = ${save.game} and FCT_Ship.RaceID = ${save.race}`)
   const damagedShips = new Set((await rowsOf(database, `select distinct FCT_DamagedComponent.ShipID from FCT_DamagedComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_DamagedComponent.ComponentID where FCT_ShipDesignComponents.ComponentTypeID = 38 and FCT_DamagedComponent.Number > 0 and FCT_DamagedComponent.GameID = ${save.game}`)).map((row) => row.ShipID))
   const orbitalShips = new Set(orbital.map((row) => row.ShipID))

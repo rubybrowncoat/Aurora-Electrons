@@ -263,7 +263,7 @@ import { idleConstruction } from '../utilities/mine-bootstrap'
 import { chartGridColor, hierarchyView } from '../utilities/map-hierarchy'
 import { COMPACT_YEARS, CRITICAL_RUNWAY_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositStateAt, flowGroupOf, ledgerCoverageDays, yearSteps } from '../utilities/minerals'
 import { categoryRows, categoryUses, depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
-import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
+import { gateMiningRows, loadOrbitalMining, loadSurfaceMining } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { loadTransfers, loadSiteRoutes, mineralSupply, scenarioEntries, transferFlows } from '../utilities/mineral-supply'
 import { industryUsage } from '../utilities/production'
@@ -439,8 +439,8 @@ export default {
         (results[row.MaterialID] = results[row.MaterialID] || []).push(result)
       }
 
-      this.surfaceMining.filter((row) => row.MassDriverExport).forEach((row) => add(row, surfaceRateResult(row)))
-      this.orbitalMining.filter((row) => row.MassDriverExport).forEach((row) => add(row, orbitalRateResult(row, this.navalAdmins)))
+      this.surfaceMining.filter((row) => row.MassDriverExport === 1 || row.MassDriverExport === null).forEach((row) => add(row, row.MassDriverExport === null ? unavailable({ rule: 'mineral.miningRate', missing: ['whether the colony exports its civilian mining output'] }) : surfaceRateResult(row)))
+      this.orbitalMining.filter((row) => row.MassDriverExport === 1 || row.MassDriverExport === null).forEach((row) => add(row, row.MassDriverExport === null ? unavailable({ rule: 'mineral.miningRate', missing: ['whether the colony exports its civilian mining output'] }) : orbitalRateResult(row, this.navalAdmins)))
 
       return Object.fromEntries(Object.entries(results).map(([materialId, list]) => [materialId, miningSum(list)]))
     },
@@ -1341,7 +1341,7 @@ export default {
           return []
         }
 
-        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(gateMiningRows(items, blocked)))
+        return Object.freeze(gateMiningRows(await loadSurfaceMining(this.database, { GameID: this.GameID, RaceID: this.RaceID }), blocked))
       }),
       default: [],
     },
@@ -1353,7 +1353,7 @@ export default {
           return []
         }
 
-        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(gateMiningRows(items, blocked)))
+        return Object.freeze(gateMiningRows(await loadOrbitalMining(this.database, { GameID: this.GameID, RaceID: this.RaceID }), blocked))
       }),
       default: [],
     },

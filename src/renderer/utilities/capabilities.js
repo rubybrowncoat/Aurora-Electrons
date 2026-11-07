@@ -91,6 +91,7 @@ export const SOFT = Object.freeze({
   ]),
   '/production': Object.freeze([navalRank('the orbital terraforming rates of the colonies, which rest on the ranks of the naval admin commanders')]),
   '/mineral-outlook': Object.freeze([navalRank('the mining rates of the orbital miners, which rest on the ranks of the naval admin commanders')]),
+  '/minerals': Object.freeze([navalRank('the orbital mining rates that fill local reserves, which rest on the ranks of the naval admin commanders')]),
   '/habitability': Object.freeze([navalRank('the mining outlook of the mass-driver colonies, which rests on the ranks of the naval admin commanders')]),
   '/logistics': Object.freeze([navalRank('the fuel output of the Sorium harvesters, which rests on the ranks of the naval admin commanders'), STATION_PANEL_READS]),
   '/survey-progress': Object.freeze([navalRank('the survey rates of the fleets, which rest on the ranks of the naval admin commanders')]),
@@ -117,6 +118,7 @@ export const MARKER_COLUMNS = Object.freeze({
 export const MARKER_USES = Object.freeze({
   '/production': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/mineral-outlook': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/minerals': Object.freeze({ policy: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/habitability': Object.freeze({ outlook: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/logistics': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/colony-outlook': Object.freeze({ populationProductionModifiers: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
@@ -203,6 +205,7 @@ const EXTRA_READS = Object.freeze({
     page: `DIM_PlanetaryInstallation(ConstructionValue OrdnanceProductionValue FighterProductionValue) ${STOCKPILES}`,
     'check:dangerous-rifts': STOCKPILES,
     'check:idle-research-labs': ORBITAL_CENSUS_READS,
+    'check:undermanned-ships': ORBITAL_CENSUS_READS,
     'check:free-construction-capacity': 'DIM_PlanetaryInstallation(ConstructionValue)',
     'check:free-ordnance-capacity': 'DIM_PlanetaryInstallation(OrdnanceProductionValue)',
     'check:free-fighter-capacity': 'DIM_PlanetaryInstallation(FighterProductionValue)',

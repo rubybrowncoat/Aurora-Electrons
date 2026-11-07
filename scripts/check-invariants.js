@@ -1774,7 +1774,7 @@ const defineCases = (modules) => {
     assert.equal(logistics.refineryOutput({ ...colony, FuelProdStatus: 0 }, null).value, 0)
     assert.equal(logistics.refineryOutput({ ...colony, Refineries: 0 }, null).value, 0)
     assert.equal(logistics.refineryOutput({ ...colony, FuelProdStatus: null }, 1.5).status, 'unavailable')
-    assert.equal(logistics.refineryYield({ ...colony, Sorium: 0.5 }, null).value, 0)
+    assert.equal(logistics.refineryYield({ ...colony, Sorium: 0.5 }, null).status, 'unavailable')
     assert.equal(logistics.refineryYield({ ...colony, Sorium: 100 }, 1.5).value, 6000)
     assert.equal(logistics.refineryYield({ ...colony, Sorium: null }, 1.5).status, 'unavailable')
     assert.equal(logistics.mspProduction(colony, 2).value, 400)

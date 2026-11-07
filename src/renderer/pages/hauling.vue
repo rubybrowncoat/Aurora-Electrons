@@ -255,7 +255,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route-position'
 import routeDesires, { DESIRE_INPUTS, DESIRE_LABELS } from '../mixins/route-desires'
-import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
+import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds, stockExporting } from '../utilities/colony-minerals'
 import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
 import { CARGO_POINTS, CARGO_UNSETTLED, classYear, cycleCargo, cycleHandling, cycleWalk, propagatedRoute, routeResults, routeYear, walkRoute } from '../utilities/hauling'
@@ -267,6 +267,7 @@ import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResul
 import { ofRule, unavailable } from '../utilities/provenance'
 import { allLoaded, tracked } from '../utilities/load-tracking'
 import { rangeFigure, rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
+import { capacitySum, capacityTerms } from '../utilities/mining-data'
 import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
@@ -557,7 +558,7 @@ export default {
     colonyStocks() {
       const { needs, packets } = this
 
-      return this.colonies.map((colony) => ({ colony, minerals: colonyMinerals(colony, needs[colony.PopulationID], packets[colony.PopulationID], colony.MassDrivers > 0 && colony.MassDriverDest > 0) }))
+      return this.colonies.map((colony) => ({ colony, minerals: colonyMinerals(colony, needs[colony.PopulationID], packets[colony.PopulationID], stockExporting(colony)) }))
     },
 
     // The hauls under the avoid settings; none while a setting is on and the systems it reads are not in, since a plan over a guess would be the baseline passing as the safe one.
@@ -947,7 +948,7 @@ export default {
           return []
         }
 
-        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${SHUTTLE_SERVICE_COLUMNS}, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join (select FCT_PopulationInstallations.PopID, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID ${shuttleServiceJoin(this.GameID, 'FCT_Population.PopulationID')} where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${SHUTTLE_SERVICE_COLUMNS}, case when VIR_Installations.PopID is null then 0 else VIR_Installations.MassDrivers end as MassDrivers, VIR_Installations.MassDriverTerms from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join (select FCT_PopulationInstallations.PopID, ${capacitySum('DIM_PlanetaryInstallation.MassDriverValue', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as MassDrivers, ${capacityTerms('DIM_PlanetaryInstallation.MassDriverValue', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as MassDriverTerms from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID ${shuttleServiceJoin(this.GameID, 'FCT_Population.PopulationID')} where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return Object.freeze(colonies)
       }),

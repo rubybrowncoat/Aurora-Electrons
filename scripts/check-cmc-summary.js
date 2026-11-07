@@ -53,7 +53,7 @@ const PAGE_STUBS = {
   'dayjs/plugin/utc.js': 'export default {}',
   romanum: 'export default { toNumeral: String }',
 }
-const STORE = { getters: { config: { get: () => 'Tick' } }, state: {} }
+const STORE = { getters: { config: { get: () => 'Tick' }, 'capabilities/result': {}, 'capabilities/blockedBonuses': new Set(), 'capabilities/report': () => ({ groups: { navalRank: true } }) }, state: {} }
 
 let failures = 0
 let checks = 0
@@ -747,7 +747,7 @@ const MUTATIONS = [
   { name: 'the bought output taxed', file: 'summary', find: 'entry.choice === \'buy\'), version)', replace: 'entry.choice === \'tax\'), version)', fails: ['wealth'] },
   { name: 'the tax collected at the purchase cost', file: 'summary', find: 'complexes * (colony.PurchaseCivilianMinerals ? CMC_PURCHASE_COST : CMC_TAX_INCOME)', replace: 'complexes * (colony.PurchaseCivilianMinerals ? CMC_PURCHASE_COST : CMC_PURCHASE_COST)', fails: ['wealth'] },
   { name: 'the rates given whatever the save\'s version', file: 'summary', find: 'if (entries.length && ruleSupports(\'cmcSummary.wealth\', version) !== true) {', replace: 'if (false) {', fails: ['wealth'] },
-  { name: 'a colony whose complexes are not recorded counted as none', file: 'summary', find: 'const complexesOf = (colony) => (known(colony.Complexes) && !(colony.ComplexGaps > 0) ? whole(Math.max(0, colony.Complexes)) : null)', replace: 'const complexesOf = (colony) => (known(colony.Complexes) ? whole(Math.max(0, colony.Complexes)) : 0)', fails: ['unknown'] },
+  { name: 'a colony whose complexes are not recorded counted as none', file: 'summary', find: 'const complexesOf = (colony) => (known(colony.Complexes) && !(colony.ComplexGaps > 0) ? whole(Math.max(0, colony.Complexes), colony.ComplexesTerms) : null)', replace: 'const complexesOf = (colony) => (known(colony.Complexes) ? whole(Math.max(0, colony.Complexes), colony.ComplexesTerms) : 0)', fails: ['unknown'] },
   { name: 'a possible body left out of its system\'s caption', file: 'summary', find: 'rows.get(body.SystemID).possible += 1', replace: 'undefined', fails: ['possible'] },
   { name: 'the systems left in the order they were found', file: 'summary', find: 'return { rows: summaryRows.sort(byName), systems: summaryRows.length, possible }', replace: 'return { rows: summaryRows, systems: summaryRows.length, possible }', fails: ['order'] },
   { name: 'a system listed for a possible body alone', file: 'summary', find: 'const listed = [...rows.values()].filter((row) => row.candidates.length > 0 || row.active > 0 || row.activeUnknown)', replace: 'const listed = [...rows.values()].filter((row) => row.candidates.length > 0 || row.active > 0 || row.activeUnknown || row.possible > 0)', fails: ['system'] },

@@ -767,6 +767,49 @@ check('page', 'the page has the Empire summary view in its toggle, view names, s
   assert.equal(held.summaryTable, null, 'a read in flight shows no rows')
 })
 
+check('refineries', 'the page lists and totals decimal-effective whole refineries with no fuel stock, classifies idle rows, and keeps stock-only colonies', async (w) => {
+  assert.ok(w.texts.page.includes('refineryRows.filter((row) => row.output > 0).length'), 'the refining chip uses the rows under test')
+  const database = copy()
+  const id = rowsOf(database, `select PopulationID from FCT_Population where GameID = ${GAME} and RaceID = ${RACE} and PopName = 'Earth'`)[0].PopulationID
+  const refinery = rowsOf(database, 'select PlanetaryInstallationID from DIM_PlanetaryInstallation where RefineryProductionValue = 1 order by PlanetaryInstallationID limit 1')[0].PlanetaryInstallationID
+
+  assert.equal(rowsOf(database, 'select RefineryProductionValue as weight from DIM_PlanetaryInstallation where PlanetaryInstallationID = 38')[0].weight, 0.05, 'the conventional industry refinery weight')
+  database.exec(`delete from FCT_PopulationInstallations where GameID = ${GAME}; update FCT_Population set FuelStockpile = 0, FuelProdStatus = 1, Sorium = 0.5 where GameID = ${GAME} and RaceID = ${RACE}; update FCT_Race set FuelProduction = 1000 where GameID = ${GAME} and RaceID = ${RACE}`)
+  const insert = database.query('insert into FCT_PopulationInstallations (GameID, PopID, PlanetaryInstallationID, Amount) values (?, ?, ?, ?)')
+
+  insert.run(GAME, id, refinery, 0.08)
+  insert.run(GAME, id, 38, 18.4)
+  const vm = await pageOn(w, database)
+  const cases = [
+    { name: 'decimal whole, zero fuel', amount: 0.08, industry: 18.4, fuel: 0, on: 1, sorium: 0.5, modifier: 1, listed: true, output: 1000, idle: null },
+    { name: 'decimal whole, production off', amount: 0.08, industry: 18.4, fuel: 0, on: 0, sorium: 0.5, modifier: 1, listed: true, output: 0, idle: 'Turned off' },
+    { name: 'decimal whole, no Sorium', amount: 0.08, industry: 18.4, fuel: 0, on: 1, sorium: 0, modifier: 1, listed: true, output: 0, idle: 'No Sorium' },
+    { name: 'decimal whole, no workers', amount: 0.08, industry: 18.4, fuel: 0, on: 1, sorium: 0.5, modifier: 0, listed: true, output: 0, idle: 'No workers' },
+    { name: 'genuinely below one, zero fuel', amount: 0.0799999999999, industry: 18.4, fuel: 0, on: 1, sorium: 0.5, modifier: 1, listed: false, output: 0, idle: null },
+    { name: 'fractional refinery, fuel retained', amount: 0.5, industry: 0, fuel: 1, on: 0, sorium: 0.5, modifier: 1, listed: true, output: 0, idle: null },
+    { name: 'stock alone', amount: 0, industry: 0, fuel: 1, on: 0, sorium: 0, modifier: 1, listed: true, output: 0, idle: null },
+    { name: 'no refinery or stock', amount: 0, industry: 0, fuel: 0, on: 1, sorium: 0.5, modifier: 1, listed: false, output: 0, idle: null },
+  ]
+
+  for (const item of cases) {
+    database.query('update FCT_PopulationInstallations set Amount = ? where GameID = ? and PopID = ? and PlanetaryInstallationID = ?').run(item.amount, GAME, id, refinery)
+    database.query('update FCT_PopulationInstallations set Amount = ? where GameID = ? and PopID = ? and PlanetaryInstallationID = 38').run(item.industry, GAME, id)
+    database.query('update FCT_Population set FuelStockpile = ?, FuelProdStatus = ?, Sorium = ? where GameID = ? and PopulationID = ?').run(item.fuel, item.on, item.sorium, GAME, id)
+    vm.modifierOf = () => item.modifier
+    await vm.runAsync('colonies')
+
+    if (item.amount === 0.08) assert.equal(vm.colonies.find((colony) => colony.PopulationID === id).Refineries, 0.9999999999999999, `${item.name}: the real page acquisition has the binary boundary`)
+    assert.deepEqual(vm.refineryRows.map((row) => row.PopulationID), item.listed ? [id] : [], `${item.name}: listed colonies`)
+    assert.equal(vm.refineryRows.filter((row) => row.output > 0).length, item.output > 0 ? 1 : 0, `${item.name}: the refining count`)
+    assert.equal(vm.refineryTotals.litres, item.output, `${item.name}: the total includes the output`)
+    assert.equal(vm.refineryTotals.unknown, 0, `${item.name}: no unknown output`)
+    if (item.listed) {
+      assert.equal(vm.refineryRows[0].output, item.output, `${item.name}: annualised row output`)
+      assert.equal(vm.refineryRows[0].idleReason, item.idle, `${item.name}: the idle classification`)
+    }
+  }
+})
+
 const loadersOf = (database) => loaderOf(database)
 
 check('loader', 'the loader reads the ships that count, the modules, the services and the stored order, and the capture\'s colonies are the ones it lists', async (w) => {
@@ -814,8 +857,8 @@ const FAULTS = [
   { name: 'production takes the facilities whole', target: 'util', from: 'whole(colony.MaintenanceFacilities), PRODUCTION_PERIODS', to: 'colony.MaintenanceFacilities, PRODUCTION_PERIODS', fails: ['formula', 'oracle'] },
   { name: 'production is not made four times over', target: 'util', from: 'export const PRODUCTION_PERIODS = 4', to: 'export const PRODUCTION_PERIODS = 1', fails: ['s4', 'oracle', 'formula'] },
   { name: 'production leaves out the colony\'s modifier', target: 'util', from: 'product(colony.MSPProduction, modifier, whole', to: 'product(colony.MSPProduction, 1, whole', fails: ['s4', 'oracle', 'formula'] },
-  { name: 'fuel production takes the refineries whole', target: 'util', from: 'product(colony.FuelProduction, modifier, whole(colony.Refineries))', to: 'product(colony.FuelProduction, modifier, colony.Refineries)', fails: ['formula', 'oracle'] },
-  { name: 'fuel production leaves out the colony\'s modifier', target: 'util', from: 'product(colony.FuelProduction, modifier, whole', to: 'product(colony.FuelProduction, 1, whole', fails: ['s4', 'oracle', 'formula'] },
+  { name: 'fuel production takes the refineries whole', target: 'util', from: 'product(colony.FuelProduction, modifier, (isNumber(colony.Refineries) ? wholeCapacity(colony.Refineries, colony.RefineriesTerms) : null))', to: 'product(colony.FuelProduction, modifier, colony.Refineries)', fails: ['formula', 'oracle'] },
+  { name: 'fuel production leaves out the colony\'s modifier', target: 'util', from: 'product(colony.FuelProduction, modifier,', to: 'product(colony.FuelProduction, 1,', fails: ['s4', 'oracle', 'formula'] },
   { name: 'the refuelling mark takes a fraction of a point', target: 'util', from: 'refuel: whole(service.RefuelPoints) > 0,', to: 'refuel: service.RefuelPoints > 0,', fails: ['formula'] },
   { name: 'the ordnance mark takes a fraction of a point', target: 'util', from: 'ordnance: whole(service.OrdnancePoints) > 0,', to: 'ordnance: service.OrdnancePoints > 0,', fails: ['formula'] },
   { name: 'the resupply mark leaves out the cargo shuttle points', target: 'util', from: ' || whole(service.ShuttlePoints) > 0,', to: ',', fails: ['formula', 'oracle', 's4'] },
@@ -890,6 +933,8 @@ const FAULTS = [
   { name: 'the page reads the summary of the colonies of the first race alone', target: 'page', from: 'return await loadSummarySources(database, { GameID, RaceID })', to: 'return await loadSummarySources(database, { GameID, RaceID: 1 })', fails: ['s4', 'oracle'] },
   { name: 'the help leaves the view out', target: 'glossary', from: 'Reserves, Empire summary and Fleet stations.', to: 'Reserves and Fleet stations.', fails: ['page'] },
   { name: 'the capability registry loses the optional read', target: 'capabilities', from: "key === 'fuelDonors' || key === 'summarySources' ||", to: "key === 'fuelDonors' ||", fails: ['page'] },
+  { name: 'the fuel page drops a decimal-effective whole refinery using the binary sum', target: 'page', from: 'colony.FuelStockpile >= 1 || wholeCapacity(colony.Refineries, colony.RefineriesTerms) !== 0', to: 'colony.FuelStockpile >= 1 || colony.Refineries >= 1', fails: ['refineries'] },
+  { name: 'the fuel page classifies idle decimal-effective refineries using the binary sum', target: 'page', from: 'idleReason: wholeCapacity(colony.Refineries, colony.RefineriesTerms) < 1', to: 'idleReason: colony.Refineries < 1', fails: ['refineries'] },
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -919,7 +964,7 @@ const run = async (checks, world) => {
 
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 
-const FIXTURES = { s4: [SAVE], oracle: [SAVE], order: [SAVE], page: [SAVE], loader: [SAVE] }
+const FIXTURES = { s4: [SAVE], oracle: [SAVE], order: [SAVE], page: [SAVE], refineries: [SAVE], loader: [SAVE] }
 const absent = (one) => (FIXTURES[one.name] || []).filter((file) => !fs.existsSync(path.join(root, file)))
 
 const main = async () => {

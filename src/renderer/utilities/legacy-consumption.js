@@ -1,7 +1,8 @@
 // The minerals a race's fuel refineries, maintenance facilities and shipyards use, worked out from the save's installations, shipyard tasks and race rates, for a save that has no mineral ledger to observe them in (the Mineral Outlook's fallback). Every figure is a provenance result (utilities/provenance.js): an input the save does not hold makes the figure unavailable and names it, never 0. A save with a ledger observes these uses, so the page never adds this model to it.
 
 import { LITRES_PER_TON, MSP_MINERALS, mspProduction, refineryYield } from './logistics'
-import { MINERALS } from './minerals'
+import { MINERALS, wholeCapacity } from './minerals'
+import { capacityTerms } from './mining-data'
 import { shipRate, shipyardUpgradeRate } from './production'
 import { capacityKind } from './production-types'
 import { combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, weakestStatus } from './provenance'
@@ -29,7 +30,7 @@ registerRule({
   units: 't/yr',
   verification: 'confirmed',
   structure: ['FCT_Population.FuelProdStatus, Sorium', 'FCT_Race.FuelProduction', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.RefineryProductionValue', 'the colony\'s production modifier'],
-  note: 'The Sorium a year the race\'s refineries take: the whole refineries of a colony with fuel production on and at least 1 t of Sorium, times the racial fuel rate and the colony\'s production modifier, at 2,000 litres of fuel a tonne. At the last production tick of three saves it matched the Sorium the mineral ledger logs for fuel refining on every colony with refineries, those with production off or no Sorium giving 0 in both. The cut of the refineries to a whole number is the game\'s own and no saved colony has a fraction, so a result that rests on it is an estimate. On a campaign of 149 saves five days apart the rule, read from the earlier save of each pair, matched the Sorium an NPR\'s deposits lost less the rise of its stock to within 0.02% in every pair tried. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
+  note: 'The current annualised Sorium use while fuel production is on and Sorium remains: the colony\'s whole refinery capacity times the racial fuel rate and the colony\'s production modifier, at 2,000 litres of fuel a tonne. Positive stocks below one tonne still support refining; the actual use over an increment can be stock-limited, so this rate does not promise a year\'s production. At the last production tick of three saves it matched the Sorium the mineral ledger logs for fuel refining on every colony with refineries, those with production off or no Sorium giving 0 in both. The cut of the refineries to a whole number is the game\'s own and no saved colony has a fraction, so a result that rests on it is an estimate. On a campaign of 149 saves five days apart the rule, read from the earlier save of each pair, matched the Sorium an NPR\'s deposits lost less the rise of its stock to within 0.02% in every pair tried. Checked against the migrated Galactic Shogunate save, a game of the earlier release carried over to the present schema.',
   assumptions: ['the colony keeps the Sorium its refineries use for the year'],
 })
 
@@ -78,7 +79,7 @@ const MAINTENANCE = 'legacy.maintenanceUse'
 const SHIPBUILDING = 'legacy.shipbuildingUse'
 
 // The colonies with the installation sums the fuel and maintenance rules read. A colony with no installation row has none (0); one with a row whose amount or type the save does not give has no figure (null), never 0. `Deposit<mineral>` counts the deposits of the colony's body that still hold some of the mineral, `DepositUnread<mineral>` those whose amount is not recorded. The stockpiles of fuel and maintenance supplies are not read: the uses do not depend on them.
-export const legacyColoniesQuery = ({ GameID, RaceID }) => `select FCT_Population.PopulationID, FCT_Population.RaceID, FCT_Population.PopName, FCT_Population.Capital, FCT_Population.FuelProdStatus, FCT_Population.MaintProdStatus, FCT_Population.Sorium, ${MSP_MINERALS.map((mineral) => `FCT_Population.${mineral.name}`).join(', ')}, FCT_Race.NPR, FCT_Race.FuelProduction, FCT_Race.MSPProduction, ${INSTALLATION_COLUMNS.map(({ column }) => `(case when VIR_Installations.${column}Unread > 0 then null else coalesce(VIR_Installations.${column}, 0) end) as ${column}`).join(', ')}, ${MSP_MINERALS.map((mineral) => `coalesce(VIR_Deposits.Deposit${mineral.name}, 0) as Deposit${mineral.name}, coalesce(VIR_Deposits.DepositUnread${mineral.name}, 0) as DepositUnread${mineral.name}`).join(', ')} from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join (select FCT_PopulationInstallations.PopID, ${INSTALLATION_COLUMNS.map(({ column, value }) => `sum(DIM_PlanetaryInstallation.${value} * FCT_PopulationInstallations.Amount) as ${column}, sum(case when DIM_PlanetaryInstallation.${value} is null or (FCT_PopulationInstallations.Amount is null and DIM_PlanetaryInstallation.${value} <> 0) then 1 else 0 end) as ${column}Unread`).join(', ')} from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID left join (select FCT_MineralDeposit.SystemBodyID, ${MSP_MINERALS.map((mineral) => `sum(case when FCT_MineralDeposit.MaterialID = ${MINERALS.find((item) => item.name === mineral.name).id} and FCT_MineralDeposit.Amount > 0 then 1 else 0 end) as Deposit${mineral.name}, sum(case when FCT_MineralDeposit.MaterialID = ${MINERALS.find((item) => item.name === mineral.name).id} and FCT_MineralDeposit.Amount is null then 1 else 0 end) as DepositUnread${mineral.name}`).join(', ')} from FCT_MineralDeposit where FCT_MineralDeposit.GameID = ${GameID} group by FCT_MineralDeposit.SystemBodyID) as VIR_Deposits on VIR_Deposits.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`
+export const legacyColoniesQuery = ({ GameID, RaceID }) => `select FCT_Population.PopulationID, FCT_Population.RaceID, FCT_Population.PopName, FCT_Population.Capital, FCT_Population.FuelProdStatus, FCT_Population.MaintProdStatus, FCT_Population.Sorium, ${MSP_MINERALS.map((mineral) => `FCT_Population.${mineral.name}`).join(', ')}, FCT_Race.NPR, FCT_Race.FuelProduction, FCT_Race.MSPProduction, VIR_Installations.RefineriesTerms, ${INSTALLATION_COLUMNS.map(({ column }) => `(case when VIR_Installations.${column}Unread > 0 then null else coalesce(VIR_Installations.${column}, 0) end) as ${column}`).join(', ')}, ${MSP_MINERALS.map((mineral) => `coalesce(VIR_Deposits.Deposit${mineral.name}, 0) as Deposit${mineral.name}, coalesce(VIR_Deposits.DepositUnread${mineral.name}, 0) as DepositUnread${mineral.name}`).join(', ')} from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join (select FCT_PopulationInstallations.PopID, ${capacityTerms('DIM_PlanetaryInstallation.RefineryProductionValue', 'DIM_PlanetaryInstallation.RefineryProductionValue > 0')} as RefineriesTerms, ${INSTALLATION_COLUMNS.map(({ column, value }) => `sum(DIM_PlanetaryInstallation.${value} * FCT_PopulationInstallations.Amount) as ${column}, sum(case when FCT_PopulationInstallations.Amount is not 0 and (DIM_PlanetaryInstallation.${value} is null or (FCT_PopulationInstallations.Amount is null and DIM_PlanetaryInstallation.${value} <> 0)) then 1 else 0 end) as ${column}Unread`).join(', ')} from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID left join (select FCT_MineralDeposit.SystemBodyID, ${MSP_MINERALS.map((mineral) => `sum(case when FCT_MineralDeposit.MaterialID = ${MINERALS.find((item) => item.name === mineral.name).id} and FCT_MineralDeposit.Amount > 0 then 1 else 0 end) as Deposit${mineral.name}, sum(case when FCT_MineralDeposit.MaterialID = ${MINERALS.find((item) => item.name === mineral.name).id} and FCT_MineralDeposit.Amount is null then 1 else 0 end) as DepositUnread${mineral.name}`).join(', ')} from FCT_MineralDeposit where FCT_MineralDeposit.GameID = ${GameID} group by FCT_MineralDeposit.SystemBodyID) as VIR_Deposits on VIR_Deposits.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`
 
 // Every shipyard task with the size and commercial flag of the class it builds (the class a refit or auto-refit turns the ship into, otherwise the class itself).
 export const shipyardTasksQuery = ({ GameID, RaceID }) => `select FCT_ShipyardTask.TaskID, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.TaskTypeID, FCT_ShipyardTask.TotalBP, FCT_ShipyardTask.CompletedBP, FCT_ShipyardTask.Paused, ${MINERALS.map((mineral) => `FCT_ShipyardTask.${mineral.name}`).join(', ')}, FCT_ShipClass.Size as ClassSize, FCT_ShipClass.Commercial as ClassCommercial from FCT_ShipyardTask left join FCT_ShipClass on FCT_ShipClass.ShipClassID = (case when FCT_ShipyardTask.TaskTypeID in (2, 4) then FCT_ShipyardTask.RefitID else FCT_ShipyardTask.ClassID end) where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID}`
@@ -92,7 +93,10 @@ const estimated = (result, assumption) => (isAvailable(result) ? envelope({ valu
 const zero = (rule, reason, units) => ofRule({ rule, value: 0, inputs: { present: [reason] }, units })
 
 // The game cuts a colony's refinery or facility count to a whole number. `fractional` says the cut changed it, a case the saves do not hold.
-const wholeCount = (value) => (isNumber(value) ? { count: Math.trunc(value), fractional: Math.trunc(value) !== value } : { count: value, fractional: false })
+const wholeCount = (value, terms) => {
+  const count = isNumber(value) ? wholeCapacity(value, terms) : value
+  return { count, fractional: isNumber(value) && count !== value }
+}
 
 const modifierOf = (modifiers, populationId) => {
   const row = modifiers[populationId]
@@ -113,7 +117,7 @@ const pooled = (colony, colonies) => {
 
 // Sorium a year (t) one colony's refineries take.
 const fuelOfColony = (colony, modifiers, colonies) => {
-  const { count: refineries, fractional } = wholeCount(colony.Refineries)
+  const { count: refineries, fractional } = wholeCount(colony.Refineries, colony.RefineriesTerms)
   const pool = refineries === 0 ? { colony, shared: false } : pooled(colony, colonies)
 
   if (pool === null) {
@@ -275,7 +279,7 @@ export const legacyModels = ({ colonies, tasks, activities, modifiers }) => {
   const fuel = colonies.map((colony) => fuelOfColony(colony, modifiers, colonies))
   const msp = maintenancePools(colonies).map(({ members, stock }) => maintenanceOfPool(members, stock, modifiers))
   const usesOf = [...tasks.map((task) => taskByMineral(task, modifiers)), ...activities.map((yard) => activityByMineral(yard, modifiers))]
-  const refineries = colonies.reduce((total, colony) => total + (isNumber(colony.Refineries) ? Math.trunc(colony.Refineries) : 0), 0)
+  const refineries = colonies.reduce((total, colony) => total + (isNumber(colony.Refineries) ? wholeCapacity(colony.Refineries, colony.RefineriesTerms) : 0), 0)
   const facilities = colonies.reduce((total, colony) => total + (isNumber(colony.MaintenanceFacilities) ? Math.trunc(colony.MaintenanceFacilities) : 0), 0)
   const running = tasks.filter((task) => task.TaskTypeID !== TASK_TYPE_SCRAP && !task.Paused).length
   const yards = activities.filter((yard) => !yard.PauseActivity).length
@@ -283,7 +287,7 @@ export const legacyModels = ({ colonies, tasks, activities, modifiers }) => {
   return {
     fuel: {
       byMineral: { Sorium: sumResults({ rule: FUEL, results: fuel }) },
-      basis: `${count(refineries, 'refinery', 'refineries')} at ${count(colonies.filter((colony) => Math.trunc(colony.Refineries) > 0).length, 'colony', 'colonies')}`,
+      basis: `${count(refineries, 'refinery', 'refineries')} at ${count(colonies.filter((colony) => wholeCapacity(colony.Refineries, colony.RefineriesTerms) > 0).length, 'colony', 'colonies')}`,
     },
     maintenance: {
       byMineral: byName(MSP_MINERALS.map((mineral) => mineral.name), (name) => sumResults({ rule: MAINTENANCE, results: msp.map((made) => combine({ rule: MAINTENANCE, parts: { 'the MSP made': made }, compute: (values) => values['the MSP made'] * MSP_MINERALS.find((mineral) => mineral.name === name).perMsp, units: 't/yr' })) })),

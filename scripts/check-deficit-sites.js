@@ -909,7 +909,7 @@ const saveStatements = async (ctx, save) => {
   const BASIS = { speed: 1000, drive: 'drive', lagrange: true, cargo: 2000 }
   const surveyed = new Set((await rowsOf(database, `select SystemBodyID from FCT_SystemBodySurveys where RaceID = ${save.race}`)).map((row) => row.SystemBodyID))
   const mineralIds = minerals.MINERALS.slice(0, 2).map((mineral) => mineral.id)
-  const surfaceRows = await rowsOf(database, mining.surfaceMiningQuery(ids))
+  const surfaceRows = await mining.loadSurfaceMining(database, ids)
   const routes = await ms.loadSiteRoutes(database, ids)
   const packets = await colonyModule.loadPacketsInFlight(database, ids)
   const rankOf = (materialId, over = {}) => {
