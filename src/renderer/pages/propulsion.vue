@@ -1124,7 +1124,7 @@ export default {
         cost: valueOrNull(provenance.cost),
         crew: sumBy(shipClass.engines, (engine) => engine.crew * engine.count) + sumBy(shipClass.tanks, (tank) => tank.crew * tank.count),
         type: !shipClass.engines.length ? '—' : commercial === shipClass.engines.length ? 'Commercial' : commercial ? 'Mixed' : 'Military',
-        thermal: thermalSignature({ enginePower: heat, stealthRating: 1, fraction: this.fraction, sizeHS: shipClass.sizeHS }),
+        thermal: thermalSignature({ enginePower: heat, stealthRating: 1, fraction: this.fraction, hasMoveOrders: this.fraction > 0, hasEngine: shipClass.engines.length > 0, mountedPower: power, sizeHS: shipClass.sizeHS }),
         cards: shipClass.engines.map((engine) => engineCard(engine, engine.name, engine.count)),
         tanks: shipClass.tanks,
         tankHS: shipClass.tankHS,

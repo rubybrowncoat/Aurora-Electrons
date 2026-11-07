@@ -1,6 +1,7 @@
 // The game's design rules, for the planners: what a component or a class built from the race's tech comes out at, as the game's design windows work it out. Pure functions with the units in their argument names: sizes in hull spaces (HS), power in engine power (EP), fuel in litres, speed in km/s, distance in km, cost in BP. docs/DATABASE.md § Design rules states each rule in prose.
 
 import { combine, envelope, getRule, isAvailable, ofRule, registerRule, STATUS, unavailable } from './provenance'
+import { divide, fitsDouble, floor, fromDouble, fromString, greater, less, multiply, negate, negative } from './decimal'
 import { HIT_RULES, hitScenario } from './missile-hit'
 import { PACKAGE_STATUS, REQUEST_TOLERANCE, packerFor } from './tank-packing'
 
@@ -83,8 +84,76 @@ export const enduranceHours = ({ fuel, enginePower, fuelPerEph, fraction = 1 }) 
   return burn > 0 ? fuel / burn : 0
 }
 
-// A moving ship's thermal signature: the engines' power times their thermal rating (`stealthRating`, the engine design's thermal share) times the share of top speed it moves at, never under a twentieth of its size. A ship that isn't moving shows that floor.
-export const thermalSignature = ({ enginePower, stealthRating, fraction = 1, sizeHS }) => {
+// The exact decimals the top-speed cut needs: the scale from power per size to speed, the ±1 a whole top speed starts at, and the two ends of the signed 32-bit integer the game casts the top speed to. The division and the multiplication at the cut are exact decimals (utilities/decimal.js), as the game's own decimal type works them out, so the boundary is the game's and not the float tolerance of the top-speed rule.
+const SPEED_ONE = fromString('1')
+const SPEED_MINUS_ONE = fromString('-1')
+const SPEED_SCALE = fromString('1000')
+const SPEED_INTEGER_MAX = fromString('2147483647')
+const SPEED_INTEGER_MIN = fromString('-2147483648')
+
+// The whole number a cast cuts a decimal to, towards zero.
+const truncate = (value) => (negative(value) ? negate(floor(negate(value))) : floor(value))
+
+// The class's top speed as the game's exact decimal, or null where the game's own arithmetic overflows its decimal type: a speed that large is far past the integer the cast holds, and the game's catch returns 0 for it as it does for the cast.
+const exactTopSpeed = (mountedPower, sizeHS) => {
+  try {
+    return multiply(divide(fromDouble(mountedPower), fromDouble(sizeHS)), SPEED_SCALE)
+  } catch (error) {
+    if (!(error instanceof RangeError)) {
+      throw error
+    }
+
+    return null
+  }
+}
+
+// Whether the class's top speed leaves no signature: a ratio a hair under a thousandth of the size cuts to 0, where the top-speed rule's float tolerance would round it up to a whole number, and the game's division by that top speed fails; a top speed beyond the signed 32-bit integer the game casts it to overflows the cast. Either reaches the game's catch and returns 0 before the floor, so both leave no signature. A figure beyond the range of the game's decimal type is no figure the game can hold, and the top-speed rule decides it; a size that is no positive number has no top speed.
+const topSpeedLeavesNoSignature = (mountedPower, sizeHS) => {
+  if (!(sizeHS > 0)) {
+    return true
+  }
+
+  if (!fitsDouble(mountedPower) || !fitsDouble(sizeHS)) {
+    return classSpeed({ enginePower: mountedPower, sizeHS }) === 0
+  }
+
+  const speed = exactTopSpeed(mountedPower, sizeHS)
+
+  if (speed === null) {
+    return true
+  }
+
+  if (less(speed, SPEED_ONE) && greater(speed, SPEED_MINUS_ONE)) {
+    return true
+  }
+
+  const whole = truncate(speed)
+
+  return less(whole, SPEED_INTEGER_MIN) || greater(whole, SPEED_INTEGER_MAX)
+}
+
+// A ship's thermal signature: a twentieth of its size with no move orders; with move orders and no engine, nothing; with an engine, the engines' power times their thermal rating (`stealthRating`, the engine design's thermal share) times the share of top speed it moves at, never under that floor. The top speed is the engines' mounted power (`mountedPower`, before their thermal rating) over the size times 1,000, cut to a signed integer, and a top speed of 0, or one past that integer's range, leaves no signature at all rather than the floor. `hasMoveOrders`, `hasEngine` and `mountedPower` are required and have no default, as a ship with move orders and no engine shows nothing rather than the floor.
+export const thermalSignature = ({ enginePower, stealthRating, fraction, hasMoveOrders, hasEngine, mountedPower, sizeHS }) => {
+  if (typeof hasMoveOrders !== 'boolean' || typeof hasEngine !== 'boolean') {
+    throw new TypeError('The thermal signature takes whether the ship has move orders and whether it has an engine')
+  }
+
+  if (!hasMoveOrders) {
+    return sizeHS / 20
+  }
+
+  if (!hasEngine) {
+    return 0
+  }
+
+  if (!Number.isFinite(mountedPower)) {
+    throw new TypeError('The thermal signature takes the engines\' mounted power, which sets the class\'s top speed')
+  }
+
+  if (topSpeedLeavesNoSignature(mountedPower, sizeHS)) {
+    return 0
+  }
+
   return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)
 }
 
@@ -1429,12 +1498,12 @@ registerRule({
 
 registerRule({
   id: 'design.thermalSignature',
-  versions: ['2.7.x'],
+  versions: DESIGN_VERSIONS,
   units: 'thermal signature',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.StealthRating, ComponentValue', 'FCT_ClassComponent.NumComponent', 'FCT_ShipClass.ClassThermal, EnginePower, Size'],
-  note: 'The signature of a ship under way is the engines\' power times their thermal rating times the share of top speed it moves at, never under a twentieth of its size, and a ship with no move orders shows that floor. The saves store the sum at full power (the class thermal signature) and no live signature, so the speed-share rule is not compared with a saved outcome.',
-  assumptions: ['The share of top speed the ship moves at is chosen by the player', 'The engines are all at their nominal count: damage is ignored', 'No ship is under tow, which would raise the mass that sets the speed', 'The ship is one of a fleet with move orders: with none the signature is the floor of a twentieth of the size'],
+  note: 'A ship with no move orders shows a twentieth of its size. A ship with move orders and no engine shows nothing. With an engine it shows the engines\' power times their thermal rating times the share of top speed it moves at, never under that floor, and a top speed of 0, or one past the signed 32-bit integer it is cut to, shows nothing at all rather than the floor: the top speed is the mounted engine power over the size, times 1,000, cut to that integer. The saves store the sum at full power (the class thermal signature) and no live signature, so the speed-share rule is not compared with a saved outcome.',
+  assumptions: ['The share of top speed the ship moves at is chosen by the player', 'The engines are all at their nominal count: damage is ignored', 'No ship is under tow, which would raise the mass that sets the speed', 'With several engine designs the game takes the top speed from the first engine design alone; the planner sums the class\'s engines', 'Move orders, an engine aboard and the mounted power that sets the top speed are planner inputs and not live observations: a share of 0 stands for no move orders and a share above it for hypothetical orders, and a class\'s engines for its having an engine'],
 })
 
 registerRule({

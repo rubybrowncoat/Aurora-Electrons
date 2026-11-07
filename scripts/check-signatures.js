@@ -4,7 +4,7 @@
   bun scripts/check-signatures.js [--no-mutations]
 
   Groups (each check's name begins with its group):
-  - thermal: a moving class shows power × thermal rating × the share of top speed, never under a twentieth of its size; idle shows that floor, a low share clamps to it, a class with no engine shows 0 moving; the speed shares typed as percentages read to sorted fractions with idle and full speed always present, and an unreadable text is an error;
+  - thermal: a moving class shows power × thermal rating × the share of top speed, never under a twentieth of its size; idle shows that floor, a low share clamps to it, a class with no engine shows 0 moving, and the signature rule's own branches keep the floor for an idle engineless ship and give 0 for an ordered engineless one even at the idle share; a top speed that cuts to 0 shows nothing rather than the floor, the cut is the game's exact decimal truncation so a mounted power a hair under a thousandth of the size is 0 where an exact thousandth gives a positive speed, the mounted power and not the thermal sum sets it, and a top speed past the signed 32-bit integer the game casts it to shows nothing too; whether a ship has move orders and whether it has an engine, and the mounted power its top speed is set from, are required inputs with no default; the speed shares typed as percentages read to sorted fractions with idle and full speed always present, and an unreadable text is an error;
   - range: four times the sensitivity doubles the passive range, a signature of 0 gives a range of 0, an unknown signature or sensitivity stays unavailable and never 0, a reach lends the provenance of its figures, and the curves hold the same points as their tables;
   - mixed: engines of several designs make the power-weighted sum and never the mean of their ratings, and are estimated; a class of one design equals its stored thermal signature;
   - cross-section: the effective and the uncloaked cross-section stay distinct for a cloaked class, the floor of 0.3 HS, the cloak that covers the class, the last such cloak, and the active reach with the floor and the square of the cross-section over the resolution;
@@ -187,6 +187,63 @@ check('thermal: idle shows the floor of a twentieth of the size', (m) => {
   assert.equal(thermalOf(m, klass({ engines: [engine({ count: 50, power: 1000 })] }), [0])[0], 2)
 })
 
+check('thermal: an idle engineless ship keeps the floor, an ordered one shows nothing', (m) => {
+  const signature = (over) => m.dr.thermalSignature({ enginePower: 0, stealthRating: 1, fraction: 0, mountedPower: 0, sizeHS: 20, ...over })
+
+  assert.equal(signature({ hasMoveOrders: false, hasEngine: false }), 1)
+  assert.equal(signature({ hasMoveOrders: true, hasEngine: false }), 0, 'the idle share does not stand in for no move orders')
+  assert.equal(signature({ hasMoveOrders: true, hasEngine: false, fraction: 1 }), 0)
+  assert.equal(signature({ hasMoveOrders: true, hasEngine: false, enginePower: 500, stealthRating: 0.5, fraction: 0.5 }), 0, 'engine power is no engine aboard')
+})
+
+check('thermal: an engine aboard shows nothing when the top speed cuts to 0', (m) => {
+  const signature = (over) => m.dr.thermalSignature({ enginePower: 100, stealthRating: 0.5, fraction: 1, hasMoveOrders: true, hasEngine: true, mountedPower: 100, sizeHS: 20, ...over })
+
+  assert.equal(signature({ enginePower: 0, mountedPower: 0 }), 0, 'no mounted power')
+  assert.equal(signature({ enginePower: 0, mountedPower: 0, fraction: 0 }), 0, 'no mounted power, not even the floor at no share')
+  assert.equal(signature({ enginePower: 1, stealthRating: 1, mountedPower: 1, sizeHS: 2000 }), 0, 'a mounted power under a thousandth of the size cuts the top speed to 0')
+  assert.equal(signature({ enginePower: 1, stealthRating: 1, mountedPower: 0.9999999995, sizeHS: 1000 }), 0, 'a mounted power a hair under a thousandth of the size still cuts the top speed to 0: the cut is the game\'s exact truncation, not a tolerance that rounds this ratio up to 1')
+  assert.equal(signature({ enginePower: 1, stealthRating: 1, mountedPower: 1, sizeHS: 1000 }), 50, 'a mounted power of exactly a thousandth of the size gives a top speed of 1, so the signature keeps the floor of 50')
+})
+
+check('thermal: the mounted power sets the top speed, not the thermal sum', (m) => {
+  const signature = (over) => m.dr.thermalSignature({ enginePower: 1, stealthRating: 1, fraction: 1, hasMoveOrders: true, hasEngine: true, mountedPower: 2, sizeHS: 2000, ...over })
+
+  assert.equal(signature({}), 100, 'a mounted power of 2 over 2,000 HS gives a top speed of 1, so the signature keeps the floor of 100 where the thermal sum of 1 would cut the top speed to 0')
+  const cls = klass({ sizeHS: 2000, stored: stored({ crossSection: 2000, thermal: 1 }), engines: [engine({ power: 1, thermalRating: 0.5, count: 2 })] })
+  assert.deepEqual(thermalOf(m, cls, [0, 1]), [100, 100], 'the class\'s two engines make a thermal sum of 1 and a mounted power of 2')
+})
+
+check('thermal: an engine aboard shows nothing when the top speed is past the signed 32-bit integer', (m) => {
+  const signature = (over) => m.dr.thermalSignature({ enginePower: 1, stealthRating: 1, fraction: 1, hasMoveOrders: true, hasEngine: true, mountedPower: 1, sizeHS: 1000, ...over })
+
+  assert.equal(signature({ enginePower: 3000000, mountedPower: 3000000, sizeHS: 1 }), 0, 'a mounted power of 3,000,000 over 1 HS gives a top speed of 3,000,000,000, past the signed 32-bit integer the game casts it to, so the overflow leaves nothing')
+  assert.equal(signature({ enginePower: 3000000, mountedPower: 3000000, sizeHS: 1, fraction: 0 }), 0, 'the overflow comes before the floor: even at no share there is no signature')
+  assert.equal(signature({ enginePower: 2147483647, mountedPower: 2147483647 }), 2147483647, 'a top speed of exactly 2,147,483,647 is the largest the cast holds, so the signature is the product at full share')
+  assert.equal(signature({ enginePower: 2147483647.9, mountedPower: 2147483647.9 }), 2147483647.9, 'a top speed between 2,147,483,647 and the next integer truncates to 2,147,483,647, the largest the cast holds')
+  assert.equal(signature({ enginePower: 2147483648, mountedPower: 2147483648 }), 0, 'a top speed of 2,147,483,648 is one past the largest the cast holds, so it overflows')
+  assert.equal(signature({ enginePower: 1e28, mountedPower: 1e28, sizeHS: 1 }), 0, 'a speed past the range of the game\'s decimal type overflows its arithmetic where the integer overflows the cast: no signature')
+
+  const cls = klass({ sizeHS: 1, stored: stored({ crossSection: 1, thermal: 3000000 }), engines: [engine({ power: 3000000, thermalRating: 1, count: 1 })] })
+  assert.deepEqual(thermalOf(m, cls, [1]), [0], 'a class of 1 HS whose engine of 3,000,000 EP makes a top speed of 3,000,000,000 shows nothing through the signature rule')
+})
+
+check('thermal: an engine aboard at a positive top speed keeps the floor at no share', (m) => {
+  const signature = (over) => m.dr.thermalSignature({ enginePower: 100, stealthRating: 0.5, fraction: 1, hasMoveOrders: true, hasEngine: true, mountedPower: 100, sizeHS: 20, ...over })
+
+  assert.equal(signature({ fraction: 0 }), 1, 'no share')
+  assert.equal(signature({ enginePower: 50 }), 25, 'half the power at the half rating')
+  assert.equal(signature({ stealthRating: 1 }), 100, 'the power at the full rating')
+  assert.equal(signature({ enginePower: 5, stealthRating: 1, sizeHS: 200 }), 10, 'the floor of a 200 HS class')
+})
+
+check('thermal: the move orders, the engine aboard and the mounted power are required, with no default', (m) => {
+  assert.throws(() => m.dr.thermalSignature({ enginePower: 100, stealthRating: 1, fraction: 1, sizeHS: 20 }), /move orders/)
+  assert.throws(() => m.dr.thermalSignature({ enginePower: 100, stealthRating: 1, fraction: 1, hasMoveOrders: true, sizeHS: 20 }), /engine/)
+  assert.throws(() => m.dr.thermalSignature({ enginePower: 100, stealthRating: 1, fraction: 1, hasMoveOrders: 1, hasEngine: 1, sizeHS: 20 }), /move orders/, 'a number is no flag')
+  assert.throws(() => m.dr.thermalSignature({ enginePower: 100, stealthRating: 1, fraction: 1, hasMoveOrders: true, hasEngine: true, sizeHS: 20 }), /mounted power/, 'the top speed is not defaulted')
+})
+
 check('thermal: a low share clamps to the floor', (m) => {
   assert.deepEqual(thermalOf(m, klass(), [0.01, 0.02, 0.03]), [2, 2, 3])
 })
@@ -199,6 +256,7 @@ check('thermal: a class with no engine shows the floor idle and 0 moving', (m) =
   assert.ok(thermal.byFraction[1].result.assumptions.some((text) => text.includes('no engine')), 'the reason is named')
   assert.equal(thermal.aggregate.value, 0)
   assert.equal(thermal.agrees, true)
+  assert.deepEqual(m.sig.speedCurve(cls, { steps: 2 }).points.map((point) => point.thermal), [2, 0, 0], 'the speed curve reaches the same branches through the signature rule')
 })
 
 check('thermal: a class of an unknown size or engine figure is unavailable, not 0', (m) => {
@@ -926,9 +984,15 @@ check('saves: ClassThermal, ClassCrossSection and SensorReduction are rebuilt fo
 
 // Each fault is planted in one module: `find` must occur once in `file`, and every check beginning with a name of `fails` must fail on the copy.
 const MUTATIONS = [
-  { name: 'the thermal floor of a tenth of the size', file: 'design-rules.js', find: 'return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)', replace: 'return Math.max(sizeHS / 10, enginePower * stealthRating * fraction)', fails: ['thermal: idle', 'thermal: a low share', 'thermal: the speed curve'] },
-  { name: 'the thermal signature as the smaller of the floor and the engines', file: 'design-rules.js', find: 'return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)', replace: 'return Math.min(sizeHS / 20, enginePower * stealthRating * fraction)', fails: ['thermal: a moving', 'thermal: idle'] },
-  { name: 'the thermal signature without the share of top speed', file: 'design-rules.js', find: 'return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)', replace: 'return Math.max(sizeHS / 20, enginePower * stealthRating)', fails: ['thermal: a moving', 'thermal: a low share', 'thermal: the speed curve'] },
+  { name: 'the engine floor of a tenth of the size', file: 'design-rules.js', find: 'return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)', replace: 'return Math.max(sizeHS / 10, enginePower * stealthRating * fraction)', fails: ['thermal: a low share', 'thermal: an engine aboard at a positive top speed keeps the floor at no share'] },
+  { name: 'the thermal signature as the smaller of the floor and the engines', file: 'design-rules.js', find: 'return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)', replace: 'return Math.min(sizeHS / 20, enginePower * stealthRating * fraction)', fails: ['thermal: a moving', 'thermal: a low share', 'thermal: an engine aboard at a positive top speed keeps the floor at no share', 'thermal: the speed curve'] },
+  { name: 'the thermal signature without the share of top speed', file: 'design-rules.js', find: 'return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)', replace: 'return Math.max(sizeHS / 20, enginePower * stealthRating)', fails: ['thermal: a moving', 'thermal: a low share', 'thermal: an engine aboard at a positive top speed keeps the floor at no share', 'thermal: the speed curve'] },
+  { name: 'the idle floor of a tenth of the size', file: 'design-rules.js', find: 'if (!hasMoveOrders) {\n    return sizeHS / 20', replace: 'if (!hasMoveOrders) {\n    return sizeHS / 10', fails: ['thermal: idle', 'thermal: a class with no engine', 'thermal: the speed curve'] },
+  { name: 'a ship with move orders and no engine showing the floor', file: 'design-rules.js', find: 'if (!hasEngine) {\n    return 0', replace: 'if (!hasEngine) {\n    return sizeHS / 20', fails: ['thermal: an idle engineless', 'thermal: a class with no engine'] },
+  { name: 'the floor kept at a top speed of 0', file: 'design-rules.js', find: 'if (topSpeedLeavesNoSignature(mountedPower, sizeHS)) {\n    return 0', replace: 'if (topSpeedLeavesNoSignature(mountedPower, sizeHS)) {\n    return sizeHS / 20', fails: ['thermal: an engine aboard shows nothing when the top speed cuts to 0'] },
+  { name: 'the top speed from the float rule, across the zero boundary', file: 'design-rules.js', find: 'if (topSpeedLeavesNoSignature(mountedPower, sizeHS)) {\n    return 0', replace: 'if (classSpeed({ enginePower: mountedPower, sizeHS }) === 0) {\n    return 0', fails: ['thermal: an engine aboard shows nothing when the top speed cuts to 0'] },
+  { name: 'the top speed from the thermal sum', file: 'design-rules.js', find: 'if (topSpeedLeavesNoSignature(mountedPower, sizeHS)) {', replace: 'if (topSpeedLeavesNoSignature(enginePower, sizeHS)) {', fails: ['thermal: an engine aboard shows nothing when the top speed cuts to 0', 'thermal: the mounted power sets the top speed'] },
+  { name: 'the signature kept at a top speed past the signed integer', file: 'design-rules.js', find: 'return less(whole, SPEED_INTEGER_MIN) || greater(whole, SPEED_INTEGER_MAX)', replace: 'return false', fails: ['thermal: an engine aboard shows nothing when the top speed is past the signed 32-bit integer'] },
   { name: 'the class thermal as the mean of the ratings', file: 'design-rules.js', find: 'return engines.reduce((total, { power, thermalRating, count }) => total + count * power * thermalRating, 0)', replace: 'return engines.reduce((total, { power, count }) => total + count * power, 0) * (engines.reduce((total, { thermalRating }) => total + thermalRating, 0) / (engines.length || 1))', fails: ['mixed: engines of two designs'] },
   { name: 'the class thermal without the thermal rating', file: 'design-rules.js', find: 'total + count * power * thermalRating, 0)', replace: 'total + count * power, 0)', fails: ['mixed: engines of two designs', 'mixed: a single design', 'saves: ClassThermal'] },
   { name: 'the class thermal without the engine count', file: 'design-rules.js', find: 'total + count * power * thermalRating, 0)', replace: 'total + power * thermalRating, 0)', fails: ['mixed: a single design', 'saves: ClassThermal'] },
@@ -945,8 +1009,6 @@ const MUTATIONS = [
   { name: 'an active sensor emission with no minimum of 1', file: 'design-rules.js', find: 'Math.max(1, Math.trunc(strength)', replace: 'Math.max(0, Math.trunc(strength)', fails: ['em: an active sensor'] },
   { name: 'an active sensor emission without the whole numbers', file: 'design-rules.js', find: 'Math.trunc(strength) * Math.trunc(resolution)', replace: 'strength * resolution', fails: ['em: an active sensor'] },
   { name: 'the active range cut by the ratio, not its square', file: 'design-rules.js', find: '(signature / resolution) ** 2', replace: '(signature / resolution)', fails: ['cross-section: active reach'] },
-  { name: 'idle thermal shown as 0', file: 'signatures.js', find: 'thermalSignature({ enginePower: 0, stealthRating: 1, fraction: 0, sizeHS })', replace: '0', fails: ['thermal: idle', 'thermal: the speed curve'] },
-  { name: 'a class with no engine showing the floor while moving', file: 'signatures.js', find: 'value: 0, inputs: { present: [\'class size\'] }, assumptions: [\'the class has no engine', replace: 'value: sizeHS / 20, inputs: { present: [\'class size\'] }, assumptions: [\'the class has no engine', fails: ['thermal: a class with no engine'] },
   { name: 'a speed share of 0 accepted', file: 'signatures.js', find: 'if (!(percent > 0 && percent <= 100)) {', replace: 'if (!(percent >= 0 && percent <= 100)) {', fails: ['thermal: speed shares that cannot be read'] },
   { name: 'a speed share of up to 1,000 % accepted', file: 'signatures.js', find: 'percent <= 100)) {', replace: 'percent <= 1000)) {', fails: ['thermal: speed shares that cannot be read'] },
   { name: 'the speed shares not sorted', file: 'signatures.js', find: 'Object.freeze([...fractions].sort((a, b) => a - b))', replace: 'Object.freeze([...fractions])', fails: ['thermal: speed shares read'] },

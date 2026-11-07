@@ -529,7 +529,7 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
             ...(costKnown ? null : UNKNOWN_COST),
             crew: pack.crew === null ? null : count * design.crew + pack.crew,
             commercial: design.commercial,
-            thermal: thermalSignature({ enginePower: power, stealthRating: design.thermalRating, fraction, sizeHS: totalHS }),
+            thermal: thermalSignature({ enginePower: power, stealthRating: design.thermalRating, fraction, hasMoveOrders: fraction > 0, hasEngine: count > 0, mountedPower: power, sizeHS: totalHS }),
           }
 
           heldCount = -1

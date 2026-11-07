@@ -72,6 +72,13 @@ const markMixed = (result, designs) => {
 
 const designsOf = (engines) => new Set(engines.map((engine) => engine.id)).size
 
+// The engines' mounted power, before their thermal rating, which sets the class's top speed: the sum of each engine's power times its count, or null when one is unknown.
+const mountedPowerOf = (engines) => {
+  const known = engines.every((engine) => isNumber(engine.power) && isNumber(engine.count))
+
+  return known ? engines.reduce((total, engine) => total + engine.power * engine.count, 0) : null
+}
+
 // The thermal signature at full power of a class from its engines, as a result of design.classThermal: unavailable naming the engine figure missing, confirmed for one engine design and estimated for several.
 const aggregateOf = (engines) => {
   const rule = RULES.thermal
@@ -84,23 +91,26 @@ const aggregateOf = (engines) => {
   return markMixed(ofRule({ rule, value: classThermal({ engines }), inputs: { present: ['engine power', 'thermal rating', 'engine count'] } }), designsOf(engines))
 }
 
-// A class's thermal signature at a share of top speed (`fraction`, 0 for idle) from its thermal sum at full power (`aggregate`, a result, or null for a class with no engine). Idle shows the floor of a twentieth of the size; a class with no engine and move orders shows 0; a share too low to rise above the floor is clamped to it.
-const thermalAt = ({ sizeHS, aggregate, fraction }) => {
+// A class's thermal signature at a share of top speed (`fraction`, 0 for idle) from its thermal sum at full power (`aggregate`, a result, or null for a class with no engine) and its mounted power (`mountedPower`, which sets the top speed). The share stands for move orders: 0 is no orders and shows the floor of a twentieth of the size, while any share above it is an order and a class with no engine then shows nothing; the signature rule itself owns both branches. A share too low to rise above the floor is clamped to it, and a top speed of 0 shows nothing.
+const thermalAt = ({ sizeHS, aggregate, mountedPower, fraction }) => {
   const rule = RULES.signature
 
   if (!isNumber(sizeHS) || !(sizeHS > 0)) {
     return unavailable({ rule, missing: ['the class size'] })
   }
 
-  if (fraction === 0) {
-    return ofRule({ rule, value: thermalSignature({ enginePower: 0, stealthRating: 1, fraction: 0, sizeHS }), inputs: { present: ['class size'] }, assumptions: ['no move orders: the signature is a twentieth of the size'] })
+  const hasMoveOrders = fraction > 0
+  const hasEngine = aggregate !== null
+
+  if (!hasMoveOrders) {
+    return ofRule({ rule, value: thermalSignature({ enginePower: 0, stealthRating: 1, fraction, hasMoveOrders, hasEngine, mountedPower, sizeHS }), inputs: { present: ['class size'] }, assumptions: ['no move orders: the signature is a twentieth of the size'] })
   }
 
-  if (aggregate === null) {
-    return ofRule({ rule, value: 0, inputs: { present: ['class size'] }, assumptions: ['the class has no engine, so with move orders it gives no thermal signature'] })
+  if (!hasEngine) {
+    return ofRule({ rule, value: thermalSignature({ enginePower: 0, stealthRating: 1, fraction, hasMoveOrders, hasEngine, mountedPower, sizeHS }), inputs: { present: ['class size'] }, assumptions: ['the class has no engine, so with move orders it gives no thermal signature'] })
   }
 
-  return combine({ rule, parts: { 'thermal signature at full power': aggregate }, compute: (values) => thermalSignature({ enginePower: values['thermal signature at full power'], stealthRating: 1, fraction, sizeHS }), inputs: { present: ['class size'] }, assumptions: [`moving at ${percentOf(fraction)} of top speed`] })
+  return combine({ rule, parts: { 'thermal signature at full power': aggregate }, compute: (values) => thermalSignature({ enginePower: values['thermal signature at full power'], stealthRating: 1, fraction, hasMoveOrders, hasEngine, mountedPower, sizeHS }), inputs: { present: ['class size'] }, assumptions: [`moving at ${percentOf(fraction)} of top speed`] })
 }
 
 const storedResult = (rule, value, name) => (isNumber(value) ? ofRule({ rule, value, inputs: { present: [name] } }) : unavailable({ rule, missing: [name] }))
@@ -160,9 +170,10 @@ export const classSignatures = (cls, { fractions = DEFAULT_FRACTIONS } = {}) => 
   const aggregate = aggregateOf(cls.engines)
   const stored = storedResult(RULES.thermal, cls.stored.thermal, 'the stored thermal signature')
   const hasEngines = cls.engines.length > 0
+  const mountedPower = mountedPowerOf(cls.engines)
 
   return {
-    thermal: { aggregate, stored, agrees: agreement(stored, aggregate), byFraction: fractions.map((fraction) => ({ fraction, result: thermalAt({ sizeHS: cls.sizeHS, aggregate: hasEngines ? aggregate : null, fraction }) })) },
+    thermal: { aggregate, stored, agrees: agreement(stored, aggregate), byFraction: fractions.map((fraction) => ({ fraction, result: thermalAt({ sizeHS: cls.sizeHS, aggregate: hasEngines ? aggregate : null, mountedPower, fraction }) })) },
     crossSection: crossSectionOf(cls),
     em: emOf(cls),
   }
@@ -205,9 +216,10 @@ export const speedCurve = (cls, { sensitivity = null, steps = DEFAULT_STEPS } = 
   }
 
   const aggregate = cls.engines.length ? aggregateOf(cls.engines) : null
+  const mountedPower = mountedPowerOf(cls.engines)
   const rows = Array.from({ length: steps + 1 }, (_, index) => {
     const fraction = index / steps
-    const thermal = thermalAt({ sizeHS: cls.sizeHS, aggregate, fraction })
+    const thermal = thermalAt({ sizeHS: cls.sizeHS, aggregate, mountedPower, fraction })
 
     return { fraction, thermal, reach: passiveReach({ sensitivity, signature: thermal }) }
   })
@@ -253,6 +265,7 @@ export const thermalReductionOptions = (cls, { levels, techs, fractions = DEFAUL
     const current = cls.engines.every((engine) => engine.techIds.thermal === level.id)
     const built = cls.engines.map((engine) => ({ engine, ...engineAtLevel(engine, level, techs) }))
     const missing = built.flatMap((entry) => entry.missing || [])
+    const mountedPower = missing.length ? null : built.reduce((total, entry) => total + entry.design.power * entry.engine.count, 0)
     const costs = built.map((entry) => (entry.design ? ofRule({ rule: RULES.engine, value: entry.design.cost, units: 'BP', inputs: { present: ['engine tech', 'fuel tech', 'thermal reduction level'] } }) : unavailable({ rule: RULES.engine, units: 'BP', missing: entry.missing })))
     const thermals = built.map((entry) => (entry.design ? ofRule({ rule: RULES.thermal, value: entry.design.thermal * entry.engine.count, inputs: { present: ['engine tech', 'thermal reduction level', 'engine count'] } }) : unavailable({ rule: RULES.thermal, missing: entry.missing })))
     const sum = (rule, results, units) => (missing.length ? unavailable({ rule, units, missing }) : combine({ rule, parts: Object.fromEntries(results.map((result, index) => [`${built[index].engine.name} (${index + 1})`, result])), compute: (values) => Object.values(values).reduce((total, value) => total + value, 0), units }))
@@ -268,7 +281,7 @@ export const thermalReductionOptions = (cls, { levels, techs, fractions = DEFAUL
       classEngineCost,
       aggregate,
       engines: built.map((entry, index) => ({ engine: entry.engine, count: entry.engine.count, cost: costs[index] })),
-      byFraction: fractions.map((fraction) => ({ fraction, result: thermalAt({ sizeHS: cls.sizeHS, aggregate, fraction }) })),
+      byFraction: fractions.map((fraction) => ({ fraction, result: thermalAt({ sizeHS: cls.sizeHS, aggregate, mountedPower, fraction }) })),
     }
   })
 }
