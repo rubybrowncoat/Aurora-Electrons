@@ -3,18 +3,18 @@
 
   bun scripts/check-version-line.js [--no-mutations] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]] [--detail]
 
-  A release is numbered <Aurora major>.<Aurora minor>.<count of releases for that line> (3.2.0 is the first of the 3.2 line), so the first two numbers of the version in package.json and the first two of the line the app states for the saves it reads (STATED_FORMULA_VERSION of utilities/capabilities.js, `3.2.x` on `3.2`) are one statement made in two places. The head reads both as the app does (package.json as JSON, the constant from the module) and proves:
+  A release is numbered <Aurora major>.<Aurora minor>.<count of releases for that line> (3.2.0 is the first of the 3.2 line), so the first two numbers of the version in package.json and the first two of the stated formula version (STATED_FORMULA_VERSION of utilities/capabilities.js, `3.2.x` on `3.2`) are one statement made in two places. The head reads both as the app does (package.json as JSON, the constant from the module) and proves:
   - version-form: the package version is a plain three-part version (numbers without a leading zero) and the stated one a line `major.minor.x`;
   - version-line: the major.minor of the package version is the stated line's.
   Planted faults are states of the two files, never a change of this script's own logic, each naming both values so that a move of the real line changes none of them: a package version one minor or one major ahead of the line, the stated line moved to 3.0.x or 3.3.x with the package left at 3.2.0, a package version of two parts or with a leading zero, a stated line that names a patch. Each must fail the check named for it by a wrong value. The rewrites that must pass: the next count of the line (3.2.1) and the 3.3 line once both move (3.3.0 against 3.3.x).
 
-  The About page (src/renderer/pages/about.vue) is served by scripts/lib/page-server.js over a copy of the fixture save (scripts/lib/fixtures.js) and read in Chromium as a player sees it (the shared readers of scripts/lib/browser-observe.js): a `data-aurora-line` hook only finds the element. Each page is read at its usual size twice, with the stated line as it is and with the constant of the served module moved to another line (3.0.x, or 4.1.x when the real line is 3.0.x), so a line that does not come from the constant fails by a value:
-  - about-line: the line on screen reads "For Aurora <stated line> saves", the sentence the release notes and the refusal notice repeat, with the line the served constant holds;
+  The About page (src/renderer/pages/about.vue) is served by scripts/lib/page-server.js over a copy of the fixture save (scripts/lib/fixtures.js) and read in Chromium as a player sees it (the shared readers of scripts/lib/browser-observe.js): a `data-aurora-line` hook only finds the element. Each page is read at its usual size twice, with the stated line as it is and with the constant of the served module moved to a line of another major (4.0.x, or 5.1.x when the real major is 4), so a line that does not come from the constant fails by a major:
+  - about-line: the line on screen reads "For Aurora <major>.x saves", the major being the first number of the served constant, the words the release notes and the refusal notice use;
   - about-beside: the line is on screen, on the row of the version chip and right of it;
   - about-version: the version chip reads v<package version>, the text the launch check of a release waits for;
   - about-quiet: the page raises no error, in any of the three views;
   - about-narrow: in a third view, a window of 960 x 720 with Verdana at the text scale 1.25 stored in the settings before the app starts, each chip of the head is inside the panel's box and the width its text needs (scrollWidth) is no more than the width it has (clientWidth). The title and its chips wrap there; a group that does not wrap pushes the line chip past the card, where the card's overflow clips it.
-  Faults in the served page: the line written out (as the current stated line, so that only the moved serving shows it) instead of read from the constant, the package version in its place, the line not displayed, the line below the row of the chip, the title and chips that do not wrap, the version chip without its v, a console error when the page opens. Rewrites that must pass: the sentence drawn through v-text, the hook on an inner element, the line bound through a computed property instead of data, and the chip under a parenthesised condition that always holds.
+  Faults in the served page: the line written out (as the line this version reads, so that only the moved serving shows it) instead of read from the constant, the package version in its place, the line not displayed, the line below the row of the chip, the title and chips that do not wrap, the version chip without its v, a console error when the page opens. Rewrites that must pass: the sentence drawn through v-text, the hook on an inner element, the line bound through a computed property instead of data, and the chip under a parenthesised condition that always holds.
 
   Prints `N of N checks passed`; a failed check sets exit code 1, a defect of the harness 2. It needs Playwright's Chromium. The head and every fault and rewrite run through scripts/lib/suite-runner.js, with the control `control:warm-reset`.
 */
@@ -35,8 +35,8 @@ const CAPABILITIES_FILE = 'src/renderer/utilities/capabilities.js'
 const ABOUT_FILE = 'src/renderer/pages/about.vue'
 const SAVE = FIXTURE.file
 const TIMEOUT = 90000
-// The line the served constant is moved to, so that a page which does not read it shows the line it was built with: the first of these the real line is not.
-const MOVED = ['3.0.x', '4.1.x']
+// The lines the served constant is moved to, so that a page which does not read it shows the line it was built with: the first whose major is not the real one, so a line written out as the real major fails too.
+const MOVED = ['4.0.x', '5.1.x']
 const NUMBER = '(0|[1-9]\\d*)'
 const PACKAGE_FORM = new RegExp(`^${NUMBER}\\.${NUMBER}\\.${NUMBER}$`)
 const STATED_FORM = new RegExp(`^${NUMBER}\\.${NUMBER}\\.x$`)
@@ -223,12 +223,12 @@ const narrowRun = (ctx) => {
 }
 
 const ABOUT_CHECKS = [
-  check('about-line', 'About says "For Aurora <line> saves" with the line the stated constant holds, whatever it holds', (ctx) => {
+  check('about-line', 'About says "For Aurora <major>.x saves" with the major of the stated constant, whatever it holds', (ctx) => {
     for (const run of aboutRuns(ctx)) {
       const lines = run.seen.line.filter((entry) => entry.on)
 
       assert.equal(lines.length, 1, `the page with the stated line ${run.stated} draws ${lines.length} lines of the supported saves`)
-      assert.equal(lines[0].text, `For Aurora ${run.stated} saves`, `the page with the stated line ${run.stated} says something else`)
+      assert.equal(lines[0].text, `For Aurora ${run.stated.split('.')[0]}.x saves`, `the page with the stated line ${run.stated} says something else`)
     }
   }),
   check('about-beside', 'the line is on screen, on the row of the version chip and right of it', (ctx) => {
@@ -268,7 +268,7 @@ const swap = (from, to) => (text) => patched(ABOUT_FILE, text, from, to)
 const compose = (...changes) => (text) => changes.reduce((given, change) => change(given), text)
 
 const ABOUT_FAULTS = [
-  { name: 'the line is written out as the current stated line instead of read from the constant', change: (text) => swap('For Aurora {{ auroraLine }} saves', `For Aurora ${ENV.stated} saves`)(text), fails: ['about-line'] },
+  { name: 'the line is written out as the line this version reads instead of read from the constant', change: (text) => swap('For Aurora {{ auroraLine }} saves', `For Aurora ${ENV.readSaves} saves`)(text), fails: ['about-line'] },
   { name: 'the package version stands in place of the line', change: swap('For Aurora {{ auroraLine }} saves', 'For Aurora {{ version }} saves'), fails: ['about-line'] },
   { name: 'the line is not displayed, its hook left as it is', change: swap('class="ml-2" data-aurora-line', 'class="ml-2 d-none" data-aurora-line'), fails: ['about-line', 'about-beside'] },
   { name: 'the line is pushed below the row of the version chip', change: swap('class="ml-2" data-aurora-line', 'class="ml-2 mt-16" data-aurora-line'), fails: ['about-beside'] },
@@ -280,7 +280,7 @@ const ABOUT_FAULTS = [
 const ABOUT_BENIGN = [
   { name: 'the sentence drawn through v-text', change: swap('data-aurora-line>For Aurora {{ auroraLine }} saves</v-chip>', 'data-aurora-line v-text="\'For Aurora \' + auroraLine + \' saves\'"></v-chip>') },
   { name: 'the hook on an inner element of the chip', change: swap('class="ml-2" data-aurora-line>For Aurora {{ auroraLine }} saves</v-chip>', 'class="ml-2"><span data-aurora-line>For Aurora {{ auroraLine }} saves</span></v-chip>') },
-  { name: 'the line bound through a computed property instead of data', change: compose(swap('      auroraLine: STATED_FORMULA_VERSION,\n', ''), swap('    settingsPath() {', '    auroraLine() {\n      return STATED_FORMULA_VERSION\n    },\n\n    settingsPath() {')) },
+  { name: 'the line bound through a computed property instead of data', change: compose(swap('      auroraLine: READ_SAVES,\n', ''), swap('    settingsPath() {', '    auroraLine() {\n      return READ_SAVES\n    },\n\n    settingsPath() {')) },
   { name: 'the chip under a parenthesised condition that always holds', change: swap('class="ml-2" data-aurora-line', 'class="ml-2" v-if="(auroraLine)" data-aurora-line') },
 ]
 /* eslint-enable no-template-curly-in-string */
@@ -318,10 +318,13 @@ const reportFault = (fault, failed) => {
 }
 
 const setUp = async (queue) => {
-  const env = { about: read(ABOUT_FILE), capabilities: read(CAPABILITIES_FILE), packageVersion: JSON.parse(read(PACKAGE_FILE)).version, server: null, chrome: null, stated: null, moved: null }
+  const env = { about: read(ABOUT_FILE), capabilities: read(CAPABILITIES_FILE), packageVersion: JSON.parse(read(PACKAGE_FILE)).version, server: null, chrome: null, stated: null, readSaves: null, moved: null }
 
-  env.stated = (await loadUtilities(['capabilities'])).capabilities.STATED_FORMULA_VERSION
-  env.moved = MOVED.find((line) => line !== env.stated)
+  const { capabilities: module } = await loadUtilities(['capabilities'])
+
+  env.stated = module.STATED_FORMULA_VERSION
+  env.readSaves = module.READ_SAVES
+  env.moved = MOVED.find((line) => line.split('.')[0] !== env.stated.split('.')[0])
 
   // The synthesized control (the head run after a fault) needs the browser its two variants need.
   if (queue.some((variant) => variant.browser || (variant.control && (variant.control.fault.browser || variant.control.head.browser)))) {
@@ -427,7 +430,7 @@ const judgeOpening = async (waitUntil = 'commit') => {
     assert.equal(gate.released, true, 'the unrelated resource was not released')
     assert.equal(gate.blocked, false, `About was blocked at route ${gate.route} while the ready app waited for the unrelated resource`)
     assert.deepEqual(observation.unexpected, [], 'the page raised errors')
-    assert.deepEqual(observation.value.line.filter((line) => line.on).map((line) => line.text), [`For Aurora ${ENV.stated} saves`])
+    assert.deepEqual(observation.value.line.filter((line) => line.on).map((line) => line.text), [`For Aurora ${ENV.readSaves} saves`])
   })], {})
 }
 

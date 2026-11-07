@@ -361,13 +361,13 @@ export const DECLARED = Object.freeze([
 
 ])
 
-// The Aurora line the app is for, as its major and minor ('3.2'): the stated formula version without its patch.
-export const LINE_NAME = STATED_FORMULA_VERSION.split('.').slice(0, 2).join('.')
+// The saves the app says it reads, as About, the refusal notice, the release title and the first line of the release notes word them ('3.x'): every minor of the stated major, since a 3.0, 3.1 and 3.2 save is read as one line (owner decision 2026-11-07). It is the stated version's major, so a move of the line moves it, while `STATED_FORMULA_VERSION` stays what the formula and the package line are checked against.
+export const READ_SAVES = `${STATED_FORMULA_VERSION.split('.')[0]}.x`
 
 // The words of a refusal, by the reason of `lineResult`: `notice` is the sentence the Unsupported save panel opens with, `status` the line the save status says.
 export const REFUSALS = Object.freeze({
   'not-aurora': Object.freeze({ notice: 'The file has no game table, so it is not an Aurora save.', status: 'refused: no game table' }),
-  'pre-3.0': Object.freeze({ notice: `The save is not shaped like an Aurora ${LINE_NAME} save: none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added is in it. A save of Aurora 2.7 is read by the Aurora Electrons 2.7.x line, releases 2.7.N from the release/2.7 branch (2.7.11 as of this release); a save from before Aurora 2.7 is read by Aurora Electrons 0.11.0.`, status: `refused: not a ${LINE_NAME} save (none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added)` }),
+  'pre-3.0': Object.freeze({ notice: `The save is not shaped like an Aurora ${READ_SAVES} save: none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added is in it. A save of Aurora 2.7 is read by the Aurora Electrons 2.7.x line, releases 2.7.N from the release/2.7 branch (2.7.11 as of this release); a save from before Aurora 2.7 is read by Aurora Electrons 0.11.0.`, status: `refused: not a ${READ_SAVES} save (none of the ${LINE_SIGNATURE.length} columns Aurora 3.0 added)` }),
 })
 
 const allTables = () => {

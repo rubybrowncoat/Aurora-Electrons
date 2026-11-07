@@ -3,7 +3,7 @@
     <v-card-title class="unsupported-save__title"><v-icon left color="error">mdi-file-alert-outline</v-icon>Unsupported save</v-card-title>
     <v-card-text class="unsupported-save__body">
       <p class="body-1" :data-unsupported-reason="line.reason">{{ refusal.notice }}</p>
-      <p>Aurora Electrons <span data-unsupported-version>{{ version }}</span> reads Aurora <span data-unsupported-line>{{ stated }}</span> saves only: a save of any other Aurora line is not read, and no figure on any page is for it. Open an Aurora {{ lineName }} save from the Empires page. A save of Aurora 2.7 is read by the Aurora Electrons 2.7.x line, whose latest release is <a :href="releaseUrl" target="_blank" rel="noopener" data-unsupported-release>{{ releaseVersion }}</a>; a save from before Aurora 2.7 is read by Aurora Electrons 0.11.0.</p>
+      <p>Aurora Electrons <span data-unsupported-version>{{ version }}</span> reads Aurora <span data-unsupported-line>{{ readSaves }}</span> saves only: a save of any other Aurora line is not read, and no figure on any page is for it. Open an Aurora {{ readSaves }} save from the Empires page. A save of Aurora 2.7 is read by the Aurora Electrons 2.7.x line, whose latest release is <a :href="releaseUrl" target="_blank" rel="noopener" data-unsupported-release>{{ releaseVersion }}</a>; a save from before Aurora 2.7 is read by Aurora Electrons 0.11.0.</p>
       <template v-if="line.missing.length">
         <p class="mb-1">Columns Aurora 3.0 added, absent from the save:</p>
         <ul class="unsupported-save__list">
@@ -20,7 +20,7 @@
 <script>
 import { mapActions, mapGetters } from 'vuex'
 
-import { LINE_NAME, REFUSALS, STATED_FORMULA_VERSION } from '../../utilities/capabilities'
+import { READ_SAVES, REFUSALS } from '../../utilities/capabilities'
 import { fieldWords } from '../../utilities/provenance'
 import { version } from '../../../../package.json'
 
@@ -34,8 +34,7 @@ export default {
   data () {
     return {
       version,
-      stated: STATED_FORMULA_VERSION,
-      lineName: LINE_NAME,
+      readSaves: READ_SAVES,
       releaseVersion: RELEASE_VERSION,
       releaseUrl: `${RELEASES_URL}/v${RELEASE_VERSION}`,
     }

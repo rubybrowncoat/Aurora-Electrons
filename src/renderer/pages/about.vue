@@ -108,60 +108,64 @@
 
         <v-col cols="12" class="py-0">
           <v-card class="panel" data-summary="Review the fonts, icons and community themes used by the app, with their authors and licenses." elevation="1" data-credits>
-            <div class="panel-head"><span>Credits</span></div>
-            <v-simple-table class="credits-table">
-              <thead>
-                <tr>
-                  <th>Asset</th>
-                  <th>Author</th>
-                  <th>Source</th>
-                  <th>License</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="credit in credits" :key="credit.id" :data-credit="credit.id">
-                  <td>
-                    <div class="font-weight-medium">{{ credit.name }}</div>
-                    <div class="caption text--secondary">{{ credit.covers }}</div>
-                  </td>
-                  <td>{{ credit.author }}</td>
-                  <td class="text-no-wrap"><external-link :href="credit.source.href">{{ credit.source.label }}</external-link></td>
-                  <td><external-link :href="credit.license.href">{{ credit.license.label }}</external-link></td>
-                  <td>
-                    <details>
-                      <summary>Details and notices</summary>
-                      <div class="caption text--secondary">{{ credit.kind }}</div>
-                      <div class="caption"><span class="font-weight-medium">{{ credit.reuse.kind }}.</span> {{ credit.reuse.detail }}</div>
-                      <div class="caption">{{ credit.modifications }}</div>
-                      <button v-for="item in credit.notices" :key="item.title" type="button" class="credit-notice" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</button>
-                      <div v-if="credit.compatibility" class="caption text-wrap mt-2" data-credit-compatibility><span class="font-weight-medium">{{ credit.compatibility.title }}: {{ credit.compatibility.status }}.</span> {{ credit.compatibility.text }}</div>
-                    </details>
-                  </td>
-                </tr>
-              </tbody>
-            </v-simple-table>
-            <div class="panel-foot caption text--secondary">Open a notice to read the license text as it comes with the asset's package, or with the community themes the presets are adapted from, bundled into the app. Bundled files ship with the app. Visual inspiration copies no code, image or font, and its notice is shown for provenance. Code libraries carry their licenses in their own packages and are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
+            <div class="panel-head"><span><v-btn icon x-small class="mr-1" :aria-label="creditsOpen ? 'Hide the credits' : 'Show the credits'" :aria-expanded="String(creditsOpen)" aria-controls="about-credits" data-about-toggle="credits" @click="creditsOpen = !creditsOpen"><v-icon small>{{ creditsOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>Credits</span></div>
+            <div v-show="creditsOpen" id="about-credits">
+              <v-simple-table class="credits-table">
+                <thead>
+                  <tr>
+                    <th>Asset</th>
+                    <th>Author</th>
+                    <th>Source</th>
+                    <th>License</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="credit in credits" :key="credit.id" :data-credit="credit.id">
+                    <td>
+                      <div class="font-weight-medium">{{ credit.name }}</div>
+                      <div class="caption text--secondary">{{ credit.covers }}</div>
+                    </td>
+                    <td>{{ credit.author }}</td>
+                    <td class="text-no-wrap"><external-link :href="credit.source.href">{{ credit.source.label }}</external-link></td>
+                    <td><external-link :href="credit.license.href">{{ credit.license.label }}</external-link></td>
+                    <td>
+                      <details>
+                        <summary>Details and notices</summary>
+                        <div class="caption text--secondary">{{ credit.kind }}</div>
+                        <div class="caption"><span class="font-weight-medium">{{ credit.reuse.kind }}.</span> {{ credit.reuse.detail }}</div>
+                        <div class="caption">{{ credit.modifications }}</div>
+                        <button v-for="item in credit.notices" :key="item.title" type="button" class="credit-notice" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</button>
+                        <div v-if="credit.compatibility" class="caption text-wrap mt-2" data-credit-compatibility><span class="font-weight-medium">{{ credit.compatibility.title }}: {{ credit.compatibility.status }}.</span> {{ credit.compatibility.text }}</div>
+                      </details>
+                    </td>
+                  </tr>
+                </tbody>
+              </v-simple-table>
+              <div class="panel-foot caption text--secondary">Open a notice to read the license text as it comes with the asset's package, or with the community themes the presets are adapted from, bundled into the app. Bundled files ship with the app. Visual inspiration copies no code, image or font, and its notice is shown for provenance. Code libraries carry their licenses in their own packages and are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
+            </div>
           </v-card>
         </v-col>
 
         <v-col cols="12" class="py-0">
           <v-card class="panel" data-summary="Follow the steps for contributing pull requests and issues." elevation="1">
-            <div class="panel-head"><span>Contribute</span></div>
-            <div class="panel-body body-2 pb-0">Pull requests and issues are welcome. The short version:</div>
-            <v-list dense>
-              <v-list-item v-for="(step, number) in steps" :key="number">
-                <v-list-item-avatar size="24" color="primary" class="steps__number">{{ number + 1 }}</v-list-item-avatar>
-                <v-list-item-content>
-                  <v-list-item-title class="steps__text">
-                    <template v-for="(part, position) in step">
-                      <code v-if="part.code" :key="position">{{ part.code }}</code>
-                      <template v-else>{{ part }}</template>
-                    </template>
-                  </v-list-item-title>
-                </v-list-item-content>
-              </v-list-item>
-            </v-list>
+            <div class="panel-head"><span><v-btn icon x-small class="mr-1" :aria-label="contributeOpen ? 'Hide the steps' : 'Show the steps'" :aria-expanded="String(contributeOpen)" aria-controls="about-contribute" data-about-toggle="contribute" @click="contributeOpen = !contributeOpen"><v-icon small>{{ contributeOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>Contribute</span></div>
+            <div v-show="contributeOpen" id="about-contribute">
+              <div class="panel-body body-2 pb-0">Pull requests and issues are welcome. The short version:</div>
+              <v-list dense>
+                <v-list-item v-for="(step, number) in steps" :key="number">
+                  <v-list-item-avatar size="24" color="primary" class="steps__number">{{ number + 1 }}</v-list-item-avatar>
+                  <v-list-item-content>
+                    <v-list-item-title class="steps__text">
+                      <template v-for="(part, position) in step">
+                        <code v-if="part.code" :key="position">{{ part.code }}</code>
+                        <template v-else>{{ part }}</template>
+                      </template>
+                    </v-list-item-title>
+                  </v-list-item-content>
+                </v-list-item>
+              </v-list>
+            </div>
           </v-card>
         </v-col>
       </v-row>
@@ -187,7 +191,7 @@ import { shell } from 'electron'
 import { mapActions, mapGetters } from 'vuex'
 
 import ExternalLink from '../components/ExternalLink.vue'
-import { STATED_FORMULA_VERSION } from '../utilities/capabilities'
+import { READ_SAVES } from '../utilities/capabilities'
 import { CREDITS } from '../utilities/credits'
 import { registryStore } from '../utilities/history'
 import { FORUM_URL } from '../utilities/navigation'
@@ -210,7 +214,7 @@ export default {
   data() {
     return {
       version,
-      auroraLine: STATED_FORMULA_VERSION,
+      auroraLine: READ_SAVES,
       forumUrl: FORUM_URL,
       repoUrl: REPO_URL,
       issuesUrl: `${REPO_URL}/issues`,
@@ -234,6 +238,10 @@ export default {
       // The notice the dialog shows: { asset, title, text }.
       notice: null,
       noticeOpen: false,
+
+      // The Credits and Contribute panels start folded on every visit: their bodies are long, and each heading says what the panel holds.
+      creditsOpen: false,
+      contributeOpen: false,
 
       // Each step is a list of text and `{ code }` parts.
       steps: [
