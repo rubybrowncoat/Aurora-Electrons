@@ -95,8 +95,6 @@ const supplyGaps = (ship) => [
   ...(!(ship.SupplyShip === 1 && ship.MinimumSupplies > 0) && !isKnownNumber(ship.MaintSupplies) ? ['the maintenance supplies the ship class carries'] : []),
 ]
 
-const CAPACITY_LABELS = [['CargoCapacity', 'tons'], ['ColonistCapacity', 'colonists'], ['TroopCapacity', 'tons of troops']]
-
 export const checks = checksOf([
   {
     key: 'undermanned-ships',
@@ -534,46 +532,6 @@ export const checks = checksOf([
           link: linkTo.logistics('fuel'),
           signature: signatureOf('no-minimum-fuel'),
         }),
-      })
-    },
-  },
-  {
-    key: 'transport-classes-without-shuttles',
-    group: group.key,
-    severity: 'info',
-    title: (count) => amount(count, 'transport ship class', 'transport ship classes') + ' without cargo shuttles',
-    rule: 'A current class of more than 10 size that carries cargo or colonists has no cargo shuttle, so it can\'t load or unload without a colony\'s help.',
-    evidence: {
-      verification: 'estimated',
-      versions: ['2.7.x'],
-      structure: ['FCT_ShipClass.Size, CargoCapacity, ColonistCapacity, TroopCapacity, CargoShuttleStrength, Obsolete'],
-      note: 'The capacities and the shuttle strength are stored class values; that a class of more than 10 size needs shuttles is a threshold of this page, not one the game states. A class with one of the values not stored is listed apart, as not evaluated.',
-      assumptions: ['A class of more than 10 size that carries cargo or colonists needs a cargo shuttle.'],
-    },
-    columns: [
-      { key: 'class', text: 'Class' },
-      { key: 'capacity', text: 'Capacity' },
-    ],
-    async read(ctx) {
-      const { GameID, RaceID } = ctx
-      const TRANSPORT = '(FCT_ShipClass.Size > 10 and (FCT_ShipClass.CargoCapacity > 0 or FCT_ShipClass.ColonistCapacity > 0) and FCT_ShipClass.CargoShuttleStrength = 0 and FCT_ShipClass.Obsolete != 1)'
-
-      const classes = await rowsOf(ctx, `select FCT_ShipClass.ShipClassID, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.TroopCapacity, FCT_ShipClass.CargoShuttleStrength, FCT_ShipClass.Obsolete, ${TRANSPORT} as Verdict from FCT_ShipClass where ${TRANSPORT} is not 0 and FCT_ShipClass.RaceID = ${RaceID} and FCT_ShipClass.GameID = ${GameID} ORDER BY FCT_ShipClass.ClassName ASC`)
-
-      return verdictRows(ctx, classes, {
-        missing: (shipClass) => lacking(shipClass, { Size: 'the size of the ship class', CargoCapacity: 'the cargo capacity of the ship class', ColonistCapacity: 'the colonist capacity of the ship class', CargoShuttleStrength: 'the cargo shuttle strength of the ship class', Obsolete: 'the obsolete flag of the ship class' }),
-        build: (shipClass) => {
-          const gaps = CAPACITY_LABELS.filter(([column]) => !isKnownNumber(shipClass[column]))
-          const parts = CAPACITY_LABELS.map(([column, unit]) => (isKnownNumber(shipClass[column]) ? (shipClass[column] ? `${ctx.count(shipClass[column])} ${unit}` : null) : `${unit} not stored`)).filter(Boolean).join(', ')
-
-          return {
-            id: `class:${shipClass.ShipClassID}`,
-            cells: {
-              class: classText(shipClass),
-              capacity: gaps.length ? { text: parts, result: ctx.unknown(gaps.map(([, unit]) => `the ${unit} capacity of the ship class`)) } : parts,
-            },
-          }
-        },
       })
     },
   },

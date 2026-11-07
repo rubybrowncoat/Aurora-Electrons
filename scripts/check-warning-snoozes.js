@@ -1091,7 +1091,7 @@ check('material-set', 'exactly the 24 checks of the classes B, C and K declare w
   const declared = m.index.CHECKS.filter((entry) => entry.material).map((entry) => entry.key).sort()
 
   assert.deepEqual(declared, [...MATERIAL_KEYS].sort())
-  assert.equal(m.index.CHECKS.length, 45)
+  assert.equal(m.index.CHECKS.length, 44)
   assert.ok(m.index.CHECKS.filter((entry) => entry.material).every((entry) => typeof entry.material === 'string' && entry.material.length > 10))
   assert.ok(m.index.CHECKS.filter((entry) => !entry.material).every((entry) => entry.material === undefined))
 })

@@ -187,9 +187,10 @@ const MASS_DRIVER_READS = 'DIM_PlanetaryInstallation(MassDriverValue) FCT_MassDr
 // The wrecks and life pods a Lagrange point carries are read for the position facts by one statement built from the name of each table (route-position.js), so the scan finds the whole table and none of its columns: these are the columns the two reads name.
 const ANCHORED_OBJECT_READS = 'FCT_Lifepods(LifepodID GameID SystemID OrbitLagrangeID Xcor Ycor) FCT_Wrecks(WreckID GameID SystemID OrbitLagrangeID Xcor Ycor)'
 
-// Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 // The columns the shared orbital colonist census reads; every input that consumes it names them.
 const ORBITAL_CENSUS_READS = 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_DamagedComponent(ComponentID GameID Number ShipID) FCT_Fleet(AssignedPopulationID CivilianFunction FleetID GameID RaceID Xcor Ycor) FCT_MoveOrders(FleetID GameID) FCT_Population(GameID Population PopulationID RaceID SystemBodyID) FCT_Ship(FleetID GameID ShipClassID ShipID) FCT_ShipCargo(Amount CargoTypeID GameID ShipID SpeciesID) FCT_ShipClass(ArkShip GameID ShipClassID) FCT_ShipDesignComponents(ComponentTypeID ComponentValue GameID SDComponentID SpecialFunction) FCT_Species(GameID SpeciesID) FCT_SystemBody(GameID SystemBodyID Xcor Ycor)'
+
+// Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
   '/production': Object.freeze({
@@ -201,6 +202,7 @@ const EXTRA_READS = Object.freeze({
   '/warnings': Object.freeze({
     page: `DIM_PlanetaryInstallation(ConstructionValue OrdnanceProductionValue FighterProductionValue) ${STOCKPILES}`,
     'check:dangerous-rifts': STOCKPILES,
+    'check:idle-research-labs': ORBITAL_CENSUS_READS,
     'check:free-construction-capacity': 'DIM_PlanetaryInstallation(ConstructionValue)',
     'check:free-ordnance-capacity': 'DIM_PlanetaryInstallation(OrdnanceProductionValue)',
     'check:free-fighter-capacity': 'DIM_PlanetaryInstallation(FighterProductionValue)',
