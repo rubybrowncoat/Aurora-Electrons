@@ -444,7 +444,7 @@ const setUp = async () => {
     notices: Object.fromEntries(reasons.map((reason) => [reason, capabilities.REFUSALS[reason].notice])),
     statuses: Object.fromEntries(reasons.map((reason) => [reason, capabilities.REFUSALS[reason].status])),
     version: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version,
-    line: capabilities.STATED_FORMULA_VERSION,
+    line: capabilities.READ_SAVES,
     words: provenance.fieldWords,
   }
   const env = { scenes, truth, originals: Object.fromEntries(FILES.map((file) => [file, fs.readFileSync(path.join(root, file), 'utf8')])), baseline: null }
