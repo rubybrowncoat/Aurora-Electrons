@@ -26,7 +26,7 @@ const IMMUTABLE = ['systemId', 'starId', 'bodyClass', 'trojan', 'distance', 'yea
 const MUTANTS = [
   { name: 'epoch from LastGrowthTime', anchor: 'return clock && isNumber(clock.gameTime) ? clock : null', replacement: 'return clock && isNumber(clock.gameTime) ? { ...clock, gameTime: clock.lastGrowthTime } : null', criterion: 'circular-bearing' },
   { name: 'ratio dropped (mean speed only)', anchor: 'const turn = (deltaSeconds / (body.year * 3600)) * (current / mean)', replacement: 'const turn = (deltaSeconds / (body.year * 3600)) * 1', criterion: 'eccentric-bound' },
-  { name: 'old 561600 s whole steps', anchor: 'const call = length', replacement: 'const call = 561600', criterion: 'eccentric-bound', wholeSteps: true },
+  { name: 'old 561600 s whole steps', anchor: 'const call = STEP_SECONDS', replacement: 'const call = 561600', criterion: 'eccentric-bound', wholeSteps: true },
 ]
 
 const point = (body) => ({ Xcor: body.xcor, Ycor: body.ycor })
@@ -136,7 +136,7 @@ const measure = async (pair, loadModel, mutation = null) => {
   }
 
   const orbit = (await loadUtilities(['orbit-propagation'], { sources: { 'orbit-propagation': `${source}\nexport { stateAt, clockOf };\n` } }))['orbit-propagation']
-  const length = orbit.callLength(a.clock)
+  const length = orbit.STEP_SECONDS
   const calls = Math.floor(elapsed / length)
   const remainder = elapsed - calls * length
   const maximumIncrement = Math.max(...ledger.map((row) => row.Length))

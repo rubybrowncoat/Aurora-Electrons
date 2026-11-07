@@ -2777,10 +2777,13 @@ const reportRewrite = (rewrite, results) => {
 const moduleResults = async (list, change, file, ids) => {
   const onPage = file === 'page'
   const page = fs.readFileSync(path.join(root, PAGE), 'utf8')
-  const sources = change && !onPage ? { [file]: change(fs.readFileSync(path.join(root, `src/renderer/utilities/${file}.js`), 'utf8')) } : {}
   const selected = list.filter(({ id }) => !ids || ids.includes(id))
+  const motion = selected.some(({ id }) => id === 'motion')
+  // The synthetic route beside this ledger flies its boundary jumps under the arrival tolerance, so the loaded copy of the orbit module rewrites its step constant to a second: test-only, in memory, never the shipped 1,800-second step.
+  const fineStep = (text) => text.replace('export const STEP_SECONDS = 1800', 'export const STEP_SECONDS = 1')
+  const sources = { ...(change && !onPage ? { [file]: change(fs.readFileSync(path.join(root, `src/renderer/utilities/${file}.js`), 'utf8')) } : {}), ...(motion ? { 'orbit-propagation': fineStep(fs.readFileSync(path.join(root, 'src/renderer/utilities/orbit-propagation.js'), 'utf8')) } : {}) }
   // Extracted page methods and their provenance results must share one per-variant module tree.
-  const names = [...new Set([MODULE, 'fleet-profile', ...(selected.some(({ id }) => id === 'motion') ? MOTION_MODULES : [])])]
+  const names = [...new Set([MODULE, 'fleet-profile', ...(motion ? MOTION_MODULES : [])])]
   const loaded = await loadUtilities(names, { sources })
   const mod = subjectModule({ ...loaded[MODULE], loadFleetShips: loaded['fleet-profile'].loadFleetShips }, 'module')
 

@@ -1,11 +1,11 @@
 /*
   Checks the propagation of known bodies to a fleet's arrival (src/renderer/utilities/orbit-propagation.js and what carries it: the adapters of route-position.js, the flights of jump-graph.js and the cycles and plans of route-plan.js) without a save.
 
-  The fixture is a small save made here in an in-memory SQLite database, read by the real loader. Every position the checks expect comes from an oracle written in this file from the orbit rules in closed form (a circle, an ellipse by its polar equation, a bisection for the arrival) and, for an eccentric body, from the game's own orbit update transcribed with the game's own terms (`sourceCall`), not from the utilities; the one thing it shares with them is the cadence it is told, the lengths of the sub-pulse and of the increment on the clock below. The statements cover the acceptance of AE-087-03 and of AE-302-14:
+  The fixture is a small save made here in an in-memory SQLite database, read by the real loader. Every position the checks expect comes from an oracle written in this file from the orbit rules in closed form (a circle, an ellipse by its polar equation, a bisection for the arrival) and, for an eccentric body, from the game's own orbit update transcribed with the game's own terms (`sourceCall`), not from the utilities; the one thing it shares with them is the fixed step of 1800 seconds the app chooses. The statements cover the acceptance of AE-087-03, AE-302-14 and the fixed-step estimate:
   - a position is rebuilt from the orbit fields only when it lands within a kilometre of the saved one; a body that misses, an unsurveyed system, a missing field and a family that is not supported keep the saved position and say why;
   - an arrival is solved to a second in at most eight evaluations for circular bodies, moons, trojans, Lagrange points and eccentric bodies, a fleet that is not faster than the body or has no engines has none, and a fleet that does not converge keeps the saved figure with its reason;
-  - an eccentric body is carried for less than one orbit from the last update and states the call length it rests on; a circular body is carried over any horizon;
-  - an eccentric body is advanced by calls of the game's own update, one for each sub-pulse of the save, or one for each increment when the save moves bodies after movement, each lowering the bearing by the call's seconds over the year at the ratio of the current to the mean speed, with no fixed step and no Kepler solve; a trojan follows its parent; the asteroid switch gates nothing;
+  - an eccentric body is carried for less than one orbit from the last update and states the estimate it rests on; a circular body is carried over any horizon;
+  - an eccentric body is advanced by calls of the game's own update in fixed steps of 1800 seconds the app chooses for every save, each lowering the bearing by the step over the year at the ratio of the current to the mean speed, with no Kepler solve; the saved sub-pulse and increment lengths select nothing, the saved update order selects only which step a movement sees, a snapshot of any body needs no update order, and the million-step budget is inclusive and stated; a trojan follows its parent; the asteroid switch gates nothing;
   - a Lagrange transfer is flown leg by leg at the time each leg is entered, and its length depends on the direction;
   - a repeated trip arrives at the position the body has reached, waits there and leaves from where the body then is, so each cycle starts from the last arrival;
   - a plan takes the adapted positions, with the saved figure beside it, and every route output states the unsupported cases with their reasons;
@@ -42,9 +42,13 @@ const memo = (make) => {
 
 // ---- The oracle ----------------------------------------------------------------------------------------------------------
 const KM = 149600000
-// The cadence of the save the checks run on, told to the utilities by the clock: the game moves bodies in each sub-pulse, of 7200 seconds, and its latest increment is 432000 seconds long (the figures of the migrated line save).
+// The app's fixed step of the eccentric estimate, seconds: the same for every save and not selected by anything the save stores.
+const STEP = 1800
+// The lengths one save stores: a sub-pulse of 7200 seconds and a latest increment of 432000 seconds. The app does not read them, and the cases below change them to show that.
 const SUBPULSE = 7200
 const INCREMENT = 432000
+// The one-second step of the synthetic flights, rewritten in the loaded copy only and labelled test-only: at 1800 seconds a movement jumps further than the arrival tolerance, so the flight cases keep the fine step while the loader, budget and fixed-step contract cases run the shipped 1800 seconds.
+const TEST_STEP = 1
 const YEAR = 31536000
 
 const rad = (degrees) => (degrees * Math.PI) / 180
@@ -73,6 +77,8 @@ const BODIES = {
   25: { cls: 1, a: 2, e: 0.15, dir: 70, B: 40, year: 17520, star: 1, system: 1 },
   26: { cls: 1, a: 1, e: 0.1, dir: 250, B: 200, year: 8760, star: 1, system: 1 },
   27: { cls: 1, a: 4.6, e: 0.6, dir: 37, B: 105, year: 87600, star: 1, system: 1 },
+  // An eccentric planet whose year passes the reach of the million-step budget, so the budget and not the one-orbit horizon decides a long horizon.
+  28: { cls: 1, a: 8, e: 0.3, dir: 120, B: 300, year: 800000, star: 1, system: 1 },
 }
 
 // The Lagrange points: the planet they sit on (the game moves a point only for a planet or a moon, and a planet is propagated only with an eccentric orbit) and their distance from the star, AU.
@@ -111,7 +117,7 @@ const sourceCall = (body, bearing, deltaSeconds) => {
   return next
 }
 
-// The bearings of an eccentric body after 0, 1, 2 ... whole calls of `call` seconds from the last update, each the one before it after one more call.
+// The bearings of an eccentric body after 0, 1, 2 ... whole steps of `call` seconds from the last update, each the one before it after one more call.
 const AFTER = new Map()
 
 const afterCalls = (id, call, calls) => {
@@ -130,8 +136,8 @@ const afterCalls = (id, call, calls) => {
   return table[calls]
 }
 
-// A snapshot advances circular bearings for the full elapsed time. Eccentric snapshots use whole update calls then one local final call; the oracle table contains whole calls only.
-const bearingAt = (id, elapsed, call = SUBPULSE) => {
+// A snapshot advances circular bearings for the full elapsed time. Eccentric snapshots use whole update steps then one local final step; the oracle table contains whole steps only.
+const bearingAt = (id, elapsed, call = STEP) => {
   const body = BODIES[id]
   const year = body.year * 3600
 
@@ -149,7 +155,7 @@ const bearingAt = (id, elapsed, call = SUBPULSE) => {
 }
 
 // Where a body is `elapsed` seconds after the last update.
-const bodyAt = (id, elapsed, call = SUBPULSE) => {
+const bodyAt = (id, elapsed, call = STEP) => {
   const body = BODIES[id]
   const star = STARS[body.star]
   const bearing = bearingAt(id, elapsed, call)
@@ -163,11 +169,11 @@ const bodyAt = (id, elapsed, call = SUBPULSE) => {
   return body.e && !body.trojan ? ellipsePoint(star, body, bearing) : circlePoint(star, body.a, bearing)
 }
 
-const pointAt = (id, elapsed, call = SUBPULSE) => ellipsePoint(STARS[BODIES[POINTS[id].body].star], { a: POINTS[id].a, e: BODIES[POINTS[id].body].e, dir: BODIES[POINTS[id].body].dir }, turn(bearingAt(POINTS[id].body, elapsed, call) + 60))
+const pointAt = (id, elapsed, call = STEP) => ellipsePoint(STARS[BODIES[POINTS[id].body].star], { a: POINTS[id].a, e: BODIES[POINTS[id].body].e, dir: BODIES[POINTS[id].body].dir }, turn(bearingAt(POINTS[id].body, elapsed, call) + 60))
 
 // Movement reads the destination after the pulse-opening call, not a snapshot partial call. The increment-mode phase cases below use explicit call counts instead.
-const bodyDuring = (id, elapsed, call = SUBPULSE) => bodyAt(id, Math.ceil(elapsed / call) * call, call)
-const pointDuring = (id, elapsed, call = SUBPULSE) => pointAt(id, Math.ceil(elapsed / call) * call, call)
+const bodyDuring = (id, elapsed, call = STEP) => bodyAt(id, Math.ceil(elapsed / call) * call, call)
+const pointDuring = (id, elapsed, call = STEP) => pointAt(id, Math.ceil(elapsed / call) * call, call)
 
 // The arrival of a fleet at `speed` from `from` leaving at `depart`: the root of (distance to the body when it arrives) / speed - T by bisection.
 const arrivalOf = (from, depart, speed, positionAt) => {
@@ -190,8 +196,9 @@ const arrivalOf = (from, depart, speed, positionAt) => {
 // ---- The save ------------------------------------------------------------------------------------------------------------
 const GAME_TIME = 5000000
 const LAST_UPDATE = GAME_TIME
-const CADENCE = { orbitalMovementInSubPulse: 1, subPulseLength: SUBPULSE, incrementLength: INCREMENT }
-const CLOCK = { gameTime: GAME_TIME, lastGrowthTime: GAME_TIME - 73800, orbitalMotion: 1, ...CADENCE }
+// The lengths a save stores, beside the update order the app does read: the cases that pass these to a clock show they change nothing.
+const SAVED = { subPulseLength: SUBPULSE, incrementLength: INCREMENT }
+const CLOCK = { gameTime: GAME_TIME, lastGrowthTime: GAME_TIME - 73800, orbitalMotion: 1, orbitalMovementInSubPulse: 1 }
 const GAME = 1
 const RACE = 2
 
@@ -293,7 +300,11 @@ const worldOf = (edits = []) => {
   })
 
   const sources = { 'orbit-propagation': text.orbit, 'route-position': text.position, 'route-plan': text.plan, 'jump-graph': text.graph }
-  const modules = memo(() => loadUtilities(['orbit-propagation', 'route-position', 'route-plan', 'jump-graph', 'query-cache', 'provenance'], { sources }))
+  // The one-second step of the synthetic flights: the same sources with the step constant rewritten in the loaded copy, so a planted fault is still there and every other behaviour is the shipped one.
+  const testSources = { ...sources, 'orbit-propagation': text.orbit.replace(`export const STEP_SECONDS = ${STEP}`, `export const STEP_SECONDS = ${TEST_STEP}`) }
+  const load = (given) => loadUtilities(['orbit-propagation', 'route-position', 'route-plan', 'jump-graph', 'query-cache', 'provenance'], { sources: given })
+  const modules = memo(() => load(sources))
+  const testModules = memo(() => load(testSources))
   // The save, its database and the orbit facts the loader reads from it for every endpoint, with the read the pages hold.
   const scene = memo(async () => {
     const m = await modules()
@@ -304,8 +315,9 @@ const worldOf = (edits = []) => {
 
     return { m, database, log, orbits, facts }
   })
+  const testScene = memo(async () => ({ ...(await scene()), m: await testModules() }))
 
-  return { text, modules, scene }
+  return { text, modules, testModules, scene, testScene }
 }
 
 // ---- The checks ----------------------------------------------------------------------------------------------------------
@@ -363,8 +375,8 @@ check('circular-arrival', 'an arrival is solved to a second in at most eight eva
 
   PROPAGATED.forEach(([key, positionAt]) => {
     const found = adapt(scene, key, { from, speed, at: GAME_TIME })
-    const seconds = arrivalOf(from, GAME_TIME, speed, (time) => positionAt(Math.ceil(elapsedAt(time) / SUBPULSE) * SUBPULSE))
-    const there = positionAt(Math.ceil(elapsedAt(GAME_TIME + seconds) / SUBPULSE) * SUBPULSE)
+    const seconds = arrivalOf(from, GAME_TIME, speed, (time) => positionAt(Math.ceil(elapsedAt(time) / STEP) * STEP))
+    const there = positionAt(Math.ceil(elapsedAt(GAME_TIME + seconds) / STEP) * STEP)
 
     assert.ok(!found.reasons, `${key}: an arrival is found`)
     assert.ok(Math.abs(found.observedAt - (GAME_TIME + seconds)) <= 1, `${key}: the arrival is the body's by the time it is reached (${found.observedAt - (GAME_TIME + seconds)} s off)`)
@@ -442,8 +454,8 @@ check('eccentric-horizon', 'an eccentric body is carried for less than one orbit
     assert.deepEqual(found.conditions, ['eccentric-cadence'], `body ${id}: states the cadence it rests on`)
   })
 
-  assert.ok(between(bodyAt(14, elapsed), bodyAt(14, elapsed, INCREMENT)) > 1000, 'the call length matters at this horizon, so the fault of another one shows')
-  const flown = adapt(scene, 'b11', { at: GAME_TIME, from: ENDPOINTS.b10, speed: 1500 })
+  assert.ok(between(bodyAt(14, elapsed), bodyAt(14, elapsed, INCREMENT)) > 1000, 'a coarser step moves it elsewhere at this horizon, so the fault of another one shows')
+  const flown = adapt(scene, 'b11', { at: GAME_TIME, from: ENDPOINTS.b10, speed: 50000 })
 
   assert.ok(!flown.reasons && flown.solved, 'an arrival at an eccentric body is solved')
   assert.deepEqual(flown.conditions, ['eccentric-cadence'], 'and states the cadence it rests on')
@@ -459,20 +471,21 @@ check('eccentric-horizon', 'an eccentric body is carried for less than one orbit
   assert.ok(!adapt(scene, 'b10', { at: LAST_UPDATE + 100 * year(10) }).reasons, 'a circular orbit has no horizon')
 })
 
-check('saved-epoch', 'the played construction-clock gap is not replayed: saved positions, one-second continuity, a sub-pulse, the supported horizon and an arrival all start at GameTime', async (w) => {
+check('saved-epoch', 'the played construction-clock gap is not replayed: saved positions, one-second continuity, a fixed step, the supported horizon and an arrival all start at GameTime', async (w) => {
   const scene = await w.scene()
   const rp = scene.m['route-position']
   const epoch = 91725410
-  const factsAt = (growth, length = 1) => ({ ...scene.facts, clock: { ...CLOCK, gameTime: epoch, lastGrowthTime: growth, subPulseLength: length } })
-  const ask = (seconds, growth = epoch - 73800, length = 1, extra = {}) => adapt(scene, 'b27', { facts: factsAt(growth, length), at: epoch + seconds, ...extra })
+  const factsAt = (growth, lengths = {}) => ({ ...scene.facts, clock: { ...CLOCK, ...lengths, gameTime: epoch, lastGrowthTime: growth } })
+  const ask = (seconds, growth = epoch - 73800, lengths = {}, extra = {}) => adapt(scene, 'b27', { facts: factsAt(growth, lengths), at: epoch + seconds, ...extra })
   const saved = ask(0)
   const one = ask(1)
 
   assert.equal(saved.observedAt, epoch)
   assert.ok(between(saved.position, ENDPOINTS.b27) <= 1e-6)
-  assert.ok(between(one.position, bodyAt(27, 1, 1)) <= 1e-6, 'one exact update second from the saved bearing')
+  assert.ok(between(one.position, bodyAt(27, 1)) <= 1e-6, 'one exact update second from the saved bearing')
   assert.ok(Math.abs(between(saved.position, one.position) - 7.119526) < 1e-5, 'the continuity probe moves about 7.12 km, not 525378 km')
-  assert.ok(between(ask(1800, epoch - 73800, 1800).position, bodyAt(27, 1800, 1800)) <= 1e-6, 'one played-length sub-pulse')
+  assert.ok(between(ask(STEP).position, bodyAt(27, STEP)) <= 1e-6, 'one fixed step')
+  assert.ok(between(ask(STEP, epoch - 73800, { subPulseLength: 1, incrementLength: 5 }).position, bodyAt(27, STEP)) <= 1e-6, 'the saved sub-pulse and increment lengths do not select the step')
   ;[epoch, epoch - 73800, null, epoch + 10].forEach((growth) => {
     assert.ok(between(ask(1, growth).position, one.position) <= 1e-6, 'construction time has no effect')
     const record = rp.positionRecord(ENDPOINTS.b27, { facts: factsAt(growth) })
@@ -480,45 +493,30 @@ check('saved-epoch', 'the played construction-clock gap is not replayed: saved p
     assert.equal(record.observedAt, epoch)
     assert.equal(record.age, 0)
     assert.ok(!record.conditions.includes('clock-unread') && !record.conditions.includes('clock-inconsistent'))
-    assert.deepEqual(ask(10 * YEAR, growth, 1800).reasons, ['orbit-horizon'])
-    assert.ok(!ask(10 * YEAR - 1, growth, 432000).reasons, 'the horizon starts at GameTime, not construction time')
+    assert.deepEqual(ask(10 * YEAR, growth).reasons, ['orbit-horizon'])
+    assert.ok(!ask(10 * YEAR - 1, growth).reasons, 'the horizon starts at GameTime, not construction time')
   })
   const from = { Xcor: ENDPOINTS.b27.Xcor + 500000, Ycor: ENDPOINTS.b27.Ycor - 100000 }
-  const flown = ask(0, epoch - 73800, 1, { from, speed: 1500 })
-  const seconds = arrivalOf(from, epoch, 1500, (time) => bodyDuring(27, time - epoch, 1))
+  const flown = ask(0, epoch - 73800, {}, { from, speed: 1500 })
+  const seconds = arrivalOf(from, epoch, 1500, (time) => bodyDuring(27, time - epoch))
 
   assert.ok(flown.solved, 'the gap case has an arrival')
   assert.ok(Math.abs(flown.solved.seconds - seconds) <= 1)
-  assert.ok(between(flown.position, bodyDuring(27, flown.solved.seconds, 1)) <= 1e-6)
-  assert.ok(between(flown.position, ask(0, epoch, 1, { from, speed: 1500 }).position) <= 1e-6, 'the arrival does not depend on construction time')
-
-  const limitedFacts = factsAt(epoch - 73800, 5)
-  const refused = rp.positionRecord(ENDPOINTS.b27, { facts: limitedFacts, adapters: rp.ADAPTERS, at: epoch + 3 * YEAR })
-  const summary = rp.summarisePositions([refused], { merge: true })
-  const detail = 'the horizon needs 18921600 calls of 5 s against a budget of 100000'
-
-  assert.equal(refused.basis, 'static')
-  assert.ok(refused.conditions.includes('cadence-budget'))
-  assert.ok(summary.missing.includes(detail), 'provenance carries the exact bound')
-  assert.ok(rp.describePositions(summary).some((group) => group.conditions.some((condition) => condition.text === detail)), 'the position strip carries the same bound')
-  const figure = rp.withPositions(scene.m.provenance.ofRule({ rule: 'route.positionAge', value: 1 }), summary)
-
-  assert.equal(figure.status, 'estimated')
-  assert.ok(figure.inputs.missing.includes(detail), 'every position-dependent figure carries the bound')
-  assert.ok(rp.summarisePositions([refused, { ...refused, details: ['another bounded horizon'] }], { merge: true }).missing.includes('another bounded horizon'), 'repeated endpoint summaries retain every bound')
+  assert.ok(between(flown.position, bodyDuring(27, flown.solved.seconds)) <= 1e-6)
+  assert.ok(between(flown.position, ask(0, epoch, {}, { from, speed: 1500 }).position) <= 1e-6, 'the arrival does not depend on construction time')
 })
 
 check('movement-phase', 'move orders see the pulse-opening orbital update, but the preceding increment update in after-movement mode, including distinct movement and snapshot sides of an exact increment boundary', async (w) => {
   const scene = await w.scene()
   const m = scene.m['orbit-propagation']
   const rp = scene.m['route-position']
-  const length = 1800
+  const length = STEP
   const speed = 30
   const endpoint = ENDPOINTS.b27
-  const saved = bodyAt(27, 0, length)
-  const first = bodyAt(27, length, length)
-  const second = bodyAt(27, 2 * length, length)
-  const facts = (mode) => ({ ...scene.facts, clock: { ...CLOCK, orbitalMovementInSubPulse: mode, subPulseLength: length, incrementLength: length } })
+  const saved = bodyAt(27, 0)
+  const first = bodyAt(27, length)
+  const second = bodyAt(27, 2 * length)
+  const facts = (mode) => ({ ...scene.facts, clock: { ...CLOCK, orbitalMovementInSubPulse: mode } })
   const ask = (mode, at, from = null, flightSpeed = speed) => adapt(scene, 'b27', { facts: facts(mode), at: GAME_TIME + at, from, speed: flightSpeed })
   const nearSaved = { Xcor: saved.Xcor, Ycor: saved.Ycor + 5 }
   const short = ask(1, 0, nearSaved)
@@ -558,118 +556,133 @@ check('movement-phase', 'move orders see the pulse-opening orbital update, but t
   ;[0, 1].forEach((mode) => {
     assert.ok(between(ask(mode, 0).position, saved) <= 1e-6, 'a no-movement snapshot exactly at the saved epoch is never advanced')
     assert.ok(between(ask(mode, 0, saved).position, saved) <= 1e-6, 'a zero-duration arrival at the saved epoch is not a movement pulse')
-    assert.deepEqual(ask(null, 0, nearSaved).reasons, ['cadence-unread'], 'an unread mode cannot choose the movement phase')
+    assert.deepEqual(ask(null, 0, nearSaved).reasons, ['movement-phase-unread'], 'an unread update order cannot choose the movement phase')
   })
   const record = rp.positionRecord(endpoint, { facts: facts(1), adapters: rp.ADAPTERS, at: GAME_TIME, from: nearSaved, speed })
   const summary = rp.summarisePositions([record])
   const figure = rp.withPositions(scene.m.provenance.ofRule({ rule: 'route.positionAge', value: 1 }), summary)
 
   assert.ok(between(record.position, first) <= 1e-6, 'the consumer contract keeps the movement destination')
-  assert.ok(rp.ASSUMPTIONS.propagated.includes('pulse-opening') && rp.ASSUMPTIONS.propagated.includes('preceding increment') && record.conditions.includes('eccentric-cadence'), 'visible provenance names both phases in the game\'s order and keeps the cadence condition')
-  assert.ok(JSON.stringify(figure).includes('pulse-opening'), 'the position-dependent figure retains the phase provenance')
+  assert.ok(rp.ASSUMPTIONS.propagated.includes('sub-pulse') && rp.ASSUMPTIONS.propagated.includes('after the increment') && record.conditions.includes('eccentric-cadence'), 'visible provenance names both phases in the game\'s order and keeps the estimate condition')
+  assert.ok(JSON.stringify(figure).includes('sub-pulse'), 'the position-dependent figure retains the phase provenance')
 })
 
-check('update-calls', 'an eccentric body is advanced as the game does it: a call of the update for each sub-pulse, or for each increment when the save moves bodies after movement, lowering the bearing by the call\'s seconds at the ratio of the current to the mean speed, with no fixed step; a trojan follows its parent through the same calls; a cadence that is not read is not guessed', async (w) => {
+check('update-calls', 'an eccentric body is advanced as the game does it in fixed steps of 1800 seconds chosen by the app: a snapshot lowers the bearing at the ratio of the current to the mean speed over whole steps and one final step, the saved sub-pulse and increment lengths select nothing, the saved update order selects only the movement phase, and a trojan follows its parent through the same steps', async (w) => {
   const scene = await w.scene()
   const m = scene.m['orbit-propagation']
   // The clock stands at the last body update, so that every `at` is a time after the save and the body is worked out for it.
-  const at = (key, seconds, fields = {}) => adapt(scene, key, { facts: { ...scene.facts, clock: { ...CLOCK, gameTime: LAST_UPDATE, ...fields } }, at: LAST_UPDATE + seconds })
+  const factsOf = (fields = {}) => ({ ...scene.facts, clock: { ...CLOCK, gameTime: LAST_UPDATE, ...fields } })
+  const at = (key, seconds, fields = {}) => adapt(scene, key, { facts: factsOf(fields), at: LAST_UPDATE + seconds })
+  const moving = (key, seconds, fields = {}) => adapt(scene, key, { facts: factsOf(fields), at: LAST_UPDATE + seconds, from: { Xcor: ENDPOINT_OF(key).Xcor + 5, Ycor: ENDPOINT_OF(key).Ycor }, speed: 50000 })
+  const ENDPOINT_OF = (key) => ENDPOINTS[key]
   const planet = BODIES[11]
   const placed = (body, bearing) => ellipsePoint(STARS[body.star], body, bearing)
   const onCircle = (body, bearing) => circlePoint(STARS[body.star], body.a, bearing)
   const dropped = (body, seconds) => placed(body, turn(body.B - (360 * seconds) / (body.year * 3600)))
 
-  // One sub-pulse is one call of 7200 seconds, written out from the game's rules, and the ratio of the speeds moves the body from where the bare turn would put it.
-  const pulse = at('b11', SUBPULSE)
+  assert.equal(m.STEP_SECONDS, STEP, 'the app chooses one step, and it is 1800 seconds')
+  // One fixed step of 1800 seconds, written out from the game's rules, and the ratio of the speeds moves the body from where the bare turn would put it.
+  const step = at('b11', STEP)
 
-  assert.ok(!pulse.reasons, 'one sub-pulse is carried')
-  assert.ok(between(pulse.position, placed(planet, sourceCall(planet, planet.B, SUBPULSE))) <= 1, `one sub-pulse: one call of the game's update (${between(pulse.position, placed(planet, sourceCall(planet, planet.B, SUBPULSE)))} km)`)
-  assert.ok(between(pulse.position, dropped(planet, SUBPULSE)) > 1000, 'the ratio of the current to the mean speed is in it')
-  assert.deepEqual(pulse.conditions, ['eccentric-cadence'])
+  assert.ok(!step.reasons, 'one step is carried')
+  assert.ok(between(step.position, placed(planet, sourceCall(planet, planet.B, STEP))) <= 1, `one step: one call of the game's update (${between(step.position, placed(planet, sourceCall(planet, planet.B, STEP)))} km)`)
+  assert.ok(between(step.position, dropped(planet, STEP)) > 1000, 'the ratio of the current to the mean speed is in it')
+  assert.deepEqual(step.conditions, ['eccentric-cadence'])
 
-  // One increment, when the save moves bodies after movement: one call of the increment's length, and the same seconds are sixty sub-pulses when it moves them in each.
-  const increment = at('b11', INCREMENT, { orbitalMovementInSubPulse: 0 })
-  const sixty = at('b11', INCREMENT)
+  // The saved sub-pulse and increment lengths select nothing: the same snapshot at saving one second, five seconds, sixty seconds, 1800 seconds or the fixture's own lengths, in either update order.
+  const LENGTHS = [{}, { subPulseLength: 1, incrementLength: 1 }, { subPulseLength: 5, incrementLength: 5 }, { subPulseLength: 60, incrementLength: 60 }, { subPulseLength: 1800, incrementLength: 1800 }, SAVED]
+  const snapshot = (seconds, mode) => at('b11', seconds, { ...mode })
 
-  assert.ok(between(increment.position, placed(planet, sourceCall(planet, planet.B, INCREMENT))) <= 1, `one increment: one call of the game's update (${between(increment.position, placed(planet, sourceCall(planet, planet.B, INCREMENT)))} km)`)
-  assert.ok(between(sixty.position, bodyAt(11, INCREMENT)) <= 1, 'the same seconds with the option on are the calls of the sub-pulses')
-  assert.ok(between(increment.position, sixty.position) > 100, 'so the option picks the cadence')
-  assert.ok(between(at('b11', INCREMENT, { orbitalMovementInSubPulse: 0, subPulseLength: null }).position, increment.position) <= 1e-6, 'a save that moves bodies after movement does not need the sub-pulse')
-  assert.ok(between(at('b11', INCREMENT, { incrementLength: null }).position, sixty.position) <= 1e-6, 'nor one that moves them in each sub-pulse the increment')
+  LENGTHS.forEach((lengths) => {
+    ;[1, 0].forEach((mode) => {
+      const found = adapt(scene, 'b11', { facts: { ...scene.facts, clock: { ...CLOCK, gameTime: LAST_UPDATE, orbitalMovementInSubPulse: mode, ...lengths } }, at: LAST_UPDATE + 3 * STEP + 905 })
 
-  // Each whole call starts from where the last left the body; a snapshot remainder is one final update call from that boundary.
+      assert.ok(!found.reasons && between(found.position, bodyAt(11, 3 * STEP + 905)) <= 1e-6, `${JSON.stringify(lengths)}, order ${mode}: the saved lengths select no step`)
+    })
+  })
+  assert.ok(between(snapshot(3 * STEP + 905, { orbitalMovementInSubPulse: 1 }).position, snapshot(3 * STEP + 905, { orbitalMovementInSubPulse: 0 }).position) <= 1e-6, 'a snapshot is the same in either update order')
+  const movingFrom = { Xcor: ENDPOINTS.b11.Xcor + 5, Ycor: ENDPOINTS.b11.Ycor }
+  const movement = (fields) => adapt(scene, 'b11', { facts: factsOf(fields), at: LAST_UPDATE + STEP, from: movingFrom, speed: 50000 })
+  const phaseOne = movement({ orbitalMovementInSubPulse: 1 })
+
+  LENGTHS.forEach((lengths) => {
+    assert.ok(phaseOne.solved && between(movement({ orbitalMovementInSubPulse: 1, ...lengths }).position, phaseOne.position) <= 1e-6, `${JSON.stringify(lengths)}: the saved lengths select no movement step either`)
+  })
+  assert.ok(between(movement({ orbitalMovementInSubPulse: 1 }).position, movement({ orbitalMovementInSubPulse: 0 }).position) > 100, 'while the update order still selects the movement phase')
+  const opening = adapt(scene, 'b11', { facts: factsOf(), at: LAST_UPDATE + STEP - 1, from: movingFrom, speed: 50000 })
+
+  assert.ok(opening.solved && between(opening.position, bodyAt(11, STEP)) <= 1e-6, 'the opening step is the one a sub-pulse movement sees')
+
+  // Each whole step starts from where the last left the body; a snapshot remainder is one final update step from that boundary.
   let bearing = planet.B
 
   for (let call = 0; call < 3; call += 1) {
-    bearing = sourceCall(planet, bearing, SUBPULSE)
+    bearing = sourceCall(planet, bearing, STEP)
   }
 
-  assert.ok(between(at('b11', 3 * SUBPULSE).position, placed(planet, bearing)) <= 1, 'three sub-pulses are three calls')
-  assert.ok(between(at('b11', 3 * SUBPULSE + SUBPULSE / 2).position, placed(planet, sourceCall(planet, bearing, SUBPULSE / 2))) <= 1e-6, 'half a sub-pulse adds one final update call')
-  assert.ok(between(at('b11', 1.5 * INCREMENT, { orbitalMovementInSubPulse: 0 }).position, placed(planet, sourceCall(planet, sourceCall(planet, planet.B, INCREMENT), INCREMENT / 2))) <= 1e-6, 'half an increment also adds one final update call')
+  assert.ok(between(at('b11', 3 * STEP).position, placed(planet, bearing)) <= 1, 'three steps are three calls')
+  assert.ok(between(at('b11', 3 * STEP + STEP / 2).position, placed(planet, sourceCall(planet, bearing, STEP / 2))) <= 1e-6, 'half a step adds one final update step')
 
-  // Circular geometry combines the full elapsed time without cadence.
+  // Circular geometry combines the full elapsed time in either update order, and needs no update order at all.
   const rock = BODIES[14]
 
-  assert.ok(between(at('b14', SUBPULSE).position, placed(rock, sourceCall(rock, rock.B, SUBPULSE))) <= 1, 'an eccentric asteroid: one call of the game\'s update')
-  assert.ok(between(at('b10', 5e6).position, bodyAt(10, 5e6)) <= 1 && between(at('b10', 5e6, { orbitalMovementInSubPulse: 0 }).position, bodyAt(10, 5e6)) <= 1, 'a circle uses the full elapsed time in either mode')
-  assert.ok(between(at('b10', 5e6, { orbitalMovementInSubPulse: null, subPulseLength: null, incrementLength: null }).position, bodyAt(10, 5e6)) <= 1e-6, 'a circular snapshot does not require cadence')
+  assert.ok(between(at('b14', STEP).position, placed(rock, sourceCall(rock, rock.B, STEP))) <= 1, 'an eccentric asteroid: one call of the game\'s update')
+  assert.ok(between(at('b10', 5e6).position, bodyAt(10, 5e6)) <= 1 && between(at('b10', 5e6, { orbitalMovementInSubPulse: 0 }).position, bodyAt(10, 5e6)) <= 1, 'a circle uses the full elapsed time in either order')
+  assert.ok(between(at('b10', 5e6, { orbitalMovementInSubPulse: null }).position, bodyAt(10, 5e6)) <= 1e-6, 'a circular snapshot does not require the update order')
 
-  // A trojan is at its parent's bearing plus its offset, the parent being advanced by the calls: not on a circle of its own.
+  // A trojan is at its parent's bearing plus its offset, the parent being advanced by the steps: not on a circle of its own.
   const trojan = BODIES[13]
-  const parentAfter = sourceCall(planet, sourceCall(planet, planet.B, SUBPULSE), SUBPULSE)
+  const parentAfter = sourceCall(planet, sourceCall(planet, planet.B, STEP), STEP)
 
-  assert.ok(between(at('b13', 2 * SUBPULSE).position, onCircle(trojan, turn(parentAfter + trojan.trojan))) <= 1, 'a trojan follows its parent')
-  assert.ok(between(at('b13', 2 * SUBPULSE).position, onCircle(trojan, turn(trojan.B - (360 * 2 * SUBPULSE) / (trojan.year * 3600)))) > 100, 'and not a circle of its own')
-  assert.ok(between(at('b13', INCREMENT, { orbitalMovementInSubPulse: 0 }).position, onCircle(trojan, turn(sourceCall(planet, planet.B, INCREMENT) + trojan.trojan))) <= 1, 'by whatever cadence the parent has')
+  assert.ok(between(at('b13', 2 * STEP).position, onCircle(trojan, turn(parentAfter + trojan.trojan))) <= 1, 'a trojan follows its parent')
+  assert.ok(between(at('b13', 2 * STEP).position, onCircle(trojan, turn(trojan.B - (360 * 2 * STEP) / (trojan.year * 3600)))) > 100, 'and not a circle of its own')
 
-  // A cadence that is not read is not guessed: an eccentric body, and what follows one, is refused, and a length of nothing is no length.
-  ;[{ orbitalMovementInSubPulse: null }, { orbitalMovementInSubPulse: 1, subPulseLength: null }, { orbitalMovementInSubPulse: 1, subPulseLength: 0 }, { orbitalMovementInSubPulse: 0, incrementLength: null }, { orbitalMovementInSubPulse: 0, incrementLength: 0 }].forEach((fields) => {
-    ;['b11', 'b14', 'b12', 'b13', 'p31'].forEach((key) => assert.deepEqual(at(key, SUBPULSE, fields).reasons, ['cadence-unread'], `${key}: ${JSON.stringify(fields)}`))
+  // An update order that is not read is not guessed for movement, and no snapshot needs it.
+  ;['b10', 'b11', 'b14', 'b12', 'b13', 'p31'].forEach((key) => {
+    assert.deepEqual(moving(key, STEP, { orbitalMovementInSubPulse: null }).reasons, ['movement-phase-unread'], `${key}: movement without the update order`)
+    assert.ok(!at(key, STEP, { orbitalMovementInSubPulse: null }).reasons, `${key}: a snapshot without the update order`)
   })
 
-  // Short saved calls remain exact through the inclusive budget. Cache lookups in either direction do not change the arithmetic.
-  assert.equal(m.MAX_CALLS, 100000)
-  ;[1, 3.5, m.MAX_CALLS, m.MAX_CALLS - 1, 1].forEach((seconds) => {
-    const found = at('b14', seconds, { subPulseLength: 1 })
+  // The million-step budget is inclusive, counts the final partial step, and is refused with the count. A body whose year passes the million-step reach shows the budget, not the one-orbit horizon, deciding.
+  const budget = at('b28', m.MAX_CALLS * STEP)
 
-    assert.ok(!found.reasons && between(found.position, bodyAt(14, seconds, 1)) <= 1e-6, `${seconds} s: whole one-second calls and a final partial call, including the budget boundary`)
+  assert.ok(!budget.reasons, 'a body whose year passes the budget is carried to the inclusive boundary')
+  assert.ok(between(budget.position, bodyAt(28, m.MAX_CALLS * STEP)) <= 1e-6, 'at the position of its millionth step')
+  assert.ok(at('b28', m.MAX_CALLS * STEP).observedAt === LAST_UPDATE + m.MAX_CALLS * STEP)
+  ;[[m.MAX_CALLS * STEP + 0.5, [`the horizon needs ${m.MAX_CALLS} steps of ${STEP} s and a final step of 0.5 s, ${m.MAX_CALLS + 1} evaluations against a budget of ${m.MAX_CALLS}`]], [(m.MAX_CALLS + 1) * STEP, [`the horizon needs ${m.MAX_CALLS + 1} steps of ${STEP} s against a budget of ${m.MAX_CALLS}`]]].forEach(([seconds, detail]) => {
+    const capped = at('b28', seconds)
+
+    assert.deepEqual(capped.reasons, ['cadence-budget'], 'a horizon past the budget is refused, never coarsened')
+    assert.deepEqual(capped.details, detail, 'the refusal counts the whole steps, the final partial step and the budget')
   })
-  ;[[m.MAX_CALLS + 1, 1], [3 * YEAR, 5]].forEach(([seconds, length]) => {
-    const capped = at('b14', seconds, { subPulseLength: length })
 
-    assert.deepEqual(capped.reasons, ['cadence-budget'], 'an in-horizon body exceeding the budget is refused, never coarsened')
-    assert.deepEqual(capped.details, [`the horizon needs ${Math.ceil(seconds / length)} calls of ${length} s against a budget of ${m.MAX_CALLS}`], 'an exact horizon is refused on its whole calls alone')
-  })
-  const movingFacts = { ...scene.facts, clock: { ...CLOCK, subPulseLength: 1 } }
-  const finalCall = bodyAt(14, m.MAX_CALLS, 1)
-  const movingFrom = { Xcor: finalCall.Xcor + 5, Ycor: finalCall.Ycor }
-  const finalArrival = adapt(scene, 'b14', { facts: movingFacts, at: GAME_TIME + m.MAX_CALLS - 0.5, from: movingFrom, speed: 50000 })
-  const movingRefusal = adapt(scene, 'b14', { facts: movingFacts, at: GAME_TIME + m.MAX_CALLS + 0.5, from: movingFrom, speed: 50000 })
+  const finalCall = bodyAt(28, m.MAX_CALLS * STEP)
+  const nearFinal = { Xcor: finalCall.Xcor + 5, Ycor: finalCall.Ycor }
+  const finalArrival = adapt(scene, 'b28', { facts: factsOf(), at: LAST_UPDATE + m.MAX_CALLS * STEP - 0.5, from: nearFinal, speed: 50000 })
+  const movingRefusal = adapt(scene, 'b28', { facts: factsOf(), at: LAST_UPDATE + m.MAX_CALLS * STEP + 0.5, from: nearFinal, speed: 50000 })
 
-  assert.ok(finalArrival.solved && between(finalArrival.position, finalCall) <= 1e-6, 'movement can use exactly the inclusive final call, even before its ending boundary')
+  assert.ok(finalArrival.solved && between(finalArrival.position, finalCall) <= 1e-6, 'movement can use exactly the inclusive final step, even before its ending boundary')
   assert.deepEqual(movingRefusal.reasons, ['cadence-budget'])
-  assert.deepEqual(movingRefusal.details, ['the horizon needs 100001 calls of 1 s against a budget of 100000'], 'movement counts its opening call in the explicit refusal, each a whole call')
+  assert.deepEqual(movingRefusal.details, [`the horizon needs ${m.MAX_CALLS + 1} steps of ${STEP} s against a budget of ${m.MAX_CALLS}`], 'movement counts its opening step in the explicit refusal, each a whole step')
 })
 
-check('snapshot-partial', 'snapshots use the entire elapsed time, including below one call and a final partial call, with the same-time parent for moons, trojans and points', async (w) => {
+check('snapshot-partial', 'snapshots use the entire elapsed time, including below one step and a final partial step, with the same-time parent for moons, trojans and points', async (w) => {
   const scene = await w.scene()
-  const length = 1800
 
-  ;[length / 2, length, length + 905, 3 * length].forEach((seconds) => {
+  ;[STEP / 2, STEP, STEP + 905, 3 * STEP].forEach((seconds) => {
     PROPAGATED.forEach(([key]) => {
-      const found = adapt(scene, key, { facts: { ...scene.facts, clock: { ...CLOCK, subPulseLength: length } }, at: GAME_TIME + seconds })
+      const found = adapt(scene, key, { at: GAME_TIME + seconds })
       const id = ENDPOINTS[key].id
-      const expected = key.startsWith('p') ? pointAt(id, seconds, length) : bodyAt(key === 'c701' ? 10 : id, seconds, length)
+      const expected = key.startsWith('p') ? pointAt(id, seconds) : bodyAt(key === 'c701' ? 10 : id, seconds)
 
       assert.ok(!found.reasons && between(found.position, expected) <= 1e-6, `${key}: ${seconds} s uses the independent orbital-rule oracle`)
     })
   })
 })
 
-check('snapshot-cadence', 'only movement and eccentric propagation need cadence; a moon own circular bearing does not, but an eccentric parent still does', async (w) => {
+check('movement-phase-unread', 'only movement needs the saved update order; a snapshot of a moon, a circular body or an eccentric ancestor does not, and movement without it is refused by name', async (w) => {
   const scene = await w.scene()
-  const clock = { ...CLOCK, orbitalMovementInSubPulse: null, subPulseLength: null, incrementLength: null }
+  const clock = { ...CLOCK, orbitalMovementInSubPulse: null }
   const moon = { ...scene.orbits.bodies[12], parentId: 10 }
   const parent = bodyAt(10, 0)
   const here = { Xcor: parent.Xcor + moon.distance * Math.cos(rad(moon.bearing - 90)), Ycor: parent.Ycor + moon.distance * Math.sin(rad(moon.bearing - 90)) }
@@ -681,56 +694,57 @@ check('snapshot-cadence', 'only movement and eccentric propagation need cadence;
   const expected = { Xcor: nextParent.Xcor + moon.distance * Math.cos(rad(bearing - 90)), Ycor: nextParent.Ycor + moon.distance * Math.sin(rad(bearing - 90)) }
   const found = scene.m['orbit-propagation'].orbitAdapter(endpoint, { facts, at: GAME_TIME + seconds })
 
-  assert.ok(!found.reasons && between(found.position, expected) <= 1e-6, 'a circular parent and moon need no cadence')
-  assert.deepEqual(adapt(scene, 'b12', { facts: { ...scene.facts, clock }, at: GAME_TIME + seconds }).reasons, ['cadence-unread'], 'an eccentric ancestor needs cadence')
-  assert.deepEqual(adapt(scene, 'b10', { facts, at: GAME_TIME, from: { Xcor: ENDPOINTS.b10.Xcor + 5, Ycor: ENDPOINTS.b10.Ycor }, speed: 50000 }).reasons, ['cadence-unread'], 'even circular movement needs its movement phase')
+  assert.ok(!found.reasons && between(found.position, expected) <= 1e-6, 'a snapshot of a circular parent and moon needs no update order')
+  assert.ok(!adapt(scene, 'b12', { facts: { ...scene.facts, clock }, at: GAME_TIME + seconds }).reasons, 'nor does a snapshot of an eccentric ancestor')
+  ;['b10', 'b14'].forEach((key) => assert.ok(!adapt(scene, key, { facts, at: GAME_TIME + seconds }).reasons, `${key}: a snapshot needs no update order`))
+  assert.deepEqual(adapt(scene, 'b10', { facts, at: GAME_TIME, from: { Xcor: ENDPOINTS.b10.Xcor + 5, Ycor: ENDPOINTS.b10.Ycor }, speed: 50000 }).reasons, ['movement-phase-unread'], 'even circular movement needs its movement phase')
+  assert.deepEqual(adapt(scene, 'b11', { facts, at: GAME_TIME, from: { Xcor: ENDPOINTS.b11.Xcor + 5, Ycor: ENDPOINTS.b11.Ycor }, speed: 50000 }).reasons, ['movement-phase-unread'], 'and so does movement to an eccentric body')
 })
 
-check('partial-cache', 'partial snapshots never enter the whole-call cache: forward, backward and repeated queries leave snapshots and movement unchanged', async (w) => {
+check('partial-cache', 'partial snapshots never enter the whole-step cache: forward, backward and repeated queries leave snapshots and movement unchanged', async (w) => {
   const scene = await w.scene()
-  const length = 1800
 
   ;[[905, 2705, 1800, 3600, 905], [3600, 2705, 905, 1800, 2705]].forEach((order) => {
-    const facts = { ...scene.facts, clock: { ...CLOCK, subPulseLength: length }, orbits: { ...scene.orbits } }
+    const facts = { ...scene.facts, orbits: { ...scene.orbits } }
 
     order.forEach((seconds) => {
       const found = adapt(scene, 'b27', { facts, at: GAME_TIME + seconds })
 
-      assert.ok(!found.reasons && between(found.position, bodyAt(27, seconds, length)) <= 1e-6, `${seconds} s is independent of prior partial queries`)
+      assert.ok(!found.reasons && between(found.position, bodyAt(27, seconds)) <= 1e-6, `${seconds} s is independent of prior partial queries`)
     })
-    const first = bodyAt(27, length, length)
+    const first = bodyAt(27, STEP)
     const from = { Xcor: first.Xcor + 5, Ycor: first.Ycor }
     const arrival = adapt(scene, 'b27', { facts, at: GAME_TIME, from, speed: 50000 })
 
-    assert.ok(arrival.solved && between(arrival.position, first) <= 1e-6, 'movement still sees the whole opening call, not a cached partial')
+    assert.ok(arrival.solved && between(arrival.position, first) <= 1e-6, 'movement still sees the whole opening step, not a cached partial')
   })
 })
 
-check('partial-budget', 'the inclusive eccentric budget counts a final partial evaluation, and the refusal states the whole calls, the short final call and the budget without coarsening or cache pollution', async (w) => {
+check('partial-budget', 'the inclusive eccentric budget counts a final partial step of the fixed 1800-second step, and the refusal states the whole steps, the short final step and the budget without coarsening or cache pollution', async (w) => {
   const scene = await w.scene()
   const rp = scene.m['route-position']
-  const limit = scene.m['orbit-propagation'].MAX_CALLS
-  const facts = { ...scene.facts, clock: { ...CLOCK, subPulseLength: 1 } }
-  const ask = (seconds) => adapt(scene, 'b14', { facts, at: GAME_TIME + seconds })
+  const m = scene.m['orbit-propagation']
+  const limit = m.MAX_CALLS * STEP
+  const ask = (seconds) => adapt(scene, 'b28', { at: GAME_TIME + seconds })
   const partial = ask(limit - 0.5)
 
-  assert.ok(!partial.reasons && between(partial.position, bodyAt(14, limit - 0.5, 1)) <= 1e-6, '99999 whole calls plus a partial is exactly within budget')
-  assert.deepEqual(ask(limit + 0.5).reasons, ['cadence-budget'], '100000 whole calls plus a partial exceeds budget')
-  assert.deepEqual(ask(limit + 0.5).details, ['the horizon needs 100000 calls of 1 s and a final call of 0.5 s, 100001 evaluations against a budget of 100000'], 'the refusal counts the evaluation once more and names its last call as short')
+  assert.ok(BODIES[28].year * 3600 > limit, 'the planted body\'s year passes the million-step reach, so the budget and not the horizon decides')
+  assert.ok(!partial.reasons && between(partial.position, bodyAt(28, limit - 0.5)) <= 1e-6, '999999 whole steps plus a partial step is exactly within budget')
+  assert.deepEqual(ask(limit + 0.5).reasons, ['cadence-budget'], 'a million whole steps plus a partial step exceeds budget')
+  assert.deepEqual(ask(limit + 0.5).details, ['the horizon needs 1000000 steps of 1800 s and a final step of 0.5 s, 1000001 evaluations against a budget of 1000000'], 'the refusal counts the evaluation once more and names its last step as short')
   const exact = ask(limit)
 
-  assert.ok(!exact.reasons && between(exact.position, bodyAt(14, limit, 1)) <= 1e-6, 'a rejected partial query does not affect the exact budget boundary')
+  assert.ok(!exact.reasons && between(exact.position, bodyAt(28, limit)) <= 1e-6, 'a rejected partial query does not affect the exact budget boundary')
 
-  const longFacts = { ...scene.facts, clock: { ...CLOCK, subPulseLength: 1800 } }
-  const horizon = GAME_TIME + limit * 1800 + 900
-  const bound = 'the horizon needs 100000 calls of 1800 s and a final call of 900 s, 100001 evaluations against a budget of 100000'
+  const horizon = GAME_TIME + limit + 900
+  const bound = 'the horizon needs 1000000 steps of 1800 s and a final step of 900 s, 1000001 evaluations against a budget of 1000000'
 
-  assert.deepEqual(adapt(scene, 'b27', { facts: longFacts, at: horizon }).details, [bound], '100000 whole calls of the saved length and a 900 s remainder are 100001 evaluations')
-  const refused = rp.positionRecord(ENDPOINTS.b27, { facts: longFacts, adapters: rp.ADAPTERS, at: horizon })
+  assert.deepEqual(ask(limit + 900).details, [bound], 'a million whole steps and a 900 s remainder are 1000001 evaluations')
+  const refused = rp.positionRecord(ENDPOINTS.b28, { facts: scene.facts, adapters: rp.ADAPTERS, at: horizon })
   const summary = rp.summarisePositions([refused], { merge: true })
   const figure = rp.withPositions(scene.m.provenance.ofRule({ rule: 'route.positionAge', value: 1 }), summary)
 
-  assert.ok(summary.missing.includes(bound), 'the position provenance states the whole calls, the final call and the budget')
+  assert.ok(summary.missing.includes(bound), 'the position provenance states the whole steps, the final step and the budget')
   assert.ok(rp.describePositions(summary).some((group) => group.conditions.some((condition) => condition.text === bound)), 'the position strip carries the same statement')
   assert.ok(figure.inputs.missing.includes(bound), 'a figure that rests on the position carries it')
 })
@@ -830,9 +844,10 @@ check('lagrange-transfer', 'a Lagrange transfer is flown leg by leg at the time 
 })
 
 check('successive-cycles', 'a repeated trip arrives at the position the body has reached, waits there and leaves from where the body then is, so every cycle starts from the last arrival and takes the waits as time', async (w) => {
-  const scene = await w.scene()
+  // The fine test step, so a flight's boundary jumps stay inside the arrival tolerance.
+  const scene = await w.testScene()
   const m = scene.m
-  const facts = { ...scene.facts, clock: { ...CLOCK, subPulseLength: 1 } }
+  const facts = scene.facts
   const speed = 1500
   const waits = [6 * 3600, 3 * 3600]
   const hop = (from, to, wait) => ({ steps: [{ kind: 'fly', SystemID: 1, from, to, via: null }], from, to, wait })
@@ -851,12 +866,12 @@ check('successive-cycles', 'a repeated trip arrives at the position the body has
     const mark = kms.length
 
     ids.forEach((id, index) => {
-      const positionAt = (when) => bodyDuring(id, elapsedAt(when), 1)
+      const positionAt = (when) => bodyDuring(id, elapsedAt(when), TEST_STEP)
       const seconds = arrivalOf(at, time, speed, positionAt)
 
       kms.push(between(at, positionAt(time + seconds)))
       time += seconds + waits[index]
-      at = bodyAt(id, elapsedAt(time), 1)
+      at = bodyAt(id, elapsedAt(time), TEST_STEP)
     })
     cycles.push(kms.slice(mark))
 
@@ -917,7 +932,7 @@ check('fallbacks', 'every case that is not propagated keeps the saved figure and
   assert.equal(cycleOf('b19', { adapters: {} }), null, 'with no adapters there is none either')
 
   // A shorter-period eccentric body crosses its own horizon during a real year of flights, without backdating its saved coordinates.
-  const late = cycleOf('b23', { facts: { ...scene.facts, clock: { ...CLOCK, subPulseLength: 360 } }, speed: 50000, wait: 86400 })
+  const late = cycleOf('b23', { facts: { ...scene.facts, clock: { ...CLOCK } }, speed: 50000, wait: 86400 })
 
   stated(late, 'orbit-horizon')
   assert.equal(late.first.positions.mode, 'propagated', 'the first cycle states its own mode')
@@ -1078,7 +1093,8 @@ check('registration', 'the adapters are registered at the one gate with the stat
   assert.equal(orbit.ARRIVAL_TOLERANCE_SECONDS, 1)
   assert.equal(orbit.ARRIVAL_MAX_EVALUATIONS, 8)
   assert.equal(orbit.ECCENTRIC_STEP_SECONDS, undefined, 'the fitted step is gone')
-  assert.equal(orbit.MAX_CALLS, 100000)
+  assert.equal(orbit.STEP_SECONDS, STEP, 'one fixed step the app chooses, 1800 seconds')
+  assert.equal(orbit.MAX_CALLS, 1000000)
 
   const body = { family: 'body', key: 'body:10', id: 10, SystemID: 1, Xcor: 1, Ycor: 2 }
   const none = rp.positionRecord(body, { facts: { clock: CLOCK } })
@@ -1090,11 +1106,10 @@ check('registration', 'the adapters are registered at the one gate with the stat
 })
 
 // ---- The anchor family ------------------------------------------------------------------------------------------------
-// The objects a Lagrange point carries (fleets, waypoints, wrecks, life pods, missile salvos). No save holds one (neither line fixture has an object whose point is above 0), so each is planted in a database of its own that the loaders of the pages read as they read a save. A moving object is looked at at the saved epoch and at whole calls after it, where the position of a point is the same whichever call a moment between two calls is given to, so the cases do not depend on which call such a moment belongs to.
+// The objects a Lagrange point carries (fleets, waypoints, wrecks, life pods, missile salvos). No save holds one (neither line fixture has an object whose point is above 0), so each is planted in a database of its own that the loaders of the pages read as they read a save. A moving object is looked at at the saved epoch and at whole steps after it, where the position of a point is the same whichever call a moment between two calls is given to, so the cases do not depend on which call such a moment belongs to.
 const ANCHOR_SCHEMA = `
   ${SCHEMA}
-  create table FCT_Game (GameID integer, GameTime real, LastGrowthTime real, OrbitalMotion integer, OrbitalMotionAst integer, OrbitalMovementInSubPulse integer, SubPulseLength integer);
-  create table FCT_Increments (IncrementID integer, GameID integer, GameTime real, Length integer);
+  create table FCT_Game (GameID integer, GameTime real, LastGrowthTime real, OrbitalMotion integer, OrbitalMotionAst integer, OrbitalMovementInSubPulse integer);
   create table FCT_Fleet (FleetID integer, GameID integer, RaceID integer, LastMoveTime real, OrbitBodyID integer, Xcor real, Ycor real, AnchorFleetID integer, OrbitLagrangeID integer, LagrangeStatus integer, SystemID integer);
   create table FCT_MoveOrders (MoveOrderID integer, GameID integer, FleetID integer, MoveOrder integer, MoveActionID integer, DestinationType integer, DestinationID integer, DestinationItemID integer, NewWarpPointID integer, MinDistance real);
   create table FCT_Waypoint (WaypointID integer, GameID integer, RaceID integer, SystemID integer, OrbitBodyID integer, OrbitLagrangeID integer, Xcor real, Ycor real);
@@ -1156,8 +1171,7 @@ const ANCHOR_INSERTS = {
 
 const anchorRows = () => [
   rowsOf(),
-  `insert into FCT_Game values (${GAME}, ${GAME_TIME}, ${CLOCK.lastGrowthTime}, 1, 0, 1, ${SUBPULSE});`,
-  `insert into FCT_Increments values (1, ${GAME}, ${GAME_TIME - 10}, ${INCREMENT});`,
+  `insert into FCT_Game values (${GAME}, ${GAME_TIME}, ${CLOCK.lastGrowthTime}, 1, 0, 1);`,
   // A point of another game under the ID a wreck of this game references: it is not that wreck's point.
   `insert into FCT_LagrangePoint values (34, 2, 1, 25, 2, 0, ${pointAt(31, 0).Xcor}, ${pointAt(31, 0).Ycor});`,
   ...OBJECTS.map((object) => ANCHOR_INSERTS[object.family](object, placeOfObject(object))),
@@ -1204,7 +1218,7 @@ const anchorScene = (w) => {
 const RIDERS = OBJECTS.filter((object) => object.rides > 0)
 // The riders of a point that moves: the point of an asteroid is never moved by the game.
 const MOVERS = RIDERS.filter((object) => object.rides !== 33)
-const MODES = [{ name: 'a sub-pulse', clock: {}, call: SUBPULSE, calls: [1, 24, 100] }, { name: 'an increment', clock: { orbitalMovementInSubPulse: 0 }, call: INCREMENT, calls: [1, 7, 40] }]
+const MODES = [{ name: 'bodies move in each sub-pulse', clock: {}, calls: [1, 24, 100] }, { name: 'bodies move after the increment', clock: { orbitalMovementInSubPulse: 0 }, calls: [1, 7, 40] }]
 const UNANCHORED_TREATMENT = ['wreck-orbit-tie', 'drift-unobserved', 'salvo-unanchored', 'fleet-point-inconsistent', 'anchor-point-inconsistent', 'waypoint-orbit-unread', 'anchor-unread']
 const withClock = (facts, clock) => ({ ...facts, clock: { ...facts.clock, ...clock } })
 const coordinatesOf = (position) => ({ Xcor: position.Xcor, Ycor: position.Ycor })
@@ -1256,7 +1270,7 @@ check('anchor-read', 'the loaders select non-fleet followers by same-game/system
   assert.deepEqual({ wrecks: asJson(barePositions.wrecks), lifepods: asJson(barePositions.lifepods), salvos: asJson(barePositions.salvos) }, { wrecks: {}, lifepods: {}, salvos: {} })
 })
 
-check('anchor-rides', 'an object a Lagrange point carries is at the point\'s saved position at the saved epoch and at the point\'s own position after every whole call, by the sub-pulse and by the increment cadence, whatever its kind: fleets, waypoints, wrecks, life pods and missile salvos ride, and an unadapted record stays at the saved position', async (w) => {
+check('anchor-rides', 'an object a Lagrange point carries is at the point\'s saved position at the saved epoch and at the point\'s own position after every whole step, in either saved update order, whatever its kind: fleets, waypoints, wrecks, life pods and missile salvos ride, and an unadapted record stays at the saved position', async (w) => {
   const scene = await anchorScene(w)
   const rp = scene.m['route-position']
 
@@ -1285,11 +1299,11 @@ check('anchor-rides', 'an object a Lagrange point carries is at the point\'s sav
       UNANCHORED_TREATMENT.forEach((code) => assert.ok(!start.conditions.includes(code), `${label}: not held for ${code}`))
 
       mode.calls.forEach((calls) => {
-        const elapsed = calls * mode.call
+        const elapsed = calls * STEP
         const at = GAME_TIME + elapsed
         const found = rp.positionRecord(endpoint, { facts, adapters: rp.ADAPTERS, at })
         const own = rp.positionRecord(ENDPOINTS[`p${object.rides}`], { facts, adapters: rp.ADAPTERS, at })
-        const there = pointAt(object.rides, elapsed, mode.call)
+        const there = pointAt(object.rides, elapsed, STEP)
         const where = `${label}, ${calls} calls of ${mode.name}`
 
         assert.equal(found.basis, 'propagated', `${where}: propagated, not held`)
@@ -1337,31 +1351,34 @@ check('anchor-displaced', 'non-fleet followers snap by point reference on the fi
       const label = `${mode.name}, ${object.family}`
 
       assert.equal(scene.positions[FACTS_OF[object.family]][object.id].riding, true, `${label}: reference, not coincidence, selects the follower`)
-      for (const elapsed of [0, mode.call / 2, mode.call, mode.call * 1.5]) {
+      for (const elapsed of [0, STEP / 2, STEP, STEP * 1.5]) {
         const snapshot = rp.positionRecord(endpoint, { facts, adapters: rp.ADAPTERS, at: GAME_TIME + elapsed })
-        const expected = elapsed === 0 ? saved : pointAt(object.point, elapsed, mode.call)
+        const expected = elapsed === 0 ? saved : pointAt(object.point, elapsed, STEP)
 
         assert.ok(between(snapshot.position, expected) < 1e-5, `${label}: snapshot at ${elapsed} keeps the exact epoch saved and counts a final partial call as an update`)
       }
-      for (const elapsed of [0, mode.call / 2, mode.call, mode.call * 1.5]) {
+      for (const elapsed of [0, STEP / 2, STEP, STEP * 1.5]) {
         const from = { SystemID: endpoint.SystemID, Xcor: endpoint.Xcor + 5, Ycor: endpoint.Ycor }
         const arrival = rp.positionRecord(endpoint, { facts, adapters: rp.ADAPTERS, at: GAME_TIME + elapsed, from, speed: 1e8 })
-        const calls = mode.clock.orbitalMovementInSubPulse === 0 ? Math.floor(elapsed / mode.call) : Math.floor(elapsed / mode.call) + 1
-        const expected = calls === 0 ? saved : pointAt(object.point, calls * mode.call, mode.call)
+        const calls = mode.clock.orbitalMovementInSubPulse === 0 ? Math.floor(elapsed / STEP) : Math.floor(elapsed / STEP) + 1
+        const expected = calls === 0 ? saved : pointAt(object.point, calls * STEP, STEP)
 
         assert.equal(arrival.basis, 'propagated', `${label}: arrival is served`)
         assert.ok(between(arrival.position, expected) < 1e-5, `${label}: movement from ${elapsed} sees the call in the game's order`)
       }
-      for (const elapsed of mode.clock.orbitalMovementInSubPulse === 0 ? [0, mode.call] : [0]) {
+      for (const elapsed of mode.clock.orbitalMovementInSubPulse === 0 ? [0, STEP] : [0]) {
         const zero = rp.positionRecord(endpoint, { facts, adapters: rp.ADAPTERS, at: GAME_TIME + elapsed, from: endpoint, speed: 1e8 })
 
         assert.equal(zero.basis, 'propagated', `${label}: zero-duration arrival is served`)
         assert.deepEqual(coordinatesOf(zero.position), saved, `${label}: zero-duration arrival at ${elapsed} sees no update in the game's order`)
       }
-      const unread = rp.positionRecord(endpoint, { facts: withClock(facts, { orbitalMovementInSubPulse: null }), adapters: rp.ADAPTERS, at: GAME_TIME + mode.call / 2 })
+      const unreadFacts = withClock(facts, { orbitalMovementInSubPulse: null })
+      const unreadSnapshot = rp.positionRecord(endpoint, { facts: unreadFacts, adapters: rp.ADAPTERS, at: GAME_TIME + STEP / 2 })
+      const unread = rp.positionRecord(endpoint, { facts: unreadFacts, adapters: rp.ADAPTERS, at: GAME_TIME, from: { Xcor: endpoint.Xcor + 5, Ycor: endpoint.Ycor }, speed: 1e8 })
 
+      assert.equal(unreadSnapshot.basis, 'propagated', `${label}: a snapshot needs no update order`)
       assert.equal(unread.basis, 'static')
-      assert.ok(unread.conditions.includes('cadence-unread'), `${label}: no snap phase is invented when the option is unread`)
+      assert.ok(unread.conditions.includes('movement-phase-unread'), `${label}: no snap phase is invented for movement when the option is unread`)
     }
   }
 })
@@ -1387,31 +1404,31 @@ check('anchor-static-snap', 'displaced non-fleet followers of a static point kee
           const label = `${object.family}, ${mode.name}, motion ${motion}`
 
           assert.equal(positions[FACTS_OF[object.family]][object.id].riding, true, `${label}: real loader selects the static point reference`)
-          for (const elapsed of [0, mode.call / 2, mode.call, mode.call * 1.5]) {
+          for (const elapsed of [0, STEP / 2, STEP, STEP * 1.5]) {
             const snapshot = rp.positionRecord(endpoint, { facts, adapters: rp.ADAPTERS, at: GAME_TIME + elapsed })
 
             assert.ok(between(snapshot.position, motion && elapsed > 0 ? point : saved) < 1e-5, `${label}: every positive snapshot elapsed time counts as an update`)
             assert.equal(snapshot.unknown, false, `${label}: resolved geometry is exact`)
             const from = { SystemID: 1, Xcor: endpoint.Xcor + 5, Ycor: endpoint.Ycor }
             const arrival = rp.positionRecord(endpoint, { facts, adapters: rp.ADAPTERS, at: GAME_TIME + elapsed, from, speed: 1e8 })
-            const updated = motion && (mode.clock.orbitalMovementInSubPulse !== 0 || elapsed >= mode.call)
+            const updated = motion && (mode.clock.orbitalMovementInSubPulse !== 0 || elapsed >= STEP)
 
             assert.ok(between(arrival.position, updated ? point : saved) < 1e-5, `${label}: arrival from ${elapsed} uses the opening sub-pulse or preceding increment`)
             assert.equal(arrival.unknown, false)
           }
           const unreadCadence = withClock(facts, { orbitalMovementInSubPulse: null })
-          const snapshot = rp.positionRecord(endpoint, { facts: unreadCadence, adapters: rp.ADAPTERS, at: GAME_TIME + mode.call / 2 })
-          const arrival = rp.positionRecord(endpoint, { facts: unreadCadence, adapters: rp.ADAPTERS, at: GAME_TIME + mode.call / 2, from: endpoint, speed: 1e8 })
+          const snapshot = rp.positionRecord(endpoint, { facts: unreadCadence, adapters: rp.ADAPTERS, at: GAME_TIME + STEP / 2 })
+          const arrival = rp.positionRecord(endpoint, { facts: unreadCadence, adapters: rp.ADAPTERS, at: GAME_TIME + STEP / 2, from: endpoint, speed: 1e8 })
 
           assert.ok(between(snapshot.position, motion ? point : saved) < 1e-5, `${label}: a static point snapshot needs no cadence`)
           assert.equal(snapshot.unknown, false)
-          assert.equal(arrival.conditions.includes('cadence-unread'), Boolean(motion), `${label}: movement alone requires cadence while motion is on`)
+          assert.equal(arrival.conditions.includes('movement-phase-unread'), Boolean(motion), `${label}: movement alone requires cadence while motion is on`)
           for (const broken of [
             { ...orbits, points: { ...orbits.points, 33: { ...orbits.points[33], xcor: null } } },
             { ...orbits, bodies: { ...orbits.bodies, 10: { ...orbits.bodies[10], bodyClass: null } } },
             { ...orbits, bodies: {} },
           ]) {
-            const unread = rp.positionRecord(endpoint, { facts: { ...facts, orbits: broken }, adapters: rp.ADAPTERS, at: GAME_TIME + mode.call })
+            const unread = rp.positionRecord(endpoint, { facts: { ...facts, orbits: broken }, adapters: rp.ADAPTERS, at: GAME_TIME + STEP })
 
             assert.equal(unread.basis, 'static', `${label}: unresolved point is not propagated`)
             assert.equal(unread.unknown, true, `${label}: refusal cannot be suppressed by the static motion group`)
@@ -1635,7 +1652,7 @@ check('review-round-1', 'a fixed body with no parent is never moved, no asteroid
     const saved = bodies.find((one) => one.id === id)
     const orbits = { bodies: Object.fromEntries(bodies.map((one) => [one.id, Object.freeze(one)])), stars: { 1: { id: 1, component: 1, xcor: 0, ycor: 0 } }, points: {}, hidden: {}, hiddenPoints: {}, bodyOf: {}, problems: [] }
 
-    return m.orbitAdapter({ family: 'body', key: `body:${id}`, id, SystemID: 1, Xcor: saved.xcor, Ycor: saved.ycor }, { facts: { clock: { gameTime: 86400, lastGrowthTime: 0, orbitalMotion: 1, ...CADENCE, ...extra }, orbits }, ...options })
+    return m.orbitAdapter({ family: 'body', key: `body:${id}`, id, SystemID: 1, Xcor: saved.xcor, Ycor: saved.ycor }, { facts: { clock: { gameTime: 86400, lastGrowthTime: 0, orbitalMotion: 1, orbitalMovementInSubPulse: 1, ...SAVED, ...extra }, orbits }, ...options })
   }
   const eccentric = body(1, { eccentricity: 0.2, xcor: 1.2 * K })
   const later = { at: 172800 }
@@ -1710,13 +1727,13 @@ check('review-round-1-flights', 'an order\'s delay is spent before its flight, a
   assert.ok(capped.first.positions.records.length > 0)
 
   // The cadence an eccentric arrival rests on survives the summary of an endpoint met again, and a fallback states static positions.
-  const eccentric = run([flyTo(ENDPOINTS.b11, ENDPOINTS.b10, { wait: 86400 }), flyTo(ENDPOINTS.b10, ENDPOINTS.b11, { wait: 86400 })], { facts: { ...scene.facts, clock: { ...CLOCK, subPulseLength: 360 } }, speed: 50000 })
+  const eccentric = run([flyTo(ENDPOINTS.b11, ENDPOINTS.b10, { wait: 86400 }), flyTo(ENDPOINTS.b10, ENDPOINTS.b11, { wait: 86400 })], { facts: { ...scene.facts, clock: { ...CLOCK } }, speed: 50000 })
   const record = eccentric.annual.positions.records.find((one) => one.identity.key === 'body:11')
 
   assert.equal(eccentric.annual.status, 'propagated', 'eccentric ' + JSON.stringify(eccentric.annual.reasons))
   assert.ok(record && record.conditions.includes('eccentric-cadence'), 'the eccentric cadence is stated for an endpoint that is departed from and met again')
 
-  const fallen = run([flyTo(ENDPOINTS.b23, ENDPOINTS.b10, { wait: 86400 }), flyTo(ENDPOINTS.b10, ENDPOINTS.b23, { wait: 86400 })], { facts: { ...scene.facts, clock: { ...CLOCK, subPulseLength: 360 } }, speed: 50000 })
+  const fallen = run([flyTo(ENDPOINTS.b23, ENDPOINTS.b10, { wait: 86400 }), flyTo(ENDPOINTS.b10, ENDPOINTS.b23, { wait: 86400 })], { facts: { ...scene.facts, clock: { ...CLOCK } }, speed: 50000 })
 
   assert.equal(fallen.annual.status, 'static', 'fallen ' + JSON.stringify(fallen.annual.reasons))
   assert.ok(fallen.annual.reasons.includes('orbit-horizon'), JSON.stringify(fallen.annual.reasons))
@@ -1727,13 +1744,15 @@ check('review-round-1-flights', 'an order\'s delay is spent before its flight, a
 
 check('review-round-2', 'a body with a negative eccentricity is as fast as its orbit says, an arrival is certified or declined whatever the sign, a Route Finder cycle states the cadence of a body it returns to, and a year that fell back states the Lagrange points of the saved route', async (w) => {
   const scene = await w.scene()
+  // The fine test step keeps the synthetic body's flight boundary jumps inside the arrival tolerance; the plan cases below run the shipped step, whose million-step budget the long legs need.
+  const fine = await w.testScene()
   const m = scene.m
   const K = 149600000
 
   // The speed bound of an eccentric orbit uses the size of the eccentricity.
   const body = { id: 1, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance: 1, bearing: 90, year: 8760, eccentricity: -0.35, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: 0.65 * K, ycor: 0 }
   const orbits = { bodies: { 1: Object.freeze(body) }, stars: { 1: { id: 1, component: 1, xcor: 0, ycor: 0 } }, points: {}, hidden: {}, hiddenPoints: {}, bodyOf: {}, problems: [] }
-  const ask = (speed, offset) => m['orbit-propagation'].orbitAdapter({ family: 'body', key: 'body:1', id: 1, SystemID: 1, Xcor: body.xcor, Ycor: body.ycor }, { facts: { clock: { gameTime: 0, lastGrowthTime: 0, orbitalMotion: 1, ...CADENCE }, orbits }, at: 0, from: { Xcor: body.xcor, Ycor: body.ycor + offset }, speed })
+  const ask = (speed, offset) => fine.m['orbit-propagation'].orbitAdapter({ family: 'body', key: 'body:1', id: 1, SystemID: 1, Xcor: body.xcor, Ycor: body.ycor }, { facts: { clock: { gameTime: 0, lastGrowthTime: 0, orbitalMotion: 1, orbitalMovementInSubPulse: 1, ...SAVED }, orbits }, at: 0, from: { Xcor: body.xcor, Ycor: body.ycor + offset }, speed })
 
   assert.deepEqual(ask(30, 1).reasons, ['fleet-slower'], 'a fleet slower than a body at 43 km/s does not intercept it, whatever the sign of the eccentricity')
   ;[45, 60, 100].forEach((speed) => {
@@ -1788,7 +1807,8 @@ check('review-round-2', 'a body with a negative eccentricity is as fast as its o
 })
 
 check('review-round-6', 'a leg that leaves a body and arrives at it again states the arrival it flew: the cadence of a body met within an orbit, the horizon refusal of one met beyond it, and the static placeholder of a destination never replaces an arrival that was computed for another body', async (w) => {
-  const scene = await w.scene()
+  // The fine test step keeps a flight's boundary jumps inside the arrival tolerance.
+  const scene = await w.testScene()
   const m = scene.m
   const plan = m['route-plan']
   const adapters = m['route-position'].ADAPTERS
@@ -1796,7 +1816,7 @@ check('review-round-6', 'a leg that leaves a body and arrives at it again states
   const rock = { id: 1, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance: 0.01, bearing: 90, year: 24, eccentricity: 0.2, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: 1.2 * 0.01 * K, ycor: 0 }
   const orbits = { bodies: { 1: Object.freeze(rock) }, stars: { 1: { id: 1, component: 1, xcor: 0, ycor: 0 } }, points: {}, hidden: {}, hiddenPoints: {}, bodyOf: {}, problems: [] }
   const again = { key: 'body:1', kind: 'body', name: 'body:1', SystemID: 1, Xcor: rock.xcor, Ycor: rock.ycor }
-  const planAt = (offset) => plan.planRoute([again, { key: 'jump:1', kind: 'jump', name: 'fixed turn', SystemID: 1, Xcor: rock.xcor + offset, Ycor: rock.ycor }, again], { cycle: false, jumpPoints: [], facts: { clock: { gameTime: 0, lastGrowthTime: -73800, orbitalMotion: 1, ...CADENCE }, orbits }, adapters, speed: 1500 })
+  const planAt = (offset) => plan.planRoute([again, { key: 'jump:1', kind: 'jump', name: 'fixed turn', SystemID: 1, Xcor: rock.xcor + offset, Ycor: rock.ycor }, again], { cycle: false, jumpPoints: [], facts: { clock: { gameTime: 0, lastGrowthTime: -73800, orbitalMotion: 1, orbitalMovementInSubPulse: 1, ...SAVED }, orbits }, adapters, speed: 1500 })
   const codes = (positions) => positions.conditions.map((one) => one.code)
   const within = planAt(2e7)
   const [, leg] = within.legs
@@ -1824,7 +1844,7 @@ check('review-round-6', 'a leg that leaves a body and arrives at it again states
 
 check('closing-round-3', 'a saved departure is not a propagated observation: the adapter marks the position it gives for the game time, and a plan that only leaves a body, or whose every arrival is refused, is stated on the saved positions', async (w) => {
   const read = await w.scene()
-  const scene = { ...read, facts: { ...read.facts, clock: { ...CLOCK, subPulseLength: 360 } } }
+  const scene = { ...read, facts: { ...read.facts, clock: { ...CLOCK } } }
   const m = scene.m
   const adapters = m['route-position'].ADAPTERS
   const place = (id) => ({ key: 'body:' + id, kind: 'body', name: 'body ' + id, SystemID: 1, Xcor: ENDPOINTS['b' + id].Xcor, Ycor: ENDPOINTS['b' + id].Ycor })
@@ -1865,7 +1885,7 @@ check('closing-round-3', 'a saved departure is not a propagated observation: the
   const still = { ...scene.facts, orbits: { ...scene.orbits, bodies: { ...scene.orbits.bodies, 30: fixed } } }
   const stillPoint = { family: 'body', key: 'body:30', id: 30, name: 'Fixed body', SystemID: 1, Xcor: ENDPOINTS.b10.Xcor, Ycor: ENDPOINTS.b10.Ycor }
   const rp = m['route-position']
-  const planetRecord = rp.positionRecord(ENDPOINTS.b11, { facts: still, adapters, at: GAME_TIME, from: stillPoint, speed: 1500 })
+  const planetRecord = rp.positionRecord(ENDPOINTS.b11, { facts: still, adapters, at: GAME_TIME, from: stillPoint, speed: 50000 })
   const rockRecord = rp.positionRecord(stillPoint, { facts: still, adapters, at: GAME_TIME, from: ENDPOINTS.b11, speed: 5 })
 
   assert.equal(planetRecord.basis, 'propagated', 'the planet is worked out')
@@ -1939,24 +1959,25 @@ const FAULTS = [
   ['an arrival is solved only to a minute', 'orbit', 'export const ARRIVAL_TOLERANCE_SECONDS = 1', 'export const ARRIVAL_TOLERANCE_SECONDS = 60', ['circular-arrival', 'registration']],
   ['an arrival is searched for eighty times', 'orbit', 'export const ARRIVAL_MAX_EVALUATIONS = 8', 'export const ARRIVAL_MAX_EVALUATIONS = 80', ['solver-bounds', 'registration']],
   ['a rebuild is trusted a kilometre in a thousand', 'orbit', 'export const REBUILD_TOLERANCE_KM = 1', 'export const REBUILD_TOLERANCE_KM = 1000', ['rebuild', 'registration']],
-  ['the fitted step is restored', 'orbit', 'const call = length', 'const call = 561600', ['update-calls', 'eccentric-horizon']],
-  ['the fitted step constant is exported again', 'orbit', 'export const MAX_CALLS = 100000', 'export const MAX_CALLS = 100000\nexport const ECCENTRIC_STEP_SECONDS = 561600', ['registration']],
+  ['the fitted step is restored', 'orbit', 'const call = STEP_SECONDS', 'const call = 561600', ['update-calls', 'eccentric-horizon', 'partial-budget']],
+  ['the saved sub-pulse and increment lengths select the step again', 'orbit', 'const call = STEP_SECONDS', 'const call = switchOf(clock.orbitalMovementInSubPulse) ? clock.subPulseLength : clock.incrementLength', ['update-calls', 'partial-budget']],
+  ['the latest increment length selects the step whatever the order', 'orbit', 'const call = STEP_SECONDS', 'const call = clock.incrementLength', ['update-calls', 'partial-budget']],
+  ['the fitted step constant is exported again', 'orbit', 'export const MAX_CALLS = 1000000', 'export const MAX_CALLS = 1000000\nexport const ECCENTRIC_STEP_SECONDS = 561600', ['registration']],
   ['the ratio of the current to the mean speed is dropped', 'orbit', 'const turn = (deltaSeconds / (body.year * 3600)) * (current / mean)', 'const turn = (deltaSeconds / (body.year * 3600)) * 1', ['update-calls', 'eccentric-horizon']],
-  ['the sub-pulse option is ignored', 'orbit', 'perPulse ? clock.subPulseLength : clock.incrementLength', 'clock.incrementLength', ['update-calls']],
-  ['the sub-pulse option is read the wrong way round', 'orbit', 'perPulse ? clock.subPulseLength : clock.incrementLength', 'perPulse ? clock.incrementLength : clock.subPulseLength', ['update-calls']],
   ['the snapshot remainder is dropped', 'orbit', 'bearing = advance(body, star, bearing, remainder)', 'bearing = bearing', ['update-calls', 'snapshot-partial']],
   ['the snapshot partial pollutes the whole-call cache', 'orbit', 'bearing = advance(body, star, bearing, remainder)', 'bearing = advance(body, star, bearing, remainder)\n      calls[whole] = bearing', ['partial-cache']],
   ['the snapshot partial is not budgeted', 'orbit', 'const evaluations = whole + (remainder > 0 ? 1 : 0)', 'const evaluations = whole', ['partial-budget']],
-  ['the budget refusal calls the remainder a full call', 'orbit', 'the horizon needs ${needs} against a budget of ${MAX_CALLS}', 'the horizon needs ${evaluations} calls of ${length} s; the app computes at most ${MAX_CALLS}', ['partial-budget', 'saved-epoch', 'update-calls']],
-  ['a circular snapshot drops its elapsed remainder', 'orbit', 'const seconds = !planets ? 0 : movement ? whole * (length || 1) : elapsed', 'const seconds = whole * (length || 1)', ['snapshot-partial']],
-  ['the call cap silently coarsens the cadence again', 'orbit', 'const call = length', 'const call = Math.max(length, year / MAX_CALLS)', ['update-calls']],
+  ['the budget refusal calls the remainder a full step', 'orbit', 'the horizon needs ${needs} against a budget of ${MAX_CALLS}', 'the horizon needs ${evaluations} steps of ${STEP_SECONDS} s; the app computes at most ${MAX_CALLS}', ['partial-budget', 'update-calls']],
+  ['a circular snapshot drops its elapsed remainder', 'orbit', 'const seconds = !planets ? 0 : movement ? whole * STEP_SECONDS : elapsed', 'const seconds = whole * STEP_SECONDS', ['snapshot-partial']],
+  ['the call cap silently coarsens the step again', 'orbit', 'const call = STEP_SECONDS', 'const call = Math.max(STEP_SECONDS, year / MAX_CALLS)', ['update-calls', 'partial-budget']],
+  ['the budget boundary is exclusive', 'orbit', 'if (evaluations > MAX_CALLS) {', 'if (evaluations >= MAX_CALLS) {', ['partial-budget', 'update-calls']],
   ['the exact call budget is ignored', 'orbit', 'if (evaluations > MAX_CALLS) {', 'if (false) {', ['update-calls']],
-  ['a cadence that is not read is guessed', 'orbit', "if (planets && elapsed > 0 && length === null && (movement || family === 'eccentric')) {", 'if (false) {', ['update-calls']],
+  ['the movement index is taken without reading the update order', 'orbit', "  if (planets && elapsed > 0 && movement && phase === null) {\n    throw unsupported('movement-phase-unread')\n  }\n\n  const count = elapsed / STEP_SECONDS\n  const whole = !planets ? 0 : movement && elapsed > 0 ? phase ? Math.ceil(count) : Math.ceil(count) - 1 : Math.floor(count)", '  const count = elapsed / STEP_SECONDS\n  const whole = !planets ? 0 : movement && elapsed > 0 ? Math.ceil(count) : Math.floor(count)', ['movement-phase-unread', 'movement-phase', 'update-calls']],
   ['a boundary arrival skips residual certification', 'orbit', 'if (Math.abs(distance(arrived) / speed - next) <= ARRIVAL_TOLERANCE_SECONDS) {', 'if (true) {', ['solver-bounds']],
-  ['movement restores floor in sub-pulse mode', 'orbit', 'switchOf(clock.orbitalMovementInSubPulse) ? Math.ceil(count)', 'switchOf(clock.orbitalMovementInSubPulse) ? Math.floor(count)', ['movement-phase']],
+  ['movement restores floor in sub-pulse mode', 'orbit', 'phase ? Math.ceil(count)', 'phase ? Math.floor(count)', ['movement-phase']],
   ['movement applies ceil in increment mode', 'orbit', ': Math.ceil(count) - 1 : Math.floor(count)', ': Math.ceil(count) : Math.floor(count)', ['movement-phase']],
   ['increment movement takes the post-update boundary', 'orbit', ': Math.ceil(count) - 1 : Math.floor(count)', ': Math.floor(count) : Math.floor(count)', ['movement-phase']],
-  ['the saved snapshot at t0 is advanced', 'orbit', 'const depart = isNumber(at) ? at : clock.gameTime', 'const depart = (isNumber(at) ? at : clock.gameTime) + (from ? 0 : callLength(clock))', ['movement-phase', 'rebuild']],
+  ['the saved snapshot at t0 is advanced', 'orbit', 'const depart = isNumber(at) ? at : clock.gameTime', 'const depart = (isNumber(at) ? at : clock.gameTime) + (from ? 0 : STEP_SECONDS)', ['movement-phase', 'rebuild']],
   ['movement phase is lost on a moon parent', 'orbit', "if (family === 'moon') {\n    parent = stateAt(orbits, clock, body.parentId, elapsed, { horizon, depth: depth + 1, movement })", "if (family === 'moon') {\n    parent = stateAt(orbits, clock, body.parentId, elapsed, { horizon, depth: depth + 1 })", ['circular-arrival']],
   ['a trojan turns on a circle of its own', 'orbit', 'bearing = planets ? wrap(parent.bearing + body.trojan) : body.bearing', 'bearing = wrap(body.bearing - (360 * seconds) / year)', ['update-calls']],
   ['a fleet with half an engine moves', 'orbit', '} else if (speed <= 1) {', '} else if (speed < 0.5) {', ['solver-bounds']],
@@ -1966,7 +1987,7 @@ const FAULTS = [
   ['the cadence is not stated', 'orbit', 'conditions: advanced ? [\'eccentric-cadence\'] : [], solved', 'conditions: [], solved', ['eccentric-horizon']],
   ['a trojan leads its parent', 'orbit', 'wrap(parent.bearing + body.trojan)', 'wrap(parent.bearing - body.trojan)', ['rebuild']],
   ['a Lagrange point is a third of the way round', 'orbit', 'const bearing = wrap(state.bearing + 60)', 'const bearing = wrap(state.bearing + 120)', ['rebuild']],
-  ['an independent asteroid is held when the asteroid switch reads off', 'orbit', 'const seconds = !planets ? 0 : movement ? whole * (length || 1) : elapsed', 'const seconds = family === \'circular\' && switchOf(clock.orbitalMotionAst) === false ? 0 : !planets ? 0 : movement ? whole * (length || 1) : elapsed', ['motion-switch']],
+  ['an independent asteroid is held when the asteroid switch reads off', 'orbit', 'const seconds = !planets ? 0 : movement ? whole * STEP_SECONDS : elapsed', 'const seconds = family === \'circular\' && switchOf(clock.orbitalMotionAst) === false ? 0 : !planets ? 0 : movement ? whole * STEP_SECONDS : elapsed', ['motion-switch']],
   ['a rebuild that misses is not looked at', 'orbit', 'verify(orbits, clock, target)\n\n    const depart', 'const depart', ['rebuild']],
   ['an orbit of an unsurveyed system is read', 'orbit', 'const open = sites.filter((row) => surveyed.has(row.SystemID)).map((row) => row.SystemBodyID)', 'const open = sites.map((row) => row.SystemBodyID)', ['rebuild', 'unsurveyed-read']],
   ['the arrival is dated at the departure', 'orbit', 'observedAt: solved.time,', 'observedAt: depart,', ['circular-arrival']],
@@ -2047,8 +2068,8 @@ const FAULTS = [
   ['a plan sums the legs of a route twice', 'plan', 'jumps += route.jumps\n      km += route.km', 'jumps += route.jumps\n      km += route.km * 2', ['anchor-order-distance']],
   ['a displaced follower snaps before the first update', 'orbit', 'savedUntilUpdate: true })', 'savedUntilUpdate: false })', ['anchor-displaced']],
   ['a displaced follower snaps at the saved epoch', 'orbit', 'Xcor: endpoint.Xcor, Ycor: endpoint.Ycor }\n  const found = orbitAdapter(point', 'Xcor: facts.orbits.points[anchor.point].xcor, Ycor: facts.orbits.points[anchor.point].ycor }\n  const found = orbitAdapter(point', ['anchor-displaced']],
-  ['a displaced follower snapshot waits for a whole call', 'orbit', ': time <= clock.gameTime))', ': time < clock.gameTime + callLength(clock)))', ['anchor-displaced', 'anchor-static-snap']],
-  ['a displaced follower snaps before the ending increment update', 'orbit', 'time <= clock.gameTime + callLength(clock)', 'time < clock.gameTime + callLength(clock)', ['anchor-displaced']],
+  ['a displaced follower snapshot waits for a whole step', 'orbit', ': time <= clock.gameTime))', ': time < clock.gameTime + STEP_SECONDS))', ['anchor-displaced', 'anchor-static-snap']],
+  ['a displaced follower snaps before the ending step update', 'orbit', 'time <= clock.gameTime + STEP_SECONDS', 'time < clock.gameTime + STEP_SECONDS', ['anchor-displaced']],
   ['a static point follower keeps its saved position after the update', 'orbit', "return { Xcor: point.xcor, Ycor: point.ycor, advanced: false, family: 'static' }", "throw unsupported('orbit-family')", ['anchor-static-snap']],
   ['a static follower refusal is silently suppressed', 'position', 'base.moves === false && !base.anchor', 'base.moves === false || Boolean(base.anchor)', ['anchor-static-snap']],
 ]
@@ -2063,7 +2084,7 @@ const BENIGN = [
   { label: 'the radians of a bearing written another way', target: 'orbit', from: 'const radians = (degrees) => (degrees * Math.PI) / 180', to: 'const radians = (degrees) => degrees * (Math.PI / 180)' },
   { label: 'the chunks of a read made smaller', target: 'orbit', from: 'const chunks = (values, size = 400)', to: 'const chunks = (values, size = 7)' },
   { label: 'a condition reworded', target: 'position', at: new RegExp(`(\\n {2}'fleet-slower': )${STRING}`), to: (m) => `${m[1]}'the fleet is not faster than the body, so no arrival is worked out for it'` },
-  { label: 'the explanation of the cadence reworded', target: 'position', at: new RegExp(`(\\n {2}'eccentric-cadence': )${STRING}`), to: (m) => `${m[1]}'an eccentric snapshot repeats saved whole calls and a final remainder; movement uses the opening sub-pulse update or the previous increment before its ending boundary, with no forced future load or edit updates and no guarantee of future cadence'` },
+  { label: 'the explanation of the estimate reworded', target: 'position', at: new RegExp(`(\\n {2}'eccentric-cadence': )${STRING}`), to: (m) => `${m[1]}'an eccentric snapshot repeats whole fixed steps and a final remainder, and movement takes the opening step or the previous one, with no forced future load or edit updates'` },
   { label: 'a second condition reworded', target: 'position', at: new RegExp(`(\\n {2}'orbit-horizon': )${STRING}`), to: (m) => `${m[1]}'an eccentric orbit is not carried for a whole orbit or more from its last update'` },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
 

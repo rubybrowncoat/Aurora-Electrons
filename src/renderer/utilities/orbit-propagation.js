@@ -2,7 +2,7 @@
 //
 // The rules are those of the game's own orbit update, as the saves reproduce them: a body at bearing B on an orbit of semi-major axis a (AU, or km for a moon) lies at the coordinate angle B - 90 degrees; an eccentric body's ellipse centre is offset a x e from its star along EccentricityDirection and the coordinate angle is turned by the same direction; one call of the update with `deltaSeconds` lowers a circular body's and a moon's bearing by 360 x deltaSeconds / (Year x 3600) and an eccentric body's by that times current / mean, `mean = sqrt(2 / a - 1 / a)` and `current = sqrt(2 / r - 1 / a)` at the distance r from the star that the body has when the call begins, so an eccentric position is one call after another and no Kepler solve; a moon is at its parent's position and a trojan has its parent's bearing plus its own offset; a Lagrange point is at its body's bearing plus 60 degrees. Nothing moves with the planet and moon switch (`FCT_Game.OrbitalMotion`) off, and there is no asteroid switch: `OrbitalMotionAst` is stored and read by no part of the update, which selects every non-fixed independent asteroid.
 //
-// Future cadence is estimated from SubPulseLength when OrbitalMovementInSubPulse is 1, otherwise the latest FCT_Increments.Length. The game advances the clock, updates sub-pulse orbits, then processes movement; after-increment orbits update only after movement ends. Thus movement in (t0 + (n-1)L, t0 + nL] sees call n in sub-pulse mode and call n-1 in increment mode. A no-movement snapshot instead advances circular and moon-own bearings for the entire elapsed time, and an eccentric bearing by whole calls then one final remainder call. That local partial call never enters the whole-call cache. Exactly t0 remains saved. Every eccentric call recalculates current/mean and counts against MAX_CALLS; no coarser substitute is used. Prediction assumes no future forced load/edit updates: loading can force 60 seconds of orbital advance without advancing GameTime, but saved coordinates remain the baseline and no load history is inferred here.
+// Future positions are estimated in fixed steps of STEP_SECONDS that the app chooses for every save, never from the saved sub-pulse or increment length. The game advances the clock, updates sub-pulse orbits, then processes movement; after-increment orbits update only after movement ends. Thus the saved update order selects only which step a movement in (t0 + (n-1)S, t0 + nS] sees: step n when bodies move in each sub-pulse and step n-1 when they move after the increment. A no-movement snapshot instead advances circular and moon-own bearings for the entire elapsed time, and an eccentric bearing by whole steps then one final remainder step. That local partial step never enters the whole-step cache. Exactly t0 remains saved. Every eccentric step recalculates current/mean and counts against MAX_CALLS; no coarser substitute is used. Prediction assumes no future forced load/edit updates: loading can force 60 seconds of orbital advance without advancing GameTime, but saved coordinates remain the baseline and no load history is inferred here.
 
 import { KM_PER_AU } from './jump-graph'
 import { inputWords } from './provenance'
@@ -15,26 +15,21 @@ export const ARRIVAL_MAX_EVALUATIONS = 8
 // A rebuilt position more than this far from the saved one is not trusted.
 export const REBUILD_TOLERANCE_KM = 1
 
-// The maximum update calls computed for one eccentric body over the requested horizon, including a snapshot's final partial call. Longer horizons are refused, never silently advanced at a different cadence.
-export const MAX_CALLS = 100000
+// The maximum update steps computed for one eccentric body over the requested horizon, including a snapshot's final partial step. Longer horizons are refused, never silently advanced at a coarser step.
+export const MAX_CALLS = 1000000
+
+// The length of one step of the app's eccentric estimate, seconds, the same for every save: the app chooses it, and the save's stored sub-pulse or increment length does not select it.
+export const STEP_SECONDS = 1800
 
 const MAX_PARENTS = 4
 
 // Why a position is not propagated, by condition code (the texts are utilities/route-position.js `CONDITIONS`). A route states each one it fell back on.
-export const REASONS = Object.freeze(['clock-unread', 'clock-inconsistent', 'motion-switch', 'motion-classification', 'cadence-unread', 'cadence-budget', 'orbit-unread', 'orbit-unsurveyed', 'orbit-missing', 'orbit-mismatch', 'orbit-family', 'orbit-star', 'orbit-horizon', 'anchor-unread', 'visitor-association-unread', 'arrival-diverged', 'fleet-immobile', 'fleet-slower', 'speed-unknown', 'cycles-capped'])
+export const REASONS = Object.freeze(['clock-unread', 'clock-inconsistent', 'motion-switch', 'motion-classification', 'movement-phase-unread', 'cadence-budget', 'orbit-unread', 'orbit-unsurveyed', 'orbit-missing', 'orbit-mismatch', 'orbit-family', 'orbit-star', 'orbit-horizon', 'anchor-unread', 'visitor-association-unread', 'arrival-diverged', 'fleet-immobile', 'fleet-slower', 'speed-unknown', 'cycles-capped'])
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // A game switch as a flag: true for 1 or true, false for 0 or false, null for a value that was not read.
 export const switchOf = (value) => (value === 1 || value === true ? true : value === 0 || value === false ? false : null)
-
-// The length of one call of the game's orbit update, seconds, from the save's clock: one sub-pulse when the save moves bodies in each sub-pulse (`orbitalMovementInSubPulse` 1, the sub-pulse length the save holds), one increment when it moves them after the movement of an increment (0, the length of the latest increment the save holds), and null when the option or its length is not read. Later increments may be of another length: that is the assumption of the 'eccentric-cadence' condition.
-export const callLength = (clock) => {
-  const perPulse = switchOf(clock.orbitalMovementInSubPulse)
-  const seconds = perPulse === null ? null : perPulse ? clock.subPulseLength : clock.incrementLength
-
-  return isNumber(seconds) && seconds > 0 ? seconds : null
-}
 
 const radians = (degrees) => (degrees * Math.PI) / 180
 
@@ -164,12 +159,12 @@ const advance = (body, star, bearing, deltaSeconds) => {
   return next < 0 ? wrap(next) : next
 }
 
-// The bearings of an eccentric body after 0, 1, 2 ... whole calls of the update of `length` seconds each from the last body update, kept per orbit read, body and call length and worked out as they are asked for: a route works out the same body at many times. Each entry is the previous one after one more call, as the game works it out.
+// The bearings of an eccentric body after 0, 1, 2 ... whole steps of STEP_SECONDS each from the last body update, kept per orbit read and body and worked out as they are asked for: a route works out the same body at many times. Each entry is the previous one after one more step, as the game works it out.
 const CALLS = new WeakMap()
 
-const callsOf = (orbits, body, length) => {
+const callsOf = (orbits, body) => {
   const tables = CALLS.get(orbits) || CALLS.set(orbits, new Map()).get(orbits)
-  const key = `${body.id}:${length}`
+  const key = `${body.id}`
 
   if (!tables.has(key)) {
     tables.set(key, [body.bearing])
@@ -178,7 +173,7 @@ const callsOf = (orbits, body, length) => {
   return tables.get(key)
 }
 
-// The state of a body `elapsed` seconds after the saved epoch: { Xcor, Ycor, bearing, advanced }. Snapshots reach the full elapsed time; `movement` selects whole calls in the move-order phase, including the pre-update side of an exact increment boundary. `advanced` marks an eccentric orbit whose estimate rests on the saved call length. A body whose orbit is not moving stays saved; an eccentric body past one orbit is not worked out (`horizon: false` lifts that for rebuilds).
+// The state of a body `elapsed` seconds after the saved epoch: { Xcor, Ycor, bearing, advanced }. Snapshots reach the full elapsed time; `movement` selects whole steps in the move-order phase, including the pre-update side of an exact step boundary. `advanced` marks an eccentric orbit whose estimate rests on the app's fixed step. A body whose orbit is not moving stays saved; an eccentric body past one orbit is not worked out (`horizon: false` lifts that for rebuilds).
 const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0, movement = false } = {}) => {
   const body = bodyOf(orbits, id, depth)
   const family = familyOf(body)
@@ -197,16 +192,16 @@ const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0, moveme
     throw unsupported('motion-switch')
   }
 
-  const length = callLength(clock)
+  const phase = switchOf(clock.orbitalMovementInSubPulse)
 
-  if (planets && elapsed > 0 && length === null && (movement || family === 'eccentric')) {
-    throw unsupported('cadence-unread')
+  if (planets && elapsed > 0 && movement && phase === null) {
+    throw unsupported('movement-phase-unread')
   }
 
-  const count = elapsed / (length || 1)
-  const whole = !planets ? 0 : movement && elapsed > 0 ? switchOf(clock.orbitalMovementInSubPulse) ? Math.ceil(count) : Math.ceil(count) - 1 : Math.floor(count)
-  const seconds = !planets ? 0 : movement ? whole * (length || 1) : elapsed
-  const remainder = !planets || movement ? 0 : elapsed - whole * (length || 1)
+  const count = elapsed / STEP_SECONDS
+  const whole = !planets ? 0 : movement && elapsed > 0 ? phase ? Math.ceil(count) : Math.ceil(count) - 1 : Math.floor(count)
+  const seconds = !planets ? 0 : movement ? whole * STEP_SECONDS : elapsed
+  const remainder = !planets || movement ? 0 : elapsed - whole * STEP_SECONDS
   const year = body.year * 3600
   let advanced = false
   let bearing = body.bearing
@@ -230,14 +225,14 @@ const stateAt = (orbits, clock, id, elapsed, { horizon = true, depth = 0, moveme
     const evaluations = whole + (remainder > 0 ? 1 : 0)
 
     if (evaluations > MAX_CALLS) {
-      const needs = remainder > 0 ? `${whole} calls of ${length} s and a final call of ${remainder} s, ${evaluations} evaluations` : `${evaluations} calls of ${length} s`
+      const needs = remainder > 0 ? `${whole} steps of ${STEP_SECONDS} s and a final step of ${remainder} s, ${evaluations} evaluations` : `${evaluations} steps of ${STEP_SECONDS} s`
 
       throw Object.assign(new Error('cadence-budget'), { code: 'cadence-budget', unsupported: true, details: [`the horizon needs ${needs} against a budget of ${MAX_CALLS}`] })
     }
 
     const star = starOf(orbits, body)
-    const call = length
-    const calls = callsOf(orbits, body, call)
+    const call = STEP_SECONDS
+    const calls = callsOf(orbits, body)
 
     while (calls.length <= whole) {
       calls.push(advance(body, star, calls[calls.length - 1], call))
@@ -272,8 +267,8 @@ const pointStateAt = (orbits, clock, point, elapsed, options = {}) => {
       throw unsupported('clock-inconsistent')
     } else if (switchOf(clock.orbitalMotion) === null) {
       throw unsupported('motion-switch')
-    } else if (switchOf(clock.orbitalMotion) && elapsed > 0 && options.movement && callLength(clock) === null) {
-      throw unsupported('cadence-unread')
+    } else if (switchOf(clock.orbitalMotion) && elapsed > 0 && options.movement && switchOf(clock.orbitalMovementInSubPulse) === null) {
+      throw unsupported('movement-phase-unread')
     }
 
     // The owner class leaves the point fixed, but the following objects still snap to these coordinates on an orbital update.
@@ -491,8 +486,8 @@ export const orbitAdapter = (endpoint, { facts, at = null, from = null, speed = 
     const positionAt = (time) => {
       const state = stateOfTarget(orbits, clock, target, time - clock.gameTime, { movement: !!from })
 
-      // A displaced follower keeps its own saved coordinates until the first update its phase sees: any positive snapshot elapsed time (including a final partial call), opening sub-pulse for movement, preceding increment for movement. stateOfTarget still validates cadence/orbit before this override.
-      const beforeUpdate = savedUntilUpdate && (switchOf(clock.orbitalMotion) === false || (from && switchOf(clock.orbitalMovementInSubPulse) === false ? time <= clock.gameTime + callLength(clock) : time <= clock.gameTime))
+      // A displaced follower keeps its own saved coordinates until the first update its phase sees: any positive snapshot elapsed time (including a final partial step), the opening step for movement, the preceding step for movement. stateOfTarget still validates the movement phase and the orbit before this override.
+      const beforeUpdate = savedUntilUpdate && (switchOf(clock.orbitalMotion) === false || (from && switchOf(clock.orbitalMovementInSubPulse) === false ? time <= clock.gameTime + STEP_SECONDS : time <= clock.gameTime))
 
       return time === clock.gameTime || beforeUpdate ? { ...state, Xcor: saved.Xcor, Ycor: saved.Ycor } : state
     }
