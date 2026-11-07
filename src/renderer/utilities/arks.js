@@ -1,6 +1,6 @@
 // Population that lives aboard Ark ships, kept apart from the surface population of Colony Outlook: what each Ark ship holds, where its fleet sits and what each body's orbit adds up to. Evidence: docs/plans/backlog/evidence/AE-061-01.md.
 //
-// An Ark ship is a ship whose class has the Ark flag (`FCT_ShipClass.ArkShip`, set by the standard-berth modules: colonist transport components with special function 7). Its people are the colonist cargo rows of `FCT_ShipCargo` (one per species), counted up to the berths of the ship's undamaged standard-berth modules. The people of a fleet that sits at its colony's body with no move orders and no civilian function are that colony's orbital population. The save stores no orbital total, so every figure here is read from stored cargo, class and fleet rows and none is compared with a stored total.
+// An Ark ship has its class's Ark flag and undamaged standard-berth modules. Stored colonist cargo supplies its people; unknown cargo categories remain unknown, not empty. Each colony separately counts eligible fleets at its coordinates using the saved assignment, without a system restriction. Ship inventories and grand ship totals still count each ship once.
 
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
@@ -30,6 +30,7 @@ export const ORBIT_REASONS = Object.freeze({
 })
 
 const LIMITATION = 'Orbital population is held at today\'s figure: its growth and its transfer to the surface are not verified, so none is applied and it is never surface population or workers'
+const ATTRIBUTION = 'Saved positions and assignments stay fixed. Several possible receiving colonies on one body retain attribution alternatives; each scalar stays decided when all alternatives agree. One fleet assignment is shared across coincident bodies, while body and grand ship inventories count each ship once. Coincident different bodies are separate censuses, not a global assignment replay'
 
 registerRule({
   id: ABOARD,
@@ -37,7 +38,7 @@ registerRule({
   units: 'M people',
   verification: 'confirmed',
   structure: ['FCT_ShipCargo.Amount (CargoTypeID 1, colonists)', 'FCT_ShipClass.ArkShip'],
-  note: 'Colonists aboard an Ark ship in millions: the sum of its colonist cargo rows, as stored. A ship with no colonist cargo row is empty, a real 0.',
+  note: 'Colonists aboard an Ark ship in millions: the sum of its colonist cargo rows, as stored. A ship with no relevant cargo rows is empty, a real zero; an unknown category on a potentially positive row makes the amount unavailable, not empty.',
 })
 
 registerRule({
@@ -55,17 +56,17 @@ registerRule({
   units: '',
   verification: 'confirmed',
   structure: ['FCT_ShipCargo.SpeciesID (CargoTypeID 1)', 'FCT_Species.SpeciesName'],
-  note: 'The species of the colonists aboard and how many of each, as the colonist cargo rows state them. A row without a known species makes the figure unavailable.',
+  note: 'The species of the colonists aboard and how many of each, as the colonist cargo rows state them. A potentially positive row without a known species or cargo category makes the figure unavailable.',
 })
 
 registerRule({
   id: ORBIT,
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: '',
   verification: 'estimated',
-  structure: ['FCT_Fleet.AssignedPopulationID, Xcor, Ycor, SystemID, CivilianFunction, OrbitBodyID', 'FCT_MoveOrders.FleetID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Xcor, Ycor'],
-  note: 'Where an Ark ship\'s people count: at the body of a colony of the race, when the fleet sits within 1 unit of the body on each axis in its system, has no move orders and is not a civilian fleet. A fleet assigned to a colony it does not sit at, or to none, is placed on the one body of the race\'s colonies at its position, as the game moves a stationary fleet to the colony it orbits; with no such body it is away or in space. The body is found from coordinates because the stored orbit body is 0 for fleets that sit on their colony\'s body; the stored value is not used. A fleet system, or a colony system or body position that decides the match, missing from the save makes the orbit unavailable. The save stores no orbital total, so the rule is read from the game and not compared with one.',
-  assumptions: ['The fleet\'s position is where the game counts it'],
+  structure: ['FCT_Fleet.AssignedPopulationID, Xcor, Ycor, CivilianFunction', 'FCT_MoveOrders.FleetID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Xcor, Ycor'],
+  note: 'Membership is evaluated separately at each colony of the race using the saved fleet position: strictly within 1 unit on each axis, with no move orders and no civilian function. Systems do not restrict the match. Its assigned colony counts the fleet; another colony on the same body holds that assignment. Explicitly unassigned fleets, proven absent assignment targets and assignments on other bodies permit reassignment, retaining alternatives when several colonies on this body can receive the fleet. Unknown inputs make only the memberships they can change unavailable.',
+  assumptions: [ATTRIBUTION],
 })
 
 registerRule({
@@ -89,21 +90,22 @@ registerRule({
 
 registerRule({
   id: TOTALS,
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['the Ark ships\' own results'],
-  note: 'Sums over Ark ships, each counted once, in its own fleet and at one body. A ship whose figure is unavailable makes a body\'s sum unavailable. In the grand totals, a ship whose figure or whose orbit is unknown is left out and named, so the total is partial; it is unavailable only when no ship\'s figure is known.',
-  assumptions: [LIMITATION],
+  note: 'Colony membership is evaluated separately, so coincident bodies can each count the same ship. Body totals count each applicable ship once per body. Grand totals count each ship once, not the sum of body or colony totals, retaining the same fleet assignment across bodies. A figure stays decided when every supported attribution gives the same contribution, including zero. A ship whose figure is unavailable makes its body or colony sum unavailable. Grand totals leave out unavailable ships and name the omitted count; they are unavailable when no included figure is known.',
+  assumptions: [LIMITATION, ATTRIBUTION],
 })
 
 registerRule({
   id: BODY_SPECIES,
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: '',
   verification: 'estimated',
   structure: ['the colonists aboard, species and standard berths rules'],
   note: 'The species counted at a body and how many of each: every ship\'s colonist cargo by species, scaled to the share its standard berths hold, summed over the ships at the body. The cargo is as stored, but the share rests on the berths and, past them, on spreading the surplus over the species in proportion.',
+  assumptions: [ATTRIBUTION],
 })
 
 const rows = (database, sql) => database.query(sql).then(([items]) => items)
@@ -114,18 +116,19 @@ const unique = (list) => [...new Set(list)]
 
 // The race's Ark ships, one row each, with the fleet that carries them, the berths of their undamaged standard-berth modules (null while the class has none), the colonist cargo by species and the race's colonies with the body coordinates. A damaged module counts by its first stored row, as the game finds it.
 export const loadArks = async (database, { GameID, RaceID }) => {
-  const [ships, cargo, colonies] = await Promise.all([
-    rows(database, `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.ShipClassID, FCT_ShipClass.ClassName, FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.AssignedPopulationID, FCT_Fleet.OrbitBodyID, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.CivilianFunction, (select count(*) from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID and FCT_MoveOrders.GameID = ${GameID}) as MoveOrders, (select sum((FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0)) * FCT_ShipDesignComponents.ComponentValue) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID left join FCT_DamagedComponent as VIR_Damage on VIR_Damage.rowid = (select min(VIR_First.rowid) from FCT_DamagedComponent as VIR_First where VIR_First.ShipID = FCT_Ship.ShipID and VIR_First.ComponentID = FCT_ClassComponent.ComponentID) where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID = ${COLONIST_MODULE} and FCT_ShipDesignComponents.SpecialFunction = ${STANDARD_BERTHS}) as Berths from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipClass.ArkShip = 1`),
-    rows(database, `select FCT_ShipCargo.ShipID, FCT_ShipCargo.SpeciesID, FCT_Species.SpeciesName, sum(FCT_ShipCargo.Amount) as Amount, count(*) as Rows, count(FCT_ShipCargo.Amount) as Amounts from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join FCT_Species on FCT_Species.SpeciesID = FCT_ShipCargo.SpeciesID and FCT_Species.GameID = FCT_ShipCargo.GameID where FCT_ShipCargo.GameID = ${GameID} and FCT_ShipCargo.CargoTypeID = ${COLONIST_CARGO} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipClass.ArkShip = 1 group by FCT_ShipCargo.ShipID, FCT_ShipCargo.SpeciesID, FCT_Species.SpeciesName`),
+  const [ships, cargo, colonies, assignments] = await Promise.all([
+    rows(database, `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.ShipClassID, FCT_ShipClass.ClassName, FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.AssignedPopulationID, FCT_Fleet.OrbitBodyID, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.CivilianFunction, (select count(*) from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID and FCT_MoveOrders.GameID = ${GameID}) as MoveOrders, (select sum((FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0)) * FCT_ShipDesignComponents.ComponentValue) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID left join FCT_DamagedComponent as VIR_Damage on VIR_Damage.rowid = (select min(VIR_First.rowid) from FCT_DamagedComponent as VIR_First where VIR_First.ShipID = FCT_Ship.ShipID and VIR_First.ComponentID = FCT_ClassComponent.ComponentID) where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID = ${COLONIST_MODULE} and FCT_ShipDesignComponents.SpecialFunction = ${STANDARD_BERTHS}) as Berths from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Fleet.RaceID = ${RaceID} and FCT_ShipClass.ArkShip = 1`),
+    rows(database, `select FCT_ShipCargo.ShipID, FCT_ShipCargo.CargoTypeID, FCT_ShipCargo.SpeciesID, FCT_Species.SpeciesName, sum(FCT_ShipCargo.Amount) as Amount, count(*) as Rows, count(FCT_ShipCargo.Amount) as Amounts from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join FCT_Species on FCT_Species.SpeciesID = FCT_ShipCargo.SpeciesID and FCT_Species.GameID = FCT_ShipCargo.GameID where FCT_ShipCargo.GameID = ${GameID} and (FCT_ShipCargo.CargoTypeID = ${COLONIST_CARGO} or FCT_ShipCargo.CargoTypeID is null) and FCT_Ship.RaceID = ${RaceID} and FCT_ShipClass.ArkShip = 1 group by FCT_ShipCargo.ShipID, FCT_ShipCargo.CargoTypeID, FCT_ShipCargo.SpeciesID, FCT_Species.SpeciesName`),
     rows(database, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.ComponentNumber, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
+    rows(database, `select FCT_Population.PopulationID, FCT_Population.SystemBodyID from FCT_Population where FCT_Population.GameID = ${GameID}`),
   ])
 
-  return { ships, cargo, colonies }
+  return { ships, cargo, colonies, assignments }
 }
 
 const aboardResult = (cargoRows) => {
-  if (cargoRows.some((row) => !finite(row.Amount) || row.Amounts !== row.Rows)) {
-    return unavailable({ rule: ABOARD, missing: ['colonists aboard'] })
+  if (cargoRows.some((row) => !finite(row.Amount) || row.Amounts !== row.Rows || row.CargoTypeID !== COLONIST_CARGO)) {
+    return unavailable({ rule: ABOARD, missing: ['the amount or category of colonists aboard'] })
   }
 
   return ofRule({ rule: ABOARD, value: cargoRows.reduce((sum, row) => sum + row.Amount, 0) / MILLION, inputs: { present: ['colonist cargo'] } })
@@ -137,8 +140,8 @@ const berthsResult = (ship) => (finite(ship.Berths) ? ofRule({ rule: BERTHS, val
 const speciesResult = (cargoRows) => {
   const held = cargoRows.filter((row) => row.Amount !== 0)
 
-  if (held.some((row) => !row.SpeciesName)) {
-    return unavailable({ rule: SPECIES, missing: ['species of the colonists aboard'] })
+  if (held.some((row) => !row.SpeciesName || row.CargoTypeID !== COLONIST_CARGO)) {
+    return unavailable({ rule: SPECIES, missing: ['the species or category of colonists aboard'] })
   }
 
   return ofRule({ rule: SPECIES, value: held.map((row) => ({ SpeciesID: row.SpeciesID, name: row.SpeciesName, amount: row.Amount / MILLION })), inputs: { present: ['species of the colonists aboard'] } })
@@ -146,79 +149,76 @@ const speciesResult = (cargoRows) => {
 
 const notCounted = (reason, present) => ofRule({ rule: ORBIT, value: { counted: false, reason }, inputs: { present } })
 
-// Where an Ark ship's people count (see the 'arks.orbit' rule): { counted, PopulationID, SystemBodyID } or { counted: false, reason }, unavailable while the fleet's position, system, orders or function, or the system or body position of a colony that could be the one it sits at, is not in the save, or when its position matches several bodies.
-const orbitResult = (ship, colonies, colonyById) => {
-  const missing = [...(finite(ship.Xcor) && finite(ship.Ycor) ? [] : ['the fleet\'s position']), ...(finite(ship.SystemID) ? [] : ['the fleet\'s system']), ...(finite(ship.MoveOrders) ? [] : ['the fleet\'s move orders']), ...(finite(ship.CivilianFunction) ? [] : ['the fleet\'s function'])]
+// Membership is local to one colony. Known exclusions short-circuit unread inputs; an unread assignment matters only if another colony on this body could hold it.
+const membershipResult = (ship, colony, colonies, colonyById, bodyWide = false, assignmentId = ship.AssignedPopulationID) => {
+  const present = ['the saved fleet position, orders, civilian function and colony assignment']
+  const excluded = (reason) => notCounted(reason, present)
 
-  if (missing.length) {
-    return unavailable({ rule: ORBIT, missing })
+  if (ship.MoveOrders > 0) return excluded('orders')
+  if (finite(ship.CivilianFunction) && ship.CivilianFunction !== 0) return excluded('civilian')
+  const axis = (key) => finite(ship[key]) && finite(colony[key]) ? Math.abs(ship[key] - colony[key]) < POSITION_TOLERANCE : null
+  const x = axis('Xcor')
+  const y = axis('Ycor')
+
+  if (x === false || y === false) return excluded('space')
+  const candidates = colonies.filter((other) => other.PopulationID === colony.PopulationID || !finite(colony.SystemBodyID) || !finite(other.SystemBodyID) || other.SystemBodyID === colony.SystemBodyID)
+  const reassigned = bodyWide || candidates.length === 1 ? true : null
+  const assignedAt = (id) => {
+    if (id === 0) return reassigned
+    if (id === colony.PopulationID || (bodyWide && colonies.some((other) => other.PopulationID === id))) return true
+    const assigned = colonyById.get(id)
+
+    if (!assigned) return reassigned
+    if (!finite(assigned.SystemBodyID) || !finite(colony.SystemBodyID)) return null
+    return assigned.SystemBodyID === colony.SystemBodyID ? false : reassigned
   }
+  const outcomes = finite(assignmentId) ? [assignedAt(assignmentId)] : [assignedAt(0), ...[...colonyById.keys()].map(assignedAt)]
+  const assignment = outcomes.every((value) => value === true) ? true : outcomes.every((value) => value === false) ? false : null
 
-  const present = ['the fleet\'s position, system, orders and function']
+  if (assignment === false) return excluded('away')
+  const missing = [...(x === null || y === null ? ['the fleet or colony body position'] : []), ...(finite(ship.MoveOrders) ? [] : ['the fleet move orders']), ...(finite(ship.CivilianFunction) ? [] : ['the fleet civilian function']), ...(assignment === null ? ['the fleet colony assignment or which colony receives it'] : [])]
 
-  if (ship.MoveOrders > 0) {
-    return notCounted('orders', present)
-  } else if (ship.CivilianFunction !== 0) {
-    return notCounted('civilian', present)
-  }
+  return missing.length ? unavailable({ rule: ORBIT, missing }) : ofRule({ rule: ORBIT, value: { counted: true, PopulationID: colony.PopulationID, SystemBodyID: colony.SystemBodyID }, inputs: { present } })
+}
 
-  const axis = (fleet, body) => (finite(body) ? Math.abs(fleet - body) < POSITION_TOLERANCE : null)
+// A ship has one inventory, but can belong to several per-colony censuses. Grand inclusion keeps the same assignment alternative across all bodies.
+const orbitResult = (memberships, bodyMemberships, countedInEveryAssignment) => {
+  const results = Object.values(bodyMemberships)
+  const bodies = results.filter((result) => isAvailable(result) && result.value.counted).map((result) => result.value.SystemBodyID)
+  const matches = Object.values(memberships).filter((result) => isAvailable(result) && result.value.counted).map((result) => result.value)
+  const uncertain = Object.values(memberships).some((result) => !isAvailable(result))
 
-  // Whether the fleet sits at the colony's body: true or false, null while the colony's system or the body's position (in the fleet's system) is not in the save.
-  const at = (colony) => {
-    if (!finite(colony.SystemID)) {
-      return null
-    } else if (colony.SystemID !== ship.SystemID) {
-      return false
-    }
+  if (bodies.length || countedInEveryAssignment) return ofRule({ rule: ORBIT, value: { counted: true, memberships: matches, bodies, uncertain }, inputs: { present: ['the per-body and per-colony memberships under the same fleet assignment'] }, assumptions: [ATTRIBUTION] })
+  const unknown = results.filter((result) => !isAvailable(result))
 
-    const x = axis(ship.Xcor, colony.Xcor)
-    const y = axis(ship.Ycor, colony.Ycor)
-
-    return x === false || y === false ? false : x === null || y === null ? null : true
-  }
-
-  const assigned = ship.AssignedPopulationID ? colonyById.get(ship.AssignedPopulationID) : null
-
-  if (assigned && at(assigned) === true) {
-    const storedElsewhere = ship.OrbitBodyID && ship.OrbitBodyID !== assigned.SystemBodyID ? ['The fleet\'s stored orbit body is not this colony\'s body; its position decides'] : []
-
-    return ofRule({ rule: ORBIT, value: { counted: true, PopulationID: assigned.PopulationID, SystemBodyID: assigned.SystemBodyID }, inputs: { present: [...present, 'the assigned colony'] }, assumptions: storedElsewhere })
-  }
-
-  const undecided = colonies.filter((colony) => at(colony) === null)
-
-  if (undecided.length) {
-    return unavailable({ rule: ORBIT, missing: unique(undecided.map((colony) => (finite(colony.SystemID) ? `the position of the body of ${colony.PopName}` : `the system of ${colony.PopName}`))), present })
-  }
-
-  const matches = colonies.filter((colony) => at(colony) === true)
-  const bodies = unique(matches.map((colony) => colony.SystemBodyID))
-
-  if (!bodies.length) {
-    return assigned ? notCounted('away', [...present, 'the assigned colony']) : notCounted('space', present)
-  } else if (bodies.length > 1) {
-    return unavailable({ rule: ORBIT, missing: ['which body the fleet is at (several bodies of colonies match its position)'], present })
-  }
-
-  const stored = assigned ? 'The fleet is assigned to a colony it is not at; the game moves a stationary fleet to the colony body it sits at' : 'The fleet is assigned to no colony in the save; the game assigns an orbiting Ark fleet to a colony of the race at its position'
-
-  return ofRule({ rule: ORBIT, value: { counted: true, PopulationID: matches.length === 1 ? matches[0].PopulationID : null, SystemBodyID: bodies[0] }, inputs: { present }, assumptions: [stored] })
+  return unknown.length ? unavailable({ rule: ORBIT, missing: unique(unknown.flatMap((result) => result.inputs.missing)) }) : notCounted(results.length ? results[0].value.reason : 'space', ['the per-body memberships'])
 }
 
 const shipRow = (ship, cargoRows, colonies, colonyById) => {
-  const aboard = aboardResult(cargoRows)
+  const relevantCargo = cargoRows.filter((row) => row.CargoTypeID === COLONIST_CARGO || (!finite(row.CargoTypeID) && !(row.Amount === 0 && row.Amounts === row.Rows)))
+  const aboard = aboardResult(relevantCargo)
   const berths = berthsResult(ship)
   const parts = { aboard, berths }
   const occupied = combine({ rule: OCCUPIED, parts, compute: (values) => Math.min(values.aboard, values.berths) })
   const empty = combine({ rule: EMPTY, parts, compute: (values) => Math.max(0, values.berths - values.aboard) })
-  const orbit = orbitResult(ship, colonies, colonyById)
+  const memberships = Object.fromEntries(colonies.map((colony) => [colony.PopulationID, membershipResult(ship, colony, colonies, colonyById)]))
+  const bodyColonies = [...new Map(colonies.map((colony) => [colony.SystemBodyID, colony])).values()]
+  const bodyMemberships = Object.fromEntries(bodyColonies.map((colony) => [colony.SystemBodyID, membershipResult(ship, colony, colonies, colonyById, true)]))
+  const assignments = finite(ship.AssignedPopulationID) ? [ship.AssignedPopulationID] : [0, ...colonyById.keys()]
+  const countedInEveryAssignment = assignments.every((id) => bodyColonies.some((colony) => {
+    const result = membershipResult(ship, colony, colonies, colonyById, true, id)
+
+    return isAvailable(result) && result.value.counted
+  }))
+  const orbit = orbitResult(memberships, bodyMemberships, countedInEveryAssignment)
   const aboardValue = valueOrNull(aboard)
   const berthsValue = valueOrNull(berths)
 
   return {
     ...ship,
-    results: { aboard, berths, species: speciesResult(cargoRows), orbit, occupied, empty },
+    results: { aboard, berths, species: speciesResult(relevantCargo), orbit, occupied, empty },
+    memberships,
+    bodyMemberships,
     aboard: aboardValue,
     berths: berthsValue,
     occupied: valueOrNull(occupied),
@@ -228,15 +228,16 @@ const shipRow = (ship, cargoRows, colonies, colonyById) => {
   }
 }
 
-// The species counted at a body: each ship's colonists aboard by species, scaled to the share the berths hold, merged. The cargo rows are confirmed, but the share rests on the berths, so the body's figure takes the berths' status and names the allocation. Unavailable while a ship's species, colonists or berths are.
+// The species counted at a body: each ship's colonists aboard by species, scaled to the share the berths hold, merged. Zero occupants contribute no species regardless of attribution; positive contributions need the ship's species, colonists and berths.
 const bodySpecies = (members) => {
-  const parts = Object.fromEntries(members.flatMap((member) => ['species', 'aboard', 'berths'].map((name) => [`ship ${member.ShipID} ${name}`, member.results[name]])))
-  const scaled = members.some((member) => member.aboard !== null && member.occupied !== null && member.aboard > 0 && member.occupied < member.aboard)
+  const contributing = members.filter((member) => !(isAvailable(member.results.occupied) && member.results.occupied.value === 0))
+  const parts = Object.fromEntries(contributing.flatMap((member) => ['species', 'aboard', 'berths'].map((name) => [`ship ${member.ShipID} ${name}`, member.results[name]])))
+  const scaled = contributing.some((member) => member.aboard !== null && member.occupied !== null && member.aboard > 0 && member.occupied < member.aboard)
 
   const compute = () => {
     const amounts = new Map()
 
-    members.forEach((member) => {
+    contributing.forEach((member) => {
       const share = member.aboard > 0 ? member.occupied / member.aboard : 0
 
       member.results.species.value.forEach((entry) => amounts.set(entry.SpeciesID, { SpeciesID: entry.SpeciesID, name: entry.name, amount: (amounts.has(entry.SpeciesID) ? amounts.get(entry.SpeciesID).amount : 0) + entry.amount * share }))
@@ -266,9 +267,9 @@ const partialSumOf = (results, assumptions = []) => {
   return { result: combine({ rule: TOTALS, parts, compute: (values) => Object.values(values).reduce((total, value) => total + value, 0), units: 'M people', assumptions: [...assumptions, ...left], inputs: { missing: lacking } }), unknown }
 }
 
-// The Ark layer of Colony Outlook from `loadArks`' rows. `ships`: every Ark ship once, with its results. `bodies`: the ships counted at each body, once, with the body's colonies, surface population, occupied people, empty berths and species. `byPopulation`: the same per assigned colony. `elsewhere`: ships whose people are aboard but not orbital population, with the reason. `unplaced`: ships whose orbit the save cannot decide. `totals`: occupied and empty berths over the counted ships, and the people aboard ships that are not counted.
-export const arkLayer = ({ ships, cargo, colonies }) => {
-  const colonyById = new Map(colonies.map((colony) => [colony.PopulationID, colony]))
+// Colony/body censuses retain local uncertainty; grand ship totals count each ship once even when several coincident bodies count it.
+export const arkLayer = ({ ships, cargo, colonies, assignments }) => {
+  const colonyById = new Map(assignments.map((colony) => [colony.PopulationID, colony]))
   const cargoByShip = new Map()
   const colonyByBody = new Map()
 
@@ -279,36 +280,25 @@ export const arkLayer = ({ ships, cargo, colonies }) => {
   const counted = all.filter((ship) => ship.orbit && ship.orbit.counted)
   const elsewhere = all.filter((ship) => ship.orbit && !ship.orbit.counted)
   const unplaced = all.filter((ship) => !ship.orbit)
-  const groups = new Map()
-  const populations = new Map()
-
-  counted.forEach((ship) => {
-    groups.set(ship.orbit.SystemBodyID, [...(groups.get(ship.orbit.SystemBodyID) || []), ship])
-
-    if (ship.orbit.PopulationID) {
-      populations.set(ship.orbit.PopulationID, [...(populations.get(ship.orbit.PopulationID) || []), ship])
-    }
-  })
-
-  const inOrbit = (ship, name, rule) => (ship.orbit ? ship.results[name] : unavailable({ rule, missing: unique([...ship.results.orbit.inputs.missing, ...ship.results[name].inputs.missing]) }))
+  const possible = (membership) => !isAvailable(membership) || membership.value.counted
+  const scoped = (ship, membership) => isAvailable(membership) ? ship : { ...ship, results: Object.fromEntries(Object.entries(ship.results).map(([key, result]) => [key, isAvailable(result) && (result.value === 0 || (key === 'species' && result.value.length === 0)) ? result : unavailable({ rule: result.rule.id, missing: membership.inputs.missing })])) }
   const totalsOf = (members) => ({ occupied: sumOf(members.map((member) => member.results.occupied)), empty: sumOf(members.map((member) => member.results.empty)) })
-  const grandOccupied = partialSumOf([...counted.map((member) => member.results.occupied), ...unplaced.map((member) => inOrbit(member, 'occupied', OCCUPIED))])
-  const grandEmpty = partialSumOf([...counted.map((member) => member.results.empty), ...unplaced.map((member) => inOrbit(member, 'empty', EMPTY))])
+  const grand = (name) => partialSumOf([...counted.map((member) => member.results[name]), ...unplaced.map((member) => scoped(member, member.results.orbit).results[name])])
+  const grandOccupied = grand('occupied')
+  const grandEmpty = grand('empty')
+  const bodies = [...colonyByBody.entries()].flatMap(([SystemBodyID, own]) => {
+    const members = all.filter((ship) => possible(ship.bodyMemberships[SystemBodyID])).map((ship) => scoped(ship, ship.bodyMemberships[SystemBodyID]))
+    if (!members.length) return []
+    const surface = own.every((colony) => finite(colony.Population)) ? own.reduce((sum, colony) => sum + colony.Population, 0) : null
+    const populationIds = own.filter((colony) => members.some((ship) => possible(ship.memberships[colony.PopulationID]))).map((colony) => colony.PopulationID)
 
-  const bodies = [...groups.entries()].map(([SystemBodyID, members]) => {
-    const own = colonyByBody.get(SystemBodyID) || []
-    const assigned = unique(members.map((member) => member.orbit.PopulationID).filter(Boolean))
-    const surface = own.length && own.every((colony) => finite(colony.Population)) ? own.reduce((sum, colony) => sum + colony.Population, 0) : null
-
-    return { SystemBodyID, colonies: own, populationIds: assigned, surface, ships: members, species: bodySpecies(members), ...totalsOf(members) }
+    return [{ SystemBodyID, colonies: own, populationIds, surface, ships: members, species: bodySpecies(members), ...totalsOf(members) }]
   })
+  const byPopulation = Object.fromEntries(colonies.map((colony) => {
+    const members = all.filter((ship) => possible(ship.memberships[colony.PopulationID])).map((ship) => scoped(ship, ship.memberships[colony.PopulationID]))
 
-  return {
-    ships: all,
-    bodies,
-    byPopulation: Object.fromEntries([...populations.entries()].map(([id, members]) => [id, { ships: members, ...totalsOf(members) }])),
-    elsewhere,
-    unplaced,
-    totals: { occupied: grandOccupied.result, empty: grandEmpty.result, unknown: Math.max(grandOccupied.unknown, grandEmpty.unknown), aboardElsewhere: partialSumOf(elsewhere.map((member) => member.results.aboard)).result },
-  }
+    return [colony.PopulationID, { ships: members, ...totalsOf(members) }]
+  }))
+
+  return { ships: all, bodies, byPopulation, elsewhere, unplaced, totals: { occupied: grandOccupied.result, empty: grandEmpty.result, unknown: Math.max(grandOccupied.unknown, grandEmpty.unknown), aboardElsewhere: partialSumOf(elsewhere.map((member) => member.results.aboard)).result } }
 }

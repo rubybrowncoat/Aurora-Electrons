@@ -86,7 +86,7 @@ const SCALE = 300
 const WIDE = GRAPH.map((point) => ({ ...point, Xcor: point.Xcor * SCALE, Ycor: point.Ycor * SCALE }))
 
 const crewed = (extra = {}) => ({ speed: SPEED, speedIn: null, shock: SHOCK, shockMissing: [], startDelay: 0, ...extra })
-const ship = (extra = {}) => ({ ShipID: 1, ShipName: 'Hauler', ClassName: 'Freighter', FleetID: 5, GradePoints: 100, CrewMorale: 1, OverhaulFactor: 1, SensorDelay: 0, ArmourThickness: 5, ...extra })
+const ship = (extra = {}) => ({ ShipID: 1, ShipName: 'Hauler', ClassName: 'Freighter', FleetID: 5, RaceNPR: 0, GradePoints: 100, CrewMorale: 1, OverhaulFactor: 1, SensorDelay: 0, ArmourThickness: 5, ...extra })
 const participant = (extra = {}, role = 'independent') => ({ ship: ship(extra), name: extra.ShipName || 'Hauler', role })
 
 // The clock of a journey worked step by step. Every jump sets a timer of `shock` seconds, flights and stops run it down, and a jump waits for it. `rounds` repeats the journey (a cycle) and gives the seconds of the last round.
@@ -416,6 +416,11 @@ const fixtures = (world) => {
     assert.ok(lacking.missing.some((entry) => entry.includes('Baker')) && !lacking.missing.some((entry) => entry.includes('Able')), 'the missing crew names its ship')
     assert.equal(time.fleetTimingOf([participant({ ShipName: 'Baker', GradePoints: null })]).shock, null)
     assert.deepEqual(time.fleetTimingOf([participant({ ShipName: 'Able' })]).shock, { lo: 121, hi: 180 })
+    assert.deepEqual([delays({ RaceNPR: 1 }).lo, delays({ RaceNPR: 1 }).hi], [60, 90], 'standard NPR halves the truncated integer, including odd 121 to 60')
+    assert.deepEqual([time.shipShock(ship({ RaceNPR: 1 }), 'squadron').lo, time.shipShock(ship({ RaceNPR: 1 }), 'squadron').hi], [11, 30], 'squadron NPR is not halved')
+    assert.equal(delays({ RaceNPR: null }), null, 'unread race state is not a player')
+    assert.equal(delays({ RaceNPR: undefined }), null)
+    assert.deepEqual(time.fleetTimingOf([participant({ RaceNPR: true })]).shock, { lo: 60, hi: 90 }, 'the raw flag reaches fleet timing')
   })
 
   add('offset: a delay the fleet still carries from a jump just made starts the route as a stated offset, and the next leg of a plan carries what the first leaves', () => {
@@ -854,6 +859,10 @@ const fixtures = (world) => {
 
   add('page: the Routes page offers the time order, ranks by it for a crewed fleet and lists each leg\'s flight, transit and wait so that they reconcile', () => {
     const vm = pageOver()
+    const npr = pageOver({ data: { routeFleetShips: [ship({ RaceNPR: 1 })] } })
+
+    assert.deepEqual(npr.crewTiming.shock, { lo: 60, hi: 90 }, 'Routes carries the raw NPR flag of its loaded ships')
+    assert.deepEqual(npr.timing.shock, { lo: 60, hi: 90 })
 
     assert.equal(vm.planOrder, 'time')
     assert.equal(vm.timeNotice, '')
@@ -1598,7 +1607,7 @@ const MUTATIONS = [
   { name: 'the crew grade rounds half away from zero', target: 'route-time', find: 'roundHalfEven(Math.sqrt(grade) - 10)', replace: 'Math.round(Math.sqrt(grade) - 10)', fails: ['shock'] },
   { name: 'a hangared ship holds the fleet back', target: 'route-time', at: /const holders = participants\.filter\(\(participant\) => participant\.role !== 'hangared'\)\n {2}const ships/, to: () => 'const holders = participants\n  const ships', fails: ['shock'] },
   { name: 'the fleet draws the smallest delay of its ships', target: 'route-time', find: 'entry.window[key] > best.window[key]', replace: 'entry.window[key] < best.window[key]', fails: ['shock'] },
-  { name: 'a ship with no crew in the save draws no delay', target: 'route-time', at: /if \(performance === null\) \{\n {4}return null\n {2}\}/, to: () => 'if (performance === null) {\n    return { performance: 1, multiplier: 1, lo: 0, hi: 0 }\n  }', fails: ['shock'] },
+  { name: 'a ship with no crew in the save draws no delay', target: 'route-time', at: /if \(performance === null \|\| [^\n]+\) \{\n {4}return null\n {2}\}/, to: () => 'if (performance === null) {\n    return { performance: 1, multiplier: 1, lo: 0, hi: 0 }\n  }', fails: ['shock'] },
   { name: 'a cycle starts with no shock running', target: 'route-time', at: /if \(cyclic\) \{\n {4}events\.forEach\(step\)\n {2}\}/, to: () => 'if (false) {\n    events.forEach(step)\n  }', fails: ['hauling'] },
   { name: 'the loader reads systems the race has no survey of', target: 'route-time', find: 'inner join FCT_RaceSysSurvey', replace: 'left join FCT_RaceSysSurvey', fails: ['dust'] },
   { name: 'the cap multiplies the density instead of dividing by it', target: 'route-time', find: '(armour * DUST_FACTOR) / density', replace: '(armour * DUST_FACTOR) * density', fails: ['dust'] },
@@ -1676,6 +1685,9 @@ const MUTATIONS = [
   { name: 'a nebula of no known cap leaves no cap state', target: 'route-time', find: 'return { maxSpeed: timing.speed, capSpeed: cap === null ? 0 : cap < timing.speed ? cap : null }', replace: 'return cap === null ? {} : { maxSpeed: timing.speed, capSpeed: cap < timing.speed ? cap : null }', fails: ['unweighed'] },
   { name: 'a cap of no known speed held is flown at no speed for its whole budget', target: 'route-time', find: 'if (held.some((cap) => cap.speed === 0)) {', replace: 'if (false) {', fails: ['unweighed'] },
   { name: 'a plan names the nebula only where the flight at its lowest case is not known', target: 'route-plan', find: 'missing: flightHi === null ? [NEBULA_GAP] : timingGaps(timing)', replace: 'missing: summed((walk) => walk.flight) === null ? [NEBULA_GAP] : timingGaps(timing)', fails: ['unweighed'] },
+  { name: 'standard NPR shock is not halved', target: 'route-time', find: 'Math.trunc(integer / 2)', replace: 'integer', fails: ['shock'] },
+  { name: 'NPR squadron shock is halved too', target: 'route-time', find: "mode === 'standard' && (ship.RaceNPR === 1 || ship.RaceNPR === true) ?", replace: '(ship.RaceNPR === 1 || ship.RaceNPR === true) ?', fails: ['shock'] },
+  { name: 'odd NPR shock retains a fraction', target: 'route-time', find: 'Math.trunc(integer / 2)', replace: 'integer / 2', fails: ['shock'] },
 ]
 
 // Edits that change nothing the checks may pin: a wording, the form of a binding, the order of a qualifier, a parenthesised condition, a comment. Each is located by its structure.

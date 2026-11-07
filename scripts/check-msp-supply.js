@@ -567,7 +567,7 @@ const pure = (ctx) => {
 
     return near(timed.days, 23.26388888888889) && delivery && near(delivery.tonnes.value, 10) && near(donor.ledger.high.given.Duranium, 10) && near(recipient.ledger.high.credited.Duranium, 10) && near(value(donor.stockOnly.result), 200) ? true : short([timed.days, delivery && delivery.tonnes.value, donor.ledger.high.given, recipient.ledger.high.credited])
   })
-  add('haul-boundary: the cross-system class haul just inside day 24 omits waits that can push it beyond the horizon, so delivery and supplied descendants retain the round-trip limitation', async () => {
+  add('haul-boundary: the current class-only haul estimate still states omitted shock waits, so a delivery just inside day 24 is conditional rather than a guaranteed arrival', async () => {
     const real = await ctx.realMsp()
     const a = pair(1, { Duranium: 100 }, {}, {}, { SystemID: 10, Xcor: 36785000, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' })
     const b = pair(2, { Duranium: 0 }, {}, {}, { SystemID: 11, Xcor: 0, Ycor: 0, ShuttleCapacity: 1, ServiceNames: 'Spaceport' })
@@ -581,7 +581,7 @@ const pure = (ctx) => {
     const figures = [inside.high.result, inside.low.result, delivery && delivery.tonnes, delivery && delivery.msp, inside.high.delivery && inside.high.delivery.msp]
 
     // A standard player transit adds at least 121 seconds per jump, each way; the class estimate has only 30 seconds to spare.
-    return near(timed.days, 24 - 30 / 86400) && timed.days + 242 / 86400 > 24 && before.ledger.high.credited.Duranium === 0 && inside.ledger.high.credited.Duranium === 10 && figures.every((figure) => figure && figure.rule.versions.join() === '2.7.x' && figure.assumptions.some((text) => /jump shock waits.*not counted/i.test(text))) && inside.stockOnly.result.rule.versions.join() === '3.2.x' ? true : short([timed.days, before.ledger.high.credited.Duranium, inside.ledger.high.credited.Duranium, figures.map((figure) => figure && [figure.rule.versions, figure.assumptions])])
+    return near(timed.days, 24 - 30 / 86400) && timed.days + 242 / 86400 > 24 && before.ledger.high.credited.Duranium === 0 && inside.ledger.high.credited.Duranium === 10 && figures.every((figure) => figure && figure.rule.versions.join() === '3.2.x' && figure.assumptions.some((text) => /jump shock waits.*not counted/i.test(text))) && inside.stockOnly.result.rule.versions.join() === '3.2.x' ? true : short([timed.days, before.ledger.high.credited.Duranium, inside.ledger.high.credited.Duranium, figures.map((figure) => figure && [figure.rule.versions, figure.assumptions])])
   })
   add('location: whole facility output reaches net and runway without discarding the output assumptions: 100 MSP stock over 300 upkeep less 200 output lasts one year', () => {
     const colony = { ...row(1, { MaintenanceFacilities: 1.5 }), SystemID: 1, Xcor: 0, Ycor: 0, MaintenanceStockpile: 100, Efficiency: 1, CapacityModifier: 1, MaintenanceCapacity: 1000 }
@@ -1025,7 +1025,7 @@ const pure = (ctx) => {
 }
 
 // The rules the ledger gives its figures are registered, each with a verification and the structure it reads.
-const ctxRulesRegistered = (m) => ['mspSupply.stockOnly', 'mspSupply.supplied', 'mspSupply.delivery', 'mspSupply.arrival', 'logistics.mspProduction', 'logistics.maintenanceLocation'].every((id) => { const rule = m.provenance.getRule(id); return rule && rule.verification && rule.structure && rule.structure.length > 0 && rule.versions.join() === (['mspSupply.supplied', 'mspSupply.delivery'].includes(id) ? '2.7.x' : '3.2.x') })
+const ctxRulesRegistered = (m) => ['mspSupply.stockOnly', 'mspSupply.supplied', 'mspSupply.delivery', 'mspSupply.arrival', 'logistics.mspProduction', 'logistics.maintenanceLocation'].every((id) => { const rule = m.provenance.getRule(id); return rule && rule.verification && rule.structure && rule.structure.length > 0 && rule.versions.join() === '3.2.x' })
 
 // ---------- the panel ----------
 
@@ -1492,8 +1492,8 @@ const MUTATIONS = [
   { name: 'the consumer treats unknown race attribution as selected', file: L, find: 'entry.raceMatches === true', replace: 'entry.raceMatches !== false', fails: ['population-race'] },
   { name: 'the supply forecast restores nominal output for an empty colony', file: U, find: 'const description = { production: active.value,', replace: 'const description = { production: production.value,', fails: ['population'] },
   { name: 'the supply feed restores nominal output for an empty colony', file: F, find: 'valueOrNull(mspActiveProduction(colony, modifier))', replace: 'colony.MaintenanceFacilities * colony.MSPProduction * 4 * modifier', fails: ['population-read'] },
-  { name: 'delivery promotes an erased retained timing primitive', file: U, find: "id: 'mspSupply.delivery',\n  versions: ['2.7.x']", replace: "id: 'mspSupply.delivery',\n  versions: ['3.2.x']", fails: ['haul-boundary'] },
-  { name: 'supplied output promotes an erased retained timing primitive', file: U, find: "id: 'mspSupply.supplied',\n  versions: ['2.7.x']", replace: "id: 'mspSupply.supplied',\n  versions: ['3.2.x']", fails: ['haul-boundary'] },
+  { name: 'delivery loses its repaired timing label', file: U, find: "id: 'mspSupply.delivery',\n  versions: VERSIONS", replace: "id: 'mspSupply.delivery',\n  versions: ['2.7.x']", fails: ['haul-boundary'] },
+  { name: 'supplied output loses its repaired timing label', file: U, find: "id: 'mspSupply.supplied',\n  versions: VERSIONS", replace: "id: 'mspSupply.supplied',\n  versions: ['2.7.x']", fails: ['haul-boundary'] },
   { name: 'maintenance production keeps a fractional facility unit', file: L, find: 'value: facilities * colony.MSPProduction', replace: 'value: colony.MaintenanceFacilities * colony.MSPProduction', fails: ['facilities', 'location'] },
   { name: 'facility count truncates the binary sum before decimal loading', file: L, find: 'MspFacilityUnits: sum === null ? null : floorRatio(sum, ONE)', replace: 'MspFacilityUnits: Math.trunc(rows.filter((row) => row.PopID === colony.PopulationID).reduce((total, row) => total + row.Amount * row.MaintenanceValue, 0))', fails: ['facility-load'] },
   { name: 'facility products lose decimal precision before their sum', file: L, find: 'MspFacilityUnits: sum === null ? null : floorRatio(sum, ONE)', replace: 'MspFacilityUnits: floorRatio(fromDouble(rows.filter((row) => row.PopID === colony.PopulationID).reduce((total, row) => total + row.Amount * row.MaintenanceValue, 0)), ONE)', fails: ['facility-load'] },

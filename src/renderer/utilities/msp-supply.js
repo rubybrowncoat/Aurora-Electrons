@@ -39,10 +39,9 @@ registerRule({
   assumptions: ['No mining, packet or haul supplies the input minerals', 'The production rate and surface and orbital population stay what they are now'],
 })
 
-// Retained because class-only haul timing omits jump-shock waits.
 registerRule({
   id: 'mspSupply.supplied',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'MSP/yr',
   verification: 'estimated',
   structure: ['FCT_Population stockpiles, reserves and mass driver destination', 'FCT_MineralDeposit.Amount', 'FCT_MassDriverPackets', 'FCT_IndustrialProjects and shipyard tasks', 'the freighter classes and charted jump points'],
@@ -50,10 +49,9 @@ registerRule({
   assumptions: ['Mining continues at today\'s rate until its deposit is spent', 'A packet arrives when its speed has covered its distance to the destination', 'A haul arrives whole once its freighter class has made every trip', 'Jump shock waits are not counted for a class timed alone, so a haul may land after the selected period', 'A daily step stands for the game\'s production ticks', 'Each queue phase draws its remaining mineral needs as soon as stock allows, without modelling project rates or promotion', 'Packets the colonies launch during the period are not counted'],
 })
 
-// C F2: transport.roundTrip remains retained and timeHauls reads its bare tripDays; retain this descendant until the timing envelope is carried end to end.
 registerRule({
   id: 'mspSupply.delivery',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 't',
   verification: 'estimated',
   structure: ['FCT_MassDriverPackets.<mineral>, Speed, Xcor, Ycor, DestID', 'FCT_SystemBody.Xcor, Ycor', 'the Hauling Planner\'s plan and freighter classes'],

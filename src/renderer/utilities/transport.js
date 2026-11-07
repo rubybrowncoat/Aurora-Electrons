@@ -119,7 +119,7 @@ registerRule({
 
 registerRule({
   id: 'transport.roundTrip',
-  versions: ['2.7.x'],
+  versions: TRANSPORT_VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_ShipClass.MaxSpeed', 'the explored jump points'],

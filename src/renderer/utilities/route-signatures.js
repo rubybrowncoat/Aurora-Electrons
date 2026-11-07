@@ -25,7 +25,7 @@ registerRule({
 
 registerRule({
   id: 'hauling.groupCapacity',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['hauling.freightMoved', 'hauling.colonistsMoved'],

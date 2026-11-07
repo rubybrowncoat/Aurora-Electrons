@@ -429,7 +429,7 @@ const pageCases = async (pageOptions, store) => {
     return vm
   }
 
-  const orbital = await open({ InstallationWorkers: 40 }, [], { arks: { ships: [{ ShipID: 1, AssignedPopulationID: 7, OrbitBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, CivilianFunction: 0, MoveOrders: 0, Berths: 100000000 }], cargo: [{ ShipID: 1, Amount: 100000000, Rows: 1, Amounts: 1, SpeciesID: 1, SpeciesName: 'Source case' }], colonies: [{ PopulationID: 7, SystemBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, Population: 100 }] } })
+  const orbital = await open({ InstallationWorkers: 40 }, [], { arks: { ships: [{ ShipID: 1, AssignedPopulationID: 7, OrbitBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, CivilianFunction: 0, MoveOrders: 0, Berths: 100000000 }], cargo: [{ ShipID: 1, CargoTypeID: 1, Amount: 100000000, Rows: 1, Amounts: 1, SpeciesID: 1, SpeciesName: 'Source case' }], colonies: [{ PopulationID: 7, SystemBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, Population: 100 }], assignments: [{ PopulationID: 7, SystemBodyID: 70 }] } })
   holds('orbitalPage', 'PAGE 100 M orbital people join 100 M surface people for 61.251939 M manufacturing workers and no shortage against 40 M demand, while surface population remains 100 M', () => {
     const row = orbital.rows[0]
 

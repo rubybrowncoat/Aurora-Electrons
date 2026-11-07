@@ -93,6 +93,7 @@ const ship = (extra = {}) => ({
   GradePoints: 100,
   CrewMorale: 1,
   SensorDelay: 0,
+  RaceNPR: 0,
   FuelEfficiency: 0.5,
   FuelCapacity: 1e9,
   Fuel: 1e9,
@@ -716,10 +717,41 @@ check('loader', 'the loader reads the engines, links and towed mass from the tab
   const [oldShip] = oldRows
 
   ;['MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'OverhaulFactor', 'Fuel', 'MaintenanceState', 'FleetSpeed', 'UseMaximumSpeed', 'LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies', 'PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip', 'CarrierCommercialHangar'].forEach((key) => assert.equal(oldShip[key], null, key))
+  assert.equal(oldShip.RaceNPR, null, 'an absent race flag stays unread')
   near(oldShip.UndamagedEnginePower, 20)
   assert.equal(fp.fleetProfile(oldRows).status, 'unknown')
   assert.ok(codesOf(fp.fleetProfile(oldRows)).includes('links'))
   old.close()
+})
+
+check('loader-npr', 'the raw race flag reaches standard and squadron timing and the fleet transport cycle, without a player default', async (w) => {
+  const { 'fleet-profile': fp, transport } = await w.modules()
+  const { 'route-time': time } = await loadUtilities(['route-time'])
+  const database = await databaseOf(SCHEMA, `${ROWS}alter table FCT_Race add column NPR integer; alter table FCT_Ship add column GradePoints real; alter table FCT_Ship add column CrewMorale real; alter table FCT_Ship add column SensorDelay integer; update FCT_Ship set GradePoints = 100, CrewMorale = 1, OverhaulFactor = 1, SensorDelay = 0;`)
+
+  try {
+    for (const [flag, expected] of [[0, { lo: 121, hi: 180 }], [1, { lo: 60, hi: 90 }], [null, null]]) {
+      await database.query(`update FCT_Race set NPR = ${flag === null ? 'null' : flag}`)
+      const rows = await fp.loadFleetShips(database, { GameID: 1, RaceID: 2, fleetWhere: 'FCT_Fleet.FleetID = 7' })
+      const profile = fp.fleetProfile(rows)
+      const timing = { ...time.fleetTimingOf(profile.participants), retry: 0, steps: [{ kind: 'jump' }, { kind: 'jump' }] }
+
+      assert.equal(rows[0].RaceNPR, flag)
+      assert.deepEqual(timing.shock, expected)
+      assert.deepEqual(timing.squadronShock, { lo: 11, hi: 30 })
+      const endpoint = transport.colonyEndpoint(colony())
+      const trip = fp.fleetTrip(profile, 0, { origin: endpoint, destination: endpoint }, { version: VERSION, colonists: false, timing })
+
+      if (flag === null) {
+        assert.equal(trip.tripSeconds, null)
+      } else {
+        assert.ok(trip.cycle && trip.waitSeconds)
+        assert.equal(trip.waitSeconds.hi, expected.hi * 2, 'the two adjacent transit pairs wait for the raw race timing; the loading stops absorb the other two delays')
+      }
+    }
+  } finally {
+    database.close()
+  }
 })
 
 const FLEET_EIGHT = { GameID: 1, RaceID: 2, fleetWhere: 'FCT_Fleet.FleetID = 8' }
@@ -1829,6 +1861,7 @@ const FAULTS = [
   ['order-offset: the composite distance claims confirmation', 'haulingRules', "id: 'hauling.routeDistance',\n  versions: HAULING_VERSIONS,\n  units: 'km',\n  verification: 'estimated'", "id: 'hauling.routeDistance',\n  versions: HAULING_VERSIONS,\n  units: 'km',\n  verification: 'confirmed'", ['order-offset-status']],
   ['order-offset: fixed endpoints hide the total forecast status', 'haulingPage', ': route.km !== null ? withPositions', ': route.km !== null && savedPositions.caveat ? withPositions', ['order-offset-status']],
   ...REARMING_READS,
+  ['the fleet loader replaces raw NPR with a player default', 'profile', /\$\{raceNPR\} as RaceNPR/, () => '0 as RaceNPR', ['loader-npr']],
 ]
 
 // ---- Benign edits ----------------------------------------------------------------------------------------------------
