@@ -5,7 +5,7 @@ const { PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2 } = require('./fixtures')
 
 const root = path.resolve(__dirname, '..', '..')
 
-// The four registered saves by the letters the pair witness and docs/WORKFLOW.md name them with.
+// The four calibrated orbit-pair saves of the registry, by the letters the pair witness and docs/WORKFLOW.md name them with; the registry also holds D1 and its sibling, outside this chain.
 const CHAIN = Object.freeze({ A: PLAYED, B: PLAYED_NEXT, C1: PLAYED_C1, C2: PLAYED_C2 })
 
 const GAME = PLAYED.gameId
