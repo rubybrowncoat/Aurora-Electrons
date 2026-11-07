@@ -254,6 +254,7 @@ import { boxLineShown, boxLines, categoryOf, completionBins, componentCredit, cr
 import { DEVELOPMENT_ITEMS, PRODUCTION_TYPE, PRODUCTION_TYPE_NAMES, isDevelopmentType, loadedProject } from '../utilities/production-types'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 import { REFIT_TASK_TYPES } from '../utilities/refits'
+import { fieldBonuses, loadResearchConstructs } from '../utilities/research'
 import { SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES } from '../utilities/shipyard-growth'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, loadTerraformSources, terraformBreakdown } from '../utilities/terraform-capacity'
 import { NO_PROCUREMENT_SOURCES, loadProcurementSources } from '../utilities/procurement-data'
@@ -452,12 +453,11 @@ export default {
 
     // Each research project, then its queue: a queued tech starts when the one ahead finishes, with the same labs.
     researchJobs() {
-      const { projects, queues } = this.researches
+      const { projects, queues, bonuses } = this.researches
 
       return projects.flatMap((project) => {
-        const modifiers = this.populationProductionModifiers[project.PopulationID]
         const paused = flagOf(project.Paused)
-        const rate = researchRate(modifiers, project)
+        const rate = researchRate(project, bonuses)
         const finish = finishDays({ rule: 'production.researchFinish', rate, remaining: project.RemainingProduction, remainingName: 'the project\'s remaining research points', paused })
         const labs = `${this.count(project.Facilities)} ${project.Facilities === 1 ? 'lab' : 'labs'}`
         let ahead = finish
@@ -477,7 +477,7 @@ export default {
         })]
 
         queues.filter((queue) => queue.CurrentProjectID === project.ID).sort((a, b) => a.ResearchOrder - b.ResearchOrder).forEach((queue, index) => {
-          const queueRate = researchRate(modifiers, queuedResearch(project, queue))
+          const queueRate = researchRate(queuedResearch(project, queue), bonuses)
           const queueFinish = finishDays({ rule: 'production.researchFinish', rate: queueRate, remaining: queuedRemaining(queue), remainingName: 'the tech\'s development cost and the points saved on it', ahead })
           const start = isAvailable(ahead.result) ? this.duration(ahead.result.value) : null
           const startNote = start !== null ? `Starts in ${start}` : ahead.idle ? (paused ? 'Never starts: the project ahead is paused' : 'Never starts: the project ahead makes no progress') : `Start not known: missing ${ahead.result.inputs.missing.join(', ')}`
@@ -1136,17 +1136,19 @@ export default {
         const blocked = this.blockedBonuses
 
         if (!this.database || !this.GameID || !this.RaceID) {
-          return { projects: [], queues: [] }
+          return { projects: [], queues: [], bonuses: {} }
         }
 
         const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_ResearchQueue.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, case when exists (select 1 from FCT_PausedResearch where FCT_PausedResearch.TechSystemID = FCT_ResearchQueue.TechSystemID and FCT_PausedResearch.GameID = ${this.GameID} and FCT_PausedResearch.RaceID = ${this.RaceID}) then (select FCT_PausedResearch.PointsAccumulated from FCT_PausedResearch where FCT_PausedResearch.TechSystemID = FCT_ResearchQueue.TechSystemID and FCT_PausedResearch.GameID = ${this.GameID} and FCT_PausedResearch.RaceID = ${this.RaceID}) else 0 end as Saved, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
 
-        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, VIR_ResearchBonus.CommandID as ScientistCommandID, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
+        // Only an absent percentage bonus row supplies the neutral multiplier; a present NULL stays unknown. No scientist retains the disclosed planner assumption, and an absent or nonmatching local construct is neutral.
+        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, FCT_Species.ResearchRateModifier, FCT_Race.Research as ResearchBase, FCT_Race.EconomicProdModifier, FCT_Population.Efficiency, FCT_SystemBody.RadiationLevel, FCT_Population.UnrestPoints, DIM_PopPoliticalStatus.ProductionMod, FCT_Game.ResearchSpeed, case when VIR_ResearchBonus.CommandID is null then 1 else VIR_ResearchBonus.CommanderBonus end as CommanderBonus, VIR_ResearchBonus.CommanderField, VIR_ResearchBonus.CommandID as ScientistCommandID, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.AncientConstructID as AnomalyID, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, case when VIR_ResearchBonus.CommandID is null then 1 when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end as ActualCommanderResearchBonus, case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, case when FCT_CommanderBonuses.CommanderID is null then 1 else FCT_CommanderBonuses.BonusValue end as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID left join FCT_Race on FCT_Race.RaceID = FCT_ResearchProject.RaceID left join FCT_Game on FCT_Game.GameID = FCT_ResearchProject.GameID left join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
+        const bonuses = fieldBonuses(await loadResearchConstructs(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
 
         // A project with a scientist has the figure of the Research bonus the save's lookup row does not confirm left unknown, never read as no bonus.
-        return { projects: blocked.has(RESEARCH_BONUS) ? projects.map((project) => (project.ScientistCommandID === null ? project : { ...project, CommanderBonus: null, ActualCommanderResearchBonus: null })) : projects, queues }
+        return { projects: blocked.has(RESEARCH_BONUS) ? projects.map((project) => (project.ScientistCommandID === null ? project : { ...project, CommanderBonus: null, ActualCommanderResearchBonus: null })) : projects, queues, bonuses }
       }),
-      default: { projects: [], queues: [] },
+      default: { projects: [], queues: [], bonuses: {} },
     },
     // Each project with its per-unit minerals and fuel, and the colony's stock of each.
     industry: {

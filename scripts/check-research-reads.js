@@ -3,15 +3,15 @@
 
   Run: bun scripts/check-research-reads.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no save played under 3.1 holds saved research or a queue (the owner's decision Q7 of AE-31: none will be supplied; the migrated fixture of scripts/lib/fixtures.js, game 141, race 784, holds no research project, queue or saved row), so each case plants its rows into in-memory copies of the fixture, as scripts/check-treasury-categories.js does. A planted tech the race designed is the copy of a design the fixture holds for the race, under a new id with a cost and no RaceTech row, as `Game.cs:31830-31849` stores one (the game and the race on the row):
-  - `Population.ProcessPlayerResearchProjects` (Population.cs:781-955): a project makes `perLab * labs * factor * step` RP in an increment of `step` years, the factor the scientist's Research bonus (four times it less 3 on a tech of his own field) and the race's field bonus; a project that has not enough is left with the difference; one that has enough lands, and the part of the increment it does not need (`(made - left) / made`) goes to the techs queued behind it, each at its own field's factor, owing its development cost less the points saved on it (`PausedResearchProject`, `method_108`, Population.cs:5107-5142), each landing in that increment while the carry lasts and the first it cannot finish starting with what it still owes after the carry;
-  - `Population.method_112` (Population.cs:5241-5294) lists a tech of the game that is the baseline's, the race's own or one the race is eligible for (`Game.LoadTechSystems` loads the techs of the baseline and of the game, Game.cs:22107-22112), unless it is researched, running or queued; a tech with a saved row is listed though it is found only in ruins or has a prerequisite not researched (the game colours it as not researchable); the game's NoShieldTechnology filter and its research prototypes are not modelled and not asserted;
-  - `Game.CalculateDevelopmentCost` (Game.cs:30919-30933) floors the cost it stores at the build cost, so the stored `FCT_TechSystem.DevelopCost` is the cost and is never recomputed.
+  The fixture has no research project, queue or saved-progress row, so the checks plant rows into in-memory copies. Expected figures are worked examples, independent of the renderer calculations.
+  - A project makes per-lab output times labs, research factors and elapsed years. When it lands, unused time carries into each queued technology at that technology's own field factor and stored cost less saved points.
+  - The catalogue lists baseline, own-race and eligible alien technologies unless researched, running or queued. Saved progress keeps an otherwise blocked technology listed as not researchable; shield filtering and prototypes are not modelled.
+  - Stored development cost is already floored at build cost and is never recomputed.
   The checks:
   - `oracle`: `scheduleProjects` against a port of that arithmetic, on hand-worked cases and 400 seeded random ones (saved points with fractions, a saved row at or above the cost, a queued tech of another field, a scientist with and without the field of the project): every landing equals the continuous time (the project's RP left over its rate, each queued tech's owed RP over its own rate, added) to 1e-9 years, and the game lands each in the end of the first increment at or after it, for increments of 1, 5 and 30 days;
   - `landing`: the same through the Research page's own reads on a copy with a project, a scientist and a queue planted (the RP of a lab worked out here from the stored race, species, colony and game rows), the Production page's own queue read, and the days its jobs give the queued techs;
   - `saved`: the saved points and the not researchable marks of `evaluateResearch` on a copy with saved rows of a ruin-only tech, techs with a prerequisite not researched, an available tech, a researched tech, a running and a queued one and another empire's, each worked out here from the saved rows, with the statuses and counts of the techs left as the fixture has them;
-  - `catalogue`: the techs the page lists are those of the game's list for the race, written here in SQL from `Population.method_112`: the baseline, the race's own designs (one with decimal progress saved, one behind a design not researched with progress saved, one with none, one in a category the lookup lacks), the alien tech the race is eligible for with progress saved, and none of another race (an alien tech with progress saved on it included); the listed flag of every tech equals the game's rule, saved or not, and the Researched count takes in the designs the race has researched;
+  - `catalogue`: the techs listed for the race include the baseline, its own designs and eligible alien technologies, but never another empire's ineligible design; saved rows preserve blocked entries and researched counts include the race's researched designs;
   - `category`: the research category of a tech is named from DIM_ResearchCategories on the Research page, in the Path view's caption and in a search match (a tech is found by its category name; a changed stored name is shown changed; a category the lookup lacks is named nowhere);
   - `landing-date`: a landing date is dated as an estimate ("about", on a project's line, on the techs queued behind it and on the Next to land tile) with the landing rule's mark on it, the day is the calendar day of the continuous time (a second either side of midnight), a landing 1.1 days away is not dated as the end of a 5-day increment, and an unknown clock is no date;
   - `view`: the Research page's tables (components/research/FieldsView.vue) and the path fact of a tech (PathView.vue) word the saved points with their decimals and mark a not researchable tech, and draw the marks; an available design of the race words its saved points and one with none words none;
@@ -19,7 +19,7 @@
   - `lookups`: the research field names shown are the stored abbreviations (a changed one is shown changed), and no code keeps a name the lookup replaced (the earlier abbreviations EW and MK, Jump Engines);
   - `queue`: the Production page's queue read carries the points saved on each queued tech and `queuedRemaining` is the cost less them (never below 0, null when either is not stored);
   - `rules`: the rules of the remaining RP and the landing year are registered for the 3.2 line too, and say what they now say.
-  Where the source does not give a rule the check does not guess it: what a played 3.1 save holds (the carry of an increment with no queue, saved points on a tech that a game then lists) is not asserted.
+  Planted rows are not a played-save witness: the carry of an increment with no queue and saved progress subsequently listed by the game are not asserted from a campaign.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
 
@@ -48,6 +48,7 @@ const FILES = {
   research: renderer('utilities', 'research.js'),
   production: renderer('utilities', 'production.js'),
   technologiesPage: renderer('pages', 'technologies.vue'),
+  space: renderer('utilities', 'warnings', 'space.js'),
   productionPage: renderer('pages', 'production.vue'),
   fieldsView: renderer('components', 'research', 'FieldsView.vue'),
   pathView: renderer('components', 'research', 'PathView.vue'),
@@ -95,7 +96,7 @@ const worldOf = (texts = { ...ORIGINALS }) => {
 
   return {
     texts,
-    modules: memo(() => loadUtilities(['research', 'production', 'provenance', 'math'], { stubs: STUBS, sources: { research: texts.research, production: texts.production } })),
+    modules: memo(() => loadUtilities(['research', 'production', 'provenance', 'math', 'warnings/common', 'warnings/space'], { stubs: STUBS, sources: { research: texts.research, production: texts.production, 'warnings/space': texts.space } })),
     technologies: page('pages/technologies'),
     production: page('pages/production'),
     fieldsView: page('components/research/FieldsView'),
@@ -162,7 +163,7 @@ const cloneRow = (database, table, key, from, over) => {
   database.run(`insert into ${table} (${names.map((name) => `"${name}"`).join(', ')}) select ${select} from ${table} where ${key} = ${from}`)
 }
 
-// Techs the race designed, each a row of the game and the race that the race has not researched: a copy of a design the fixture holds for the race (the game stores one under its own id with the game and the race, Game.cs:31830-31849), under a new id with its own cost (the game stores the cost it computes, floored at the build cost, Game.cs:30919-30933), and no RaceTech row. `own` is a Jump Drives design (category 22) with progress saved on it, `locked` a design behind `own` with progress saved, `bare` a design with none, `unnamed` one whose category the lookup lacks. `eligible` is an alien tech made eligible for the race (a FCT_EligibleProjects row) with progress saved on it, `foreign` one of another race that is not eligible, with progress saved on it. Progress is stored only below the cost (`Race.method_80`, Race.cs:6280-6310).
+// Unresearched own-race designs use new identities and stored costs, with saved progress below cost where present. The examples include an unresearched prerequisite, an absent category lookup, an eligible alien design and an ineligible foreign design.
 const DESIGN_COST = { own: 2500, locked: 1800, bare: 900, unnamed: 700 }
 const DESIGN_SAVED = { own: 1234.75, locked: 410.25 }
 const UNNAMED_CATEGORY = 9999
@@ -259,7 +260,7 @@ const pageOn = async (w, database) => {
 }
 
 // ---- The game's arithmetic, ported ---------------------------------------------------------------------------------
-// One colony's project and the techs queued behind it, run an increment of `step` years at a time as the game does (Population.cs:851-949), until the last has landed: the time each lands, a whole number of increments. `perLab` RP a lab a year, `bonus` the scientist's Research bonus, `specialty` his field. `project` is { left, field }, each queued tech { field, develop, saved }.
+// Run a colony's project and queue in fixed increments until the final technology lands. `perLab` is annual output per lab, `bonus` the scientist's Research bonus, `specialty` the scientist's field; each queued technology owes its development cost less saved points.
 const gameLandings = ({ perLab, labs, bonus, specialty, project, queue, step }) => {
   const factor = (field) => (field === specialty ? bonus * 4 - 3 : bonus)
   const landings = []
@@ -287,7 +288,7 @@ const gameLandings = ({ perLab, labs, bonus, specialty, project, queue, step }) 
     while (waiting.length) {
       const next = waiting.shift()
       const reach = perLab * labs * factor(next.field) * step * carry
-      // The game subtracts the saved points as they are; a saved row at or above the cost cannot arise: `ResearchProject.CancelAndStoreProgress` (ResearchProject.cs:41-62) stores the cost less the RP left and only when above 0, and `Race.method_80` (Race.cs:6280-6310) stores points only below the cost (otherwise it completes the tech). The app never owes less than nothing, and the port is held to that.
+      // Saved progress is kept with its fractions. The game stores only positive progress below the development cost; the app additionally clamps any overpaid planted row at zero owed.
       const owed = Math.max(0, next.develop - next.saved)
 
       if (!(owed <= reach)) {
@@ -342,9 +343,12 @@ const assertLandings = (label, years, params) => {
   }
 }
 
+// Raw stored inputs for a colony with the requested base and otherwise neutral per-lab factors.
+const labInputs = (ResearchBase) => ({ ResearchBase, ResearchRateModifier: 1, EconomicProdModifier: 1, Efficiency: 1, RadiationLevel: 0, UnrestPoints: 0, ProductionMod: 1, ResearchSpeed: 100 })
+
 // The rows `scheduleProjects` takes, for the parameters of the port.
 const rowsFor = ({ perLab, labs, bonus, specialty, project, queue }) => {
-  const projectRow = { ProjectID: 1, Name: 'Project', CommanderID: 7, OutputPerLab: perLab, Facilities: labs, ResearchBonus: bonus, ScientistField: specialty, FieldID: project.field, Pause: 0, ResearchPointsRequired: project.left, LocalConstructField: null, LocalConstructBonus: null }
+  const projectRow = { ProjectID: 1, Name: 'Project', CommanderID: 7, ...labInputs(perLab), Facilities: labs, ResearchBonus: bonus, ScientistField: specialty, FieldID: project.field, Pause: 0, ResearchPointsRequired: project.left, LocalConstructField: null, LocalConstructBonus: null }
   const queueRows = queue.map((next, index) => ({ CurrentProjectID: 1, ResearchOrder: index + 1, TechID: 100 + index, Name: `Queued ${index}`, DevelopCost: next.develop, FieldID: next.field }))
   const paused = new Map(queue.filter((next) => next.saved !== null).map((next, index) => [100 + index, next.saved]))
 
@@ -457,6 +461,461 @@ check('landing', 'on the copy with a project, its scientist and a queue planted,
   jobs.forEach((job, index) => assert.ok(near(job.days, continuous[index] * 365), `the Production page lands job ${index} in ${continuous[index] * 365} days, not ${job.days}`))
 })
 
+check('production-field', 'the processor multiplies 100 RP/year by the racial field factor 1.2, giving 120 RP/year and a 365-day finish for 120 RP', async (w) => {
+  const { production } = await w.modules()
+  const project = { ...labInputs(100), Facilities: 1, ProjectField: 3, ScientistCommandID: 1, CommanderField: 3, ActualCommanderResearchBonus: 1, ActualAnomalyBonus: 1 }
+  const rate = production.researchRate(project, { 3: 1.2 })
+  const finish = production.finishDays({ rule: 'production.researchFinish', rate, remaining: 120, remainingName: '120 RP' })
+
+  assert.equal(rate.value, 120, '100 * 1.2 = 120 RP/year')
+  assert.equal(finish.result.value, 365, '120 RP at 120 RP/year takes one game year')
+})
+
+check('production-queued-field', 'a queued tech chooses the scientist specialty and local construct by the queued field, not the running field', async (w) => {
+  const { production } = await w.modules()
+  const project = { ...labInputs(100), Facilities: 1, ProjectField: 3, ScientistCommandID: 1, CommanderField: 8, CommanderBonus: 1.25, ActualCommanderResearchBonus: 1.25, AnomalyID: 1, AnomalyField: 8, AnomalyBonus: 1.5, ActualAnomalyBonus: 1 }
+  const queued = production.queuedResearch(project, { ProjectField: 8 })
+  const rate = production.researchRate(queued, { 3: 1, 8: 1.2 })
+
+  assert.equal(queued.ActualCommanderResearchBonus, 2, 'the scientist specialty factor is 4 * 1.25 - 3 = 2')
+  assert.equal(queued.ActualAnomalyBonus, 1.5, 'the queued field matches the construct, irrespective of the current project field')
+  assert.ok(near(rate.value, 360), '100 * 2 * 1.5 * 1.2 = 360 RP/year')
+})
+
+// A construct colony with 0.4 M surface people and an eligible orbital census at the one-million boundary.
+const censusCopy = () => {
+  const database = new Database(fs.readFileSync(path.join(root, SAVE)))
+  const [{ SystemBodyID, SystemID, SpeciesID }] = rowsOf(database, `select SystemBodyID, SystemID, SpeciesID from FCT_Population where PopulationID = ${COLONY}`)
+  const firstId = (table, key) => rowsOf(database, `select ${key} as Id from ${table} limit 1`)[0].Id
+
+  database.run(`delete from FCT_AncientConstruct where GameID = ${GAME}`)
+  database.run(`delete from FCT_Ship where GameID = ${GAME} and RaceID = ${RACE}`)
+  database.run(`update FCT_SystemBody set Xcor = 123456789, Ycor = 987654321 where SystemBodyID = ${SystemBodyID}`)
+  database.run(`update FCT_Population set Population = 0.4 where PopulationID = ${COLONY}`)
+  database.run(`insert into FCT_AncientConstruct (AncientConstructID, GameID, SystemBodyID, Active, ResearchField, ResearchBonus) values (990001, ${GAME}, ${SystemBodyID}, 1, 3, 1.5)`)
+  cloneRow(database, 'FCT_Fleet', 'FleetID', firstId('FCT_Fleet', 'FleetID'), { FleetID: 990001, GameID: GAME, RaceID: RACE, FleetName: 'Census', AssignedPopulationID: COLONY, SystemID, Xcor: 123456789, Ycor: 987654321, CivilianFunction: 0, OrbitBodyID: 0 })
+  cloneRow(database, 'FCT_ShipClass', 'ShipClassID', firstId('FCT_ShipClass', 'ShipClassID'), { ShipClassID: 990001, GameID: GAME, RaceID: RACE, ArkShip: 1 })
+  cloneRow(database, 'FCT_ShipDesignComponents', 'SDComponentID', firstId('FCT_ShipDesignComponents', 'SDComponentID'), { SDComponentID: 990001, ComponentTypeID: 17, SpecialFunction: 7, ComponentValue: 500000 })
+  database.run(`insert into FCT_ClassComponent (GameID, ClassID, ComponentID, NumComponent) values (${GAME}, 990001, 990001, 2)`)
+  for (const [ShipID, Amount] of [[990001, 2000000], [990002, 100000]]) {
+    database.run(`insert into FCT_Ship (ShipID, GameID, RaceID, FleetID, ShipClassID, ShipName) values (${ShipID}, ${GAME}, ${RACE}, 990001, 990001, 'Census ship')`)
+    database.run(`insert into FCT_ShipCargo (GameID, ShipID, CargoTypeID, SpeciesID, Amount) values (${GAME}, ${ShipID}, 1, ${SpeciesID}, ${Amount})`)
+  }
+  database.run(`insert into FCT_DamagedComponent (GameID, ShipID, ComponentID, Number) values (${GAME}, 990001, 990001, 1)`)
+
+  return { database, SystemBodyID }
+}
+
+check('processor-inputs', 'processor rates and finish forecasts retain a dormant local construct bonus; radiation 12000 clamps research output to zero rather than a negative rate', async (w) => {
+  const { database, SystemBodyID } = censusCopy()
+
+  try {
+    plantQueue(database)
+    database.run('update FCT_AncientConstruct set Active = 0 where AncientConstructID = 990001')
+    const dormant = await pageOn(w, database)
+    const [project] = dormant.research.schedule
+
+    assert.ok(near(project.rate, 4320), '900 * 2 * 1.6 * 1.5 = 4320 RP/year despite Active = 0')
+    assert.ok(near(dormant.research.output.result.value, 4320), 'the output descendant sums the processor rate')
+    const { research } = await w.modules()
+
+    assert.ok(near(research.nextLandingResult(dormant.research.schedule, dormant.game).result.value, 0.2857638888888889), '1234.5 RP / 4320 RP/year = 0.2857638888888889 years')
+    database.run(`update FCT_SystemBody set RadiationLevel = 12000 where SystemBodyID = ${SystemBodyID}`)
+    const irradiated = await pageOn(w, database)
+
+    assert.equal(irradiated.research.schedule[0].rate, 0, 'zero output is known zero, not negative or missing')
+    assert.equal(irradiated.research.output.result.value, 0, 'the output descendant is zero')
+    assert.equal(research.nextLandingResult(irradiated.research.schedule, irradiated.game).result.status, 'unavailable', 'zero output cannot land')
+  } finally {
+    database.close()
+  }
+})
+
+check('production-processor', 'Production reads the processor inputs and racial field bonus, and the research completion bin uses the repaired finish', async (w) => {
+  const { database, SystemBodyID } = censusCopy()
+
+  try {
+    plantQueue(database)
+    const page = instantiate(await w.production(), { ...STORE, database: adapterOf(database), GameID: GAME, RaceID: RACE, data: { populationProductionModifiers: { [COLONY]: { OverallResearchModifier: 900 } }, arrivals: [] } })
+
+    await page.runAsync('researches')
+    const [job] = page.researchJobs
+
+    assert.ok(near(job.rateResult.value, 4536), '900 * 2 * 1.6 * 1.5 * 1.05 = 4536 RP/year')
+    assert.ok(near(job.days, 99.3369708994709), '1234.5 RP at 4536 RP/year takes 99.3369708994709 days')
+    const { production } = await w.modules()
+    const bins = production.completionBins([job], { years: 1, bins: 4 }, ['research'])
+
+    assert.deepEqual(bins.counts.research, [0, 1, 0, 0], 'the repaired finish belongs in the second quarter')
+    database.run(`update FCT_SystemBody set RadiationLevel = 12000 where SystemBodyID = ${SystemBodyID}`)
+    await page.runAsync('researches')
+    assert.equal(page.researchJobs[0].rateResult.value, 0, 'Production uses radiation-clamped output, not the old colony modifier')
+  } finally {
+    database.close()
+  }
+})
+
+const researchPagesOn = async (w, database) => {
+  const technologies = await pageOn(w, database)
+  const production = instantiate(await w.production(), { ...STORE, database: adapterOf(database), GameID: GAME, RaceID: RACE, data: { arrivals: [] } })
+
+  await production.runAsync('researches')
+
+  const [project] = technologies.research.schedule
+
+  return { technologies, production, entries: [project, ...project.queue], jobs: production.researchJobs }
+}
+
+const unknownResearchOn = async (w, database, { rates = [0, 1, 2], finishes = [0, 1, 2], missing }) => {
+  const pages = await researchPagesOn(w, database)
+  const { research, production } = await w.modules()
+
+  rates.forEach((index) => {
+    for (const result of [pages.entries[index].rateResult, pages.jobs[index].rateResult]) {
+      assert.equal(result.status, 'unavailable', `entry ${index}: the rate must not invent a multiplier`)
+      assert.ok(result.inputs.missing.some((name) => missing.test(name)), `entry ${index}: the rate names ${missing}`)
+    }
+  })
+  finishes.forEach((index) => {
+    assert.equal(pages.entries[index].yearsResult.status, 'unavailable', `entry ${index}: no Research landing is known`)
+    assert.equal(pages.jobs[index].finishResult.status, 'unavailable', `entry ${index}: no Production finish is known`)
+    assert.equal(pages.jobs[index].days, null, `entry ${index}: no finish day is invented`)
+    assert.equal(pages.jobs[index].finishIdle, false, `entry ${index}: unknown is not idle`)
+  })
+  if (rates.includes(0)) {
+    assert.equal(pages.technologies.research.output.result.status, 'unavailable', 'unknown running output is not summed as zero')
+    const next = research.nextLandingResult(pages.technologies.research.schedule, pages.technologies.game)
+
+    assert.equal(next.result.status, 'unavailable', 'no next landing can be claimed')
+    assert.ok(next.causes.some((name) => missing.test(name)), 'the missing multiplier selection reaches the landing explanation')
+  }
+  const bins = production.completionBins(pages.jobs, { years: 1, bins: 4 }, ['research'])
+
+  assert.equal(bins.skipped.unknown, finishes.length, 'unknown dates stay out of the timeline')
+  assert.ok(bins.result.inputs.missing.length > 0, 'the timeline discloses excluded unknown finishes')
+
+  return pages
+}
+
+// One orbital fixture provides a decided or undecided one-million gate for the research consumers.
+const nullableCensusCopy = () => {
+  const copy = censusCopy()
+
+  copy.database.run('delete from FCT_Ship where ShipID = 990002')
+  copy.database.run('delete from FCT_ShipCargo where ShipID = 990002')
+  copy.database.run('update FCT_ShipCargo set Amount = 600000 where ShipID = 990001')
+  copy.database.run('update FCT_ShipDesignComponents set ComponentValue = 600000 where SDComponentID = 990001')
+
+  return copy
+}
+
+const censusRate = async (w, database, project = {}) => {
+  const { research, production } = await w.modules()
+  const constructs = await research.loadResearchConstructs(adapterOf(database), { GameID: GAME, RaceID: RACE })
+
+  return production.researchRate({ ...labInputs(100), Facilities: 1, ProjectField: 3, ScientistCommandID: 1, CommanderField: 3, ActualCommanderResearchBonus: 1, ActualAnomalyBonus: 1, ...project }, research.fieldBonuses(constructs))
+}
+
+const unknownCensusWarning = async (w, database, missing) => {
+  const modules = await w.modules()
+  const warning = modules['warnings/space'].checks.find((one) => one.key === 'known-unexploited-constructs')
+  const rows = await warning.read({ GameID: GAME, RaceID: RACE, database: adapterOf(database), count: modules['warnings/common'].counter(','), separator: ',', options: {} })
+
+  assert.equal(rows.length, 1, 'the warning retains the unresolved construct')
+  assert.ok(rows[0].unevaluated, 'neither a used nor an unused contribution is established')
+  assert.ok(rows[0].unevaluated.inputs.missing.some((name) => missing.test(name)), 'the warning names the missing census selector')
+}
+
+check('census-wiring-yes', 'a decided eligible census enables the racial factor through both pages, queued finishes and the construct warning', async (w) => {
+  const { database } = nullableCensusCopy()
+  const modules = await w.modules()
+  const warning = modules['warnings/space'].checks.find((one) => one.key === 'known-unexploited-constructs')
+
+  try {
+    database.run('update FCT_ShipCargo set Amount = 599999.5 where ShipID = 990001')
+    assert.equal((await censusRate(w, database)).value, 105, 'the census decides eligibility after loading the saved people')
+    plantQueue(database)
+    const pages = await researchPagesOn(w, database)
+
+    for (const [index, rate] of [4536, 2070, 4536].entries()) {
+      assert.equal(pages.entries[index].rate, rate, `Technologies entry ${index} uses the eligible field factor`)
+      assert.equal(pages.jobs[index].rateResult.value, rate, `Production entry ${index} uses the eligible field factor`)
+      assert.ok(pages.entries[index].years > 0 && pages.jobs[index].days > 0, 'known rates retain continuous finishes')
+    }
+    assert.deepEqual(await warning.read({ GameID: GAME, RaceID: RACE, database: adapterOf(database), count: modules['warnings/common'].counter(','), separator: ',', options: {} }), [], 'an eligible active construct has no unused racial contribution')
+  } finally {
+    database.close()
+  }
+})
+
+check('census-wiring-no', 'a decided ineligible census excludes the racial factor without withholding either page forecast and warns of the unused contribution', async (w) => {
+  const { database } = nullableCensusCopy()
+  const modules = await w.modules()
+  const warning = modules['warnings/space'].checks.find((one) => one.key === 'known-unexploited-constructs')
+
+  try {
+    database.run('update FCT_ShipClass set ArkShip = 0 where ShipClassID = 990001')
+    assert.equal((await censusRate(w, database)).value, 100, 'an ineligible colony adds no racial factor')
+    plantQueue(database)
+    const pages = await researchPagesOn(w, database)
+
+    for (const [index, rate] of [4320, 2070, 4320].entries()) {
+      assert.equal(pages.entries[index].rate, rate, `Technologies entry ${index} has no racial addition`)
+      assert.equal(pages.jobs[index].rateResult.value, rate, `Production entry ${index} has no racial addition`)
+      assert.ok(pages.entries[index].years > 0 && pages.jobs[index].days > 0, 'ineligibility is not an unavailable rate')
+    }
+    const rows = await warning.read({ GameID: GAME, RaceID: RACE, database: adapterOf(database), count: modules['warnings/common'].counter(','), separator: ',', options: {} })
+
+    assert.equal(rows.length, 1, 'the known unused contribution warns')
+    assert.equal(rows[0].unevaluated, undefined, 'the warning is evaluated, not unknown')
+    assert.match(rows[0].cells.blocker, /1 million/, 'the warning states its consumer threshold')
+  } finally {
+    database.close()
+  }
+})
+
+check('census-wiring-undecided', 'an undecided census leaves both page rates, queued finishes, aggregates and the construct warning honestly unavailable', async (w) => {
+  const { database } = nullableCensusCopy()
+
+  try {
+    database.run('update FCT_ShipClass set ArkShip = null where ShipClassID = 990001')
+    const unknown = await censusRate(w, database)
+
+    assert.equal(unknown.status, 'unavailable', 'an undecided gate cannot choose a racial factor')
+    assert.ok(unknown.inputs.missing.some((name) => /Ark/.test(name)), 'the census cause reaches the rate')
+    plantQueue(database)
+    await unknownResearchOn(w, database, { rates: [0, 2], missing: /Ark/ })
+    await unknownCensusWarning(w, database, /Ark/)
+  } finally {
+    database.close()
+  }
+})
+
+check('construct-race', 'an eligible colony of unknown race cannot supply a known racial factor or a known unused-contribution verdict', async (w) => {
+  const { database } = nullableCensusCopy()
+
+  try {
+    database.run(`update FCT_Population set RaceID = null, Population = 1 where PopulationID = ${COLONY}`)
+    const rate = await censusRate(w, database)
+
+    assert.equal(rate.status, 'unavailable', 'eligibility does not decide the colony race')
+    assert.ok(rate.inputs.missing.some((name) => /race.*colony/.test(name)), 'the rate names the unknown colony race')
+    await unknownCensusWarning(w, database, /race.*colony/)
+  } finally {
+    database.close()
+  }
+})
+
+check('consumer-invariant-rate', 'an unknown population gate does not withhold a known zero research rate or a neutral field contribution', async (w) => {
+  const { database } = nullableCensusCopy()
+  const { research } = await w.modules()
+
+  try {
+    database.run('update FCT_ShipClass set ArkShip = null where ShipClassID = 990001')
+    assert.equal((await censusRate(w, database, { ResearchBase: 0 })).value, 0, 'no research output is zero under both Ark completions')
+    const constructs = await research.loadResearchConstructs(adapterOf(database), { GameID: GAME, RaceID: RACE })
+    const project = { ...labInputs(0), Facilities: 1, CommanderID: 1, ResearchBonus: 1, ScientistField: 3 }
+
+    assert.equal(research.annualResearchPointsResult(project, 3, research.fieldBonuses(constructs)).value, 0, 'Technologies also retains the invariant zero rate')
+    database.run('update FCT_AncientConstruct set ResearchBonus = 1, ResearchField = null where AncientConstructID = 990001')
+    assert.equal((await censusRate(w, database)).value, 100, 'a neutral contribution is neutral whatever its eligibility or field')
+  } finally {
+    database.close()
+  }
+})
+
+check('unknown-local-field', 'a present dormant local construct with no field makes running and queued rates and their descendants unknown, but an absent row is neutral', async (w) => {
+  const { database } = censusCopy()
+
+  try {
+    plantQueue(database)
+    database.run('update FCT_AncientConstruct set Active = 0, ResearchField = null where AncientConstructID = 990001')
+    await unknownResearchOn(w, database, { missing: /construct.*field|field.*construct/ })
+    database.run('delete from FCT_AncientConstruct where AncientConstructID = 990001')
+    const absent = await researchPagesOn(w, database)
+
+    assert.ok(near(absent.entries[0].rate, 2880), 'no local construct: 900 * 2 * 1.6 = 2880 RP/year')
+    assert.ok(near(absent.jobs[0].rateResult.value, 2880), 'Production also uses a genuinely absent construct as neutral')
+    assert.ok(absent.jobs.every((job) => job.days !== null), 'absence leaves known finish dates, unlike an unknown field')
+  } finally {
+    database.close()
+  }
+})
+
+check('unknown-null-bonuses', 'present null construct and scientist bonuses are unknown, while a genuinely absent bonus row keeps the neutral game default', async (w) => {
+  const { database } = censusCopy()
+
+  try {
+    plantQueue(database)
+    database.run('update FCT_AncientConstruct set Active = 0, ResearchBonus = null where AncientConstructID = 990001')
+    const construct = await unknownResearchOn(w, database, { rates: [0, 2], missing: /bonus/ })
+
+    assert.ok(near(construct.entries[1].rate, 2070), 'a known different field does not use the null local bonus')
+    assert.ok(near(construct.jobs[1].rateResult.value, 2070), 'Production also leaves the known nonmatching field rate available')
+    database.run('update FCT_AncientConstruct set ResearchField = 8 where AncientConstructID = 990001')
+    await unknownResearchOn(w, database, { rates: [1], finishes: [1, 2], missing: /bonus/ })
+    database.run('update FCT_AncientConstruct set ResearchField = 3, ResearchBonus = 1.5 where AncientConstructID = 990001')
+    database.run(`update FCT_CommanderBonuses set BonusValue = null where CommanderID = ${SCIENTIST} and BonusID = 3`)
+    await unknownResearchOn(w, database, { missing: /scientist.*bonus/ })
+    database.run(`delete from FCT_CommanderBonuses where CommanderID = ${SCIENTIST} and BonusID = 3`)
+    const absentBonus = await researchPagesOn(w, database)
+
+    assert.ok(near(absentBonus.entries[0].rate, 2700), 'absent percentage bonus row: 900 * 2 * 1 * 1.5 = 2700 RP/year')
+    assert.ok(near(absentBonus.jobs[0].rateResult.value, 2700), 'Production distinguishes absent bonus from present null')
+    assert.ok(absentBonus.jobs.every((job) => job.days !== null), 'the absent-row default leaves known forecasts')
+    database.run(`update FCT_Commander set CommandID = 0 where CommanderID = ${SCIENTIST}`)
+    const unstaffed = await researchPagesOn(w, database)
+
+    assert.equal(unstaffed.entries[0].rateResult.status, 'unavailable', 'Technologies does not forecast unstaffed progress')
+    assert.ok(near(unstaffed.jobs[0].rateResult.value, 2700), 'Production retains its explicit neutral no-scientist planning assumption')
+    assert.ok(unstaffed.jobs[0].rateResult.assumptions.some((text) => text.includes('No scientist')), 'the planner assumption is disclosed')
+  } finally {
+    database.close()
+  }
+})
+
+check('unknown-selection-fields', 'missing project, queue or assigned scientist fields cannot select neutral racial, specialty or local multipliers', async (w) => {
+  const { production } = await w.modules()
+  const rate = production.researchRate({ ...labInputs(100), Facilities: 1, ProjectField: null, ActualCommanderResearchBonus: 1, ActualAnomalyBonus: 1 }, { 3: 1.2 })
+
+  assert.equal(rate.status, 'unavailable', '100 RP/year cannot be known when an unstored field could select the racial ×1.2')
+  assert.ok(rate.inputs.missing.some((name) => /field/.test(name)), 'the missing project field is named')
+  const { database } = censusCopy()
+
+  try {
+    plantQueue(database)
+    database.run('update FCT_AncientConstruct set Active = 0 where AncientConstructID = 990001')
+    database.run(`update FCT_ResearchProject set ResSpecID = null where ProjectID = ${PROJECT}`)
+    const current = await unknownResearchOn(w, database, { rates: [0], missing: /field/ })
+
+    assert.ok(near(current.jobs[1].rateResult.value, 2070), 'the queued tech still selects its own known field, but cannot start at a known time')
+    database.run(`update FCT_ResearchProject set ResSpecID = ${FIELD} where ProjectID = ${PROJECT}`)
+    database.run(`update DIM_TechType set FieldID = null where TechTypeID = (select TechTypeID from FCT_TechSystem where TechSystemID = ${QUEUED[0].tech})`)
+    await unknownResearchOn(w, database, { rates: [1], finishes: [1, 2], missing: /field/ })
+    database.run(`update DIM_TechType set FieldID = 8 where TechTypeID = (select TechTypeID from FCT_TechSystem where TechSystemID = ${QUEUED[0].tech})`)
+    database.run(`update FCT_Commander set ResSpecID = null where CommanderID = ${SCIENTIST}`)
+    const specialty = await unknownResearchOn(w, database, { missing: /scientist.*field/ })
+
+    assert.ok(specialty.jobs.every((job) => !job.rateResult.assumptions.some((text) => text.includes('No scientist'))), 'an assigned scientist with an unknown specialty is not an absent scientist')
+  } finally {
+    database.close()
+  }
+})
+
+check('construct-warning', 'the warning describes only the unused racial contribution, with a tenth-sized field bonus and a distinct dormant local multiplier', async (w) => {
+  const { database } = censusCopy()
+  const modules = await w.modules()
+  const warning = modules['warnings/space'].checks.find((one) => one.key === 'known-unexploited-constructs')
+  const ctx = { GameID: GAME, RaceID: RACE, database: adapterOf(database), count: modules['warnings/common'].counter(','), separator: ',', options: {} }
+
+  try {
+    database.run('delete from FCT_Ship where FleetID = 990001')
+    database.run(`update FCT_Population set Population = 0.5 where PopulationID = ${COLONY}`)
+    const lacking = await warning.read(ctx)
+
+    assert.equal(lacking.length, 1, 'a known ineligible colony leaves an unused contribution')
+    assert.match(lacking[0].cells.blocker, /1 million/, 'the blocker names the one-million threshold')
+    assert.match(lacking[0].cells.bonus, /^5% field-wide/, 'a local +50% construct contributes +5% to the racial field factor')
+    database.run(`update FCT_Population set Population = 2 where PopulationID = ${COLONY}`)
+    assert.deepEqual(await warning.read(ctx), [], 'the 2 M counterexample is not falsely reported as unused')
+    database.run('update FCT_AncientConstruct set Active = 0 where AncientConstructID = 990001')
+    const dormant = await warning.read(ctx)
+
+    assert.equal(dormant.length, 1, 'a dormant construct does not contribute the racial factor')
+    assert.match(modules.provenance.getRule('warnings.knownUnexploitedConstructs').note, /local.*dormant|dormant.*local/, 'the explanation distinguishes the processor local bonus from the unused racial contribution')
+  } finally {
+    database.close()
+  }
+})
+
+check('research-descendants', 'output and next landing keep the rate and all compared landing assumptions, including a project that is not the winner', async (w) => {
+  const { research, provenance } = await w.modules()
+  const project = { ...labInputs(100), Facilities: 1, CommanderID: 1, ResearchBonus: 1, ScientistField: 3, FieldID: 3, ResearchPointsRequired: 100, Pause: 0 }
+  const schedule = research.scheduleProjects([{ ...project, ProjectID: 1, Name: 'First' }, { ...project, ProjectID: 2, Name: 'Later', ResearchPointsRequired: 200 }], [], new Map())
+  const later = schedule[1]
+
+  later.rateResult = provenance.ofRule({ rule: 'research.projectRate', value: 100, assumptions: ['The later project uses the current lab assignment'] })
+  later.yearsResult = provenance.ofRule({ rule: 'research.landing', value: 2, assumptions: ['The later project keeps its scientist'] })
+  const output = research.outputResult(schedule)
+  const next = research.nextLandingResult(schedule, { StartYear: 2000, GameTime: 0 })
+
+  assert.equal(output.result.value, 200, 'the two project rates sum to 200 RP/year')
+  assert.ok(output.result.assumptions.includes('The later project uses the current lab assignment'), 'the total keeps each contributing rate assumption')
+  assert.equal(next.project.ProjectID, 1, 'the first project lands sooner')
+  assert.equal(next.result.value, 1, '100 RP at 100 RP/year is one year')
+  assert.ok(next.result.assumptions.includes('The later project keeps its scientist'), 'the minimum depends on every compared landing, not just its winner')
+})
+
+check('constructs-aggregation', 'every eligible colony contributes its construct addition to the racial field factor', async (w) => {
+  const { research } = await w.modules()
+
+  assert.ok(near(research.fieldBonuses([{ FieldID: 3, ResearchBonus: 1.5 }, { FieldID: 3, ResearchBonus: 2 }])[3], 1.15), 'both eligible colonies add to the field factor: 1 + .05 + .1 = 1.15')
+})
+
+check('decimal-annual-rate', 'decimal annual RP preserves an exact one-year finish and its comparison at the last timeline-bin boundary', async (w) => {
+  const { research, production } = await w.modules()
+  const rate = production.researchRate({ ...labInputs(0.1), Facilities: 3, ProjectField: 3, ScientistCommandID: 1, CommanderField: 3, ActualCommanderResearchBonus: 1, ActualAnomalyBonus: 1 })
+  const finish = production.finishDays({ rule: 'production.researchFinish', rate, remaining: 0.3, remainingName: '0.3 RP' })
+  const bins = production.completionBins([{ type: 'research', days: finish.result.value, finishIdle: false }], { years: 1, bins: 4 }, ['research'])
+
+  assert.equal(bins.later, 1, '0.3 RP at decimal 0.3 RP/year lands at day 365, not just before the one-year boundary')
+  assert.deepEqual(bins.counts.research, [0, 0, 0, 0], 'an exact year belongs after all four quarterly bins')
+  assert.equal(rate.value, 0.3, 'the annual rate is decimal 0.1 × 3, not binary 0.30000000000000004')
+  assert.equal(finish.result.value, 365, 'the comparison uses an exact 365-day finish')
+  const project = { ProjectID: 1, ...labInputs(0.1), Facilities: 3, CommanderID: 1, ResearchBonus: 1, ScientistField: 3, FieldID: 3, ResearchPointsRequired: 0.3, Pause: 0 }
+  const [scheduled] = research.scheduleProjects([project], [], new Map())
+
+  assert.equal(scheduled.rate, 0.3, 'Technologies uses the same decimal annual product')
+  assert.equal(scheduled.years, 1, 'Technologies keeps the exact one-year landing')
+})
+
+check('decimal-per-lab-pages', 'both page reads preserve decimal per-lab products through their one-year finish and timeline boundary, with neutral and nontrivial-factor controls', async (w) => {
+  const { production } = await w.modules()
+  // The decimal square of 0.123456789012345 is 0.015241578753238669120562399; its nearest displayed rate is 0.01524157875323867, not a floating product converted afterwards.
+  const cases = [
+    { name: 'Terra per-lab counterexample', species: 0.123456789012345, base: 1, economic: 0.123456789012345, efficiency: 1, radiation: 0, unrest: 0, political: 1, speed: 100, rate: 0.01524157875323867 },
+    { name: 'neutral stored factors', species: 1, base: 1, economic: 1, efficiency: 1, radiation: 0, unrest: 0, political: 1, speed: 100, rate: 1 },
+    { name: 'every factor and a non-default speed', species: 0.1, base: 100, economic: 0.2, efficiency: 0.3, radiation: 5000, unrest: 75, political: 0.8, speed: 29, rate: 0.0174 },
+  ]
+
+  for (const example of cases) {
+    const database = new Database(fs.readFileSync(path.join(root, SAVE)))
+
+    try {
+      plantQueue(database)
+      const [{ SpeciesID, SystemBodyID, PoliticalStatus }] = rowsOf(database, `select SpeciesID, SystemBodyID, PoliticalStatus from FCT_Population where PopulationID = ${COLONY}`)
+
+      database.run(`delete from FCT_AncientConstruct where GameID = ${GAME}`)
+      database.run(`update FCT_Species set ResearchRateModifier = ${example.species} where SpeciesID = ${SpeciesID}`)
+      database.run(`update FCT_Race set Research = ${example.base}, EconomicProdModifier = ${example.economic} where RaceID = ${RACE}`)
+      database.run(`update FCT_Population set Efficiency = ${example.efficiency}, UnrestPoints = ${example.unrest} where PopulationID = ${COLONY}`)
+      database.run(`update FCT_SystemBody set RadiationLevel = ${example.radiation} where SystemBodyID = ${SystemBodyID}`)
+      database.run(`update DIM_PopPoliticalStatus set ProductionMod = ${example.political} where StatusID = ${PoliticalStatus}`)
+      database.run(`update FCT_Game set ResearchSpeed = ${example.speed} where GameID = ${GAME}`)
+      database.run(`update FCT_CommanderBonuses set BonusValue = 1 where CommanderID = ${SCIENTIST} and BonusID = 3`)
+      database.run(`update FCT_ResearchProject set Facilities = 1, ResearchPointsRequired = ${example.rate} where ProjectID = ${PROJECT}`)
+      database.run(`update FCT_TechSystem set DevelopCost = ${example.rate} where TechSystemID in (${QUEUED.map((entry) => entry.tech).join(', ')})`)
+      database.run(`delete from FCT_PausedResearch where GameID = ${GAME} and RaceID = ${RACE}`)
+      const pages = await researchPagesOn(w, database)
+
+      pages.entries.forEach((entry, index) => {
+        assert.equal(entry.rate, example.rate, `${example.name}: Technologies entry ${index} keeps the decimal product`)
+        assert.equal(entry.years, index + 1, `${example.name}: Technologies entry ${index} lands on its exact year`)
+      })
+      pages.jobs.forEach((job, index) => {
+        assert.equal(job.rateResult.value, example.rate, `${example.name}: Production entry ${index} keeps the decimal product`)
+        assert.equal(job.days, 365 * (index + 1), `${example.name}: Production entry ${index} lands on its exact year`)
+        const bins = production.completionBins([job], { years: index + 1, bins: 4 }, ['research'])
+
+        assert.equal(bins.later, 1, `${example.name}: the exact finish stays after the last timeline bin`)
+        assert.deepEqual(bins.counts.research, [0, 0, 0, 0], `${example.name}: no rounded-down finish enters the timeline`)
+      })
+    } finally {
+      database.close()
+    }
+  }
+})
+
 check('saved', 'the saved points and not researchable marks of evaluateResearch on the copy with saved rows: a ruin-only tech and techs with a prerequisite not researched are listed as not researchable with their points (ruin, prerequisite), an available tech is listed as researchable, a researched, a running, a queued and another empire\'s tech are not listed, a decimal is kept as stored, and no status or count of the fixture changes', async (w) => {
   const { database, facts } = copyOf('saved')
   const base = await pageOn(w, copyOf('intact').database)
@@ -474,7 +933,7 @@ check('saved', 'the saved points and not researchable marks of evaluateResearch 
 
     return [...(tech.RuinOnly ? ['ruin'] : []), ...([tech.Prerequisite1, tech.Prerequisite2].some((need) => need > 0 && !researched.has(need)) ? ['prerequisite'] : [])]
   }
-  // Population.method_112: a saved row is listed unless the tech is researched, running or queued, or belongs to another empire (its RaceID is neither 0 nor the race's, and the race has no right to it).
+  // Saved progress keeps a tech listed unless it is researched, running, queued or belongs to an ineligible foreign empire.
   const listed = (id) => {
     const tech = techRow(id)
     const eligible = rowsOf(database, `select 1 from FCT_EligibleProjects where GameID = ${GAME} and RaceID = ${RACE} and TechSystemID = ${id}`).length > 0
@@ -699,7 +1158,7 @@ check('lookups', 'the research field names the page shows are the stored abbrevi
   assert.deepEqual(hits, [], 'no source or script keeps one of the replaced names')
 })
 
-// The game's list of the techs a race can start, in SQL written here from Population.method_112 (Population.cs:5241-5294): a tech of the game that is the baseline's (RaceID 0), the race's or one the race is eligible for, that is not researched, running or queued, with its prerequisites researched and not found only in ruins, unless progress is saved on it (a saved tech is listed whatever stops it being started). The game's NoShieldTechnology filter and its research prototypes are not modelled.
+// The independently written catalogue predicate includes baseline, own-race and eligible alien technologies. Saved progress keeps a blocked technology listed; otherwise it needs researched prerequisites and cannot be ruin-only. Shield filtering and prototypes are not modelled.
 const RESEARCHED_SQL = `select TechID from FCT_RaceTech where GameID = ${GAME} and RaceID = ${RACE}`
 const SAVED_SQL = `select TechSystemID from FCT_PausedResearch where GameID = ${GAME} and RaceID = ${RACE}`
 const ELIGIBLE_SQL = `select TechSystemID from FCT_EligibleProjects where GameID = ${GAME} and RaceID = ${RACE}`
@@ -887,17 +1346,18 @@ check('queue', 'the Production page\'s research read carries the points saved on
 check('rules', 'the rules of the remaining RP and of the landing year are registered for the 3.2 line and say the saved points are read as stored with their decimals, the cost is the stored one and the game hands the part of an increment a project does not need to the tech behind it', async (w) => {
   const { provenance } = await w.modules()
 
-  for (const id of ['research.remaining', 'research.landing']) {
+  for (const id of ['research.remaining', 'research.landing', 'research.projectRate', 'research.output', 'research.nextLanding', 'production.researchRate', 'production.researchFinish', 'warnings.knownUnexploitedConstructs']) {
     const rule = provenance.getRule(id)
 
     assert.ok(rule, `${id} is registered`)
     assert.deepEqual(rule.versions, ['3.2.x'], `${id} is registered for the line`)
   }
+  assert.deepEqual(provenance.getRule('production.timeline').versions, ['2.7.x'], 'the broad timeline remains held for the other formula families')
 
   assert.ok(/saved points are read as stored, decimals included, and the cost is the stored one whatever its size/.test(provenance.getRule('research.remaining').note), 'the remaining RP rule says what it reads')
   assert.ok(/The game hands the part of a landing increment the project does not need to the next queued tech at that tech's own rate/.test(provenance.getRule('research.landing').note), 'the landing rule says how the game carries')
   assert.ok(/first increment at or after it/.test(provenance.getRule('research.landing').note), 'and where it lands')
-  assert.ok(/for a queued tech the stored development cost less the points saved on it\. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here/.test(provenance.getRule('production.researchFinish').note), 'the Production page\'s research finish rule says the cost is the stored one, floored by the game at the build cost (Game.cs:30919-30933)')
+  assert.ok(/for a queued tech the stored development cost less the points saved on it\. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here/.test(provenance.getRule('production.researchFinish').note), 'the Production research finish uses the stored development cost, floored by the game at build cost')
 })
 
 // ---- The faults and the rewrites ------------------------------------------------------------------------------------
@@ -913,6 +1373,44 @@ const POINTS = 'return this.count(value, Number.isInteger(value) ? 0 : 2)'
 
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
+  { name: 'Technologies restores the floating-point per-lab query product', target: 'technologiesPage', from: 'FCT_Species.ResearchRateModifier, FCT_Race.Research as ResearchBase, FCT_Race.EconomicProdModifier, FCT_Population.Efficiency, FCT_SystemBody.RadiationLevel, FCT_Population.UnrestPoints, DIM_PopPoliticalStatus.ProductionMod, FCT_Game.ResearchSpeed', to: 'FCT_Species.ResearchRateModifier * FCT_Race.Research * FCT_Race.EconomicProdModifier * FCT_Population.Efficiency * max(0, 1 - FCT_SystemBody.RadiationLevel / 10000.0) * (1 - FCT_Population.UnrestPoints / 100.0) * DIM_PopPoliticalStatus.ProductionMod * (FCT_Game.ResearchSpeed / 100.0) as ResearchRateModifier, 1 as ResearchBase, 1 as EconomicProdModifier, 1 as Efficiency, 0 as RadiationLevel, 0 as UnrestPoints, 1 as ProductionMod, 100 as ResearchSpeed', fails: ['decimal-per-lab-pages'] },
+  { name: 'Production restores the floating-point per-lab query product', target: 'productionPage', from: 'FCT_Species.ResearchRateModifier, FCT_Race.Research as ResearchBase, FCT_Race.EconomicProdModifier, FCT_Population.Efficiency, FCT_SystemBody.RadiationLevel, FCT_Population.UnrestPoints, DIM_PopPoliticalStatus.ProductionMod, FCT_Game.ResearchSpeed', to: 'FCT_Species.ResearchRateModifier * FCT_Race.Research * FCT_Race.EconomicProdModifier * FCT_Population.Efficiency * max(0, 1 - FCT_SystemBody.RadiationLevel / 10000.0) * (1 - FCT_Population.UnrestPoints / 100.0) * DIM_PopPoliticalStatus.ProductionMod * (FCT_Game.ResearchSpeed / 100.0) as ResearchRateModifier, 1 as ResearchBase, 1 as EconomicProdModifier, 1 as Efficiency, 0 as RadiationLevel, 0 as UnrestPoints, 1 as ProductionMod, 100 as ResearchSpeed', fails: ['decimal-per-lab-pages'] },
+  { name: 'the per-lab decimal product passes through double before multiplying speed', target: 'research', from: 'return decimal.multiply(output, decimal.fromDouble(project.ResearchSpeed / 100.0))', to: 'return decimal.multiply(decimal.fromDouble(decimal.toDouble(output)), decimal.fromDouble(project.ResearchSpeed / 100.0))', fails: ['decimal-per-lab-pages'] },
+  { name: 'research discards the shared census input', target: 'research', from: 'const population = totals.get(row.PopulationID)', to: 'const population = null', fails: ['census-wiring-yes'] },
+  { name: 'research treats an undecided census as eligible', target: 'research', from: 'const gate = population ? valueOrNull(population.millionEligible) : null', to: 'const gate = population ? valueOrNull(population.millionEligible) !== false : null', fails: ['census-wiring-undecided'] },
+  { name: 'research ignores the census colony race', target: 'research', from: 'population && population.raceMatches === true ? gate : null', to: 'population ? gate : null', fails: ['construct-race'] },
+  { name: 'research treats a decided ineligible census as eligible', target: 'research', from: 'const eligible = gate === false ? false', to: 'const eligible = gate === false ? true', fails: ['census-wiring-no'] },
+  { name: 'the construct warning discards the shared census input', target: 'space', from: 'const census = populationsById.get(row.PopulationID)', to: 'const census = null', fails: ['census-wiring-yes'] },
+  { name: 'the construct warning treats an undecided census as ineligible', target: 'space', from: 'const gate = census ? valueOrNull(census.millionEligible) : null', to: 'const gate = census ? valueOrNull(census.millionEligible) || false : null', fails: ['census-wiring-undecided'] },
+  { name: 'the construct warning ignores the census colony race', target: 'space', from: 'census && census.raceMatches === true && gate === true', to: 'census && gate === true', fails: ['construct-race'] },
+  { name: 'the construct warning treats a decided ineligible census as eligible', target: 'space', from: 'const population = gate === false ? 0', to: 'const population = gate === false ? 1', fails: ['census-wiring-no'] },
+  { name: 'Production withholds an invariant zero rate for a missing census', target: 'production', from: 'const zeroOutput = (outputPerLab !== null && outputPerLab.m === 0n) || project.Facilities === 0', to: 'const zeroOutput = false', fails: ['consumer-invariant-rate'] },
+  { name: 'Technologies withholds an invariant zero rate for a missing census', target: 'research', from: 'const zeroOutput = (outputPerLab !== null && outputPerLab.m === 0n) || project.Facilities === 0', to: 'const zeroOutput = false', fails: ['consumer-invariant-rate'] },
+  { name: 'a neutral contribution with unknown field poisons every field', target: 'research', from: 'if (row.ResearchBonus === 1)', to: 'if (false)', fails: ['consumer-invariant-rate'] },
+  { name: 'Production annual RP reverts to binary multiplication', target: 'production', from: 'researchAnnualRate({ outputPerLab, facilities: project.Facilities, scientist: project.ActualCommanderResearchBonus, local: project.ActualAnomalyBonus, racial: fieldBonus })', to: 'project.ActualCommanderResearchBonus * project.ActualAnomalyBonus * fieldBonus * (Number(outputPerLab.m) / 10 ** outputPerLab.s) * project.Facilities', fails: ['decimal-annual-rate'] },
+  { name: 'Technologies annual RP reverts to binary multiplication', target: 'research', from: 'researchAnnualRate({ outputPerLab, facilities: project.Facilities, scientist: researchMultiplier(project.ResearchBonus, project.ScientistField === fieldId), local, racial: fieldBonus })', to: 'decimal.toNumber(outputPerLab) * project.Facilities * researchMultiplier(project.ResearchBonus, project.ScientistField === fieldId) * local * fieldBonus', fails: ['decimal-annual-rate'] },
+  { name: 'Technologies loses present local construct identity', target: 'technologiesPage', from: 'FCT_AncientConstruct.AncientConstructID as LocalConstructID', to: 'null as LocalConstructID', fails: ['unknown-local-field'] },
+  { name: 'Production loses present local construct identity', target: 'productionPage', from: 'FCT_AncientConstruct.AncientConstructID as AnomalyID', to: 'null as AnomalyID', fails: ['unknown-local-field'] },
+  { name: 'Technologies treats unknown local field as a definite nonmatch', target: 'research', from: 'project.LocalConstructID != null', to: 'false', fails: ['unknown-local-field'] },
+  { name: 'Production treats unknown local field as a definite nonmatch', target: 'production', from: 'if (project.AnomalyID != null && !isNumber(project.AnomalyField))', to: 'if (false)', fails: ['unknown-local-field'] },
+  { name: 'Production launders a present null local bonus to one', target: 'productionPage', from: 'then FCT_AncientConstruct.ResearchBonus else 1 end as ActualAnomalyBonus', to: 'then coalesce(FCT_AncientConstruct.ResearchBonus, 1) else 1 end as ActualAnomalyBonus', fails: ['unknown-null-bonuses'] },
+  { name: 'Production launders a present null scientist bonus to one', target: 'productionPage', from: 'else FCT_CommanderBonuses.BonusValue end as CommanderBonus', to: 'else coalesce(FCT_CommanderBonuses.BonusValue, 1) end as CommanderBonus', fails: ['unknown-null-bonuses'] },
+  { name: 'the queued raw scientist bonus launders null to one', target: 'productionPage', from: 'else VIR_ResearchBonus.CommanderBonus end as CommanderBonus', to: 'else coalesce(VIR_ResearchBonus.CommanderBonus, 1) end as CommanderBonus', fails: ['unknown-null-bonuses'] },
+  { name: 'the running scientist bonus launders null to one', target: 'productionPage', from: 'case when VIR_ResearchBonus.CommandID is null then 1 when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end as ActualCommanderResearchBonus', to: 'coalesce(case when VIR_ResearchBonus.CommandID is null then 1 when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus', fails: ['unknown-null-bonuses'] },
+  { name: 'an absent percentage bonus row is incorrectly zero', target: 'productionPage', from: 'case when FCT_CommanderBonuses.CommanderID is null then 1', to: 'case when FCT_CommanderBonuses.CommanderID is null then 0', fails: ['unknown-null-bonuses'] },
+  { name: 'Production selects neutral racial bonus for an unknown tech field', target: 'production', from: 'if (!isNumber(project.ProjectField))', to: 'if (false)', fails: ['unknown-selection-fields'] },
+  { name: 'Production confuses an unknown specialty with no scientist', target: 'production', from: 'if (project.ScientistCommandID != null && !isNumber(project.CommanderField))', to: 'if (false)', fails: ['unknown-selection-fields'] },
+  { name: 'Production loses the racial field multiplier', target: 'production', from: 'racial: fieldBonus', to: 'racial: 1', fails: ['production-field', 'production-queued-field', 'production-processor'] },
+  { name: 'the queued specialty follows the running project field', target: 'production', from: 'project.CommanderField === queue.ProjectField', to: 'project.ProjectField === queue.ProjectField', fails: ['production-queued-field'] },
+  { name: 'the queued local construct follows the running project field', target: 'production', from: 'project.AnomalyField === queue.ProjectField', to: 'project.ProjectField === queue.ProjectField', fails: ['production-queued-field'] },
+  { name: 'the queue keeps the old racial field', target: 'production', from: 'ProjectField: queue.ProjectField,', to: 'ProjectField: project.ProjectField,', fails: ['production-queued-field'] },
+  { name: 'Technologies drops the dormant local processor bonus', target: 'technologiesPage', from: 'and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID\n', to: 'and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID and FCT_AncientConstruct.Active = 1\n', fails: ['processor-inputs'] },
+  { name: 'both pages leave radiation production negative', target: 'research', from: 'decimal.negative(radiation) ? decimal.ZERO : radiation', to: 'radiation', fails: ['processor-inputs', 'production-processor'] },
+  { name: 'racial field additions lose their tenth factor', target: 'research', from: '(row.ResearchBonus - 1) / 10', to: '(row.ResearchBonus - 1)', fails: ['constructs-aggregation', 'production-processor'] },
+  { name: 'the construct warning retains the ten-million gate', target: 'space', from: 'population !== null && population >= 1', to: 'population !== null && population >= 10', fails: ['construct-warning'] },
+  { name: 'the warning displays the local bonus as racial', target: 'space', from: '(bonus - 1) * 10', to: '(bonus - 1) * 100', fails: ['construct-warning'] },
+  { name: 'output erases the contributing rate assumptions', target: 'research', from: 'project.rateResult])), compute: (values) => Object.values(values).reduce', to: 'ofRule({ rule: RATE_RULE, value: project.rate })])), compute: (values) => Object.values(values).reduce', fails: ['research-descendants'] },
+  { name: 'the next landing erases the losing alternatives', target: 'research', from: 'parts: Object.fromEntries(dated.map((project, index) => [`project ${index + 1}`, project.yearsResult]))', to: 'parts: { winner: best.yearsResult }', fails: ['research-descendants'] },
   { name: 'the saved points are ignored in what a queued tech owes', target: 'research', from: BANKED, to: 'const banked = 0', fails: ['oracle', 'landing'] },
   { name: 'the saved points are cut to a whole number', target: 'research', from: BANKED, to: 'const banked = paused.has(entry.TechID) ? Math.trunc(paused.get(entry.TechID)) : 0', fails: ['oracle', 'landing'] },
   { name: 'a saved row above the cost owes less than nothing', target: 'research', from: REMAINING, to: 'const remaining = isKnownNumber(entry.DevelopCost) && isKnownNumber(banked) ? entry.DevelopCost - banked : null', fails: ['oracle'] },
@@ -968,6 +1466,7 @@ const FAULTS = [
 
 // Rewrites that say the same thing: a clamp written with a comparison, the carry written as a sum in the other order.
 const BENIGN = [
+  { name: 'the construct tenth written as a decimal multiplication', target: 'research', from: '(row.ResearchBonus - 1) / 10', to: '(row.ResearchBonus - 1) * 0.1' },
   { name: 'the clamp of the owed RP written as a comparison', target: 'research', from: REMAINING, to: 'const remaining = isKnownNumber(entry.DevelopCost) && isKnownNumber(banked) ? (entry.DevelopCost - banked > 0 ? entry.DevelopCost - banked : 0) : null' },
   { name: 'the carry written as a sum in the other order', target: 'research', from: CARRY, to: 'compute: (values) => values.own + values.before' },
   { name: 'the clamp of the queued remaining written as a comparison', target: 'production', from: 'Math.max(0, queue.DevelopCost - queue.Saved)', to: '(queue.DevelopCost - queue.Saved > 0 ? queue.DevelopCost - queue.Saved : 0)' },

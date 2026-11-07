@@ -65,7 +65,7 @@ import { tracked } from '../utilities/load-tracking'
 import { isKnownNumber, UNKNOWN_TEXT } from '../utilities/math'
 import { sectionById } from '../utilities/navigation'
 import { describeResult, isAvailable } from '../utilities/provenance'
-import { ACTIVE, AVAILABLE, availableResult, BLOCKED, buildLines, buildTechGraph, countStatuses, DONE, durationLabel, evaluateResearch, fieldBonuses, freeScientistsResult, groupTechs, labsResults, LOCKED, nextLandingResult, outputResult, QUEUED, researchedResults, researchState, scheduleProjects, startPointsResult } from '../utilities/research'
+import { ACTIVE, AVAILABLE, availableResult, BLOCKED, buildLines, buildTechGraph, countStatuses, DONE, durationLabel, evaluateResearch, fieldBonuses, freeScientistsResult, groupTechs, labsResults, loadResearchConstructs, LOCKED, nextLandingResult, outputResult, QUEUED, researchedResults, researchState, scheduleProjects, startPointsResult } from '../utilities/research'
 import { NO_RESEARCH_UNREAD, NO_RESEARCH_WORDS, loadNoResearchProjects } from '../utilities/research-data'
 
 const INPUT_LABELS = {
@@ -388,7 +388,7 @@ export default {
       default: [],
     },
 
-    // Each running project with its colony, scientist and the labs' output; RP a year follows from them.
+    // Processor inputs for rates and finish forecasts: unlike the game's list display, the local construct applies even while dormant.
     projects: {
       get: tracked('projects', async function () {
         const blocked = this.blockedBonuses
@@ -397,7 +397,8 @@ export default {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_ResearchProject.ProjectID, FCT_ResearchProject.PopulationID, FCT_ResearchProject.TechID, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResSpecID as FieldID, FCT_ResearchProject.ResearchPointsRequired, FCT_ResearchProject.Pause, FCT_ResearchProject.AssignNew, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, FCT_Population.PopName, FCT_Commander.CommanderID, FCT_Commander.Name as ScientistName, FCT_Commander.ResSpecID as ScientistField, case when JOI_Research.CommanderID is null then 1 else JOI_Research.BonusValue end as ResearchBonus, case when JOI_Admin.CommanderID is null then 0 else JOI_Admin.BonusValue end as MaxLabs, FCT_Species.ResearchRateModifier * FCT_Race.Research * FCT_Race.EconomicProdModifier * FCT_Population.Efficiency * (1 - FCT_SystemBody.RadiationLevel / 10000.0) * (1 - FCT_Population.UnrestPoints / 100.0) * DIM_PopPoliticalStatus.ProductionMod * (FCT_Game.ResearchSpeed / 100.0) as OutputPerLab, FCT_AncientConstruct.ResearchField as LocalConstructField, FCT_AncientConstruct.ResearchBonus as LocalConstructBonus from FCT_ResearchProject
+        // Only an absent percentage or administration bonus row defaults to 1 or 0; a present NULL stays unknown.
+        const [rows] = await this.database.query(`select FCT_ResearchProject.ProjectID, FCT_ResearchProject.PopulationID, FCT_ResearchProject.TechID, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResSpecID as FieldID, FCT_ResearchProject.ResearchPointsRequired, FCT_ResearchProject.Pause, FCT_ResearchProject.AssignNew, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, FCT_Population.PopName, FCT_Commander.CommanderID, FCT_Commander.Name as ScientistName, FCT_Commander.ResSpecID as ScientistField, case when JOI_Research.CommanderID is null then 1 else JOI_Research.BonusValue end as ResearchBonus, case when JOI_Admin.CommanderID is null then 0 else JOI_Admin.BonusValue end as MaxLabs, FCT_Species.ResearchRateModifier, FCT_Race.Research as ResearchBase, FCT_Race.EconomicProdModifier, FCT_Population.Efficiency, FCT_SystemBody.RadiationLevel, FCT_Population.UnrestPoints, DIM_PopPoliticalStatus.ProductionMod, FCT_Game.ResearchSpeed, FCT_AncientConstruct.AncientConstructID as LocalConstructID, FCT_AncientConstruct.ResearchField as LocalConstructField, FCT_AncientConstruct.ResearchBonus as LocalConstructBonus from FCT_ResearchProject
           inner join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID
           inner join FCT_Race on FCT_Race.RaceID = FCT_ResearchProject.RaceID
           inner join FCT_Game on FCT_Game.GameID = FCT_ResearchProject.GameID
@@ -405,7 +406,7 @@ export default {
           inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID
           left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID
           left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus
-          left join FCT_AncientConstruct on FCT_AncientConstruct.SystemBodyID = FCT_Population.SystemBodyID and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID and FCT_AncientConstruct.Active = 1
+          left join FCT_AncientConstruct on FCT_AncientConstruct.SystemBodyID = FCT_Population.SystemBodyID and FCT_AncientConstruct.GameID = FCT_ResearchProject.GameID
           left join FCT_Commander on FCT_Commander.GameID = FCT_ResearchProject.GameID and FCT_Commander.RaceID = FCT_ResearchProject.RaceID and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID = FCT_ResearchProject.ProjectID and FCT_Commander.Deceased = 0
           left join FCT_CommanderBonuses as JOI_Research on JOI_Research.CommanderID = FCT_Commander.CommanderID and JOI_Research.BonusID = 3
           left join FCT_CommanderBonuses as JOI_Admin on JOI_Admin.CommanderID = FCT_Commander.CommanderID and JOI_Admin.BonusID = 27
@@ -483,18 +484,14 @@ export default {
       default: [],
     },
 
-    // One row per populated colony of the race on an active ancient construct, as the game counts them.
+    // Each active construct's racial contribution counts colonies with at least a million surface and eligible orbital people.
     constructs: {
       get: tracked('constructs', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_AncientConstruct.ResearchField as FieldID, FCT_AncientConstruct.ResearchBonus from FCT_AncientConstruct
-          inner join FCT_Population on FCT_Population.SystemBodyID = FCT_AncientConstruct.SystemBodyID
-          where FCT_AncientConstruct.GameID = ${this.GameID} and FCT_AncientConstruct.Active = 1 and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.Population >= 1`)
-
-        return rows
+        return loadResearchConstructs(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: [],
     },

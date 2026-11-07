@@ -180,7 +180,7 @@ const productionResults = async (context, fixtures, mutate) => {
     { ID: 1, PopulationID: 1, ScientistCommandID: 7, CommanderBonus: 1.5, ActualCommanderResearchBonus: 4 },
     { ID: 2, PopulationID: 1, ScientistCommandID: null, CommanderBonus: 1, ActualCommanderResearchBonus: 1 },
   ]
-  const database = () => cannedDatabase((sql) => (/^select FCT_ResearchQueue/.test(sql) ? [] : projects.map((project) => ({ ...project }))))
+  const database = () => cannedDatabase((sql) => (/^select FCT_ResearchProject/.test(sql) ? projects.map((project) => ({ ...project })) : []))
   const page = (result, connection) => instantiate(options, { $store: storeOver(context.store, result), database: connection, GameID: 1, RaceID: 2 })
 
   const blocked = await page(fixtures.renamed3, database()).runAsync('researches')

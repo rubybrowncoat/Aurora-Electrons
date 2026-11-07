@@ -972,7 +972,7 @@ const defineCases = (modules) => {
   const designRules = modules['design-rules']
   const provenance = modules.provenance
   const counter = { count: (value) => (value === null || value === undefined ? '—' : String(value)) }
-  const labProject = (extra = {}) => ({ ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, OutputPerLab: 10, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null, ...extra })
+  const labProject = (extra = {}) => ({ ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, ResearchBase: 10, ResearchRateModifier: 1, EconomicProdModifier: 1, Efficiency: 1, RadiationLevel: 0, UnrestPoints: 0, ProductionMod: 1, ResearchSpeed: 100, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null, ...extra })
   const techRow = (id, extra = {}) => ({ TechSystemID: id, Name: `Tech ${id}`, DevelopCost: 100, FieldID: 1, TechTypeID: 1, TypeName: 'Type', RaceID: 0, Prerequisite1: 0, Prerequisite2: 0, ...extra })
   const componentRow = (extra = {}) => ({ SDComponentID: 1, Name: 'Armour', CategoryID: 1, ComponentTypeID: 1, ComponentValue: 10, Size: 2, Cost: 4, Obsolete: 0, MilitarySystem: 1, ShippingLineSystem: 0, Baseline: 0, ...extra })
 
@@ -990,7 +990,7 @@ const defineCases = (modules) => {
 
   invariant('research', 'a paused project makes a known 0; every project unrated leaves the output unavailable and no projects at all a known 0', () => {
     const paused = research.outputResult(research.scheduleProjects([labProject({ Pause: 1 })], [], new Map()))
-    const unrated = research.outputResult(research.scheduleProjects([labProject({ CommanderID: 0 }), labProject({ ProjectID: 2, OutputPerLab: null })], [], new Map()))
+    const unrated = research.outputResult(research.scheduleProjects([labProject({ CommanderID: 0 }), labProject({ ProjectID: 2, ResearchBase: null })], [], new Map()))
     const none = research.outputResult([])
 
     assert.equal(paused.result.value, 0)
@@ -1000,7 +1000,7 @@ const defineCases = (modules) => {
   })
 
   invariant('research', 'a project missing its labs, output per lab, scientist bonus or field has an unavailable rate that names the input', () => {
-    ;[['Facilities', 'labs'], ['OutputPerLab', 'output per lab'], ['ResearchBonus', 'Research bonus'], ['FieldID', 'field']].forEach(([field, word]) => {
+    ;[['Facilities', 'labs'], ['ResearchBase', 'output per lab'], ['ResearchRateModifier', 'output per lab'], ['EconomicProdModifier', 'output per lab'], ['Efficiency', 'output per lab'], ['RadiationLevel', 'output per lab'], ['UnrestPoints', 'output per lab'], ['ProductionMod', 'output per lab'], ['ResearchSpeed', 'output per lab'], ['ResearchBonus', 'Research bonus'], ['FieldID', 'field']].forEach(([field, word]) => {
       const [project] = research.scheduleProjects([labProject({ [field]: null })], [], new Map())
 
       assert.equal(project.rateResult.status, 'unavailable', field)
@@ -1089,7 +1089,7 @@ const defineCases = (modules) => {
 
     const clock = { StartYear: 2000, GameTime: 0 }
     const known = labProject()
-    const unrated = labProject({ ProjectID: 2, Name: 'Shields', OutputPerLab: null })
+    const unrated = labProject({ ProjectID: 2, Name: 'Shields', ResearchBase: null })
     const unflagged = labProject({ ProjectID: 3, Name: 'Engines', Pause: null })
     const paused = labProject({ ProjectID: 4, Name: 'Armour', Pause: 1 })
     const mixed = research.nextLandingResult(research.scheduleProjects([known, unrated, unflagged, paused], [], new Map()), clock)
@@ -1318,7 +1318,7 @@ const defineCases = (modules) => {
   const colonyOf = (extra = {}) => ({ installations: 0, radius: 6000, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, ships: [], ...extra })
   const shipOf = (extra = {}) => ({ ShipID: 1, PopulationID: 1, ParentCommandID: 0, FleetSystemID: 1, crew: 1, captain: 1, captained: true, modules: 100, ...extra })
   const rateOf = (source, { raceRate = 0.001, speed = 100 } = {}) => terraform.terraformBreakdown({ raceRate, speed, source, admins: {} }).rate
-  const researchRow = (extra = {}) => ({ Facilities: 4, ActualCommanderResearchBonus: 1.5, ActualAnomalyBonus: 1, CommanderField: 3, ...extra })
+  const researchRow = (extra = {}) => ({ ResearchBase: 2, ResearchRateModifier: 1, EconomicProdModifier: 1, Efficiency: 1, RadiationLevel: 0, UnrestPoints: 0, ProductionMod: 1, ResearchSpeed: 100, Facilities: 4, ProjectField: 3, ScientistCommandID: 1, ActualCommanderResearchBonus: 1.5, ActualAnomalyBonus: 1, CommanderField: 3, ...extra })
   const industryRow = (id, extra = {}) => ({ ID: id, ProductionType: 0, Percentage: 50, Amount: 10, ProdPerUnit: 100, Queue: 0, Paused: 0, ...extra })
   const capacityResult = (value) => (value === null ? provenance.unavailable({ rule: 'production.industryRate', missing: ['the colony\'s production modifiers'] }) : provenance.ofRule({ rule: 'production.industryRate', value, inputs: { present: ['capacity'] } }))
 
@@ -1331,16 +1331,18 @@ const defineCases = (modules) => {
     ;['refineryOutput', 'soriumLasts', 'mspProduction', 'mspOutput', 'maintenanceLocation'].forEach((key) => assert.ok(provenance.getRule(`logistics.${key}`), key))
   })
 
-  invariant('production', 'a research rate with no scientist takes no bonus and says so, and a missing modifier row or facility count leaves it unavailable, never 0', () => {
-    const alone = production.researchRate(colonyModifiers, researchRow({ CommanderField: null, ActualCommanderResearchBonus: 1 }))
+  invariant('production', 'a research rate with no scientist takes no bonus and says so, and a missing output or facility count leaves it unavailable, never 0', () => {
+    const alone = production.researchRate(researchRow({ ScientistCommandID: null, CommanderField: null, ActualCommanderResearchBonus: 1 }))
 
     assert.equal(alone.value, 8)
     assert.ok(alone.assumptions.some((text) => text.includes('No scientist')))
-    assert.equal(production.researchRate(colonyModifiers, researchRow()).value, 12)
-    assert.equal(production.researchRate(undefined, researchRow()).status, 'unavailable')
-    assert.ok(production.researchRate(undefined, researchRow()).inputs.missing.includes('the colony\'s production modifiers'))
-    assert.equal(production.researchRate(colonyModifiers, researchRow({ Facilities: null })).status, 'unavailable')
-    assert.equal(production.researchRate(colonyModifiers, researchRow({ Facilities: 0 })).value, 0)
+    assert.equal(production.researchRate(researchRow()).value, 12)
+    ;['ResearchBase', 'ResearchRateModifier', 'EconomicProdModifier', 'Efficiency', 'RadiationLevel', 'UnrestPoints', 'ProductionMod', 'ResearchSpeed'].forEach((field) => {
+      assert.equal(production.researchRate(researchRow({ [field]: null })).status, 'unavailable')
+      assert.ok(production.researchRate(researchRow({ [field]: null })).inputs.missing.includes('the colony\'s research output per lab'))
+    })
+    assert.equal(production.researchRate(researchRow({ Facilities: null })).status, 'unavailable')
+    assert.equal(production.researchRate(researchRow({ Facilities: 0 })).value, 0)
   })
 
   invariant('production', 'an industrial project with an unknown capacity has no rate and no finish and is not idle, while a real 0 capacity is a rate of 0 and an idle job', () => {
@@ -2065,16 +2067,16 @@ const defineCases = (modules) => {
     assert.ok(searchable.text.includes('30%') && searchable.text.includes('10% possible'))
   })
 
-  invariant('warnings', 'an ancient construct with no known colony of 10 million is not evaluated while a population or its state is missing, and one that is known to be dormant or short of people warns', async () => {
+  invariant('warnings', 'an ancient construct with no known colony of 1 million is not evaluated while a population or its state is missing, and one that is known to be dormant or short of people warns', async () => {
     const construct = (AncientConstructID, Active, PopulationID, Population) => ({ AncientConstructID, Active, ResearchBonus: 1.25, FieldName: 'Sensors', SystemBodyID: AncientConstructID, PlanetNumber: 1, OrbitNumber: 0, BodyClass: 1, SystemBodyName: `Body ${AncientConstructID}`, ComponentNumber: 1, SystemName: 'Sol', PopulationID, Population })
-    const rows = await readCheck('known-unexploited-constructs', (sql) => (sql.includes('FCT_AncientConstruct') ? [construct(1, 1, 11, null), construct(2, null, 12, 25), construct(3, 0, null, null), construct(4, 1, 13, 25), construct(5, 1, 14, 5)] : []))
+    const rows = await readCheck('known-unexploited-constructs', (sql) => (sql.includes('FCT_AncientConstruct') ? [construct(1, 1, 11, null), construct(2, null, 12, 25), construct(3, 0, null, null), construct(4, 1, 13, 25), construct(5, 1, 14, 0.5)] : sql.includes('FCT_Population.*') ? [[11, null], [12, 25], [13, 25], [14, 0.5]].map(([PopulationID, Population]) => ({ CensusRowID: PopulationID, PopulationID, Population, RaceID: 1, GameID: 1, SystemBodyID: PopulationID })) : []))
     const byId = Object.fromEntries(rows.map((row) => [row.id, row]))
 
     assert.deepEqual(Object.keys(byId), ['construct:1', 'construct:2', 'construct:3', 'construct:5'])
-    assert.deepEqual(byId['construct:1'].unevaluated.inputs.missing, ['the population of a colony on the construct\'s body'])
+    assert.deepEqual(byId['construct:1'].unevaluated.inputs.missing, ['surface population'])
     assert.deepEqual(byId['construct:2'].unevaluated.inputs.missing, ['whether the ancient construct is active'])
     assert.equal(byId['construct:3'].cells.bonus, 'Dormant')
-    assert.equal(byId['construct:5'].cells.blocker, 'Lacking 10 million population on the body')
+    assert.equal(byId['construct:5'].cells.blocker, 'Lacking 1 million population at any colony on the body')
   })
 
   invariant('warnings', 'a colony whose factory amounts are all unstored is not evaluated and names the amount, one known positive amount still proves free capacity, a real 0 amount has none, and an unstored installation type is named', async () => {

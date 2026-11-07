@@ -356,7 +356,7 @@ const synthetic = (m, tree) => {
 
     ['the RP left is the stored remainder or the cost less banked points, and the time left is that over the rate, as the definitions say', async () => {
       const tech = { TechSystemID: 1, Name: 'Tech', DevelopCost: 100, FieldID: 1, TechTypeID: 1, TypeName: 'Type', RaceID: 0, Prerequisite1: 0, Prerequisite2: 0 }
-      const project = { ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, OutputPerLab: 10, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null }
+      const project = { ProjectID: 1, Name: 'Lasers', CommanderID: 9, ResearchBonus: 1, ScientistField: 1, FieldID: 1, ResearchBase: 10, ResearchRateModifier: 1, EconomicProdModifier: 1, Efficiency: 1, RadiationLevel: 0, UnrestPoints: 0, ProductionMod: 1, ResearchSpeed: 100, Facilities: 3, Pause: 0, ResearchPointsRequired: 300, LocalConstructField: null, LocalConstructBonus: null }
       const remaining = (state) => research.evaluateResearch(research.buildTechGraph([tech]), research.researchState({ raceId: 1, researched: [], ...state })).get(1).remaining
       const years = (left) => research.scheduleProjects([{ ...project, ResearchPointsRequired: left }], [], new Map())[0].yearsResult.value
 

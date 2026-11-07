@@ -188,10 +188,13 @@ const MASS_DRIVER_READS = 'DIM_PlanetaryInstallation(MassDriverValue) FCT_MassDr
 const ANCHORED_OBJECT_READS = 'FCT_Lifepods(LifepodID GameID SystemID OrbitLagrangeID Xcor Ycor) FCT_Wrecks(WreckID GameID SystemID OrbitLagrangeID Xcor Ycor)'
 
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
+// The columns the shared orbital colonist census reads; every input that consumes it names them.
+const ORBITAL_CENSUS_READS = 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_DamagedComponent(ComponentID GameID Number ShipID) FCT_Fleet(AssignedPopulationID CivilianFunction FleetID GameID RaceID Xcor Ycor) FCT_MoveOrders(FleetID GameID) FCT_Population(GameID Population PopulationID RaceID SystemBodyID) FCT_Ship(FleetID GameID ShipClassID ShipID) FCT_ShipCargo(Amount CargoTypeID GameID ShipID SpeciesID) FCT_ShipClass(ArkShip GameID ShipClassID) FCT_ShipDesignComponents(ComponentTypeID ComponentValue GameID SDComponentID SpecialFunction) FCT_Species(GameID SpeciesID) FCT_SystemBody(GameID SystemBodyID Xcor Ycor)'
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
   '/production': Object.freeze({
     colonyFacilities: 'DIM_PlanetaryInstallation(ResearchValue GroundTrainingValue)',
+    researches: ORBITAL_CENSUS_READS,
     procurementSources: 'FCT_ShipDesignComponents(Size Cost)',
     page: FLEET_COMMAND_READS,
   }),
@@ -201,6 +204,7 @@ const EXTRA_READS = Object.freeze({
     'check:free-construction-capacity': 'DIM_PlanetaryInstallation(ConstructionValue)',
     'check:free-ordnance-capacity': 'DIM_PlanetaryInstallation(OrdnanceProductionValue)',
     'check:free-fighter-capacity': 'DIM_PlanetaryInstallation(FighterProductionValue)',
+    'check:known-unexploited-constructs': ORBITAL_CENSUS_READS,
   }),
   '/habitability': Object.freeze({
     gases: 'DIM_Gases(GasID Name FreezingPoint GHGas AntiGHGas DangerousOxygen DangerousPPMOxygen DangerousMethane DangerousPPMMethane DangerousSulphur DangerousPPMSulphur DangerousAmmonia DangerousPPMAmmonia)',
@@ -214,6 +218,7 @@ const EXTRA_READS = Object.freeze({
   '/mineral-outlook': Object.freeze({ DeficitSites: 'DIM_PlanetaryInstallation(MiningProductionValue Workers) FCT_MineralDeposit(Accessibility Amount) FCT_SystemBody(Xcor)', deploymentSources: BUILDABILITY_READS, page: MASS_DRIVER_READS }),
   '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS, page: START_DELAY_READS, positionFacts: ANCHORED_OBJECT_READS }),
   '/information': Object.freeze({ page: START_DELAY_READS, shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)', fuelSites: FUEL_SITE_READS, shippingTax: 'FCT_Race(GameID RaceID ShippingLineTax NPR)', positionFacts: ANCHORED_OBJECT_READS }),
+  '/technologies': Object.freeze({ constructs: ORBITAL_CENSUS_READS }),
   '/designed-tech': Object.freeze({
     categories: 'DIM_ResearchCategories(CategoryID Name)',
     classUsage: 'FCT_Ship(ShipClassID GameID RaceID Destroyed)',

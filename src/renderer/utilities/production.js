@@ -7,6 +7,7 @@ import { MINERALS, projectShortages } from './minerals'
 import { capacityKind } from './production-types'
 import { isFullCapacityYard } from './shipyard-types'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
+import { researchAnnualRate, researchOutputPerLab } from './research'
 
 const PRODUCTION_VERSIONS = ['3.2.x']
 // The versions of the rules written against the line's source: the credit of stored components and the cycle forecast's mineral floor.
@@ -73,11 +74,11 @@ registerRule({
 
 registerRule({
   id: 'production.researchRate',
-  versions: ['2.7.x'],
+  versions: PRODUCTION_VERSIONS,
   units: 'RP/yr',
   verification: 'estimated',
-  structure: ['FCT_ResearchProject.Facilities', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses (Research)', 'FCT_AncientConstruct.ResearchField, ResearchBonus', 'FCT_Race.Research', 'FCT_Species.ResearchRateModifier', 'FCT_Game.ResearchSpeed'],
-  note: `The project's facilities times the colony's overall research modifier (race and species rate, economy, efficiency, radiation, stability, political status and the game's research speed) times the scientist's Research bonus (four times the bonus less 3 in the scientist's own field, the bonus itself outside it) times the anomaly bonus. ${ESTIMATE}`,
+  structure: ['FCT_ResearchProject.Facilities, ResSpecID', 'FCT_Commander.ResSpecID', 'FCT_CommanderBonuses (Research)', 'FCT_AncientConstruct.Active, ResearchField, ResearchBonus', 'FCT_Population.Population and eligible orbital colonists', 'FCT_Race.Research', 'FCT_Species.ResearchRateModifier', 'FCT_Game.ResearchSpeed'],
+  note: `The project's facilities times the colony's research output per lab, the scientist's Research bonus (four times the bonus less 3 in the scientist's own field), the local construct's bonus in its field whether active or dormant, and the racial field factor. Each active construct adds a tenth of its bonus above 1 to its racial field factor for every colony with at least a million surface and eligible orbital people. Radiation production is at least 0. ${ESTIMATE}`,
   assumptions: ['A project with no scientist, or a scientist without the Research bonus, takes no bonus (×1)'],
 })
 
@@ -138,11 +139,11 @@ registerRule({
 })
 
 ;[
-  { key: 'research', versions: ['2.7.x'], note: 'The remaining research points over the project\'s rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs.' },
+  { key: 'research', versions: PRODUCTION_VERSIONS, note: 'The remaining research points over the project\'s effective rate, in days; for a queued tech the stored development cost less the points saved on it. The development cost is the stored one: the game floors it at the build cost when it sets it, so the figure is never recomputed here. A queued tech starts when the one ahead finishes, with the same labs and scientist but its own field bonuses. The game carries unused time into that tech; the date is continuous time and the game completes it at the end of the first increment at or after it.', assumptions: ['The current labs, scientist, colony output and racial field bonuses stay fixed throughout the queue'] },
   { key: 'ship', versions: ['3.2.x'], structure: ['production.shipRate', 'FCT_ShipyardTask.TotalBP, CompletedBP, NumShips'], note: 'The task\'s remaining build points over the yard\'s rate, in days; a task that repeats (a count of ships above 1) adds the whole cost of each later hull to the current hull\'s balance, as the game\'s own date does, whatever credit the later hulls will take. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
   { key: 'training', versions: ['2.7.x'], note: 'The task\'s remaining build points over its rate, in days.' },
-].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}` }))
+].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`], assumptions = [] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}`, assumptions }))
 
 // Population.ProcessTerraforming (Population.cs:1057-1130; minimum gravity in Helpers.cs:861), Game.ProcessConstructionCycleStrategicUpdates (Game.cs:23908-23909, 23984), ProcessWaterVapourCondensation/Evaporation (Game.cs:27382-27499) and SystemBody.ProcessHydrosphereTransition/UpdateAtmosPress/UpdateSurfaceTemp (SystemBody.cs:2020-2045, 2415-2524).
 registerRule({
@@ -616,24 +617,40 @@ export const jobStatus = ({ paused, rate, stalled, finish = null }) => {
   return rate.value > 0 ? { id: 'running', label: 'Running' } : { id: 'stalled', ...stalled }
 }
 
-// A research project's rate in RP a year: the project's facilities times the colony's research modifier and the bonuses. `project`: { Facilities, ActualCommanderResearchBonus, ActualAnomalyBonus, CommanderField }.
-export const researchRate = (modifiers, project) => {
+// A research project's processor rate in RP a year, with the racial bonus of the project's own field.
+export const researchRate = (project, bonuses = {}) => {
   const rule = 'production.researchRate'
-  const missing = [...modifierGaps(modifiers, ['OverallResearchModifier']), ...(isNumber(project.Facilities) ? [] : ['the facilities the project holds']), ...(isNumber(project.ActualCommanderResearchBonus) ? [] : ['the scientist\'s research bonus']), ...(isNumber(project.ActualAnomalyBonus) ? [] : ['the anomaly bonus'])]
+  const outputPerLab = researchOutputPerLab(project)
+  const zeroOutput = (outputPerLab !== null && outputPerLab.m === 0n) || project.Facilities === 0
+  const fieldBonus = zeroOutput ? 1 : project.ProjectField in bonuses ? bonuses[project.ProjectField] : 1
+  const missing = [...(outputPerLab === null ? ['the colony\'s research output per lab'] : []), ...(isNumber(project.Facilities) ? [] : ['the facilities the project holds']), ...(isNumber(project.ActualCommanderResearchBonus) ? [] : ['the scientist\'s research bonus']), ...(isNumber(project.ActualAnomalyBonus) ? [] : ['the anomaly bonus']), ...(isNumber(fieldBonus) && (zeroOutput || !('unknown' in bonuses)) ? [] : ['the racial research field bonus'])]
+  if (!zeroOutput) {
+    missing.push(...(bonuses.missing ? bonuses.missing[project.ProjectField] || [] : []), ...(bonuses.missing ? bonuses.missing.unknown || [] : []))
+  }
+  if (project.AnomalyID != null && !isNumber(project.AnomalyField)) {
+    missing.push('the colony\'s ancient construct field')
+  }
+  if (!isNumber(project.ProjectField)) {
+    missing.push('the research field of the tech')
+  }
+  if (project.ScientistCommandID != null && !isNumber(project.CommanderField)) {
+    missing.push('the scientist\'s research field')
+  }
 
   if (missing.length) {
     return unavailable({ rule, missing })
   }
 
-  return ofRule({ rule, value: project.ActualCommanderResearchBonus * project.ActualAnomalyBonus * modifiers.OverallResearchModifier * project.Facilities, inputs: { present: [MODIFIER_TEXT.OverallResearchModifier, 'the project\'s facilities and bonuses'] }, assumptions: project.CommanderField ? [] : ['No scientist is assigned, so the project takes no research bonus (×1)'] })
+  return ofRule({ rule, value: researchAnnualRate({ outputPerLab, facilities: project.Facilities, scientist: project.ActualCommanderResearchBonus, local: project.ActualAnomalyBonus, racial: fieldBonus }), inputs: { present: ['the colony\'s research output per lab', 'the project\'s facilities and bonuses', 'the racial research field bonus'] }, assumptions: project.ScientistCommandID != null ? [] : ['No scientist is assigned, so the project takes no research bonus (×1)'] })
 }
 
-// The project a queued tech runs as: the same labs, the scientist's bonus out of his field (the bonus itself) or in it (four times it less 3, as the project's query gives it), and the anomaly bonus only in the project's field.
-export const queuedResearch = (project, queue) => {
-  const inField = project.ProjectField === queue.ProjectField
-
-  return { ...project, ActualCommanderResearchBonus: inField ? project.ActualCommanderResearchBonus : project.CommanderBonus, ActualAnomalyBonus: inField ? project.ActualAnomalyBonus : 1 }
-}
+// A queued tech keeps the labs and scientist, but selects specialty and the local construct by its own field.
+export const queuedResearch = (project, queue) => ({
+  ...project,
+  ProjectField: queue.ProjectField,
+  ActualCommanderResearchBonus: !isNumber(queue.ProjectField) || (project.ScientistCommandID != null && !isNumber(project.CommanderField)) ? null : isNumber(project.CommanderBonus) ? project.CommanderField === queue.ProjectField ? 4 * project.CommanderBonus - 3 : project.CommanderBonus : null,
+  ActualAnomalyBonus: !isNumber(queue.ProjectField) || (project.AnomalyID != null && !isNumber(project.AnomalyField)) ? null : project.AnomalyField === queue.ProjectField ? project.AnomalyBonus : 1,
+})
 
 // The RP a queued tech still costs: its stored development cost less the points saved from cancelled research on it (none saved is 0), never below 0; null when the cost, or the points of a saved row, are not stored. The stored cost is used as the game set it: `Game.CalculateDevelopmentCost` (Game.cs:30919-30933) floors a computed development cost at the build cost before it is stored, so the figure is never recomputed here.
 export const queuedRemaining = (queue) => (!isNumber(queue.DevelopCost) || !isNumber(queue.Saved) ? null : Math.max(0, queue.DevelopCost - queue.Saved))
