@@ -136,7 +136,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['production.industryRate'],
-  note: `The colony's industrial projects run cycle by cycle, each building its share of capacity capped by the amount left and by the minerals remaining after earlier projects. That request is floored to four decimals before separate fuel and conversion limits. The finish is the end of the completing cycle. Mineral balances remain nonnegative. A queued project starts when a project of its kind finishes and its whole share fits, and builds from the next cycle. The order of projects is not saved: where stock is contested the forecast reports the earliest and range over the orders tried. For colonies with missing inputs, the fallback is remaining points over rate without mineral simulation, with continuous queue starts. ${ESTIMATE}`,
+  note: `The colony's industrial projects run cycle by cycle, each building its share of capacity capped by the amount left and by the minerals remaining after earlier projects. That request is floored to four decimals before separate fuel and conversion limits. The finish is the end of the completing cycle. Each mineral debit leaves no balance below 0. A queued project starts when a project of its kind finishes and its whole share fits, and builds from the next cycle. The order of projects is not saved: where stock is contested the forecast reports the earliest and range over the orders tried. For colonies with missing inputs, the fallback is remaining points over rate without mineral simulation, with continuous queue starts. ${ESTIMATE}`,
 })
 
 ;[
