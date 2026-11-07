@@ -157,9 +157,9 @@ const RACE = 5
 // The colonies worked by hand. Colony cost 0: agriculture takes 5% of the people; services take (population / 1000 M)^0.25, which is half of 62.5 M people. 62.5 M people have 28.125 M workers.
 const world = (m) => {
   const { cf, col, provenance } = m
-  const colony = (over = {}) => ({ PopulationID: 1, PopName: 'Alpha', Population: 62.5, InstallationWorkers: 20, YardWorkers: 0, ReqInf: 0, PopulationDensityModifier: 1, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, ...over })
+  const colony = (over = {}) => ({ PopulationID: 1, PopName: 'Alpha', Population: 62.5, OrbitalPopulation: 0, CurrentColonyCost: 0, MaximumColonyCost: 0, InstallationWorkers: 20, YardWorkers: 0, ReqInf: 0, PopulationDensityModifier: 1, LowGravity: 0, Infrastructure: 0, LGInfrastructure: 0, ...over })
   // A colony of colony cost `cost`: ReqInf = cost x population x 100 / density.
-  const costed = (cost, over = {}) => { const base = colony(over); return { ...base, ReqInf: (cost * base.Population * 100) / base.PopulationDensityModifier } }
+  const costed = (cost, over = {}) => { const base = colony(over); return { ...base, CurrentColonyCost: cost, MaximumColonyCost: cost, ReqInf: (cost * base.Population * 100) / base.PopulationDensityModifier } }
   const results = (c) => { const cost = col.colonyCostResult(c); return { cost, workers: col.workerSplitResult(c, cost) } }
   const split = (population, required, cost = 0) => col.workerSplit({}, population, cost, required)
   const source = (over = {}) => ({ PopulationID: 1, ColonistDestination: 1, PoliticalStatus: 1, MilitaryRestrictedColony: 0, AvailableColonists: 4, ColonizationPressure: 2, ...over })
@@ -1141,7 +1141,7 @@ const MUTATIONS = [
   { name: 'the panel showing its figures while the read is out', file: V, find: 'return this.loading || !!this.failed', replace: 'return false', fails: ['optional'] },
   { name: 'the page passing no failure to the panel', file: P, at: /(<colonist-floor\b[^>]*?)\s:failed\s*=\s*(?:"[^"]*"|'[^']*')/, to: (m) => m[1], fails: ['page'] },
   { name: 'the page mounting the panel without the queue flag', file: P, at: /(<colonist-floor\b[^>]*?)\s:committed-view\s*=\s*(?:"[^"]*"|'[^']*')/, to: (m) => m[1], fails: ['page'] },
-  { name: 'the staffing search without the services-cap stretch', file: U, find: '...(SERVICE_CAP_POPULATION < population ? [SERVICE_CAP_POPULATION] : [])', replace: '...[]', fails: ['search'] },
+  { name: 'the staffing search without the services-cap stretch', file: U, find: '...(SERVICE_CAP_POPULATION - orbitalPopulation > 0 && SERVICE_CAP_POPULATION - orbitalPopulation < population ? [SERVICE_CAP_POPULATION - orbitalPopulation] : [])', replace: '...[]', fails: ['search'] },
   { name: 'the shipping-line pickup not bounded by the colony\'s people', file: U, find: 'const problem = batchProblem(\'colonistFloor.civilian\', { workers, batch })', replace: 'const problem = batch.state === \'ok\' ? null : batchProblem(\'colonistFloor.civilian\', { workers, batch })', fails: ['pool'] },
   { name: 'the present support counting the deliveries on their way', file: U, find: 'infrastructureCapResult(infrastructureOf(colony, null), rate)', replace: 'colony.r.cap', fails: ['panel'] },
   { name: 'a batch leaving more people than the built infrastructure supports not flagged', file: V, find: 'unsupportedAfter: outcome !== null && supportNow !== null && outcome.remaining > supportNow + 1e-9,', replace: 'unsupportedAfter: false,', fails: ['panel'] },

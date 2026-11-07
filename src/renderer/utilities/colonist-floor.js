@@ -26,17 +26,17 @@ export const NO_COLONIST_SOURCES = Object.freeze({ rows: Object.freeze([]), prob
 
 registerRule({
   id: 'colonistFloor.staffing',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_Population.Population', 'FCT_PopulationInstallations.Amount', 'FCT_Shipyard.Slipways, ParentShipID', 'the worker split rule'],
   note: 'The lowest population the colony could be left with that still has as many workers as its installations and shipyards need today, found by taking people away step by step and stopping before the first step that leaves it short. A shipyard aboard a ship needs no workers from the colony. Every population between that lowest one and the current one keeps the colony staffed, so the figure never counts a removal that passes through a shortage. The worker split under it is confirmed against stored efficiency; the search for the limit is not checked against saved data. A colony already short has no room to give.',
-  assumptions: ['the installations, shipyards and colony cost stay as they are today', 'the services and agriculture take their share of the people who remain', 'people living aboard Ark ships are not counted as workers'],
+  assumptions: ['the installations, shipyards and maximum colony cost stay as they are today', 'agriculture takes its share of the surface people who remain, then services take their share of surface and orbital people', 'orbital population stays at the colony while surface colonists leave'],
 })
 
 registerRule({
   id: 'colonistFloor.removable',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['the staffing rule', 'the retained floor entered here'],
@@ -46,7 +46,7 @@ registerRule({
 
 registerRule({
   id: 'colonistFloor.outcome',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['the staffing rule', 'the batch entered here'],
@@ -56,7 +56,7 @@ registerRule({
 
 registerRule({
   id: 'colonistFloor.committed',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['the committed workforce rule', 'the staffing rule'],
@@ -125,17 +125,17 @@ export const parseAmount = (text) => {
 }
 
 // The populations the downward search takes one stretch at a time: 0, the services cap when it lies below `population`, and `population`. On each stretch the staffed populations are a single interval that reaches the stretch's upper end whenever that end is staffed (the workers only rise above the cap, and the curve below it is concave), so a stretch whose lower end is short has its boundary inside it and nothing narrower than a step can be skipped.
-const staffingBreakpoints = ({ population }) => [...new Set([0, ...(SERVICE_CAP_POPULATION < population ? [SERVICE_CAP_POPULATION] : []), population])].sort((a, b) => a - b)
+const staffingBreakpoints = ({ population, orbitalPopulation }) => [...new Set([0, ...(SERVICE_CAP_POPULATION - orbitalPopulation > 0 && SERVICE_CAP_POPULATION - orbitalPopulation < population ? [SERVICE_CAP_POPULATION - orbitalPopulation] : []), population])].sort((a, b) => a - b)
 
 // The lowest population that keeps `required` workers staffed (null when the colony is short today): going down from `population` one stretch at a time, the first stretch whose lower end is short is narrowed by bisection to the last population that is not. 0 when no removal leaves the colony short.
-export const staffingMinimum = ({ population, cost, required }) => {
-  const staffed = (level) => workerSplit({}, level, cost, required).free >= -EPSILON
+export const staffingMinimum = ({ population, orbitalPopulation = 0, cost, required }) => {
+  const staffed = (level) => workerSplit({ OrbitalPopulation: orbitalPopulation }, level, cost, required).free >= -EPSILON
 
   if (!(population >= 0) || !staffed(population)) {
     return null
   }
 
-  const points = staffingBreakpoints({ population })
+  const points = staffingBreakpoints({ population, orbitalPopulation })
 
   for (let at = points.length - 1; at > 0; at -= 1) {
     if (!staffed(points[at - 1])) {
@@ -178,10 +178,10 @@ export const removalLimit = ({ population, floor, minimum }) => {
 }
 
 // What a colony is left with after `batch` leaves: the population and its split, the workers short (never negative) and what breaks. `before` is the split today.
-export const batchOutcome = ({ population, cost, required, batch, floor = null }) => {
+export const batchOutcome = ({ population, orbitalPopulation = 0, cost, required, batch, floor = null }) => {
   const remaining = Math.max(0, population - batch)
-  const before = workerSplit({}, population, cost, required)
-  const after = workerSplit({}, remaining, cost, required)
+  const before = workerSplit({ OrbitalPopulation: orbitalPopulation }, population, cost, required)
+  const after = workerSplit({ OrbitalPopulation: orbitalPopulation }, remaining, cost, required)
   const shortage = Math.max(0, -after.free)
   const short = shortage > WORKER_TOLERANCE
   const breaks = [...(floor !== null && remaining < floor - EPSILON ? ['floor'] : []), ...(short ? ['staffing'] : [])]
@@ -190,16 +190,16 @@ export const batchOutcome = ({ population, cost, required, batch, floor = null }
 }
 
 // The people of the colony as the worker split counts them, from its result: { population, required }.
-const termsOf = (workers) => ({ population: workers.population, required: workers.required })
+const termsOf = (workers) => ({ population: workers.population, orbitalPopulation: workers.orbitalPopulation, required: workers.required })
 
 // The staffing figures of a colony today, from the Outlook's worker split and colony cost results: { population, required, free, workers, minimum, short } with `minimum` the staffing minimum.
 export const staffingResult = ({ workers, cost }) => combine({
   rule: 'colonistFloor.staffing',
   parts: { workers, cost },
   compute: ({ workers: split, cost: value }) => {
-    const { population, required } = termsOf(split)
+    const { population, orbitalPopulation, required } = termsOf(split)
 
-    return { population, required, free: split.free, workers: split.available, service: split.service, agriculture: split.agriculture, minimum: staffingMinimum({ population, cost: value, required }), short: -split.free > WORKER_TOLERANCE }
+    return { population, orbitalPopulation, required, free: split.free, workers: split.available, service: split.service, agriculture: split.agriculture, minimum: staffingMinimum({ population, orbitalPopulation, cost: value, required }), short: -split.free > WORKER_TOLERANCE }
   },
 })
 
@@ -241,7 +241,7 @@ export const outcomeResult = ({ workers, cost, batch, floor }) => {
   return combine({
     rule: 'colonistFloor.outcome',
     parts: { workers, cost },
-    compute: ({ workers: split, cost: value }) => batchOutcome({ population: split.population, cost: value, required: split.required, batch: batch.value, floor: floor.state === 'ok' ? floor.value : null }),
+    compute: ({ workers: split, cost: value }) => batchOutcome({ population: split.population, orbitalPopulation: split.orbitalPopulation, cost: value, required: split.required, batch: batch.value, floor: floor.state === 'ok' ? floor.value : null }),
   })
 }
 
@@ -256,13 +256,13 @@ export const committedResult = ({ workers, cost, committed, floor, batch }) => {
     parts: { workers, cost, committed },
     assumptions: floor.state === 'ok' ? ['the retained floor entered here'] : ['no retained floor is set'],
     compute: ({ workers: split, cost: value, committed: queue }) => {
-      const { population } = termsOf(split)
+      const { population, orbitalPopulation } = termsOf(split)
       const side = (series) => {
         const required = series[series.length - 1]
-        const minimum = staffingMinimum({ population, cost: value, required })
+        const minimum = staffingMinimum({ population, orbitalPopulation, cost: value, required })
         const usable = batch.state === 'ok' && batch.value <= population + EPSILON
 
-        return { required, minimum, ...removalLimit({ population, floor: floor.value, minimum }), population, outcome: usable ? batchOutcome({ population, cost: value, required, batch: batch.value, floor: floor.state === 'ok' ? floor.value : null }) : null }
+        return { required, minimum, ...removalLimit({ population, floor: floor.value, minimum }), population, outcome: usable ? batchOutcome({ population, orbitalPopulation, cost: value, required, batch: batch.value, floor: floor.state === 'ok' ? floor.value : null }) : null }
       }
 
       return { supported: side(queue.required.low), possible: side(queue.required.high) }

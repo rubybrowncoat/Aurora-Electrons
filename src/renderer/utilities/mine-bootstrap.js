@@ -25,6 +25,7 @@ registerRule({
   note: 'What a number of one installation type takes: its build cost times the number, its cargo points times the number (an installation weighs its cargo points in tonnes of cargo), the workers it needs and the minerals of its recipe. A type with Workers above 0 is manned, one with 0 is automated and needs no workers.',
 })
 
+// Worker arithmetic: Population.RecalculateWorkforceBreakdown, Population.cs:9219-9253. Fresh bare-result wrappers still erase the retained Ark membership (B11, family 13) and capacity geometry (B06, family 12), so this registration is not released by the arithmetic repair.
 registerRule({
   id: 'mineBootstrap.localBuild',
   versions: ['2.7.x'],
@@ -35,6 +36,7 @@ registerRule({
   assumptions: ['the idle share stays as it is', 'the whole idle share goes to the mines', 'the mineral stock covers the recipe'],
 })
 
+// The repaired labour split still erases B11/B06 inputs, and route timing also retains B12. Keep the registration retained until those families release every erased primitive.
 registerRule({
   id: 'mineBootstrap.import',
   versions: ['2.7.x'],
@@ -119,8 +121,8 @@ const mineralGaps = (recipe, stock) => {
   return { known: unknown.length === 0, short, missing: unknown.map((item) => `the stock of ${item.name}`) }
 }
 
-// The colony's workers once `extra` more are needed (millions), re-split with the colony's own cost: { free, efficiency } or null when a figure is missing.
-const staffed = (split, cost, extra) => (split && isNumber(cost) && isNumber(extra) ? workerSplit({}, split.population, cost, split.required + extra) : null)
+// The colony's workers once `extra` more are needed (millions), keeping the split's orbital people while surface agriculture and services are recalculated at the same maximum cost.
+const staffed = (split, cost, extra) => (split && isNumber(cost) && isNumber(extra) ? workerSplit({ OrbitalPopulation: split.orbitalPopulation }, split.population, cost, split.required + extra) : null)
 
 // The days a build of `bp` takes at `rate` BP/yr, as a result of `rule`.
 const buildDays = (rule, bp, rate) => combine({ rule, parts: { bp, rate }, compute: ({ bp: cost, rate: perYear }) => (perYear > 0 ? (cost / perYear) * DAYS_PER_YEAR : Infinity), units: 'days' })
