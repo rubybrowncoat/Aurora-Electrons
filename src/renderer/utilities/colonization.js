@@ -62,11 +62,11 @@ registerRule({
 
 registerRule({
   id: 'habitability.bodyCapacity',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Radius, HydroExt, TidalLock, BodyClass', 'FCT_Species.PopulationDensityModifier'],
-  note: 'Millions of people a body holds before growth stops: surface area times the species\' density, less above 75% water and a fifth on a tide-locked planet. The save stores no capacity to compare with, so the figure is not checked against saved values.',
+  note: 'Millions of people a body holds before growth stops: surface area (four pi of 3.1416 times the radius squared) times the species\' density, less above 75% water and a fifth on a tide-locked planet. The save stores no capacity to compare with, so the figure is not checked against saved values.',
 })
 
 registerRule({
@@ -90,11 +90,11 @@ registerRule({
 
 registerRule({
   id: 'habitability.score',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: '% of the best target',
   verification: 'assumed',
   structure: ['FCT_SystemBody', 'FCT_Species', 'FCT_MineralDeposit', 'FCT_Population', 'FCT_RaceJumpPointSurvey'],
-  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. A plan that drains surface water counts its minimum years, so its discount is the most that plan can earn. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read; none of it is compared with a game value.',
+  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds under the game\'s capacity rule and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. A plan that drains surface water counts its minimum years, so its discount is the most that plan can earn. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read; none of it is compared with a game value.',
   assumptions: ['mineral weights, discount scales and thresholds as set in Ranking'],
 })
 

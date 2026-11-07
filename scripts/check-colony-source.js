@@ -191,6 +191,29 @@ const CASES = [
     },
   },
   {
+    // The game's geometry for the stated inputs: four times its pi (3.1416) times the radius squared over its Earth surface (511187128), times the baseline density (12,000) and the species density, the water factor above three quarters water (a hundredth at all water), a fifth on a tide-locked planet that is not a moon, and a floor of 50,000 people. The figures are the game's own arithmetic, not the helper's: Math.PI would give 12082.89909124985 for the first.
+    id: 'capacity',
+    run: ({ colonies: c }) => {
+      const capacity = (over = {}) => c.bodyCapacity(colony(over))
+
+      near(capacity(), 12082.927346323946)
+      near(capacity({ HydroExt: 75 }), 12082.927346323946)
+      near(capacity({ HydroExt: 90 }), 4833.170938529579)
+      near(capacity({ HydroExt: 100 }), 120.82927346323946)
+      near(capacity({ TidalLock: 1 }), 2416.585469264789)
+      near(capacity({ TidalLock: 1, BodyClass: 2 }), 12082.927346323946)
+      near(capacity({ PopulationDensityModifier: 2 }), 24165.854692647892)
+      near(capacity({ Radius: 10 }), 0.05)
+      // The repaired non-colonisable branch stays: a body that cannot be settled holds nobody, whatever its geometry.
+      near(capacity({ CurrentColonyCost: -1, Radius: 10 }), 0)
+
+      const result = c.bodyCapacityResult(colony())
+
+      near(result.value, 12082.927346323946)
+      assert.deepEqual(result.rule.versions, ['3.2.x'], 'the capacity rule is on the line')
+    },
+  },
+  {
     id: 'support',
     run: ({ colonies: c }) => {
       const row = colony({ Population: 10, ReqInf: 36, CurrentColonyCost: 0.036, MaximumColonyCost: 0.036, Infrastructure: 36 })
@@ -266,6 +289,7 @@ const FAULTS = [
   { name: 'radiation penalty not rounded', file: 'colonies', from: "toNumber(round(multiply(fromDouble(colony.RadiationLevel), fromString('0.0025')), 2)) / 100", to: 'colony.RadiationLevel / 40000', fails: 'growth' },
   { name: 'infrastructure shortfall growth omitted', file: 'colonies', from: 'shortfall > 0 ? -shortfall * 0.25 : baseGrowthRate(population)', to: 'shortfall > 0 ? 0 : baseGrowthRate(population)', fails: 'shortfall' },
   { name: 'non-colonisable capacity gate omitted', file: 'colonies', from: 'if (CurrentColonyCost === -1)', to: 'if (false)', fails: 'shortfall' },
+  { name: 'capacity geometry taken from Math.PI', file: 'colonies', from: 'export const PI_APPROX = 3.1416', to: 'export const PI_APPROX = Math.PI', fails: 'capacity' },
   { name: 'support denominator not ceiling-rounded', file: 'colonies', from: 'Math.max(1, ceilRatio(numerator, fromDouble(colony.PopulationDensityModifier)))', to: 'toNumber(numerator) / colony.PopulationDensityModifier', fails: 'support' },
   { name: 'monthly population compounded instead of linear', file: 'colonies', from: 'population * (1 + rate / MONTHS_PER_YEAR)', to: 'population * (1 + rate) ** (1 / MONTHS_PER_YEAR)', fails: 'projection' },
   { name: 'services take priority over agriculture', file: 'colonies', from: 'agriculture,\n    available,', to: 'agriculture: Math.min(agriculture, totalPopulation - Math.min(0.7, (totalPopulation / 1000) ** 0.25) * totalPopulation),\n    available,', fails: 'workers' },

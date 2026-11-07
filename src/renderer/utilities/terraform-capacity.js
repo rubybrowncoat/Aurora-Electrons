@@ -1,5 +1,6 @@
 // What a colony's terraforming capacity is made of, and what it moves on its own body: the one calculation behind the Production page's terraforming jobs and the Colonization Planner's body detail. The capacity is the installations' output plus the orbital modules' output, times the game's terraforming speed; the rate is that capacity spread over the body's surface against the Earth's. Each term is a provenance result (utilities/provenance.js): a missing factor leaves the result unavailable, naming it, and is never taken as 1 or 0. Evidence: docs/plans/backlog/evidence/AE-059-01.md and AE-072-01.md.
 
+import { PI_APPROX } from './colonies'
 import { fleetClaimable, fleetCountsForColony, fleetPlaced } from './colonization'
 import { crewFraction } from './crew'
 import { missingBodyInputs, surfaceTemperature } from './habitability'
@@ -15,9 +16,8 @@ const NONE = new Set()
 const AESTUSIUM = 'Add Aestusium for one year'
 const FRIGUSIUM = 'Add Frigusium for one year'
 
-// The surface of the Earth in the unit the game spreads pressure over, and the value of pi it divides by (3.1416, not Math.PI: the saved pressure changes of the campaigns match this figure to 1e-15, Math.PI is off by 2.3e-6).
+// The surface of the Earth in the unit the game spreads pressure over. The pi it divides by is the shared 3.1416, not Math.PI: the saved pressure changes of the campaigns match that figure to 1e-15, Math.PI is off by 2.3e-6.
 export const EARTH_SURFACE_AREA = 511187128
-export const SURFACE_PI = 3.1416
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 const sum = (values) => values.reduce((total, value) => total + value, 0)
@@ -58,7 +58,7 @@ registerRule({
   units: 'atm/yr',
   verification: 'estimated',
   structure: ['terraform.capacity', 'FCT_SystemBody.Radius', 'crew.terraforming'],
-  note: `The colony's terraforming capacity spread over its own body: times the Earth's surface of ${EARTH_SURFACE_AREA} over the body's, 4 × ${SURFACE_PI} × radius². The pressure of one gas on a body changes by this rate times the years the game's growth clock advanced between two saves; it matched the saved change of a gas to four places on 13 colonies of the Falryx and Rin campaigns where the order and the capacity held between the saves. The rate is not compared with a saved figure of the job.`,
+  note: `The colony's terraforming capacity spread over its own body: times the Earth's surface of ${EARTH_SURFACE_AREA} over the body's, 4 × ${PI_APPROX} × radius². The pressure of one gas on a body changes by this rate times the years the game's growth clock advanced between two saves; it matched the saved change of a gas to four places on 13 colonies of the Falryx and Rin campaigns where the order and the capacity held between the saves. The rate is not compared with a saved figure of the job.`,
   assumptions: ['The capacity holds over the whole job'],
 })
 
@@ -218,7 +218,7 @@ export const terraformBreakdown = ({ raceRate, speed, source, admins = {} }) => 
   const rateMissing = isNumber(raceRate) ? [] : ['the race\'s terraforming rate']
   const speedMissing = isNumber(speed) ? [] : ['the game\'s terraforming speed']
   const radius = isNumber(source.radius) && source.radius > 0 ? source.radius : null
-  const scale = radius === null ? null : EARTH_SURFACE_AREA / (4 * SURFACE_PI * radius * radius)
+  const scale = radius === null ? null : EARTH_SURFACE_AREA / (4 * PI_APPROX * radius * radius)
 
   const installationsMissing = source.installations === 0 ? [] : [...rateMissing, ...(isNumber(source.installations) ? [] : ['the colony\'s terraforming installations']), ...modifier.missing]
   const installations = installationsMissing.length ? unavailable({ rule: 'terraform.installationOutput', missing: installationsMissing }) : ofRule({ rule: 'terraform.installationOutput', value: source.installations === 0 ? 0 : raceRate * Math.trunc(source.installations) * modifier.value, inputs: { present: source.installations === 0 ? ['no installations'] : ['the race\'s terraforming rate', 'the installations', 'the colony\'s modifiers'] } })

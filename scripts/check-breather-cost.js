@@ -502,13 +502,13 @@ check('drain order', 'a frozen ammonia world warms before draining, and costly s
 })
 
 // ---- The time a drain takes ------------------------------------------------------------------------------------------------------
-// Sol's probe: an ammonia breather's body with 50 % of liquid water at 280.5 K under 1 atm (0.2 atm of ammonia, 0.8 of nitrogen). The drain is 1.2472547819851116 Earth atm of work, so 100 Earth atm a year of terraformers (100 installations of rate 1) move it in 0.0125 years, 4.55 days: the bound of the capacity. The terraformer removes only the vapour in the air and the surface adds vapour in small steps: one such step of 0.005 atm (0.2 % of the surface) leaves 49.8 % of the water, which still costs 4.98.
+// Sol's probe: an ammonia breather's body with 50 % of liquid water at 280.5 K under 1 atm (0.2 atm of ammonia, 0.8 of nitrogen). The drain is 1.2472576986093435 Earth atm of work, so 100 Earth atm a year of terraformers (100 installations of rate 1) move it in 0.0125 years, 4.55 days: the bound of the capacity. The terraformer removes only the vapour in the air and the surface adds vapour in small steps: one such step of 0.005 atm (0.2 % of the surface) leaves 49.8 % of the water, which still costs 4.98.
 const YEARS = (years) => `${years} years`
 // How a page that writes years at one decimal shows them: the precision a minimum is floored to before it is handed over.
 const ONE_PLACE = (years) => `${years.toFixed(1)} years`
 // The body detail's precision for a plan under ten years.
 const TWO_PLACES = (years) => `${years.toFixed(2)} years`
-const DRAIN_WORK = 1.2472547819851116
+const DRAIN_WORK = 1.2472576986093435
 
 // The Planner's ranking of one planted body for one species of rate-1 terraformers: the real assessBodies and rankBodies.
 const ranked = async (m, BreatheID, body, species = {}, terraformers = 100) => {
@@ -534,11 +534,11 @@ check('minimum time', 'the years of a plan that drains surface water are the ter
   const years = m.t.planYears(assessment.work, 100)
 
   close(years, DRAIN_WORK / 100, 'the capacity bound in years')
-  close(years * 365, 4.5524799542456575, 'the capacity bound in days')
+  close(years * 365, 4.552490599924104, 'the capacity bound in days')
   assert.equal(assessment.timeBasis, MINIMUM, 'the assessment labels the plan\'s years a minimum')
   assert.equal(m.t.planTimeBasis(assessment.plan), MINIMUM, 'so does the plan')
   assert.equal(m.t.stepTimeBasis(assessment.plan.steps[0]), MINIMUM, 'and the step that drains')
-  assert.equal(m.t.timeWords(years, assessment.timeBasis, YEARS, 2), 'at least 4.5 days', 'the minimum is worded as a least number of days, not as "under 0.1 years", and floored: the 4.5524-day bound reads 4.5, never the 4.6 nearest rounding gives')
+  assert.equal(m.t.timeWords(years, assessment.timeBasis, YEARS, 2), 'at least 4.5 days', 'the minimum is worded as a least number of days, not as "under 0.1 years", and floored: the 4.55-day bound reads 4.5, never the 4.6 nearest rounding gives')
   assert.equal(m.t.timeWords(0.25, MINIMUM, YEARS, 2), 'at least 0.25 years', 'a minimum from 0.1 years on keeps the page\'s years')
   assert.equal(m.t.timeWords(1e-6, MINIMUM, YEARS, 2), 'at least a fraction of a day', 'a minimum under a tenth of a day is a fraction of a day')
   assert.equal(m.t.timeWords(Infinity, MINIMUM, YEARS, 2), 'Infinity years', 'no terraformers is no time to name, minimum or not')

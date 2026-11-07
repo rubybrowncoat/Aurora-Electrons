@@ -795,16 +795,17 @@ const BREAKDOWN_CHECKS = {
         assert.ok(plan.dampening && plan.dampening.levers.length > 0, 'the plan names its levers')
 
         const lever = plan.steps.find((step) => step.lever)
+        // The area worked with the game's own pi (3.1416, the check's PI), so a plan's work is compared with the rule to 1e-12 and a Math.PI area shows.
         const area = 4 * PI * body.Radius ** 2 / EARTH_ATMOSPHERE_UNITS
         const end = stages[stages.length - 1]
 
         assert.ok(lever && lever.work > 0, 'a step pulls a lever and is work')
 
         for (const step of plan.steps) {
-          assert.ok(Math.abs(step.work / (step.atm * area) - 1) < 1e-5, `${step.label}: work ${step.work}, rule ${step.atm * area}`)
+          assert.ok(Math.abs(step.work / (step.atm * area) - 1) < 1e-12, `${step.label}: work ${step.work}, rule ${step.atm * area}`)
         }
 
-        assert.ok(Math.abs(plan.work / plan.steps.reduce((total, step) => total + step.atm * area, 0) - 1) < 1e-5, 'the plan\'s work is its steps\'')
+        assert.ok(Math.abs(plan.work / plan.steps.reduce((total, step) => total + step.atm * area, 0) - 1) < 1e-12, 'the plan\'s work is its steps\'')
         assert.equal(stages.find((stage) => stage.step && stage.step.key === lever.key).lever, lever.lever, 'the stage of the step names the lever')
         assert.equal(end.lever, 'water', 'the stage that settles the added vapour names the surface water')
         assert.ok(end.effect.dampening.to > end.effect.dampening.from && end.hydroExt === 100, 'and shows it raise the dampening with the whole surface under water')
@@ -825,7 +826,7 @@ const BREAKDOWN_FAULTS = [
   { label: 'an ambiguous fleet resolved silently', from: 'contested: reach.length > 1', to: 'contested: false', fails: ['planted: a fleet the game may give to two colonies leaves the term unavailable'] },
   { label: 'the rules labelled for the earlier line', from: "const VERSIONS = ['3.2.x']", to: "const VERSIONS = ['2.7.x']", fails: ['arith'] },
   { label: 'installation sum not rounded down', from: 'raceRate * Math.trunc(source.installations) * modifier.value', to: 'raceRate * source.installations * modifier.value', fails: ['arith'] },
-  { label: 'Math.PI for the body area', from: 'export const SURFACE_PI = 3.1416', to: 'export const SURFACE_PI = Math.PI', fails: ['arith'] },
+  { label: 'Math.PI for the body area', from: 'EARTH_SURFACE_AREA / (4 * PI_APPROX * radius * radius)', to: 'EARTH_SURFACE_AREA / (4 * Math.PI * radius * radius)', fails: ['arith'] },
   { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith'] },
   { label: 'naval admin chain ignored', from: 'group.admin * group.effective', to: 'group.effective', fails: ['arith'] },
   { label: 'crew share ignored', from: 'modules === null || known(ship.crew) === null ? null : modules * ship.crew', to: 'modules === null ? null : modules', fails: ['arith', 'unknown'] },
@@ -853,6 +854,7 @@ const BREAKDOWN_FAULTS = [
   { label: 'a colony that moves no pressure gets a line', from: 'if (!(rate.value > 0)) {', to: 'if (false) {', fails: ['one-year: planted cases'] },
   { module: 'terraforming', label: 'no dampening lever is ever pulled', from: 'return plan && plan.partial && reached ? raisedDampening(body, species, gasInfo, plan) || plan : plan', to: 'return plan', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
   { module: 'terraforming', label: 'a lever step is priced at half its atm', from: 'work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio })', to: 'work: (Math.abs(to - from) + off / HYDRO_PER_ATM) * areaRatio * (pulled ? 0.5 : 1) })', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
+  { module: 'terraforming', label: 'the body area taken from Math.PI', from: 'const area = 4 * PI_APPROX * body.Radius ** 2', to: 'const area = 4 * Math.PI * body.Radius ** 2', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
   { module: 'terraforming', label: 'the water step never names its lever', from: 'raisedWater ? LEVER.WATER : null', to: 'null', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
   { module: 'terraform-limits', label: 'the stage that settles the water does not name it', from: 'lever: waterLever ? LEVER.WATER : null', to: 'lever: null', fails: ['planted: an eccentric body with a tolerable mean and an intolerable extreme gets a priced dampening step'] },
 ]

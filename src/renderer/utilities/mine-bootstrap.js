@@ -25,7 +25,7 @@ registerRule({
   note: 'What a number of one installation type takes: its build cost times the number, its cargo points times the number (an installation weighs its cargo points in tonnes of cargo), the workers it needs and the minerals of its recipe. A type with Workers above 0 is manned, one with 0 is automated and needs no workers.',
 })
 
-// Worker arithmetic. Fresh bare-result wrappers still erase the retained Ark membership (B11, family 13) and capacity geometry (B06, family 12), so this registration is not released by the arithmetic repair.
+// Worker arithmetic. Fresh bare-result wrappers still erase the retained Ark membership (B11, family 13), so this registration is not released by the arithmetic repair.
 registerRule({
   id: 'mineBootstrap.localBuild',
   versions: ['2.7.x'],
@@ -36,7 +36,7 @@ registerRule({
   assumptions: ['the idle share stays as it is', 'the whole idle share goes to the mines', 'the mineral stock covers the recipe'],
 })
 
-// The repaired labour split still erases B11/B06 inputs. Keep the registration retained until those families release every erased primitive.
+// The repaired labour split still erases B11 inputs. Keep the registration retained until that family releases the erased primitive.
 registerRule({
   id: 'mineBootstrap.import',
   versions: ['2.7.x'],
