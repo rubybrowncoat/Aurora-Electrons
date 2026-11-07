@@ -55,11 +55,8 @@ const ITEMS = Object.freeze({
 
 // Each rule kept on an older version, with its findings of AE-301-10: [finding, ...items that repair it]. A finding no item names stands alone.
 const RETAINED = Object.freeze({
-  'map.dangerFlag': [['C F5', 'AE-311-09']],
   'mineral.depositForecast': [['B04 (continuous aggregate decline; per-increment per-extractor rounding omitted; no proven error bound)']],
   'mineral.stockProjection': [['B04 (continuous aggregate decline; per-increment per-extractor rounding omitted; no proven error bound)']],
-  'warnings.damagedShips': [['D-2', 'AE-311-09']],
-  'warnings.summary': [['D-1, D-2, D-5, D-7 to D-9 (industrial primitives repaired; final F7/F9 closure remains)', 'AE-311-07', 'AE-311-08', 'AE-311-09']],
 })
 
 // Each rule an AE-311 item repaired and moved to the line, with the finding of AE-301-10 that had kept it unverified: [finding, item]. Add a rule here when an item moves its label; the script tells on stderr when one listed is not on the line.
@@ -102,6 +99,9 @@ const REPAIRED = Object.freeze({
   'warnings.strandedMiners': ['D-7', 'AE-311-07'],
   'warnings.undermannedShips': ['D-1', 'AE-311-07'],
   'warnings.wastedMiningCapacity': ['D-5', 'AE-311-07'],
+  'map.dangerFlag': ['C F5', 'AE-311-09'],
+  'warnings.damagedShips': ['D-2', 'AE-311-09'],
+  'warnings.summary': ['D-1, D-2, D-5, D-7 to D-9', 'AE-311-07, AE-311-08, AE-311-09'],
   'colonies.infrastructureCap': ['B08', 'AE-311-02'],
   'colonies.populationProjection': ['B07', 'AE-311-02'],
   'colonies.workers': ['B09, C F3', 'AE-311-02'],

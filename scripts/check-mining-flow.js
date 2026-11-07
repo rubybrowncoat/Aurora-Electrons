@@ -591,9 +591,9 @@ const define = (m, pageOf) => {
       }
     }
   })
-  test('labels: the eight repaired rules support the line, while summary stays retained', () => {
+  test('labels: the eight repaired rules and the summary support the line', () => {
     for (const id of ['cmcPolicy.throughput', 'logistics.refineryOutput', 'minerals.massDriverRate', 'warnings.massDriverOrphans', 'warnings.miningRedeployment', 'warnings.strandedMiners', 'warnings.undermannedShips', 'warnings.wastedMiningCapacity']) assert.deepEqual(m.provenance.getRule(id).versions, ['3.2.x'], id)
-    assert.deepEqual(m.provenance.getRule('warnings.summary').versions, ['2.7.x'])
+    assert.deepEqual(m.provenance.getRule('warnings.summary').versions, ['3.2.x'])
   })
 }
 

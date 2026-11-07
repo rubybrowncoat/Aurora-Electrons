@@ -39,7 +39,7 @@ export const checksOf = (checks) => checks.map(({ evidence, read, ...check }) =>
 
 registerRule({
   id: 'warnings.summary',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'rows, checks',
   verification: 'confirmed',
   structure: ['the rows each check returns', 'the muted rows and checks of the race', 'the snoozes of the race on the open branch'],

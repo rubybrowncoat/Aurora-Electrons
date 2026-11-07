@@ -5,6 +5,8 @@
 
   The N predicate is settled by the game's rule: N tests the species' maximum gravity against 0.1, not the body's gravity. `retention` states where the two readings part and counts the species and bodies of the saves where they do.
 
+  The map's danger flag is checked here too: the protection of the race's ships in a system against the system's danger rating, compared unrounded, so a protection of 4.6 against a danger of 5 is a shortfall that rounding would hide.
+
   Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults.
 
   bun scripts/check-breather-cost.js [--no-mutations]
@@ -20,7 +22,7 @@ const { FIXTURE, PLAYED } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const UTILITIES = path.join(root, 'src/renderer/utilities')
-const MODULES = ['habitability', 'terraforming', 'terraform-limits', 'colonization-data', 'colonization', 'colonization-states', 'map-features', 'colonies', 'capabilities', 'provenance']
+const MODULES = ['habitability', 'terraforming', 'terraform-limits', 'colonization-data', 'colonization', 'colonization-states', 'map-features', 'colonies', 'capabilities', 'provenance', 'decimal']
 const ORIGINALS = Object.fromEntries(MODULES.map((name) => [name, fs.readFileSync(path.join(UTILITIES, `${name}.js`), 'utf8').replace(/\r\n/g, '\n')]))
 const GROUP_BY = 'export default (list, key) => list.reduce((groups, item) => { (groups[item[key]] = groups[item[key]] || []).push(item); return groups }, {})'
 const BREATHERS = { oxygen: 10, methane: 3, ammonia: 4, 'sulphur dioxide': 15 }
@@ -789,6 +791,55 @@ check('map', 'the colony-cost layer counts the bodies by the species\' breathing
   }
 })
 
+// ---- The danger flag: the protection of the race's ships there against the danger rating, unrounded and added as the game's decimal -------------------------------------
+// Two systems: ten ships at a stored protection of 0.1 and nine at 0.1, each of a class that moves. A binary sum of the ten gives 0.9999999999999999 and reports a shortfall the game does not; the game's decimal sum is exactly 1.
+const protectionFleets = () => {
+  const raw = new Database(':memory:')
+  const ships = (count, fleet) => Array.from({ length: count }, (_value, index) => `(${fleet * 100 + index + 1}, ${fleet}, 1, 0, 0, 1, 1)`).join(', ')
+
+  raw.exec(`
+    create table FCT_Ship (ShipID, FleetID, ShipClassID, ShippingLineID, Destroyed, GameID, RaceID);
+    create table FCT_Fleet (FleetID, SystemID);
+    create table FCT_ShipClass (ShipClassID, ProtectionValue, MaxSpeed, Commercial);
+    insert into FCT_Fleet values (1, 1);
+    insert into FCT_Fleet values (2, 2);
+    insert into FCT_ShipClass values (1, 0.1, 1, 0);
+    insert into FCT_Ship values ${ships(10, 1)};
+    insert into FCT_Ship values ${ships(9, 2)};
+  `)
+
+  return raw
+}
+
+check('danger', 'the map danger flag adds the protection of the race\'s ships there as the game\'s decimal and compares the total with the danger rating without rounding: 4.6 against 5 falls short though it rounds to 5, ten ships at 0.1 against 1 are no shortfall while nine are, an equal or greater protection does not, and a missing rating or protection is unavailable', async (m) => {
+  const decimal = (text) => m.n.fromString(text)
+
+  // The counterexample: a protection of 4.6 rounds to 5, so a comparison of the rounded figure would report no shortfall, as the game does not.
+  assert.equal(m.f.dangerFlag(5, decimal('4.6')).value, true, 'a protection of 4.6 against a danger of 5 falls short')
+  assert.equal(m.f.dangerFlag(5, decimal('5')).value, false, 'an equal protection is no shortfall')
+  assert.equal(m.f.dangerFlag(5, decimal('5.1')).value, false, 'a greater protection is no shortfall')
+  assert.equal(m.f.dangerFlag(5, m.n.ZERO).value, true, 'a system with no ships of the race falls short')
+  assert.equal(m.f.dangerFlag(1, decimal('0.4')).value, true, 'a fractional shortfall of less than one is still a shortfall')
+  assert.equal(m.f.dangerFlag(5, null).status, 'unavailable', 'a protection that is not stored is unavailable, never 0')
+  assert.equal(m.f.dangerFlag(null, decimal('5')).status, 'unavailable', 'a danger rating that is not stored is unavailable')
+  assert.equal(m.f.dangerFlag(5, decimal('4.6')).inputs.present.includes('the protection of the ships there'), true, 'the result names the protection it compared')
+
+  const raw = protectionFleets()
+
+  try {
+    const systems = await m.f.loadShipProtection({ query: async (sql) => [raw.query(sql).all()] }, { GameID: 1, RaceID: 1 })
+    const ten = systems.find((system) => system.SystemID === 1)
+    const nine = systems.find((system) => system.SystemID === 2)
+
+    assert.equal(m.f.protectionText(ten.protection), '1', 'ten ships at 0.1 add to exactly 1 as the game\'s decimal')
+    assert.equal(m.f.dangerFlag(1, ten.protection).value, false, 'ten ships at 0.1 against a danger of 1 are no shortfall')
+    assert.equal(m.f.protectionText(nine.protection), '0.9', 'nine ships at 0.1 add to 0.9')
+    assert.equal(m.f.dangerFlag(1, nine.protection).value, true, 'nine ships at 0.1 against a danger of 1 are a shortfall')
+  } finally {
+    raw.close()
+  }
+})
+
 check('capability', 'the tactical colouring options stay declared as unread, the six Galaxy Map options are read by the layer and declared by no one, and the rules of the layer list the game version they were checked for', (m) => {
   const declared = m.k.DECLARED.filter((entry) => entry.table === 'FCT_Race').flatMap((entry) => entry.columns)
 
@@ -883,6 +934,10 @@ const faults = [
   { name: 'the normal-gravity option wins over the low-gravity one', module: 'map-features', from: '(normalGravityOnly && !includeLowGravity ? \'normal\' : \'all\')', to: '(normalGravityOnly ? \'normal\' : \'all\')', fails: ['map'] },
   { name: 'the count at normal gravity ignores the gravity', module: 'map-features', from: 'normal[band] += Gravity >= limits.MinimumGravity ? 1 : 0', to: 'normal[band] += 1', fails: ['map'] },
   { name: 'the layer prices the water of every body as liquid', module: 'map-features', from: 'FCT_SystemBody.HydroExt || \',\' || FCT_SystemBody.HydroID || \',\'', to: 'FCT_SystemBody.HydroExt || \',\' || 3 || \',\'', fails: ['map'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the danger flag compares the protection rounded', module: 'map-features', from: 'value: less(protection, fromDouble(danger))', to: 'value: less(fromDouble(Math.round(Number(`${protection.m}e-${protection.s}`))), fromDouble(danger))', fails: ['danger'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the protection is summed as a binary floating-point number', module: 'map-features', from: 'total = add(total, fromDouble(protection))', to: 'total = (() => { const sum = Number(`${total.m}e-${total.s}`) + protection; const [whole, fraction = \'\'] = String(sum).split(\'.\'); return { m: BigInt(whole + fraction), s: fraction.length } })()', fails: ['danger'] },
   { name: 'the registry drops the declared tactical options', module: 'capabilities', from: '  Object.freeze({ item: \'AE-308-07\', readBy: \'AE-302-01\', table: \'FCT_Race\', columns: Object.freeze([\'chkShowBodyColours\', \'chkCCIncludeLowG\', \'chkGasGiantColour\']) }),\n', to: '', fails: ['capability'] },
 ]
 
@@ -890,7 +945,7 @@ const loadAll = async (module = null, source = null) => {
   const loaded = await loadUtilities(MODULES, { stubs: { 'lodash/groupBy': GROUP_BY }, sources: module ? { [module]: source } : {} })
   const subject = (name) => subjectModule(loaded[name])
 
-  return { h: subject('habitability'), t: subject('terraforming'), l: subject('terraform-limits'), d: subject('colonization-data'), z: subject('colonization'), s: subject('colonization-states'), f: subject('map-features'), c: subject('colonies'), k: subject('capabilities'), p: subject('provenance') }
+  return { h: subject('habitability'), t: subject('terraforming'), l: subject('terraform-limits'), d: subject('colonization-data'), z: subject('colonization'), s: subject('colonization-states'), f: subject('map-features'), n: subject('decimal'), c: subject('colonies'), k: subject('capabilities'), p: subject('provenance') }
 }
 
 const main = async () => {

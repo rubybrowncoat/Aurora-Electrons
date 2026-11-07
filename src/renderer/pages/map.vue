@@ -321,7 +321,7 @@ import { loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
 import { drawGrid, drawLegend, exportComposition, legendLayout, LEGEND_MIN_WIDTH } from '../utilities/map-export'
-import { allBandCounts, bandBasisNote, bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { allBandCounts, bandBasisNote, bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, protectionText, ruinState } from '../utilities/map-features'
 import { loadGroundFormations, roleTotals } from '../utilities/ground-formations'
 import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
 import { gridDotColor, hierarchyView, HIERARCHY_LEVELS, labelInk, labelMinPx, linkStyle } from '../utilities/map-hierarchy'
@@ -1586,7 +1586,7 @@ export default {
         features.wrecks - (features.ownWrecks || 0) > 0 && { label: 'Foreign wrecks', value: this.count(features.wrecks - (features.ownWrecks || 0)) },
         features.rifts && { label: 'Aether rifts', value: this.count(features.rifts) },
         // A system with no danger rating stored shows a dash; one whose ships' protection is not stored shows the rating and a dash for the protection, with no ⚠.
-        danger && { label: 'Danger', value: system.danger === null ? '—' : `${this.count(system.danger)}, protection ${Number.isFinite(features.protection) ? this.count(features.protection) : '—'}${danger.value ? ' ⚠' : ''}`, result: danger },
+        danger && { label: 'Danger', value: system.danger === null ? '—' : `${this.count(system.danger)}, protection ${protectionText(features.protection, this.separator)}${danger.value ? ' ⚠' : ''}`, result: danger },
         features.ships && { label: 'Ships', value: `${this.count(features.ships)}${features.military ? `, ${this.count(features.military)} of them military` : ''}` },
         features.shipyards && { label: 'Shipyards', value: this.count(features.shipyards) },
         features.waypoints && { label: 'Waypoints', value: this.count(features.waypoints) },
@@ -2474,11 +2474,11 @@ export default {
       const features = this.features[row.id] || NO_FEATURES
 
       if (mark === 'danger') {
-        // The game reds its danger line where the protection of the ships there falls short of the danger. A protection that is not stored shows a dash and no ⚠.
+        // The game reds its danger line where the protection of the ships there falls short of the danger, and prints the protection as the decimal it adds. A protection that is not stored shows a dash and no ⚠.
         const flag = this.dangerOf(row)
         const protection = features.protection
 
-        return row.danger > 0 ? `${flag.value ? '⚠ ' : ''}${this.count(row.danger)} / ${Number.isFinite(protection) ? this.count(Math.round(protection)) : '—'}` : ''
+        return row.danger > 0 ? `${flag.value ? '⚠ ' : ''}${this.count(row.danger)} / ${protectionText(protection, this.separator)}` : ''
       }
 
       if (mark === 'discovered') {

@@ -172,12 +172,12 @@ export const checks = checksOf([
     material: 'another kind of component being damaged',
     captured: [countWords('damaged component kind', 'damaged component kinds')],
     title: (count) => amount(count, 'damaged ship'),
-    rule: 'A ship has one or more damaged components; the cost is the maintenance supplies a repair takes.',
+    rule: 'A ship has one or more damaged components; the cost is the maintenance supplies repairing all of them takes.',
     evidence: {
       verification: 'confirmed',
-      versions: ['2.7.x'],
-      structure: ['FCT_DamagedComponent', 'FCT_ShipDesignComponents.Cost', 'FCT_Ship.ShippingLineID'],
-      note: 'A presence check on stored rows: a ship with a damaged component row. The repair cost is twice the stored component cost; a cost not stored shows a dash. A ship whose shipping line is not stored is listed apart, as not evaluated.',
+      versions: ['3.2.x'],
+      structure: ['FCT_DamagedComponent.Number', 'FCT_ShipDesignComponents.Cost', 'FCT_Ship.ShippingLineID'],
+      note: 'A presence check on stored rows: a ship with a damaged component row. The repair cost is twice the stored component cost for every damaged instance of the type (the stored count); a count or a cost not stored shows a dash. A ship whose shipping line is not stored is listed apart, as not evaluated.',
     },
     columns: [
       { key: 'ship', text: 'Ship' },
@@ -187,31 +187,39 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
       const COST = 'the cost of a damaged component'
+      const COUNT = 'the number of damaged instances of a component'
 
-      const items = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.ShippingLineID, ${SHIP_LINE} as Verdict, FCT_Fleet.FleetName, FCT_DamagedComponent.ComponentID as ComponentID, FCT_ShipDesignComponents.Name as ComponentName, FCT_ShipDesignComponents.Cost as ComponentCost from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_DamagedComponent on FCT_Ship.ShipID = FCT_DamagedComponent.ShipID left join FCT_ShipDesignComponents on FCT_DamagedComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${SHIP_LINE} is not 0`)
+      const items = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.ShippingLineID, ${SHIP_LINE} as Verdict, FCT_Fleet.FleetName, FCT_DamagedComponent.ComponentID as ComponentID, FCT_DamagedComponent.Number as ComponentNumber, FCT_ShipDesignComponents.Name as ComponentName, FCT_ShipDesignComponents.Cost as ComponentCost from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_DamagedComponent on FCT_Ship.ShipID = FCT_DamagedComponent.ShipID left join FCT_ShipDesignComponents on FCT_DamagedComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${SHIP_LINE} is not 0`)
 
       const ships = Object.values(items.reduce((aggregate, item) => {
         if (!aggregate[item.ShipID]) {
-          aggregate[item.ShipID] = { ShipID: item.ShipID, FleetID: item.FleetID, ShipName: item.ShipName, FleetName: item.FleetName, ShippingLineID: item.ShippingLineID, Verdict: item.Verdict, Components: [], ComponentIDs: [], TotalCost: 0, CostGaps: 0 }
+          aggregate[item.ShipID] = { ShipID: item.ShipID, FleetID: item.FleetID, ShipName: item.ShipName, FleetName: item.FleetName, ShippingLineID: item.ShippingLineID, Verdict: item.Verdict, Components: [], ComponentIDs: [], TotalCost: 0, CostGaps: [] }
         }
 
         const ship = aggregate[item.ShipID]
+        const known = isKnownNumber(item.ComponentCost) && isKnownNumber(item.ComponentNumber)
 
         ship.ComponentIDs.push(item.ComponentID)
-        ship.Components.push(`${item.ComponentName || 'An unknown component'} (${ctx.count(isKnownNumber(item.ComponentCost) ? item.ComponentCost * 2 : null)} MSP)`)
+        ship.Components.push(`${item.ComponentName || 'An unknown component'} (${ctx.count(known ? item.ComponentCost * 2 * item.ComponentNumber : null)} MSP)`)
 
-        if (isKnownNumber(item.ComponentCost)) {
-          ship.TotalCost += item.ComponentCost
+        if (known) {
+          ship.TotalCost += item.ComponentCost * item.ComponentNumber
         } else {
-          ship.CostGaps += 1
+          if (!isKnownNumber(item.ComponentCost)) {
+            ship.CostGaps.push(COST)
+          }
+
+          if (!isKnownNumber(item.ComponentNumber)) {
+            ship.CostGaps.push(COUNT)
+          }
         }
 
         return aggregate
       }, {}))
 
-      return verdictRows(ctx, ships.sort((alpha, beta) => (alpha.CostGaps > 0) - (beta.CostGaps > 0) || beta.TotalCost - alpha.TotalCost), {
+      return verdictRows(ctx, ships.sort((alpha, beta) => (alpha.CostGaps.length > 0) - (beta.CostGaps.length > 0) || beta.TotalCost - alpha.TotalCost), {
         missing: (ship) => lacking(ship, LINE_INPUTS),
-        build: (ship) => shipRow(ship, { components: ship.Components.join(', '), cost: figure(ctx, ship.CostGaps > 0 ? null : ship.TotalCost, COST, (known) => `${ctx.count(known * 2)} MSP`) }, { signature: ship.ComponentIDs.some((id) => id === null || id === undefined) ? null : signatureOf(categoriesOf(ship.ComponentIDs)) }),
+        build: (ship) => shipRow(ship, { components: ship.Components.join(', '), cost: figure(ctx, ship.CostGaps.length ? null : ship.TotalCost, ship.CostGaps.length ? [...new Set(ship.CostGaps)] : COST, (known) => `${ctx.count(known * 2)} MSP`) }, { signature: ship.ComponentIDs.some((id) => id === null || id === undefined) ? null : signatureOf(categoriesOf(ship.ComponentIDs)) }),
       })
     },
   },

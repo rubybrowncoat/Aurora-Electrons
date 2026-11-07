@@ -2011,14 +2011,25 @@ const defineCases = (modules) => {
     assert.equal(rows[1].cells.morale.result.status, 'unavailable')
   })
 
-  invariant('warnings', 'a damaged component with no stored cost gives a dash and an unavailable result for the ship\'s repair, never a cost of 0, and a stored cost of 0 stays 0', async () => {
-    const item = (ComponentCost) => ({ ShipID: 1, FleetID: 1, ShipName: 'Ship', ShippingLineID: 0, Verdict: 1, FleetName: 'Fleet', ComponentName: 'Gun', ComponentCost })
-    const [unknown] = await readCheck('damaged-ships', [item(null), item(5)])
+  invariant('warnings', 'a damaged component with no stored cost or count gives a dash and an unavailable result for the ship\'s repair, never a cost of 0, and a stored cost of 0 stays 0', async () => {
+    const item = (ComponentCost, ComponentNumber = 1) => ({ ShipID: 1, FleetID: 1, ShipName: 'Ship', ShippingLineID: 0, Verdict: 1, FleetName: 'Fleet', ComponentName: 'Gun', ComponentCost, ComponentNumber })
+    const [unknown] = await readCheck('damaged-ships', [item(null, null), item(5)])
+    const [uncounted] = await readCheck('damaged-ships', [item(5, null)])
     const [zero] = await readCheck('damaged-ships', [item(0)])
 
     assert.equal(unknown.cells.cost.text, '—')
     assert.equal(unknown.cells.cost.result.status, 'unavailable')
+    assert.deepEqual(unknown.cells.cost.result.inputs.missing, ['the cost of a damaged component', 'the number of damaged instances of a component'])
+    assert.deepEqual(uncounted.cells.cost.result.inputs.missing, ['the number of damaged instances of a component'])
     assert.equal(zero.cells.cost, '0 MSP')
+  })
+
+  invariant('warnings', 'the repair cost of a damaged ship counts every damaged instance of a component: three at 10 MSP repair for 60 and one at 4 for 8, a total of 68', async () => {
+    const item = (ComponentID, ComponentName, ComponentCost, ComponentNumber) => ({ ShipID: 1, FleetID: 1, ShipName: 'Ship', ShippingLineID: 0, Verdict: 1, FleetName: 'Fleet', ComponentID, ComponentName, ComponentCost, ComponentNumber })
+    const [ship] = await readCheck('damaged-ships', [item(10, 'Gun', 10, 3), item(11, 'Engine', 4, 1)])
+
+    assert.equal(ship.cells.components, 'Gun (60 MSP), Engine (8 MSP)')
+    assert.equal(ship.cells.cost, '68 MSP')
   })
 
   invariant('warnings', 'a lifepod keeps its crew of 0, and without a game time or a creation time its time remaining is a dash with an unavailable result and not an expiry', async () => {
