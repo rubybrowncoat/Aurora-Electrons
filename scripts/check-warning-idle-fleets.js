@@ -1,9 +1,9 @@
 /*
-  Checks the idle fleets warning of the Warnings page (the `idle-fleets` check of src/renderer/utilities/warnings/fleets.js): which fleets it leaves out as parked, the places it names under the ones it lists, the option that lists the parked ones too, the title and the label of the option.
+  Checks the idle fleets warning of the Warnings page (the `idle-fleets` check of src/renderer/utilities/warnings/fleets.js): which fleets it leaves out as parked, the places it names under the ones it lists, the option that lists the parked ones too, the title and the label of the option; and, beside it, the idle cargo ships check of the same module, which decides on the same military fleet: a fleet of commercial classes only is no military fleet, a fleet with a military ship is one, a mixed fleet counts as military, and a class whose commercial flag is not stored leaves the fleet not evaluated.
 
   Run: bun scripts/check-warning-idle-fleets.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
-  - Fixtures: an in-memory save of four systems with colonies (one with a deep space population on a body beside another body with a colony, one a rival's, one on a body with no stored position), a jump point, command types and idle fleets set at distances from them and from fleets of the race with maintenance and recreational modules: modules damaged, not counted, not stored, on a ship docked in a hangar, aboard the idle fleet itself, in another system, of another race, exactly 1 km and less than 1 km away, fleets under a Training command, under another command, under none stored and under one whose type is not stored, and fleets with no stored position. Each case is read back through the module's word tables and compared with what is written here.
+  - Fixtures: an in-memory save of five systems with colonies (one with a deep space population on a body beside another body with a colony, one a rival's, one on a body with no stored position), two jump points, command types and idle fleets set at distances from them and from fleets of the race with maintenance and recreational modules: modules damaged, not counted, not stored, on a ship docked in a hangar, aboard the idle fleet itself, in another system, of another race, exactly 1 km and less than 1 km away, fleets under a Training command, under another command, under none stored and under one whose type is not stored, and fleets with no stored position. A fleet of a class the game marks commercial, one of a military class, one of both, one whose commercial flag is not stored and one whose class is not stored stand at a jump point away from every colony and anchorage, the last of them alone in another system; the first of each carries cargo. Each case is read back through the module's word tables and compared with what is written here.
   - Save, read only: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784): every idle fleet against SQL written here from the game's rules, with the option off and on.
   - The page in a browser: scripts/lib/page-server.js serves a copy of the fixture save in which one idle fleet is put beside a fleet with a maintenance module, one on the position of a colony that its orbit does not name and one without a stored position. The Warnings page is opened on the check, every row shown, the screen read, and then the option switched on and read again. Rows are paired with SQL by the id of their fleet, never by their place; the figures are read whole in the grouping of the setting, the text from the text nodes drawn, and each element by whether it is on screen.
   - Planted faults in copies of the module, the shared module and the page, each of which must make a check named for it fail by a value, never by a throw of the code under test; benign rewrites, one of each family, that must leave every check passing; controls of the harness.
@@ -49,6 +49,7 @@ const STUBS = {
 const GROUPING = 'Tick'
 const SEPARATOR = GROUPINGS[GROUPING]
 const CHECK = 'idle-fleets'
+const CARGO_CHECK = 'idle-cargo-ships'
 const RULE = 'warnings.idleFleets'
 const READ = 'readIdleFleets'
 const ROUTE = `/warnings?check=${CHECK}`
@@ -93,15 +94,36 @@ const POPULATIONS = [
   [7, 1, 'Beta Colony', 100, 2, 8], [8, 1, 'Origin Colony', 100, 1, 9], [9, 1, 'Blank Colony', 100, 3, 10], [10, 1, 'Station DSP', 10, 1, 11],
 ]
 const JUMP_POINT = [1, 1, 6000, 3000]
-// Components: [id, type]. Maintenance Module (48), Recreational Module (57), an engine (1) and a component with no stored type. The component 4899 has no definition row at all.
-const COMPONENTS = [[4801, 48], [5701, 57], [9901, 1], [4802, null]]
-// Ship classes: [id, [[component, count]]]. 0 carries no component; 3 two maintenance modules; 4 a maintenance module line with no stored count; 6 a component with no stored type; 7 a component with no definition row; 8 a maintenance module and a component with no stored type; 9 a line with no stored component; 10 an engine line whose class has no class row. The class 99, which a ship may name, has no class row and no lines, and a ship may have no class at all (null).
-const CLASSES = [[1, [[4801, 1]]], [2, [[5701, 1]]], [3, [[4801, 2]]], [4, [[4801, null]]], [5, [[9901, 1]]], [6, [[4802, 1]]], [7, [[4899, 1]]], [8, [[4801, 1], [4802, 1]]], [9, [[null, 1]]], [10, [[9901, 1]]]]
+// Components: [id, type]. Maintenance Module (48), Recreational Module (57), an engine (1), a Diplomacy Module (67) and a component with no stored type. The component 4899 has no definition row at all.
+const COMPONENTS = [[4801, 48], [5701, 57], [9901, 1], [6701, 67], [4802, null]]
+// Ship classes: [id, [[component, count]]]. 0 carries no component; 3 two maintenance modules; 4 a maintenance module line with no stored count; 6 a component with no stored type; 7 a component with no definition row; 8 a maintenance module and a component with no stored type; 9 a line with no stored component; 10 an engine line whose class has no class row. 11 a diplomacy module line; 12 an engine line; 13 no lines. The class 99, which a ship may name, has no class row and no lines, and a ship may have no class at all (null).
+const CLASSES = [[1, [[4801, 1]]], [2, [[5701, 1]]], [3, [[4801, 2]]], [4, [[4801, null]]], [5, [[9901, 1]]], [6, [[4802, 1]]], [7, [[4899, 1]]], [8, [[4801, 1], [4802, 1]]], [9, [[null, 1]]], [10, [[9901, 1]]], [11, [[6701, 1]]], [12, [[9901, 1]]], [13, []]]
 // The classes with lines but no row of their own in the table of ship classes.
 const MISSING_CLASS_ROWS = [10]
+// The commercial flag of the classes whose flag is not 0: the class 11 is commercial, the class 13 has no stored flag, and every other class is military.
+const COMMERCIAL = new Map([[11, 1], [13, null]])
 // Admin commands: [id, type]; type 5 is Training, 1 Naval. The command 9 is not stored.
 const COMMANDS = [[7, 5], [8, 1]]
 const COMMAND_TYPES = [[5, 'Training'], [1, 'Naval']]
+
+// A jump point of another system, away from every colony and anchorage of the fixtures, where the fleets that decide what makes a fleet military stand: [WarpPointID, SystemID, Xcor, Ycor].
+const JUMP_POINT_2 = [2, 2, 9000, 8000]
+
+// The fleets that decide what makes a fleet military, at the second jump point or, for the fleet whose class names no row and the last three, each alone in system 2: [id, name, [system, x, y], the classes of its ships, what the idle fleets warning must do (excluded, listed or unevaluated), the inputs named when not evaluated, what the idle cargo ships list must do with the ship that carries cargo (excluded, listed or unevaluated), the caption it carries]. The last three stand apart from the other fleets so that an unclassed ship of theirs is no neighbour's module question: two carry a known military ship beside one whose class or flag is not stored, which the known ship settles, and the last carries a cargo ship of a commercial class beside one whose class is not stored, which no ship settles.
+const MILITARY_CASES = [
+  [301, 'DIP-01 Lesotho 001', JUMP_POINT_2.slice(1), [11], 'excluded', [], 'excluded', ['jumpPoint', 'Beta']],
+  [302, 'DIP-02 Escort', JUMP_POINT_2.slice(1), [12], 'listed', [], 'listed', ['jumpPoint', 'Beta']],
+  [303, 'DIP-03 Mixed', JUMP_POINT_2.slice(1), [11, 12], 'listed', [], 'listed', ['jumpPoint', 'Beta']],
+  [304, 'DIP-04 Flagless', JUMP_POINT_2.slice(1), [13], 'unevaluated', ['military'], 'unevaluated', ['jumpPoint', 'Beta']],
+  [305, 'DIP-05 Commercials', JUMP_POINT_2.slice(1), [11, 11], 'excluded', [], 'excluded', ['jumpPoint', 'Beta']],
+  [306, 'DIP-06 Ghost Class', [2, 20000, 20000], [99], 'unevaluated', ['military'], 'unevaluated', ['deepSpace', 'Beta']],
+  [307, 'DIP-07 Known and Ghost Class', [2, 21000, 21000], [12, 99], 'listed', [], 'listed', ['deepSpace', 'Beta']],
+  [308, 'DIP-08 Known and Flagless', [2, 22000, 22000], [12, 13], 'listed', [], 'listed', ['deepSpace', 'Beta']],
+  [309, 'DIP-09 Commercial and Ghost Class', [2, 23000, 23000], [11, 99], 'unevaluated', ['military'], 'unevaluated', ['deepSpace', 'Beta']],
+]
+
+// The cargo of one ship of each of those fleets: [fleet, ship index, [[cargo type, amount]]]. All carry it on the first ship except the fleets 307 and 308, which carry it on the second, whose class or commercial flag is not stored; the fleet 309 carries it on its first ship, of a commercial class, beside a second whose class is not stored.
+const CARGO = [[301, 0, [[3, 10]]], [302, 0, [[3, 10]]], [303, 0, [[3, 10]]], [304, 0, [[3, 10]]], [305, 0, [[3, 10]]], [306, 0, [[3, 10]]], [307, 1, [[3, 10]]], [308, 1, [[3, 10]]], [309, 0, [[3, 10]]]]
 
 // Idle fleets of race 1 (mobile, military, no orders, one ship unless `ships` says): [id, [system, x, y], orbit body, command, what the warning must do (out: left out as parked, listed, unevaluated), the caption it carries [kind, name], the inputs named when not evaluated, ships].
 const IDLE = [
@@ -215,7 +237,7 @@ const insert = (table, record) => `insert into ${table} (${Object.keys(record).j
 const fixtureSql = () => {
   const statements = [
     'create table FCT_Fleet (FleetID integer, GameID integer, RaceID integer, FleetName text, SystemID integer, Xcor real, Ycor real, OrbitBodyID integer, ParentCommandID integer, ShippingLine integer, CivilianFunction integer, Speed integer, AnchorFleetID integer);',
-    'create table FCT_Ship (ShipID integer, GameID integer, RaceID integer, FleetID integer, ShipClassID integer, MaintenanceState integer, MothershipID integer);',
+    'create table FCT_Ship (ShipID integer, GameID integer, RaceID integer, FleetID integer, ShipClassID integer, ShipName text, MaintenanceState integer, MothershipID integer);',
     'create table FCT_RaceSysSurvey (GameID integer, SystemID integer, RaceID integer, Name text);',
     'create table FCT_SystemBody (SystemBodyID integer, StarID integer, BodyClass integer, PlanetNumber integer, OrbitNumber integer, Xcor real, Ycor real);',
     'create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);',
@@ -226,13 +248,15 @@ const fixtureSql = () => {
     'create table FCT_MoveOrders (FleetID integer);',
     'create table FCT_Population (PopulationID integer, GameID integer, RaceID integer, PopName text, Population real, SystemID integer, SystemBodyID integer);',
     'create table FCT_ClassComponent (GameID integer, ClassID integer, ComponentID integer, NumComponent real);',
-    'create table FCT_ShipClass (ShipClassID integer);',
+    'create table FCT_ShipClass (ShipClassID integer, ClassName text, Commercial integer);',
     'create table FCT_ShipDesignComponents (SDComponentID integer, ComponentTypeID integer);',
+    'create table FCT_ShipCargo (ShipID integer, CargoTypeID integer, Amount real);',
     'create table FCT_DamagedComponent (ShipID integer, GameID integer, ComponentID integer, Number real);',
     'create table FCT_NavalAdminCommand (NavalAdminCommandID integer, AdminCommandTypeID integer);',
     'create table DIM_NavalAdminCommandType (CommandTypeID integer, Description text);',
     insert('FCT_Star', { StarID: 1, ComponentNumber: 1 }),
     insert('FCT_JumpPoint', { WarpPointID: JUMP_POINT[0], GameID: 1, SystemID: JUMP_POINT[1], Xcor: JUMP_POINT[2], Ycor: JUMP_POINT[3] }),
+    insert('FCT_JumpPoint', { WarpPointID: JUMP_POINT_2[0], GameID: 1, SystemID: JUMP_POINT_2[1], Xcor: JUMP_POINT_2[2], Ycor: JUMP_POINT_2[3] }),
   ]
 
   SYSTEMS.forEach(([SystemID, Name]) => statements.push(insert('FCT_RaceSysSurvey', { GameID: 1, SystemID, RaceID: 1, Name })))
@@ -243,7 +267,7 @@ const fixtureSql = () => {
 
   const classIds = [0, ...CLASSES.map(([ClassID]) => ClassID).filter((ClassID) => !MISSING_CLASS_ROWS.includes(ClassID))]
 
-  classIds.forEach((ShipClassID) => statements.push(insert('FCT_ShipClass', { ShipClassID })))
+  classIds.forEach((ShipClassID) => statements.push(insert('FCT_ShipClass', { ShipClassID, ClassName: `Class ${ShipClassID}`, Commercial: COMMERCIAL.has(ShipClassID) ? COMMERCIAL.get(ShipClassID) : 0 })))
   COMMANDS.forEach(([NavalAdminCommandID, AdminCommandTypeID]) => statements.push(insert('FCT_NavalAdminCommand', { NavalAdminCommandID, AdminCommandTypeID })))
   COMMAND_TYPES.forEach(([CommandTypeID, Description]) => statements.push(insert('DIM_NavalAdminCommandType', { CommandTypeID, Description })))
 
@@ -253,12 +277,14 @@ const fixtureSql = () => {
     const ids = specs.map(() => shipId++)
 
     specs.forEach(([ShipClassID, extra = {}], index) => {
-      statements.push(insert('FCT_Ship', { ShipID: ids[index], GameID: 1, RaceID, FleetID, ShipClassID, MaintenanceState: 0, MothershipID: extra.docked === undefined ? 0 : ids[extra.docked] }))
+      statements.push(insert('FCT_Ship', { ShipID: ids[index], GameID: 1, RaceID, FleetID, ShipClassID, ShipName: `Hull ${ids[index]}`, MaintenanceState: 0, MothershipID: extra.docked === undefined ? 0 : ids[extra.docked] }))
 
       if (extra.damaged) {
         statements.push(insert('FCT_DamagedComponent', { ShipID: ids[index], GameID: 1, ComponentID: extra.damaged[0], Number: extra.damaged[1] }))
       }
     })
+
+    return ids
   }
 
   const addFleet = (FleetID, FleetName, [SystemID, Xcor, Ycor], RaceID, OrbitBodyID, ParentCommandID, Speed) => statements.push(insert('FCT_Fleet', { FleetID, GameID: 1, RaceID, FleetName, SystemID, Xcor, Ycor, OrbitBodyID, ParentCommandID, ShippingLine: 0, CivilianFunction: 0, Speed, AnchorFleetID: 0 }))
@@ -270,6 +296,12 @@ const fixtureSql = () => {
   STATIONS.forEach(([id, name, at, race, specs]) => {
     addFleet(id, name, at, race, 0, 0, 0)
     addShips(id, race, specs)
+  })
+  MILITARY_CASES.forEach(([id, name, at, classes]) => {
+    const ids = addShips(id, 1, classes.map((ShipClassID) => [ShipClassID]))
+
+    addFleet(id, name, at, 1, 0, 0, 100)
+    CARGO.filter(([fleet]) => fleet === id).forEach(([, index, lines]) => lines.forEach(([CargoTypeID, Amount]) => statements.push(insert('FCT_ShipCargo', { ShipID: ids[index], CargoTypeID, Amount }))))
   })
 
   return statements.join('\n')
@@ -299,8 +331,8 @@ const SAVES = [
 ]
 const PAGE_SAVE = SAVES[0]
 
-// One row for each idle fleet by the game's rules: the fleet is mobile and military, follows no fleet, has no move order and a ship that is neither in maintenance nor carried; it is parked at a colony of the race in its system whose body lies less than 1 km away on both axes, or at another fleet of the race in its system less than 1 km away on both axes with an undamaged maintenance module (type 48) on an undocked ship, or one with a recreational module (type 57) when the fleet is not under a Training command. The name is the colony on the body the fleet orbits, else the largest colony there; failing a colony, the first fleet by name.
-const truthSql = ({ GameID: g, RaceID: r }) => `with idle as (select f.FleetID, f.FleetName, f.SystemID, f.Xcor, f.Ycor, f.OrbitBodyID, f.RaceID, f.GameID, case when f.ParentCommandID = 0 then 0 else coalesce((select t.Description = 'Training' from FCT_NavalAdminCommand c join DIM_NavalAdminCommandType t on t.CommandTypeID = c.AdminCommandTypeID where c.NavalAdminCommandID = f.ParentCommandID), 0) end as Training from FCT_Fleet f where f.GameID = ${g} and f.RaceID = ${r} and f.ShippingLine = 0 and f.CivilianFunction = 0 and f.Speed > 1 and f.AnchorFleetID = 0 and not exists (select 1 from FCT_MoveOrders m where m.FleetID = f.FleetID) and exists (select 1 from FCT_Ship s where s.FleetID = f.FleetID and s.GameID = f.GameID and s.RaceID = f.RaceID and s.MaintenanceState <> 2 and s.MothershipID = 0)), working as (select s.FleetID, d.ComponentTypeID as Type, sum(max(c.NumComponent - coalesce((select sum(x.Number) from FCT_DamagedComponent x where x.ShipID = s.ShipID and x.GameID = s.GameID and x.ComponentID = c.ComponentID), 0), 0)) as Modules from FCT_Ship s join FCT_ClassComponent c on c.ClassID = s.ShipClassID join FCT_ShipDesignComponents d on d.SDComponentID = c.ComponentID and d.ComponentTypeID in (48, 57) where s.GameID = ${g} and s.RaceID = ${r} and s.MothershipID = 0 group by s.FleetID, d.ComponentTypeID) select i.FleetID, i.FleetName, i.SystemID, i.Xcor, i.Ycor, i.OrbitBodyID, i.Training, (select count(*) from FCT_Ship s where s.FleetID = i.FleetID and s.GameID = i.GameID and s.RaceID = i.RaceID) as Ships, (select p.PopName from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = i.GameID and p.RaceID = i.RaceID and p.SystemID = i.SystemID and abs(i.Xcor - b.Xcor) < 1 and abs(i.Ycor - b.Ycor) < 1 order by (p.SystemBodyID = i.OrbitBodyID) desc, p.Population desc, p.PopulationID limit 1) as Colony, (select count(*) from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = i.GameID and p.RaceID = i.RaceID and p.SystemID = i.SystemID and abs(i.Xcor - b.Xcor) < 1 and abs(i.Ycor - b.Ycor) < 1) as Colonies, (select g.FleetName from FCT_Fleet g join working w on w.FleetID = g.FleetID where g.GameID = i.GameID and g.RaceID = i.RaceID and g.FleetID <> i.FleetID and g.SystemID = i.SystemID and abs(i.Xcor - g.Xcor) < 1 and abs(i.Ycor - g.Ycor) < 1 and w.Modules > 0 and (w.Type = 48 or (w.Type = 57 and i.Training = 0)) order by g.FleetName, g.FleetID limit 1) as Station, (select count(*) from FCT_Fleet g join working w on w.FleetID = g.FleetID where g.GameID = i.GameID and g.RaceID = i.RaceID and g.FleetID <> i.FleetID and g.SystemID = i.SystemID and abs(i.Xcor - g.Xcor) < 1 and abs(i.Ycor - g.Ycor) < 1 and w.Modules > 0 and (w.Type = 48 or (w.Type = 57 and i.Training = 0))) as Stations, (select n.Name from FCT_SystemBodyName n where n.SystemBodyID = i.OrbitBodyID and n.RaceID = i.RaceID limit 1) as BodyName, (select v.Name from FCT_RaceSysSurvey v where v.SystemID = i.SystemID and v.RaceID = i.RaceID and v.GameID = i.GameID limit 1) as SystemName, (select count(*) from FCT_JumpPoint j where j.GameID = i.GameID and j.SystemID = i.SystemID and j.Xcor = i.Xcor and j.Ycor = i.Ycor) as OnJump from idle i order by i.FleetID`
+// One row for each idle fleet by the game's rules: the fleet is mobile and military (a ship of a class whose commercial flag is not set), follows no fleet, has no move order and a ship that is neither in maintenance nor carried; it is parked at a colony of the race in its system whose body lies less than 1 km away on both axes, or at another fleet of the race in its system less than 1 km away on both axes with an undamaged maintenance module (type 48) on an undocked ship, or one with a recreational module (type 57) when the fleet is not under a Training command. The name is the colony on the body the fleet orbits, else the largest colony there; failing a colony, the first fleet by name.
+const truthSql = ({ GameID: g, RaceID: r }) => `with idle as (select f.FleetID, f.FleetName, f.SystemID, f.Xcor, f.Ycor, f.OrbitBodyID, f.RaceID, f.GameID, case when f.ParentCommandID = 0 then 0 else coalesce((select t.Description = 'Training' from FCT_NavalAdminCommand c join DIM_NavalAdminCommandType t on t.CommandTypeID = c.AdminCommandTypeID where c.NavalAdminCommandID = f.ParentCommandID), 0) end as Training from FCT_Fleet f where f.GameID = ${g} and f.RaceID = ${r} and f.ShippingLine = 0 and f.CivilianFunction = 0 and f.Speed > 1 and f.AnchorFleetID = 0 and exists (select 1 from FCT_Ship m join FCT_ShipClass k on k.ShipClassID = m.ShipClassID where m.FleetID = f.FleetID and m.GameID = f.GameID and m.RaceID = f.RaceID and k.Commercial = 0) and not exists (select 1 from FCT_MoveOrders m where m.FleetID = f.FleetID) and exists (select 1 from FCT_Ship s where s.FleetID = f.FleetID and s.GameID = f.GameID and s.RaceID = f.RaceID and s.MaintenanceState <> 2 and s.MothershipID = 0)), working as (select s.FleetID, d.ComponentTypeID as Type, sum(max(c.NumComponent - coalesce((select sum(x.Number) from FCT_DamagedComponent x where x.ShipID = s.ShipID and x.GameID = s.GameID and x.ComponentID = c.ComponentID), 0), 0)) as Modules from FCT_Ship s join FCT_ClassComponent c on c.ClassID = s.ShipClassID join FCT_ShipDesignComponents d on d.SDComponentID = c.ComponentID and d.ComponentTypeID in (48, 57) where s.GameID = ${g} and s.RaceID = ${r} and s.MothershipID = 0 group by s.FleetID, d.ComponentTypeID) select i.FleetID, i.FleetName, i.SystemID, i.Xcor, i.Ycor, i.OrbitBodyID, i.Training, (select count(*) from FCT_Ship s where s.FleetID = i.FleetID and s.GameID = i.GameID and s.RaceID = i.RaceID) as Ships, (select p.PopName from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = i.GameID and p.RaceID = i.RaceID and p.SystemID = i.SystemID and abs(i.Xcor - b.Xcor) < 1 and abs(i.Ycor - b.Ycor) < 1 order by (p.SystemBodyID = i.OrbitBodyID) desc, p.Population desc, p.PopulationID limit 1) as Colony, (select count(*) from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = i.GameID and p.RaceID = i.RaceID and p.SystemID = i.SystemID and abs(i.Xcor - b.Xcor) < 1 and abs(i.Ycor - b.Ycor) < 1) as Colonies, (select g.FleetName from FCT_Fleet g join working w on w.FleetID = g.FleetID where g.GameID = i.GameID and g.RaceID = i.RaceID and g.FleetID <> i.FleetID and g.SystemID = i.SystemID and abs(i.Xcor - g.Xcor) < 1 and abs(i.Ycor - g.Ycor) < 1 and w.Modules > 0 and (w.Type = 48 or (w.Type = 57 and i.Training = 0)) order by g.FleetName, g.FleetID limit 1) as Station, (select count(*) from FCT_Fleet g join working w on w.FleetID = g.FleetID where g.GameID = i.GameID and g.RaceID = i.RaceID and g.FleetID <> i.FleetID and g.SystemID = i.SystemID and abs(i.Xcor - g.Xcor) < 1 and abs(i.Ycor - g.Ycor) < 1 and w.Modules > 0 and (w.Type = 48 or (w.Type = 57 and i.Training = 0))) as Stations, (select n.Name from FCT_SystemBodyName n where n.SystemBodyID = i.OrbitBodyID and n.RaceID = i.RaceID limit 1) as BodyName, (select v.Name from FCT_RaceSysSurvey v where v.SystemID = i.SystemID and v.RaceID = i.RaceID and v.GameID = i.GameID limit 1) as SystemName, (select count(*) from FCT_JumpPoint j where j.GameID = i.GameID and j.SystemID = i.SystemID and j.Xcor = i.Xcor and j.Ycor = i.Ycor) as OnJump from idle i order by i.FleetID`
 
 // The stored values the SQL above cannot decide on when one is missing: a fleet with no stored position beyond `allowed`, a colony whose body has none, a module line with no count or a damaged row with no number, a fleet under no stored command, a ship with no mothership. A save that stores one is not judged by that SQL.
 const nullsSql = ({ GameID: g, RaceID: r }, allowed) => `select (select count(*) from FCT_Fleet where GameID = ${g} and RaceID = ${r} and (SystemID is null or Xcor is null or Ycor is null) and FleetID not in (${allowed.concat([0]).join(', ')})) as Fleets, (select count(*) from FCT_Population p left join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = ${g} and p.RaceID = ${r} and (p.SystemID is null or b.Xcor is null or b.Ycor is null)) as Colonies, (select count(*) from FCT_Ship s join FCT_ClassComponent c on c.ClassID = s.ShipClassID join FCT_ShipDesignComponents d on d.SDComponentID = c.ComponentID and d.ComponentTypeID in (48, 57) where s.GameID = ${g} and s.RaceID = ${r} and c.NumComponent is null) as Counts, (select count(*) from FCT_DamagedComponent where GameID = ${g} and Number is null) as Damage, (select count(*) from FCT_Fleet where GameID = ${g} and RaceID = ${r} and ParentCommandID is null) as Commands, (select count(*) from FCT_Ship where GameID = ${g} and RaceID = ${r} and MothershipID is null) as Carried`
@@ -313,8 +345,11 @@ const truthOf = async (database, ids, allowed = []) => {
 
   const [{ Classes }] = await allRows(database.raw, `select count(*) as Classes from FCT_Ship s left join FCT_ShipClass k on k.ShipClassID = s.ShipClassID where s.GameID = ${ids.GameID} and s.RaceID = ${ids.RaceID} and k.ShipClassID is null`)
 
+  const [{ Flags }] = await allRows(database.raw, `select count(*) as Flags from FCT_Ship s join FCT_ShipClass k on k.ShipClassID = s.ShipClassID where s.GameID = ${ids.GameID} and s.RaceID = ${ids.RaceID} and k.Commercial is null`)
+
   counts.Types = Types
   counts.Classes = Classes
+  counts.Flags = Flags
 
   const fleets = new Map(rows.map((row) => {
     const parked = row.Colonies > 0 || row.Stations > 0
@@ -355,6 +390,28 @@ const readRows = async (loaded, check, database, ids, on) => {
 
 const FIXTURE_IDS = { GameID: 1, RaceID: 1 }
 
+// What the idle cargo ships check reads of the fixtures: the rows by the name of their fleet (the caption), each { state, missing }, the check deciding on the same military fleet.
+const observeCargo = async (loaded) => {
+  const check = loaded['warnings/fleets'].checks.find((item) => item.key === CARGO_CHECK)
+
+  if (!check) {
+    throw new HarnessError(`the module has no check keyed ${CARGO_CHECK}`)
+  }
+
+  const rows = await check.read({ database: ENV.fixture, GameID: FIXTURE_IDS.GameID, RaceID: FIXTURE_IDS.RaceID, RaceNPR: false, separator: SEPARATOR, count: loaded['warnings/common'].counter(SEPARATOR), options: {} })
+  const seen = new Map()
+
+  rows.forEach((row) => {
+    if (seen.has(row.caption)) {
+      throw new HarnessError(`the fleet ${row.caption} is listed twice by the idle cargo ships`)
+    }
+
+    seen.set(row.caption, { state: row.unevaluated ? 'unevaluated' : 'listed', missing: row.unevaluated ? [...row.unevaluated.inputs.missing].sort() : [] })
+  })
+
+  return seen
+}
+
 // What the module reads of the fixtures, the copy of the save and each save, and the tables of words and the rule it registers, for the variant `texts`.
 const observeModule = async (texts) => {
   const loaded = await loadModules(texts)
@@ -375,6 +432,7 @@ const observeModule = async (texts) => {
     rule: loaded.provenance.getRule(RULE),
     ruleText: check.rule,
     fixture: await both(ENV.fixture, FIXTURE_IDS),
+    cargo: await observeCargo(loaded),
     copy: await both(ENV.copy.database, PAGE_SAVE),
     saves: await Promise.all(SAVES.map((save, index) => both(ENV.saves[index], save))),
   }
@@ -422,6 +480,66 @@ const caseProblems = (o, ids, aspects) => ids.flatMap((id) => {
 
 const verdictOf = (problems) => problems.length === 0 || short(problems.slice(0, 3))
 
+// What the idle fleets warning makes of the fleets that decide what makes a fleet military: a fleet of commercial classes only is not listed at all, with the option off or on; a military one and a mixed one are listed both ways, under the jump point they stand at, and so is a known military ship beside one whose class or commercial flag is not stored; one whose class flag is not stored, and one whose class names no row, are not evaluated both ways and name their input.
+const militaryProblems = (o) => MILITARY_CASES.flatMap(([id, , , , state, missing, , says]) => {
+  const off = o.fixture.off.get(id)
+  const on = o.fixture.on.get(id)
+  const problems = []
+
+  if (state === 'excluded') {
+    if (off || on) {
+      problems.push([id, 'listed as', [off && off.state, on && on.state]])
+    }
+  } else {
+    if (!off || off.state !== state) {
+      problems.push([id, 'with the option off', off ? off.state : 'out', state])
+    }
+
+    if (!on || on.state !== state) {
+      problems.push([id, 'with the option on', on ? on.state : 'out', state])
+    }
+
+    if (state === 'unevaluated') {
+      const named = missing.map((kind) => o.gaps[kind])
+      const shown = off ? off.missing : []
+
+      if (JSON.stringify(shown) !== JSON.stringify([...named].sort())) {
+        problems.push([id, 'the inputs named', shown, named])
+      }
+    }
+
+    if (on && !captionIs(on.caption, says, o.words)) {
+      problems.push([id, 'the caption', on.caption, says])
+    }
+  }
+
+  return problems
+})
+
+// What the idle cargo ships list makes of the same fleets' ship that carries cargo: absent for a fleet of commercial classes only, listed for a military fleet, for a commercial ship of a mixed fleet and for a ship whose class or commercial flag is not stored in a fleet with a known military ship, and not evaluated, naming the input, for a fleet whose class flag is not stored with no military ship or whose class names no row.
+const cargoProblems = (o) => MILITARY_CASES.flatMap(([, name, , , , missing, cargo]) => {
+  const row = o.cargo.get(name)
+  const problems = []
+
+  if (cargo === 'excluded') {
+    if (row) {
+      problems.push([name, 'listed as', row.state])
+    }
+  } else if (!row) {
+    problems.push([name, 'not listed'])
+  } else if (row.state !== cargo) {
+    problems.push([name, 'listed as', row.state, cargo])
+  } else if (cargo === 'unevaluated') {
+    const named = missing.map((kind) => o.gaps[kind])
+
+    if (JSON.stringify(row.missing) !== JSON.stringify([...named].sort())) {
+      problems.push([name, 'the inputs named', row.missing, named])
+    }
+  }
+
+  return problems
+})
+
 // A read of a save against SQL: each idle fleet left out or listed, not evaluated when it has no stored position, and captioned by its place; with the option on every idle fleet is listed.
 const againstTruth = (o, read, truth, label) => {
   if (truth.nulls.length) {
@@ -468,17 +586,18 @@ const MODULE_CHECKS = [
   ['unevaluated', 'a fleet whose system or position, a colony\'s position, another fleet\'s position, a module count, a component type or a command type is not stored, with nothing that decides it, is not evaluated and names that input, never listed or left out as if it were known, even in a system with no colony or fleet to compare with', (o) => verdictOf(caseProblems(o, GROUPS.open, { state: true, missing: true }))],
   ['names', 'with the option on every idle fleet is listed with the place it is in: the colony on the body it orbits before the largest colony there, a colony before a fleet, the first fleet by name, the body it orbits, the jump point, or deep space', (o) => verdictOf(caseProblems(o, [...CASES.keys()], { says: true }))],
   ['option', 'the option lists every idle fleet, and with it off the fleets listed and those not evaluated are the ones the cases say, and no fleet that cannot move or is another race\'s', (o) => {
-    const all = [...CASES.keys()].sort((a, b) => a - b)
+    const states = new Map([...CASES].map(([id, entry]) => [id, entry.state]).concat(MILITARY_CASES.map(([id, , , , state]) => [id, state])))
+    const all = [...states.keys()].sort((a, b) => a - b)
     const sorted = (ids) => [...ids].sort((a, b) => a - b)
     const problems = []
 
-    if (JSON.stringify(sorted(o.fixture.on.keys())) !== JSON.stringify(all)) {
+    if (JSON.stringify(sorted(o.fixture.on.keys())) !== JSON.stringify(all.filter((id) => states.get(id) !== 'excluded'))) {
       problems.push(['listed with the option on', sorted(o.fixture.on.keys())])
     }
 
     ;['listed', 'unevaluated'].forEach((state) => {
       const got = sorted([...o.fixture.off.entries()].filter(([, row]) => row.state === state).map(([id]) => id))
-      const want = all.filter((id) => CASES.get(id).state === state)
+      const want = all.filter((id) => states.get(id) === state)
 
       if (JSON.stringify(got) !== JSON.stringify(want)) {
         problems.push([`${state} with the option off`, got, want])
@@ -487,10 +606,12 @@ const MODULE_CHECKS = [
 
     return verdictOf(problems)
   }],
+  ['military', 'a fleet of commercial classes only is no military fleet and is left out even with the option on, a fleet with a military ship is listed, a fleet of both is military, a known military ship beside one whose class or flag is not stored still makes the fleet military, and one whose commercial flag or class is not stored with no military ship is not evaluated and names it, even beside a ship of a commercial class', (o) => verdictOf(militaryProblems(o))],
+  ['military-cargo', 'a ship carrying cargo in a fleet of commercial classes only is left out, one in a military fleet is listed, a commercial ship of a mixed fleet is listed, one whose class or flag is not stored beside a known military ship is listed, and a ship in a fleet whose commercial flag or class is not stored with no military ship is not evaluated and names it, even when the ship carrying the cargo is of a commercial class', (o) => verdictOf(cargoProblems(o))],
   ['rows', 'each row names its fleet and counts its ships, both fleets of one ship and the one with a module ship of its own', (o) => verdictOf(caseProblems(o, [...CASES.keys()], { rows: true }))],
-  ['structure', 'the registered rule of the warning names the stored values it decides on: the fleet\'s system, position and command, the colonies and their bodies\' positions, the ships\' mothership and class, the module counts and types, the damaged modules and the command types', (o) => {
+  ['structure', 'the registered rule of the warning names the stored values it decides on: the fleet\'s system, position and command, the colonies and their bodies\' positions, the ships\' mothership, class and commercial flag, the module counts and types, the damaged modules and the command types', (o) => {
     const columns = named(o.rule)
-    const missing = ['FCT_Fleet.SystemID', 'FCT_Fleet.Xcor', 'FCT_Fleet.Ycor', 'FCT_Fleet.ParentCommandID', 'FCT_Ship.MothershipID', 'FCT_Ship.ShipClassID', 'FCT_ShipClass.ShipClassID', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Xcor', 'FCT_SystemBody.Ycor', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent.Number', 'FCT_NavalAdminCommand.AdminCommandTypeID', 'DIM_NavalAdminCommandType.Description'].filter((column) => !columns.has(column))
+    const missing = ['FCT_Fleet.SystemID', 'FCT_Fleet.Xcor', 'FCT_Fleet.Ycor', 'FCT_Fleet.ParentCommandID', 'FCT_Ship.MothershipID', 'FCT_Ship.ShipClassID', 'FCT_ShipClass.ShipClassID', 'FCT_ShipClass.Commercial', 'FCT_Population.SystemBodyID', 'FCT_SystemBody.Xcor', 'FCT_SystemBody.Ycor', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID', 'FCT_DamagedComponent.Number', 'FCT_NavalAdminCommand.AdminCommandTypeID', 'DIM_NavalAdminCommandType.Description'].filter((column) => !columns.has(column))
 
     return missing.length === 0 || `the rule's structure does not name ${missing.join(', ')}`
   }],
@@ -744,7 +865,7 @@ const FAULTS = [
   ['a ship with no stored class or one that names no class is not read for a station', [['fleets', ' or ${SHIP_CLASS_UNKNOWN} or ${COMPONENT_TYPE_UNKNOWN}) group by', ' or ${COMPONENT_TYPE_UNKNOWN}) group by']], ['unevaluated']],
   ['a ship with no stored class is a ship with no modules', [['fleets', "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is null or FCT_ShipClass.ShipClassID is null)'", "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is not null and FCT_ShipClass.ShipClassID is null)'"]], ['unevaluated']],
   ['a class that names no class is a class with no modules', [['fleets', "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is null or FCT_ShipClass.ShipClassID is null)'", "const SHIP_CLASS_UNKNOWN = '(FCT_Ship.ShipClassID is null)'"]], ['unevaluated']],
-  ['a ship class read through an inner join', [['fleets', 'left join FCT_ShipClass on FCT_ShipClass.ShipClassID', 'inner join FCT_ShipClass on FCT_ShipClass.ShipClassID']], ['unevaluated']],
+  ['a ship class read through an inner join', [['fleets', 'left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join FCT_ClassComponent', 'inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join FCT_ClassComponent']], ['unevaluated']],
   ['a ship whose class is not stored leaves the support known', [['fleets', ' || station.Untyped > 0 || station.Unclassed > 0 ? null : 0', ' || station.Untyped > 0 ? null : 0']], ['unevaluated']],
   ['a ship whose class is not stored names no input', [['fleets', '...(supports(station, fleet) === null && station.Unclassed > 0 ? [PARKED_GAPS.shipClass] : []),', '...[],']], ['unevaluated']],
   ['a ship whose class is not stored outweighs a module known to work', [['fleets', 'return modules && modules.Working > 0 ? 1 :', 'return station.Unclassed > 0 ? null : modules && modules.Working > 0 ? 1 :']], ['stations']],
@@ -754,14 +875,17 @@ const FAULTS = [
   ['the caption of a parked fleet is the place it orbits', [['fleets', 'if (fleet.ParkedName) {', 'if (false) {']], ['names', 'save-fixture', 'page-on'], true],
   ['the title names the places with the option on too', [['fleets', 'options.idleFleetsAtColonies ? \'\' : ', 'false ? \'\' : ']], ['page-title'], true],
   ['the rule\'s structure leaves out the ships\' mothership', [['fleets', '\'FCT_Ship.MaintenanceState, MothershipID, ShipClassID\'', '\'FCT_Ship.MaintenanceState, ShipClassID\'']], ['structure']],
-  ['the rule\'s structure leaves out the class table of a ship', [['fleets', ', \'FCT_ShipClass.ShipClassID\'', '']], ['structure']],
-  ['the rule speaks to the player', [['fleets', 'rule: \'A mobile military fleet', 'rule: \'Your mobile military fleet']], ['voice']],
+  ['the rule\'s structure leaves out the class table of a ship', [['fleets', '\'FCT_Ship.MaintenanceState, MothershipID, ShipClassID\', \'FCT_ShipClass.ShipClassID, Commercial\'', '\'FCT_Ship.MaintenanceState, MothershipID, ShipClassID\'']], ['structure']],
+  ['the rule speaks to the player', [['fleets', 'rule: \'A military fleet is one that', 'rule: \'Your military fleet is one that']], ['voice']],
   ['a row of the check is hidden', [['page', ':data-row="row.id">', ':data-row="row.id" v-show="false">']], ['page-off', 'page-on'], true],
   ['the caption of a row is drawn with no opacity', [['page', 'data-caption>', 'data-caption style="opacity: 0">']], ['page-off', 'page-on'], true],
   ['the check is drawn with no opacity', [['page', ':data-check="section.check.key">', ':data-check="section.check.key" style="opacity: 0">']], ['page-off', 'page-on'], true],
   ['the ships cell shows the name of the fleet', [['page', ':data-cell="column.key">{{ cellText(row, column) }}</span><provenance-mark', ':data-cell="column.key">{{ cellText(row, section.check.columns[0]) }}</span><provenance-mark']], ['page-off', 'page-on'], true],
   ['the title is not given the option', [['page', 'check.title(section.rows.length, this.options)', 'check.title(section.rows.length)']], ['page-title'], true],
   ['the option is labelled with other words', [['page', ':label="idleFleetsLabel"', 'label="Include idle fleets"']], ['page-title'], true],
+  ['a fleet of commercial classes only is military', [['fleets', 'const MILITARY_FLEET = `(FCT_Fleet.ShippingLine = 0 and FCT_Fleet.CivilianFunction = 0 and FCT_Fleet.Speed > 1 and ${MILITARY_SHIPS})`', 'const MILITARY_FLEET = \'(FCT_Fleet.ShippingLine = 0 and FCT_Fleet.CivilianFunction = 0 and FCT_Fleet.Speed > 1)\'']], ['military', 'military-cargo']],
+  ['a fleet whose commercial flag is not stored is a fleet of commercial ships', [['fleets', 'VIR_UnknownClass.Commercial is null)) then null else 0 end)', 'VIR_UnknownClass.Commercial is null)) then 0 else 0 end)']], ['military', 'military-cargo']],
+  ['a ship whose class or flag is not stored is not evaluated beside a military ship', [['fleets', 'then 1 when exists (select 1 from FCT_Ship VIR_UnknownShip', 'then null when exists (select 1 from FCT_Ship VIR_UnknownShip'], ['fleets', 'VIR_UnknownClass.Commercial is null)) then null else 0 end', 'VIR_UnknownClass.Commercial is null)) then 1 else 0 end']], ['military', 'military-cargo']],
 ]
 
 // Rewrites that change nothing the checks observe, one of each family: each must leave every check passing. `same` names the ones that also leave the screen as it is.
@@ -921,7 +1045,7 @@ const checkEveryBenign = async () => {
   report('variant passes: every benign rewrite together', wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
 }
 
-// A copy of the fixture save the page serves and SQL here reads. The first fleet of the race with an undamaged maintenance module on a ship that is not docked is put 1,000,000 km from where it was, so that no colony is within 1 km of it, and three idle fleets away from every colony and anchorage are put elsewhere: one beside that fleet, one on the position of a colony its orbit does not name (orbit 0), and one in the system of that colony with no stored position and no orbit.
+// A copy of the fixture save the page serves and SQL here reads. The first fleet of the race with an undamaged maintenance module on a ship that is not docked is put 1,000,000 km from where it was, so that no colony is within 1 km of it, and four idle fleets are put elsewhere: one beside that fleet, one on the position of a colony its orbit does not name (orbit 0), one in the system of that colony with no stored position and no orbit, and one in deep space 2,000 km from the fleet with the module, so that the option off still has a fleet away from every colony and anchorage to list.
 const copyOfSave = async () => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-idle-fleets-'))
   const file = path.join(folder, 'save.db')
@@ -950,16 +1074,17 @@ const copyOfSave = async () => {
 
   assert.ok(before.nulls.length === 0, `the save stores ${before.nulls.join(', ')}`)
 
-  const away = [...before.fleets.values()].filter((fleet) => !fleet.parked).map((fleet) => fleet.id)
+  const idle = [...before.fleets.values()].map((fleet) => fleet.id).filter((id) => id !== station.FleetID)
   const [colony] = await allRows(raw, `select p.PopName, p.SystemID, b.Xcor, b.Ycor from FCT_Population p join FCT_SystemBody b on b.SystemBodyID = p.SystemBodyID where p.GameID = ${PAGE_SAVE.GameID} and p.RaceID = ${PAGE_SAVE.RaceID} order by p.PopulationID limit 1`)
 
-  assert.ok(colony && away.filter((id) => id !== station.FleetID).length >= 3, 'the save holds a colony and three idle fleets away from every colony and anchorage')
+  assert.ok(colony && idle.length >= 4, 'the save holds a colony and four idle fleets')
 
-  const [beside, onColony, unplaced] = away.filter((id) => id !== station.FleetID)
+  const [beside, onColony, unplaced, away] = idle
   const moves = [
     `update FCT_Fleet set SystemID = ${station.SystemID}, Xcor = ${station.Xcor}, Ycor = ${station.Ycor}, OrbitBodyID = 0 where FleetID = ${beside}`,
     `update FCT_Fleet set SystemID = ${colony.SystemID}, Xcor = ${colony.Xcor}, Ycor = ${colony.Ycor}, OrbitBodyID = 0 where FleetID = ${onColony}`,
     `update FCT_Fleet set SystemID = ${colony.SystemID}, Xcor = null, Ycor = null, OrbitBodyID = 0 where FleetID = ${unplaced}`,
+    `update FCT_Fleet set SystemID = ${station.SystemID}, Xcor = ${station.Xcor + 2000}, Ycor = ${station.Ycor}, OrbitBodyID = 0 where FleetID = ${away}`,
   ]
 
   for (const statement of moves) {
@@ -971,6 +1096,7 @@ const copyOfSave = async () => {
   assert.ok(truth.fleets.get(beside).parked, 'the fleet put beside the station is parked')
   assert.ok(truth.fleets.get(onColony).parked, 'the fleet put on a colony is parked')
   assert.ok(truth.fleets.get(unplaced).unevaluated, 'the fleet with no stored position is not evaluated')
+  assert.ok(!truth.fleets.get(away).parked && !truth.fleets.get(away).unevaluated, 'the fleet put in deep space is listed')
 
   return { folder, file, database, truth }
 }
