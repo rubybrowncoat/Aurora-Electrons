@@ -12,7 +12,7 @@
   - compare: the baseline is pinned and apart from the three alternatives, a fourth is refused with its reason, the columns carry the same rows with their source visible, and an alternative never changes the baseline;
   - sources: a design is researched, hypothetical (carrying the assumption) or manual (typed figures, blank is unknown), and a saved design shows as saved;
   - gating: every column lists every option the designer does not build, with its state, and an option asked for without its tech is blocked with the reason and not applied, and the column shows no figure as that missile's;
-  - owned: only the designs the race owns and has researched are imported, read from the fixture of scripts/lib/fixtures.js (the race of the save that owns the most designs and the one with the next most, found by SQL, since the player race 784 owns none) and from the stock save when one is named; a check whose save is not there is reported as skipped, never as passed, and a mutant that names only skipped checks is skipped with them;
+  - owned: only the designs the race owns and has researched are imported, read from the fixture of scripts/lib/fixtures.js (the race of the save that owns the most designs and the one with the next most, found by SQL, since the player race 784 owns none) and, for the stock save, from that save's own record of the race's held tech and the designs it owns; a check whose save is not there is reported as skipped, never as passed, and a mutant that names only skipped checks is skipped with them;
   - record: a comparison is a typed record of the race on its branch, written only when the tab holds the file, with its saved designs and the tech levels it was made with as links, an older record migrated, and the tech restored on opening;
   - the page: its reads, its state, its copy and its records on a pseudo instance (scripts/lib/page-loader.js).
 
@@ -840,17 +840,22 @@ const ownedChecks = (m) => {
 
       return mine.length > 0 && mine.every((design) => design.race === other) && !mine.some((design) => own.includes(design.id)) ? true : short(mine.map((design) => [design.id, design.race]))
     })],
-    ['owned: the designs loaded from the stock save are researched designs of its fixture, with the figures the fixture holds', on('stock', async (save) => {
+    ['owned: the designs loaded from the stock save are the researched designs the save holds, with its stored figures', on('stock', async (save) => {
       const designs = await m.md.loadDesigns(save.database, save.ids)
-      const expected = fixtureOf(STOCK).designs.filter((design) => !design.stageOnly)
+      // The save's own record of what the race holds and owns, by SQL here and not by the loader: every design it owns and has researched, and the size, speed and cost it stored for each.
+      const [held] = await save.database.query('select FCT_RaceTech.TechID from FCT_RaceTech where FCT_RaceTech.GameID = :GameID and FCT_RaceTech.RaceID = :RaceID', { replacements: save.ids })
+      const [owned] = await save.database.query('select FCT_MissileType.MissileID, FCT_MissileType.Size, FCT_MissileType.Speed, FCT_MissileType.Cost from FCT_MissileType inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_MissileType.MissileID and FCT_TechSystem.TechTypeID = 122 where FCT_MissileType.GameID = :GameID and FCT_TechSystem.RaceID = :RaceID order by FCT_MissileType.MissileID', { replacements: save.ids })
+      const researched = new Set(held.map((row) => Number(row.TechID)))
+      const known = new Map(owned.filter((row) => researched.has(Number(row.MissileID))).map((row) => [Number(row.MissileID), row]))
       const loaded = designs.fixture.designs.filter((design) => !design.stageOnly)
       const same = loaded.every((design) => {
-        const fixed = expected.find((entry) => entry.id === design.id)
+        const row = known.get(design.id)
 
-        return fixed && fixed.race === STOCK.race && fixed.row.Size === design.row.Size && fixed.row.Speed === design.row.Speed && fixed.row.Cost === design.row.Cost
+        return row && Number(design.race) === Number(save.ids.RaceID) && design.row.Size === row.Size && design.row.Speed === row.Speed && design.row.Cost === row.Cost
       })
+      const excluded = owned.length - known.size
 
-      return loaded.length > 0 && same && loaded.some((design) => design.id === ORDINARY) && Number.isInteger(designs.excluded) && designs.excluded >= 0 ? true : short([idsOf(designs), idsOf({ fixture: { designs: expected } }), designs.excluded])
+      return loaded.length > 0 && same && sorted(idsOf(designs)) === sorted(known.keys()) && designs.excluded === excluded ? true : short([idsOf(designs), [...known.keys()].sort((a, b) => a - b), designs.excluded, excluded])
     })],
   ]
 }
@@ -1636,6 +1641,9 @@ const MUTATIONS = [
   { name: 'a ground pod carried by a seeded draft', file: 'missile-designer.js', find: 'shipDecoy: row.ShipDecoy === 1, enhancedRadiation: saved.enhancedRadiation },', replace: 'shipDecoy: row.ShipDecoy === 1, groundPod: row.GroundShots > 0, enhancedRadiation: saved.enhancedRadiation },', fails: ['gating: the designer offers no ground pod'] },
   { name: 'a stored ground pod not recorded', file: 'missile-designer.js', find: 'shipDecoy: row.ShipDecoy === 1, groundPod: ground, enhancedRadiation: saved.enhancedRadiation,', replace: 'shipDecoy: row.ShipDecoy === 1, groundPod: false, enhancedRadiation: saved.enhancedRadiation,', fails: ['gating: a ground pod or an enhanced radiation warhead', 'gating: the designer offers no ground pod'] },
   { name: 'a column with an option not applied still shows the figures of the design without it', file: 'missile-designer.js', find: 'withheld ? NO_FIGURE(DESIGNER_RULES.plannerFigure, withheld, definition.unit) : mark(figures[definition.id])', replace: 'mark(figures[definition.id])', fails: ['gating: a column with an option not applied', 'gating: a laser warhead asked for'] },
+  { name: 'a stock design imports a corrupted size', file: 'missile-designer.js', find: 'const fixture = await loadMissileFixture(database, GameID, known)', replace: 'const fixture = await loadMissileFixture(database, GameID, known.map((row) => ({ ...row, Size: row.Size + 1 })))', fails: ['owned: the designs loaded from the stock save'] },
+  { name: 'a stock design imports a corrupted speed', file: 'missile-designer.js', find: 'const fixture = await loadMissileFixture(database, GameID, known)', replace: 'const fixture = await loadMissileFixture(database, GameID, known.map((row) => ({ ...row, Speed: row.Speed + 1 })))', fails: ['owned: the designs loaded from the stock save'] },
+  { name: 'a stock design imports a corrupted cost', file: 'missile-designer.js', find: 'const fixture = await loadMissileFixture(database, GameID, known)', replace: 'const fixture = await loadMissileFixture(database, GameID, known.map((row) => ({ ...row, Cost: row.Cost + 1 })))', fails: ['owned: the designs loaded from the stock save'] },
 ]
 
 const mutatedCopy = (file, from, to) => {
