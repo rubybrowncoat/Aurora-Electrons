@@ -24,7 +24,7 @@ bun run lint
 
 ```
 
-The app reads `AuroraDB.db` from the project root in development. A sample save lives in `fixtures/AuroraDB.zip` (`unzip fixtures/AuroraDB.zip`).
+The app reads `AuroraDB.db` from the project root in development. A sample save lives in `fixtures/AuroraDB.zip` (`unzip fixtures/AuroraDB.zip`): a United Earth Federation campaign of this line, saved in 2102.
 
 The shared saved-snapshot orbital census is `loadOrbitalCensus(database, { GameID, RaceID })` in `utilities/orbital-census.js`. It returns per-colony finite population bounds and separate positive-population and million-person predicates; an unknown count is not zero. Only reachable rows and their shared-cell constraints affect a colony, and infeasible relationship alternatives do not erase supported ones. A missing categorical input is named only when its supported alternatives change that colony's population bounds, not merely because its row is reachable or another constraint tightens the result. Coupled unknown quantities can leave a conservative upper bound and an undecided gate. `bun scripts/check-orbital-census.js` checks SQLite tables built from `.github/exports/` headers against an independent completion oracle and semantic mutants, plus loader/interval-order smoke checks on the four played saves (`--no-mutations` runs the head cases only). Consumer migrations remain separate from this shared primitive.
 
