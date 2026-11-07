@@ -99,6 +99,15 @@ export default {
       return { objects: bundle.objects, GameID: bundle.GameID, RaceID: bundle.RaceID, campaignId: open.campaignId, branchId: open.branchId, branches: this.recoveryBranches }
     },
 
+    // A complete snapshot for renaming kept statuses, whichever independent read finishes last. The context excludes objects read for another save or race.
+    recoveryMigration() {
+      const repository = this.recoveryRepository
+      const scope = this.recoveryScope
+      const context = this.recoveryContext
+
+      return repository && scope && context ? { repository, scope, context } : null
+    },
+
     recoveryRead() {
       // eslint-disable-next-line no-unused-expressions
       this.recoveryRevision + this.$store.state.history.revision
@@ -221,15 +230,18 @@ export default {
         this.recoveryObserveChoice = prefix && this.recoveryCampaignId ? PLACES.every((place) => observedKinds(this.config.store, this.recoveryCampaignId, this.RaceID).includes(place)) : false
       },
     },
-    // The statuses kept before a pod or a wreck was named by the point it is tied to take their new name once the objects of the save are read: the list reads them as held without it (`readRecovery`), the write makes it last when the object moves. A status kept at a later game time than this save is left for the save it was kept at, as it is not this save's to map. It writes the repository, never the save, and a window that cannot write leaves it for the next read.
-    recoveryContext: {
-      handler(context) {
-        if (!context || !this.recoveryRepository || !this.recoveryScope) {
+    // The statuses kept before a pod or a wreck was named by the point it is tied to take their new name once the repository, scope and objects of the save are ready: the list reads them as held without it (`readRecovery`), the write makes it last when the object moves. A status kept at a later game time than this save is left for the save it was kept at, as it is not this save's to map. It writes the repository, never the save, and a window that cannot write leaves it for the next read.
+    recoveryMigration: {
+      immediate: true,
+      handler(input) {
+        if (!input) {
           return
         }
 
-        migrateRecoveryRecords(this.recoveryRepository, this.recoveryScope, context).then((result) => {
-          if (result.changed) {
+        const { repository, scope, context } = input
+
+        migrateRecoveryRecords(repository, scope, context).then((result) => {
+          if (result.changed && this.recoveryMigration === input) {
             this.recoveryChanged()
           }
         })

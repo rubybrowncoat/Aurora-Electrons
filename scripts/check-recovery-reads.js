@@ -20,7 +20,8 @@
   - `registry`: the two columns the catalogue declared for this item are no longer declared and the generated reads of the ledger name them; the ledger's dialog words the survivors through the module;
   - `legacy-records`: a status kept under the name a foreign pod or a foreign wreck had before it was named by its point (a pod by its position, a wreck at a Lagrange point by an orbit body of 0), planted in a store made as the code before the change made it, is read as held where the object under its id has the old details and no other object of its kind has them, `migrateRecoveryRecords` stores the new name once (so the status stays held when the point moves its coordinates) and writes nothing at a second run, an object that moved or was replaced is mapped by nothing and reads as reused, and objects that share the old details leave the status unverified, with the ambiguity recorded in it once and the name never rewritten;
   - `legacy-observations`: a pod or a wreck tied to a point gives the text it was observed by before beside the text it is observed by now, the digest of each reaches the capture, a span kept under the old digest goes on under the new one (in the recorder, when the same save is read again and in what the page shows), and the span of an object that moved or changed starts again;
-  - `legacy-wiring`: the mixin of the ledger runs the migration once the objects are read and gives the observation both digests, and the observation view compares an object with both.
+  - `legacy-readiness`: the real Vue watcher and computed inputs persist one old pod status in either readiness order, keep it held after its point moves, write nothing on a repeat and keep pending reads and results scoped to their save, race and branch.
+  - `legacy-wiring`: the mixin gives the observation both digests, and the observation view compares an object with both.
   Where the game gives no rule the check does not guess it: no figure here is compared with what a played save wrote, because none exists for these cases, and no check claims how long a pod lasts beyond the two weeks the game gives.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
@@ -29,6 +30,7 @@
 */
 const fs = require('fs')
 const path = require('path')
+const Vue = require('vue')
 const { Database } = require('bun:sqlite')
 const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
@@ -71,7 +73,7 @@ const FILES = {
 const ORIGINALS = Object.fromEntries(Object.entries(FILES).map(([name, file]) => [name, fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')]))
 
 // The modules under the names the graph reaches them by, so that every module is one instance.
-const UTILITY_NAMES = { ledger: 'recovery-ledger', space: 'warnings/space', placeData: 'place-data', arks: 'arks', capabilities: 'capabilities', milestones: 'history-milestones', snoozes: 'warnings/snoozes', observations: 'observations' }
+const UTILITY_NAMES = { ledger: 'recovery-ledger', space: 'warnings/space', placeData: 'place-data', arks: 'arks', capabilities: 'capabilities', milestones: 'history-milestones', snoozes: 'warnings/snoozes', observations: 'observations', mixin: '../mixins/recovery-ledger' }
 const OTHER_NAMES = ['scenario-records', 'warnings/index', 'warnings/common', 'deep-links', 'colonization-data', 'capability-reads', 'campaign']
 
 const STUBS = {
@@ -90,6 +92,7 @@ const STUBS = {
   romanum: 'export default { toNumeral: String }',
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
   'lodash/groupBy': 'export default (list, key) => list.reduce((groups, item) => { const name = typeof key === \'function\' ? key(item) : item[key]; (groups[name] = groups[name] || []).push(item); return groups }, {})',
+  vuex: 'export const mapGetters = () => ({})',
 }
 
 const memo = (make) => {
@@ -676,8 +679,172 @@ check('legacy-observations', 'a pod or a wreck tied to a point gives the text it
   assert.equal(observations.observationOf(kept, id, movedRead.get(id)[0], open, movedRead.get(id)[1]).state, 'changed', 'and the page says changed')
 })
 
-check('legacy-wiring', 'the mixin of the ledger runs the migration of the statuses once the objects of the save are read and gives the observation the digest of each text, and the observation view compares an object with both', (w) => {
-  assert.ok(/migrateRecoveryRecords\(this\.recoveryRepository, this\.recoveryScope, context\)\.then\(/.test(w.texts.mixin), 'the migration runs when the context is there')
+// Install the actual computed inputs and watcher on Vue 2; only the asynchronous read completions and persistent storage are supplied by the check.
+check('legacy-readiness', 'either readiness order persists one old pod status before its point moves, repeat readiness writes nothing, and pending reads and results stay with their save and scope', async (w) => {
+  const { 'recovery-ledger': ledger, 'scenario-records': records, '../mixins/recovery-ledger': { default: mixin } } = await w.modules()
+  const scope = { campaignId: 'c1', RaceID: RACE, branchId: 'b1', gameTime: 1000 }
+  const row = { type: 'lifepod', place: 'lifepod', id: 7, own: false, systemId: 10, systemName: 'Test', x: 1000, y: 2000, orbitBodyId: 0, orbitLagrangeId: 42, aliasId: 3, copies: 1 }
+  const oldName = 'lifepod|10|1000|2000|3'
+  const newName = 'lifepod|10|lagrange42|3'
+  const bundleOf = (database, RaceID = RACE, object = row) => ({ database, GameID: GAME, RaceID, objects: { ownLifepod: new Map(), lifepod: new Map([[7, object]]), ownWreck: new Map(), wreck: new Map() } })
+  const contextOf = (scope, object = row) => ({ ...scope, GameID: GAME, objects: bundleOf(null, scope.RaceID, object).objects, branches: null })
+  const make = async () => {
+    const files = new Map()
+    const adapters = records.createAdapterRegistry()
+    let writes = 0
+    let serial = 0
+    let pending = null
+    const storage = {
+      open: (campaignId) => ({
+        get store() { return JSON.parse(JSON.stringify(files.get(campaignId) || {})) },
+        update(change) { files.set(campaignId, change(this.store)); writes += 1 },
+      }),
+      writable: () => pending || Promise.resolve(true),
+      registry: () => ({}),
+    }
+
+    ledger.registerRecoveryLedger(adapters.register)
+
+    const repository = records.createRepository({ storage, adapters, newId: () => `00000000-0000-4000-8000-${String(++serial).padStart(12, '0')}` })
+    const seed = async (scope) => {
+      const kept = await ledger.setStatus(repository, scope, { row, status: 'acknowledged', context: contextOf(scope) })
+
+      assert.equal(kept.ok, true, kept.message)
+      repository.update(scope, kept.record.uuid, kept.record.revision, { links: [{ type: 'lifepod', id: row.id, fingerprint: oldName }] })
+
+      return kept.record.uuid
+    }
+
+    return { repository, seed, get writes() { return writes }, delay: (promise) => { pending = promise } }
+  }
+  const mount = () => new Vue({
+    data: { recoveryObjects: null, recoveryRecords: null, database: Object.freeze({}), GameID: GAME, RaceID: RACE, GameTime: scope.gameTime, recoveryResolved: { campaignId: scope.campaignId, branchId: scope.branchId }, recoveryBranches: null, recoveryRevision: 0 },
+    computed: Object.fromEntries(Object.entries(mixin.computed).filter(([key]) => ['recoveryRepository', 'recoveryScope', 'recoveryBundle', 'recoveryContext', 'recoveryMigration', 'recoveryRead'].includes(key))),
+    watch: Object.fromEntries(Object.entries(mixin.watch).filter(([key]) => key !== 'recoveryPrefix')),
+    beforeCreate() { this.$store = { state: { history: { revision: 0 } } } },
+    methods: { recoveryChanged: mixin.methods.recoveryChanged },
+  })
+  // Drain Vue's queue and the migration's asynchronous write permission, without a timer or a replacement migration handler.
+  const settle = async () => {
+    await Vue.nextTick()
+    await new Promise((resolve) => setImmediate(resolve))
+    await Vue.nextTick()
+  }
+  const storedName = (repo, scope, uuid) => repo.read(scope, uuid, { context: contextOf(scope) }).links[0].fingerprint
+
+  for (const order of ['objects-first', 'repository-first']) {
+    const kept = await make()
+    const uuid = await kept.seed(scope)
+    const vm = mount()
+    const before = kept.writes
+    const objects = () => { vm.recoveryObjects = bundleOf(vm.database) }
+    const repository = () => { vm.recoveryRecords = Object.freeze({ repository: kept.repository }) }
+    const completions = order === 'objects-first' ? [objects, repository] : [repository, objects]
+
+    try {
+      completions[0]()
+      await settle()
+      assert.equal(kept.writes, before, `${order}: an incomplete input set writes nothing`)
+      completions[1]()
+      await settle()
+      assert.equal(kept.writes, before + 1, `${order}: exactly one persisted rename before movement`)
+      assert.equal(storedName(kept.repository, scope, uuid), newName, `${order}: the stored link names the point`)
+      assert.equal(vm.recoveryRevision, 1, `${order}: the changed result refreshes the ledger once`)
+
+      vm.recoveryRecords = null
+      await settle()
+      repository()
+      await settle()
+      assert.equal(kept.writes, before + 1, `${order}: a second readiness pulse writes nothing`)
+      assert.equal(vm.recoveryRevision, 1, `${order}: an unchanged result does not refresh the ledger`)
+
+      vm.database = Object.freeze({})
+      vm.GameTime = 2000
+      vm.recoveryObjects = bundleOf(vm.database, RACE, { ...row, x: 1500, y: 2500 })
+      await settle()
+      assert.equal(vm.recoveryRead.entries[0].state, 'held', `${order}: the pod stays held after its point moves`)
+      assert.equal(kept.writes, before + 1, `${order}: movement writes nothing more`)
+    } finally {
+      vm.$destroy()
+    }
+
+    for (const change of [{}, { RaceID: OTHER_RACE }, { branchId: 'b2' }, { campaignId: 'c2', branchId: 'b2' }]) {
+      const kept = await make()
+      const uuid = await kept.seed(scope)
+      const next = { ...scope, gameTime: 2000, ...change }
+      const other = Object.keys(change).length ? await kept.seed(next) : uuid
+      const vm = mount()
+      const oldBundle = bundleOf(vm.database)
+      const before = kept.writes
+      const label = `${order}, switch ${JSON.stringify(change)}`
+
+      try {
+        if (order === 'objects-first') {
+          vm.recoveryObjects = oldBundle
+        } else {
+          vm.recoveryRecords = Object.freeze({ repository: kept.repository })
+        }
+
+        await settle()
+        vm.database = Object.freeze({})
+        vm.RaceID = next.RaceID
+        vm.GameTime = next.gameTime
+        vm.recoveryResolved = { campaignId: next.campaignId, branchId: next.branchId }
+        await settle()
+        vm.recoveryRecords = Object.freeze({ repository: kept.repository })
+        vm.recoveryObjects = oldBundle
+        await settle()
+        assert.equal(vm.recoveryContext, null, `${label}: the old save's completion is not the new save's context`)
+        assert.equal(kept.writes, before, `${label}: readiness never pairs the old objects with the new scope`)
+        assert.equal(vm.recoveryRevision, 0, `${label}: no stale result refreshes the ledger`)
+
+        vm.recoveryObjects = bundleOf(vm.database, next.RaceID, { ...row, orbitLagrangeId: 99 })
+        await settle()
+        assert.equal(kept.writes, before + 1, `${label}: the current save alone migrates once`)
+        assert.equal(storedName(kept.repository, next, other), 'lifepod|10|lagrange99|3', `${label}: the new scope uses only its own point`)
+
+        if (other !== uuid) {
+          assert.equal(storedName(kept.repository, scope, uuid), oldName, `${label}: the old scope is untouched`)
+        }
+      } finally {
+        vm.$destroy()
+      }
+    }
+  }
+
+  const kept = await make()
+  const uuid = await kept.seed(scope)
+  const next = { ...scope, campaignId: 'c2', branchId: 'b2', RaceID: OTHER_RACE, gameTime: 2000 }
+  const other = await kept.seed(next)
+  const vm = mount()
+  const before = kept.writes
+  let grant
+
+  kept.delay(new Promise((resolve) => { grant = resolve }))
+
+  try {
+    vm.recoveryObjects = bundleOf(vm.database)
+    vm.recoveryRecords = Object.freeze({ repository: kept.repository })
+    await settle()
+    assert.equal(kept.writes, before, 'the permission-pending migration has not written')
+    vm.database = Object.freeze({})
+    vm.RaceID = next.RaceID
+    vm.GameTime = next.gameTime
+    vm.recoveryResolved = { campaignId: next.campaignId, branchId: next.branchId }
+    await settle()
+    grant(true)
+    await settle()
+    assert.equal(storedName(kept.repository, scope, uuid), newName, 'the in-flight operation retains its original scope and objects')
+    assert.equal(storedName(kept.repository, next, other), oldName, 'the in-flight operation never writes into the switched scope')
+    assert.equal(kept.writes, before + 1, 'the in-flight operation writes only its original rename')
+    assert.equal(vm.recoveryRevision, 0, 'a result from the old save does not refresh the new save')
+  } finally {
+    grant(true)
+    vm.$destroy()
+  }
+})
+
+check('legacy-wiring', 'the mixin gives the observation the digest of each text, and the observation view compares an object with both', (w) => {
   assert.ok(/\[row\.id, hashValue\(signature\), hashValue\(earlier\)\]/.test(w.texts.mixin), 'the page reads the digest of before as well')
   assert.ok(/observationOf\(record, id, digest, open, earlier\)/.test(w.texts.observationView), 'the view compares with it')
 })
@@ -901,7 +1068,42 @@ const FAULTS = [
   { name: 'the recorder carries a span over for any earlier digest', target: 'observations', from: '&& earlier !== undefined && before[2] === earlier', to: '&& earlier !== undefined', fails: ['legacy-observations'] },
   { name: 'the recorder keeps the old digest when the same save is read again', target: 'observations', from: 'objects[id] = carried ? [before[0], before[1], digest, ...(before[3] ? [before[3]] : [])] : before', to: 'objects[id] = before', fails: ['legacy-observations'] },
   { name: 'the page compares with the digest of now alone', target: 'observations', from: "span.digest === digest || (earlier !== undefined && span.digest === earlier) ? 'observed' : 'changed'", to: "span.digest === digest ? 'observed' : 'changed'", fails: ['legacy-observations'] },
-  { name: 'the mixin does not migrate', target: 'mixin', from: 'migrateRecoveryRecords(this.recoveryRepository, this.recoveryScope, context).then(', to: 'Promise.resolve({ changed: false }).then(', fails: ['legacy-wiring'] },
+  { name: 'the mixin does not migrate', target: 'mixin', from: 'migrateRecoveryRecords(repository, scope, context).then(', to: 'Promise.resolve({ changed: false }).then(', fails: ['legacy-readiness'] },
+  {
+    name: 'the mixin migrates on context readiness alone',
+    target: 'mixin',
+    from: `    recoveryMigration: {
+      immediate: true,
+      handler(input) {
+        if (!input) {
+          return
+        }
+
+        const { repository, scope, context } = input
+
+        migrateRecoveryRecords(repository, scope, context).then((result) => {
+          if (result.changed && this.recoveryMigration === input) {
+            this.recoveryChanged()
+          }
+        })
+      },
+    },`,
+    to: `    recoveryContext: {
+      handler(context) {
+        if (!context || !this.recoveryRepository || !this.recoveryScope) {
+          return
+        }
+
+        migrateRecoveryRecords(this.recoveryRepository, this.recoveryScope, context).then((result) => {
+          if (result.changed) {
+            this.recoveryChanged()
+          }
+        })
+      },
+    },`,
+    fails: ['legacy-readiness'],
+  },
+  { name: 'the mixin applies a changed result after switching saves', target: 'mixin', from: 'if (result.changed && this.recoveryMigration === input) {', to: 'if (result.changed) {', fails: ['legacy-readiness'] },
   { name: 'the mixin gives the page one digest', target: 'mixin', from: 'return earlier === signature ? [row.id, hashValue(signature)] : [row.id, hashValue(signature), hashValue(earlier)]', to: 'return [row.id, hashValue(signature)]', fails: ['legacy-wiring'] },
   { name: 'the view compares with the digest of now alone', target: 'observationView', from: '.map(([id, digest, earlier]) => [id, observationOf(record, id, digest, open, earlier)])', to: '.map(([id, digest]) => [id, observationOf(record, id, digest, open)])', fails: ['legacy-wiring'] },
 ]
