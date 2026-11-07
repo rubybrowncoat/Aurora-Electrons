@@ -6,14 +6,16 @@
   Groups:
   - worked: the reconciliation on small synthetic ledgers, logs and snapshots with known answers: the residual's sign and size, the window's two ends, the coverage, the total, a residual of 0 only when the log accounts for the whole change, and an unknown residual (never 0) for a snapshot whose witness the open save's ledger does not reproduce (checked at the snapshot's own increment count, never at a checkpoint below it), one taken after more increments than the save holds, one with no witness, one without a treasury or after the open save, and a log that starts late, is empty, holds no cycle between the snapshots or lacks an amount; the grouped SQL of the log on an in-memory database; how a residual is printed;
   - lifecycle: the history files the real recorder, `settle` and `attach` leave behind (a rewound replay that diverges inside the last partial checkpoint and then the original reopened, a legacy history attached to an observed campaign, a campaign merged into another), reconciled against the reopened save's own ledger: a snapshot of another history is never compared;
+  - real saves: the real recorder over the played saves (A, B and the two branches from B, C1 and C2 of scripts/lib/fixtures.js, game 161, race 909), read only and skipped where they are not there, in the order A, B, C1, C2 and in a rewind (A, C1, B): the snapshots each branch holds are ancestors of its tip save, a window is compared exactly when both its ends are ancestors of the open save, a snapshot of C1 is refused when C2 is open, a witness taken at the increment where the two branches part is refused on the other (told apart by that increment's length), and the residual of the one window the log holds whole (A to B) is the one SQL gives. The logs of the later saves start after B, so a residual's sign and size beyond that window and a net folded into it are witnessed by the groups above alone;
   - mutations: each deliberate breakage of the sources (a residual folded into the net, the witness not compared, a snapshot with no witness let through, the recorder storing none or the wrong count, a merge re-stamping the witness, the old rounding of a residual and more) is applied to a copy of the utilities and must make the checks named for it fail.
 
-  Everything runs on in-memory stores and databases. Any failed check sets exit code 1.
+  Everything runs on in-memory stores and databases (the real-saves group reads the saves read only). Any failed check sets exit code 1.
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
+const played = require('./lib/played-chain')
 const { loadUtilities } = require('./lib/utilities')
 const { kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
@@ -88,6 +90,76 @@ const installation = () => {
 
 // The chained digest, with each increment's Length, of the first `n` rows of a ledger, made again here from the raw rows with the digest of campaign.js (not its ledger scan).
 const chainOracle = (m, rows, n) => rows.slice(0, n).reduce((digest, row) => m.campaign.hashText(`${digest}${row.IncrementID}:${row.GameTime}:${row.Length};`), '')
+
+// ---- The played campaign -----------------------------------------------------------------------------------------------
+
+const CHAIN_THERE = ['A', 'B', 'C1', 'C2'].every((letter) => fs.existsSync(played.fileOf(letter)))
+
+// What one save of the chain shows and what its own SQL says: the game's time and treasury, its ledger (the rows and the increments' game times and lengths, for the true ancestry), the log as the page reads it, and the time of the log's first cycle.
+const readSave = (m, letter) => {
+  const file = played.fileOf(letter)
+  const [race] = played.rowsOf(file, `select FCT_Game.GameTime, FCT_Race.WealthPoints from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${played.GAME} and FCT_Race.RaceID = ${played.RACE}`)
+  const rows = played.rowsOf(file, m.campaign.ledgerSql(played.GAME))
+  const log = played.rowsOf(file, m.anchors.wealthLogSql(played.GAME, played.RACE))
+  const [{ first }] = played.rowsOf(file, `select min(TimeUsed) as first from FCT_WealthData where GameID = ${played.GAME} and RaceID = ${played.RACE}`)
+
+  return { t: race.GameTime, wealth: race.WealthPoints, rows, increments: rows.map((row) => `${row.GameTime}:${row.Length}`), log, logFirst: first }
+}
+
+// The logged net and the number of cycles of the save `letter` over (from, to], summed with SQL that never saw the page's grouped read.
+const spanNet = (letter, from, to) => {
+  const [row] = played.rowsOf(played.fileOf(letter), `select sum(case when DIM_WealthUse.Income = 1 then FCT_WealthData.Amount else -FCT_WealthData.Amount end) as net, count(distinct FCT_WealthData.TimeUsed) as cycles from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID where FCT_WealthData.GameID = ${played.GAME} and FCT_WealthData.RaceID = ${played.RACE} and FCT_WealthData.TimeUsed > ${from} and FCT_WealthData.TimeUsed <= ${to}`)
+
+  return { net: row.net, cycles: row.cycles }
+}
+
+// Records the saves in order into in-memory stores with the real recorder; after each, keeps what the recorder settled the game to, the snapshots of every branch of its campaign as stored then, and what the save itself shows.
+const playScenario = async (m, order) => {
+  const inst = installation()
+  const steps = []
+  const saves = {}
+  const times = {}
+
+  for (const letter of order) {
+    const resolutions = {}
+    const run = await played.recordSave(m.history, inst, letter, { onResolved: (GameID, resolution) => { resolutions[GameID] = resolution } })
+
+    if (run.failed.length) {
+      throw new Error(`recording ${letter} failed: ${run.failed.map((failure) => failure.error && failure.error.message).join('; ')}`)
+    }
+
+    const resolved = resolutions[played.GAME]
+    const campaign = inst.files.get('registry').campaigns[resolved.campaignId]
+    const branches = Object.fromEntries(Object.keys(campaign.branches).map((branchId) => {
+      const file = inst.files.get(`file:campaign-${campaign.id}-${branchId}`)
+
+      return [branchId, clone(file && file.races && file.races[played.RACE] ? file.races[played.RACE].snapshots : [])]
+    }))
+    const save = readSave(m, letter)
+
+    saves[save.t] = save
+    times[letter] = save.t
+    steps.push({ entry: letter, t: save.t, logFirst: save.logFirst, resolution: { campaignId: resolved.campaignId, branchId: resolved.branchId, relation: resolved.relation }, fork: campaign.branches[resolved.branchId].fork, branches, snapshots: branches[resolved.branchId] })
+  }
+
+  return { steps, saves, times }
+}
+
+// A step's reconciliation with its own branch's snapshots (or the `anchors` given), its own treasury, log and ledger.
+const reconcileStep = (m, found, step, { anchors = null } = {}) => {
+  const given = anchors || m.anchors.recordedAnchors({ snapshots: step.snapshots })
+  const save = found.saves[step.t]
+
+  return m.anchors.reconcileTreasury({ settled: true, anchors: given, live: { t: save.t, wealth: save.wealth }, log: save.log, ledger: m.anchors.ledgerEvidence(save.rows, given) })
+}
+
+// Whether the save at `earlier` is an ancestor of the save at `later` on their own ledgers: its increments' game times and lengths are the first of the later one's, all of them.
+const isAncestor = (found, earlier, later) => {
+  const a = found.saves[earlier].increments
+  const b = found.saves[later].increments
+
+  return a.length <= b.length && a.every((time, index) => time === b[index])
+}
 
 // ---- A save of one game for the real recorder --------------------------------------------------------------------------
 
@@ -642,6 +714,225 @@ const defineSuite = (m) => {
     assert.equal(check.total, null)
   })
 
+  // ---- real saves ----
+
+  // The saves of the played chain (A, B and the two branches from B, C1 and C2) are run through the real recorder into in-memory stores, in the order they were played and as a rewind, then reconciled against each open save's own log and ledger; the recorder is the one of `m`, so a fault in it changes what is recorded.
+  const ORDERS = { 'order played': ['A', 'B', 'C1', 'C2'], rewind: ['A', 'C1', 'B'] }
+  const prepared = new Map()
+
+  const scenario = (key) => {
+    if (!CHAIN_THERE) {
+      throw Object.assign(new Error('a save of the played campaign is not here'), { skipped: true })
+    }
+
+    if (!prepared.has(key)) {
+      prepared.set(key, playScenario(m, ORDERS[key]))
+    }
+
+    return prepared.get(key)
+  }
+
+  // Every window of a step against the saves themselves: the status the ancestry of its two ends and the start of the open save's log give, both ends real ancestors of the open save for a known window, the snapshots holding the saves' own treasuries, and the stored change, the logged net and the residual that SQL of the check's own says.
+  const verifyStep = (found, step) => {
+    const check = reconcileStep(m, found, step)
+
+    assert.ok(check.windows.length > 0 || check.reason, 'neither windows nor a reason')
+
+    check.windows.forEach((window) => {
+      const oracle = spanNet(step.entry, window.from, window.to)
+      const comparable = [window.from, window.to].every((time) => isAncestor(found, time, step.t))
+      const expected = comparable && step.logFirst <= window.from && oracle.cycles > 0
+
+      assert.equal(window.status === 'known', expected, `(${window.from}, ${window.to}] on the open save ${step.entry}: ${window.status} ${window.reason}`)
+
+      if (!expected) {
+        assert.equal(window.residual, null)
+        assert.ok(window.reason)
+        assert.ok((comparable ? (step.logFirst > window.from ? /log starts after/ : /no cycle/) : /different ledger|later than the open save/).test(window.reason), `unknown for another reason: ${window.reason}`)
+
+        return
+      }
+
+      const earlier = found.saves[window.from]
+      const later = found.saves[window.to]
+
+      assert.equal(window.storedChange, later.wealth - earlier.wealth)
+      near(window.loggedNet, oracle.net, `the logged net over (${window.from}, ${window.to}]`)
+      assert.equal(window.cycles, oracle.cycles)
+      near(window.residual, later.wealth - earlier.wealth - oracle.net, `the residual over (${window.from}, ${window.to}]`)
+      assert.equal(window.residual === 0, Math.abs(later.wealth - earlier.wealth - oracle.net) <= 1e-6, 'a residual of 0 is a balanced window and only that')
+    })
+
+    return check
+  }
+
+  // The snapshots of every branch of a step's campaign as anchors, one for each distinct point.
+  const everyBranch = (step) => {
+    const seen = new Set()
+
+    return Object.values(step.branches).flatMap((snapshots) => m.anchors.recordedAnchors({ snapshots })).filter((anchor) => {
+      const key = `${anchor.t}:${anchor.chain ? anchor.chain.digest : ''}`
+
+      return seen.has(key) ? false : (seen.add(key), true)
+    })
+  }
+
+  const knownWindows = (check) => check.windows.filter((window) => window.status === 'known').map((window) => [window.from, window.to])
+
+  Object.keys(ORDERS).forEach((key) => {
+    test('real saves', `chain ${key}: every window of every open save has real ancestors for its two ends, the status the log's start and the ancestry give, and the residual the saves' own amounts give`, async () => {
+      const found = await scenario(key)
+
+      found.steps.forEach((step) => verifyStep(found, step))
+    })
+
+    test('real saves', `chain ${key}: every snapshot the recorder took carries its save's own ledger as its witness`, async () => {
+      const found = await scenario(key)
+
+      found.steps.forEach((step) => {
+        const own = step.snapshots.find((snapshot) => snapshot.t === step.t)
+        const save = found.saves[step.t]
+
+        assert.ok(own && own.chain, `the snapshot of ${step.entry} has no witness`)
+        assert.deepEqual(own.chain, { n: save.rows.length, digest: chainOracle(m, save.rows, save.rows.length) })
+      })
+    })
+  })
+
+  test('real saves', 'chain order played: the snapshots each branch holds are ancestors of that branch\'s tip save (C1 stays on its own branch)', async () => {
+    const found = await scenario('order played')
+    const second = found.steps.find((step) => step.entry === 'C2')
+
+    found.steps.forEach((step) => {
+      step.snapshots.forEach((snapshot) => {
+        assert.ok(isAncestor(found, snapshot.t, step.t), `${snapshot.t} in branch ${step.resolution.branchId} is no ancestor of ${step.t}`)
+      })
+    })
+
+    assert.deepEqual(found.steps.map((step) => step.resolution.relation), ['new', 'continues', 'continues', 'fork'])
+    assert.equal(second.resolution.branchId, 'b2')
+    assert.deepEqual(second.snapshots.map((snapshot) => snapshot.t), [found.times.A, found.times.C2], 'the fork holds A, which the cut leaves in its past, and its own save: neither B nor C1')
+    assert.ok(second.fork && second.fork.t < found.times.B, 'the cut falls before the save of B')
+    assert.equal(isAncestor(found, found.times.B, found.times.C1), true)
+    assert.equal(isAncestor(found, found.times.B, found.times.C2), true, 'B is an ancestor of both branches')
+    assert.equal(isAncestor(found, found.times.C1, found.times.C2), false)
+    assert.equal(isAncestor(found, found.times.C2, found.times.C1), false)
+  })
+
+  test('real saves', 'chain order played: a window is compared exactly when both of its ends are ancestors of the open save, whatever branch file the snapshots came from', async () => {
+    const found = await scenario('order played')
+    const counts = { refused: 0, compared: 0, known: 0 }
+
+    found.steps.forEach((step) => {
+      const check = reconcileStep(m, found, step, { anchors: everyBranch(step) })
+
+      check.windows.forEach((window) => {
+        const both = isAncestor(found, window.from, step.t) && isAncestor(found, window.to, step.t)
+
+        if (both) {
+          counts.compared++
+          assert.ok(!/different ledger|later than the open save/.test(window.reason), `(${window.from}, ${window.to}] has both ends on the ledger of ${step.t} and was refused: ${window.reason}`)
+
+          if (window.status === 'known') {
+            counts.known++
+          } else {
+            assert.ok(/log starts after/.test(window.reason), `unknown for another reason: ${window.reason}`)
+          }
+        } else {
+          counts.refused++
+          assert.equal(window.status, 'unknown', `a balance drawn over (${window.from}, ${window.to}], which has an end that is no ancestor of ${step.t}`)
+          assert.equal(window.residual, null)
+          assert.ok(/different ledger|later than the open save/.test(window.reason), `refused for another reason: ${window.reason}`)
+        }
+      })
+    })
+    assert.ok(counts.refused > 0 && counts.compared > 0 && counts.known > 0, JSON.stringify(counts))
+  })
+
+  test('real saves', 'chain order played: a snapshot of C1 is refused when C2 is open, so no window touches or spans it, and B, which both branches share, is not refused though the branch file of C2 does not hold it', async () => {
+    const found = await scenario('order played')
+    const deadEnd = found.steps.find((step) => step.entry === 'C1')
+    const open = found.steps.find((step) => step.entry === 'C2')
+    const dead = m.anchors.recordedAnchors({ snapshots: deadEnd.snapshots }).filter((anchor) => anchor.t === found.times.C1)
+    const shared = m.anchors.recordedAnchors({ snapshots: deadEnd.snapshots }).filter((anchor) => anchor.t === found.times.B)
+    const own = m.anchors.recordedAnchors({ snapshots: open.snapshots })
+    const check = reconcileStep(m, found, open, { anchors: [...own, ...dead, ...shared] })
+    const touching = check.windows.filter((window) => window.from === found.times.C1 || window.to === found.times.C1)
+
+    assert.equal(dead.length, 1)
+    assert.equal(shared.length, 1)
+    assert.equal(own.some((anchor) => anchor.t === found.times.B), false, 'the file of C2 holds no snapshot of B')
+    assert.ok(touching.length > 0 && touching.every((window) => window.status === 'unknown' && window.residual === null && /different ledger/.test(window.reason)), JSON.stringify(touching.map((window) => [window.from, window.to, window.status, window.reason])))
+    assert.ok(!check.windows.some((window) => window.status === 'known' && window.from < found.times.C1 && window.to > found.times.C1), 'a balance across C1')
+
+    const without = reconcileStep(m, found, open, { anchors: [...own, ...shared] })
+
+    assert.deepEqual(without.windows.map((window) => [window.from, window.to]), [[found.times.A, found.times.B], [found.times.B, found.times.C2]])
+    assert.ok(without.windows.every((window) => !/different ledger/.test(window.reason)), JSON.stringify(without.windows.map((window) => window.reason)))
+  })
+
+  test('real saves', 'chain order played: the two branches share the ID and game time of the increment where they part and are told apart by its Length: a prefix witness taken there on one is refused on the other', async () => {
+    const found = await scenario('order played')
+    const one = found.saves[found.times.C1]
+    const other = found.saves[found.times.C2]
+    const n = played.partingOf(one.rows, other.rows).common
+    const parting = [one.rows[n - 1], other.rows[n - 1]]
+    const identity = (rows) => m.campaign.scanLedger(rows, [n]).exact[n]
+    const witnessOf = (rows) => ({ t: rows[n - 1].GameTime, wealth: 1, chain: { n, digest: m.campaign.scanLedger(rows, [n]).exactLength[n] } })
+    const refusedOn = (opened, anchor) => m.anchors.reconcileTreasury({ settled: true, anchors: [anchor], live: { t: opened.t, wealth: opened.wealth }, log: opened.log, ledger: m.anchors.ledgerEvidence(opened.rows, [anchor]) })
+
+    assert.ok(n > found.saves[found.times.B].rows.length, 'the branches part after B')
+    assert.equal(parting[0].IncrementID, parting[1].IncrementID)
+    assert.equal(parting[0].GameTime, parting[1].GameTime)
+    assert.notEqual(parting[0].Length, parting[1].Length, 'the branches do not differ in the Length of the increment they part at')
+    assert.deepEqual(one.rows.slice(0, n - 1), other.rows.slice(0, n - 1), 'the branches agree before it')
+    assert.equal(identity(one.rows), identity(other.rows), 'the identity digest, which leaves Length out, cannot tell them apart')
+
+    ;[[other, witnessOf(one.rows)], [one, witnessOf(other.rows)]].forEach(([opened, anchor]) => {
+      const check = refusedOn(opened, anchor)
+
+      assert.equal(check.windows.length, 1)
+      assert.equal(check.windows[0].status, 'unknown', 'the prefix witness of the other branch was accepted')
+      assert.equal(check.windows[0].residual, null)
+      assert.ok(/different ledger/.test(check.windows[0].reason), check.windows[0].reason)
+    })
+
+    const own = witnessOf(other.rows)
+
+    assert.equal(m.anchors.ledgerEvidence(other.rows, [own]).exact[n], own.chain.digest, 'the save\'s own prefix witness is reproduced')
+  })
+
+  test('real saves', 'chain one line: the residual of the one window the played line has a log for, A to B, which the log accounts for whole, and the later saves whose retained log starts after B', async () => {
+    const found = await scenario('order played')
+    const [first, second, third] = found.steps
+    const check = verifyStep(found, second)
+
+    assert.deepEqual(knownWindows(verifyStep(found, first)), [])
+    assert.deepEqual(knownWindows(check), [[found.times.A, found.times.B]])
+    assert.equal(check.windows.length, 1)
+    assert.equal(check.total, null, 'a total needs more than one window')
+    near(check.windows[0].storedChange, found.saves[found.times.B].wealth - found.saves[found.times.A].wealth, 'the stored change')
+    assert.deepEqual([check.windows[0].residual, check.windows[0].balanced, check.windows[0].cycles], [0, true, 72], 'the log accounts for the whole change over A to B')
+    near(check.windows[0].loggedNet, 2427.0561, 'the logged net', 0.001)
+    assert.equal(check.windows[0].coverage.unloggedTail, (found.times.B - played.rowsOf(played.fileOf('B'), `select max(TimeUsed) as last from FCT_WealthData where GameID = ${played.GAME} and RaceID = ${played.RACE}`)[0].last) / DAY, 'the last cycle was logged before the later save')
+    assert.ok(found.steps.slice(2).every((step) => knownWindows(verifyStep(found, step)).length === 0), 'the log of each save after B starts after B')
+    assert.ok(third.logFirst > found.times.B)
+  })
+
+  test('real saves', 'chain rewind: the save opened after a later one is rewound, its later snapshot is refused and the earlier ones are compared', async () => {
+    const found = await scenario('rewind')
+    const step = found.steps.find((entry) => entry.entry === 'B')
+
+    assert.equal(step.resolution.relation, 'rewound')
+    assert.deepEqual(step.snapshots.map((snapshot) => snapshot.t), [found.times.A, found.times.B, found.times.C1], 'the later snapshot is in the branch\'s past')
+
+    const check = verifyStep(found, step)
+
+    assert.deepEqual(check.windows.map((window) => [window.from, window.to, window.status]), [[found.times.A, found.times.B, 'known'], [found.times.B, found.times.C1, 'unknown']])
+    assert.ok(/later than the open save/.test(check.windows[1].reason))
+    assert.equal(check.windows[1].residual, null)
+  })
+
   return cases
 }
 
@@ -664,6 +955,13 @@ const RECORDED_LIFE = 'lifecycle: the recorder stores with each snapshot'
 const LENGTH_ONLY = 'worked: a snapshot is refused when the open save\'s ledger differs only in the Length'
 const SQL_LENGTH = 'worked: the ledger read holds the Length'
 const LENGTH_LIFE = 'lifecycle: a replay that parts at an increment'
+const LINE = 'real saves: chain one line: the residual'
+const PLAYED = 'real saves: chain order played: every window'
+const OTHER_BRANCHES = 'real saves: chain order played: a window is compared exactly when'
+const DEAD_END = 'real saves: chain order played: a snapshot of C1 is refused'
+const FORK_LENGTH = 'real saves: chain order played: the two branches'
+const WITNESS_REAL = 'real saves: chain order played: every snapshot the recorder took'
+const REWIND_REAL = 'real saves: chain rewind: the save opened after'
 
 // `from` must occur once in `file` (a utility of the copy); `fails` are the starts of the full names ("group: name") of the checks that must fail.
 // TFIN-03 catalog audit: zero-based indices and mapped checks are unchanged; replacements do not prove retired operators.
@@ -677,10 +975,10 @@ const LENGTH_LIFE = 'lifecycle: a replay that parts at an increment'
 const MUTATIONS = [
   { name: 'the residual is folded into the net', file: 'treasury-anchors.js', from: 'const storedChange = to.wealth - from.wealth\n  const difference', to: 'const storedChange = to.wealth - from.wealth\n  loggedNet = storedChange\n  const difference', fails: [SIGN, ZERO] },
   { name: 'the residual has the wrong sign', file: 'treasury-anchors.js', from: 'const difference = storedChange - loggedNet', to: 'const difference = loggedNet - storedChange', fails: [SIGN] },
-  { name: 'the witness is not compared with the open save\'s ledger', file: 'treasury-anchors.js', from: 'if (ledger.exact[anchor.chain.n] !== anchor.chain.digest) {', to: 'if (false) {', fails: [OTHER_LEDGER, OWN_COUNT, REWIND_LIFE, MERGE_LIFE] },
+  { name: 'the witness is not compared with the open save\'s ledger', file: 'treasury-anchors.js', from: 'if (ledger.exact[anchor.chain.n] !== anchor.chain.digest) {', to: 'if (false) {', fails: [OTHER_LEDGER, OWN_COUNT, REWIND_LIFE, MERGE_LIFE, OTHER_BRANCHES, DEAD_END] },
   { name: 'an unwitnessed snapshot is accepted without verification', file: 'treasury-anchors.js', from: 'if (!anchor.chain) {', to: 'if (!anchor.chain) return null\n\n  if (!anchor.chain) {', fails: [NO_WITNESS, LEGACY_LIFE] },
   { name: 'a snapshot taken after more increments than the save holds is not told apart', file: 'treasury-anchors.js', from: 'if (anchor.chain.n > ledger.count) {', to: 'if (false) {', fails: [OTHER_LEDGER, 'worked: a save that holds fewer increments'] },
-  { name: 'the witness is read at the checkpoint below the snapshot\'s increment count', file: 'treasury-anchors.js', from: 'anchors.filter((anchor) => anchor.chain).map((anchor) => anchor.chain.n)', to: 'anchors.filter((anchor) => anchor.chain).map((anchor) => Math.floor(anchor.chain.n / 64) * 64)', fails: [OWN_COUNT] },
+  { name: 'the witness is read at the checkpoint below the snapshot\'s increment count', file: 'treasury-anchors.js', from: 'anchors.filter((anchor) => anchor.chain).map((anchor) => anchor.chain.n)', to: 'anchors.filter((anchor) => anchor.chain).map((anchor) => Math.floor(anchor.chain.n / 64) * 64)', fails: [OWN_COUNT, LINE] },
   { name: 'a malformed witness is kept', file: 'treasury-anchors.js', from: 'chain: isChain(snapshot.chain) ? { n: snapshot.chain.n, digest: snapshot.chain.digest } : null', to: 'chain: snapshot.chain || null', fails: [NO_WITNESS] },
   { name: 'a witness of no increments is believed', file: 'history.js', from: 'Number.isInteger(chain.n) && chain.n > 0', to: 'Number.isInteger(chain.n) && chain.n >= 0', fails: [NO_WITNESS] },
   { name: 'a snapshot without a treasury is recorded as 0', file: 'treasury-anchors.js', from: 'wealth: finite(snapshot.wealth) ? snapshot.wealth : null,', to: 'wealth: finite(snapshot.wealth) ? snapshot.wealth : 0,', fails: [NO_TREASURY] },
@@ -689,14 +987,14 @@ const MUTATIONS = [
   { name: 'the log window skips the first cycle after the earlier snapshot', file: 'treasury-anchors.js', from: 'firstAfter(log, from.t)', to: 'firstAfter(log, from.t + 100)', fails: [ENDS, SIGN] },
   { name: 'the log window leaves out the cycle at the later snapshot', file: 'treasury-anchors.js', from: 'log[index].t <= to.t', to: 'log[index].t < to.t', fails: [ENDS, SIGN] },
   { name: 'the log window takes a cycle after the later snapshot', file: 'treasury-anchors.js', from: 'log[index].t <= to.t', to: 'log[index].t <= to.t + 100', fails: [ENDS, 'worked: a window\'s cycles stop at its later snapshot'] },
-  { name: 'a snapshot after the open save is accepted', file: 'treasury-anchors.js', from: 'if (anchor.t > live.t) {', to: 'if (false) {', fails: ['worked: a snapshot after the open save is refused'] },
+  { name: 'a snapshot after the open save is accepted', file: 'treasury-anchors.js', from: 'if (anchor.t > live.t) {', to: 'if (false) {', fails: ['worked: a snapshot after the open save is refused', REWIND_REAL] },
   { name: 'a snapshot is accepted without a ledger', file: 'treasury-anchors.js', from: 'if (!ledger || !(ledger.count > 0)) {', to: 'if (!ledger || !(ledger.count > 0)) return null\n\n  if (!ledger || !(ledger.count > 0)) {', fails: ['worked: a snapshot is not verified when the open save\'s ledger is not read'] },
   { name: 'an unknown window reads as a residual of 0', file: 'treasury-anchors.js', from: 'storedChange: null, loggedNet: null, residual: null, balanced: false, cycles: 0, coverage: null, result: unknownResult(reason)', to: 'storedChange: null, loggedNet: null, residual: 0, balanced: false, cycles: 0, coverage: null, result: unknownResult(reason)', fails: [UNKNOWN, NO_TREASURY] },
   { name: 'a residual up to half a unit counts as balanced', file: 'treasury-anchors.js', from: 'export const BALANCE_TOLERANCE = 1e-6', to: 'export const BALANCE_TOLERANCE = 0.5', fails: [ZERO] },
-  { name: 'no window is ever balanced', file: 'treasury-anchors.js', from: 'const balanced = Math.abs(difference) <= BALANCE_TOLERANCE\n', to: 'const balanced = false\n', fails: [ZERO] },
+  { name: 'no window is ever balanced', file: 'treasury-anchors.js', from: 'const balanced = Math.abs(difference) <= BALANCE_TOLERANCE\n', to: 'const balanced = false\n', fails: [ZERO, LINE] },
   { name: 'a residual under 1 is rounded to the thousandth when printed', file: 'treasury-anchors.js', from: 'String(Number(Math.abs(residual).toPrecision(2)))', to: 'String(Math.round(Math.abs(residual) * 1000) / 1000)', fails: [PRINTED] },
   { name: 'a residual of 0 prints as a signed figure', file: 'treasury-anchors.js', from: 'if (residual === 0) {\n    return \'0\'', to: 'if (residual === 0) {\n    return signed(residual)', fails: [PRINTED] },
-  { name: 'a log that starts after the earlier snapshot is compared', file: 'treasury-anchors.js', from: 'if (log[0].t > from.t) {', to: 'if (false) {', fails: ['worked: a log that starts after'] },
+  { name: 'a log that starts after the earlier snapshot is compared', file: 'treasury-anchors.js', from: 'if (log[0].t > from.t) {', to: 'if (false) {', fails: ['worked: a log that starts after', PLAYED, OTHER_BRANCHES] },
   { name: 'a window with no logged cycle is compared', file: 'treasury-anchors.js', from: 'if (!cycles) {', to: 'if (false) {', fails: ['worked: a log that starts after'] },
   { name: 'a cycle with a missing amount is added up', file: 'treasury-anchors.js', from: 'if (!finite(cycle.net) || cycle.rows !== cycle.amounts) {', to: 'if (!finite(cycle.net)) {', fails: ['worked: a log that starts after'] },
   { name: 'a use missing from the use table is not noted', file: 'treasury-anchors.js', from: 'unmatched += cycle.unmatched || 0', to: 'unmatched += 0', fails: ['worked: a use missing from the use table'] },
@@ -705,12 +1003,12 @@ const MUTATIONS = [
   { name: 'spending is read as income by the log read', file: 'treasury-anchors.js', from: 'case when DIM_WealthUse.Income <> 0 then FCT_WealthData.Amount else -FCT_WealthData.Amount end', to: 'case when DIM_WealthUse.Income is not null then FCT_WealthData.Amount else -FCT_WealthData.Amount end', fails: [LOG_READ] },
   { name: 'a use missing from the use table is income in the log read', file: 'treasury-anchors.js', from: 'case when DIM_WealthUse.Income <> 0 then', to: 'case when coalesce(DIM_WealthUse.Income, 1) <> 0 then', fails: [LOG_READ] },
   { name: 'the log read ignores the race', file: 'treasury-anchors.js', from: 'and FCT_WealthData.RaceID = $' + '{wholeNumber(RaceID)}', to: '', fails: [LOG_READ] },
-  { name: 'the recorder stores no witness with a snapshot', file: 'history.js', from: 'snapshot: withChain(result.snapshot, observation)', to: 'snapshot: result.snapshot', fails: [RECORDED_LIFE, REWIND_LIFE, MERGE_LIFE] },
-  { name: 'the recorder stores the witness of one increment fewer', file: 'history.js', from: 'const chain = { n: observation.count, digest: observation.lengthDigest }', to: 'const chain = { n: observation.count - 1, digest: observation.lengthDigest }', fails: [RECORDED_LIFE, MERGE_LIFE] },
+  { name: 'the recorder stores no witness with a snapshot', file: 'history.js', from: 'snapshot: withChain(result.snapshot, observation)', to: 'snapshot: result.snapshot', fails: [RECORDED_LIFE, REWIND_LIFE, MERGE_LIFE, WITNESS_REAL] },
+  { name: 'the recorder stores the witness of one increment fewer', file: 'history.js', from: 'const chain = { n: observation.count, digest: observation.lengthDigest }', to: 'const chain = { n: observation.count - 1, digest: observation.lengthDigest }', fails: [RECORDED_LIFE, MERGE_LIFE, WITNESS_REAL] },
   { name: 'a merge stamps the destination\'s witness on the snapshots it brings in', file: 'campaign-attach.js', from: 'const fresh = added.filter((snapshot) => !known.has(snapshot.t))', to: 'const fresh = added.filter((snapshot) => !known.has(snapshot.t)).map((snapshot) => ({ ...snapshot, chain: kept.length ? kept[kept.length - 1].chain : snapshot.chain }))', fails: [LEGACY_LIFE, MERGE_LIFE] },
-  { name: 'the witness leaves out the Length of an increment', file: 'campaign.js', from: 'lengthDigest = hashText(`$' + '{lengthDigest}$' + '{row.IncrementID}:$' + '{row.GameTime}:$' + '{row.Length};`)', to: 'lengthDigest = hashText(`$' + '{lengthDigest}$' + '{row.IncrementID}:$' + '{row.GameTime};`)', fails: [LENGTH_ONLY, SQL_LENGTH, LENGTH_LIFE] },
-  { name: 'the recorder stores the identity digest of the ledger as the witness', file: 'history.js', from: 'digest: observation.lengthDigest', to: 'digest: observation.digest', fails: [RECORDED_LIFE, LENGTH_LIFE] },
-  { name: 'the open save\'s ledger is checked with the identity digest, which leaves out Length', file: 'treasury-anchors.js', from: 'exact: scanned.exactLength', to: 'exact: scanned.exact', fails: [LENGTH_ONLY, LENGTH_LIFE] },
+  { name: 'the witness leaves out the Length of an increment', file: 'campaign.js', from: 'lengthDigest = hashText(`$' + '{lengthDigest}$' + '{row.IncrementID}:$' + '{row.GameTime}:$' + '{row.Length};`)', to: 'lengthDigest = hashText(`$' + '{lengthDigest}$' + '{row.IncrementID}:$' + '{row.GameTime};`)', fails: [LENGTH_ONLY, SQL_LENGTH, LENGTH_LIFE, FORK_LENGTH] },
+  { name: 'the recorder stores the identity digest of the ledger as the witness', file: 'history.js', from: 'digest: observation.lengthDigest', to: 'digest: observation.digest', fails: [RECORDED_LIFE, LENGTH_LIFE, WITNESS_REAL] },
+  { name: 'the open save\'s ledger is checked with the identity digest, which leaves out Length', file: 'treasury-anchors.js', from: 'exact: scanned.exactLength', to: 'exact: scanned.exact', fails: [LENGTH_ONLY, LENGTH_LIFE, FORK_LENGTH] },
   { name: 'the ledger read does not hold the Length of an increment', file: 'campaign.js', from: 'FCT_Increments.GameTime, FCT_Increments.Length from', to: 'FCT_Increments.GameTime from', fails: [SQL_LENGTH] },
 ]
 

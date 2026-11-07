@@ -1,5 +1,5 @@
 /*
-  Measures the real orbital propagation against a pair of played saves of one campaign, matched by SystemBodyID, without changing either save. --from and --to name the pair: A, B, C or D for the four registered saves, or the path of a save relative to the repository root, whose game is the one with the latest clock. The defaults are A and B, the pair this check was written for; B-C is a second witness on the same terms, A-B and B-C span one load and A-C two; a pair ending in D is evidence-only: D's load history is not stated (the saved bearings fit two loads after B and three after A) and D's sub-pulse cadence (60 s against 1800 s) fails the witness's cadence guard, so no D pair is registered in the gate. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
+  Measures the real orbital propagation against a pair of played saves of one campaign, matched by SystemBodyID, without changing either save. --from and --to name the pair: A, B, C1 or C2 for the four registered saves (A and B, then the two branches from B), or the path of a save relative to the repository root, whose game is the one with the latest clock. The defaults are A and B, the pair this check was written for; B-C1 is a second witness on the same terms, A-B and B-C1 span one load and A-C1 two; a pair ending in C2 is evidence-only: the load history of C2 is not stated (the saved bearings fit two loads after B and three after A) and its sub-pulse cadence (60 s against 1800 s) fails the witness's cadence guard, so no C2 pair is registered in the gate. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
 
   Snapshots reach the later save's GameTime from the earlier save's baseline: full elapsed circular/moon-own bearings, whole eccentric calls plus a local remainder, never movement-phase calls. The private stateAt and clockOf seams are exported only in the loaded source copy. horizon:false measures short-period bodies too, without changing the arithmetic or MAX_CALLS; out-of-horizon measurements and every other refusal remain disclosed. All campaign systems are read, not just the race's surveyed subset.
 
@@ -10,7 +10,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { Database } = require('bun:sqlite')
 const assert = require('./lib/bounded-assert')
-const { PLAYED, PLAYED_NEXT, PLAYED_THIRD, PLAYED_BRANCHED } = require('./lib/fixtures')
+const { PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2 } = require('./lib/fixtures')
 const { loadUtilities } = require('./lib/utilities')
 const { runChild, lastJson } = require('./lib/check-pool')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
@@ -37,8 +37,8 @@ const percentile = (values, p) => values.length ? [...values].sort((a, b) => a -
 const distribution = (values) => ({ count: values.length, max: values.length ? Math.max(...values) : null, p50: percentile(values, 0.5), p95: percentile(values, 0.95) })
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 
-// The registered saves of the campaign, lettered as docs/WORKFLOW.md and the played-save entries of scripts/check-capabilities.js name them; any other --from or --to value is the path of a save, resolved against the repository root as a fixture's file is.
-const SAVES = { A: PLAYED, B: PLAYED_NEXT, C: PLAYED_THIRD, D: PLAYED_BRANCHED }
+// The registered saves of the campaign, lettered as docs/WORKFLOW.md and the played-save entries of scripts/check-capabilities.js name them (C1 and C2 the two branches from B); any other --from or --to value is the path of a save, resolved against the repository root as a fixture's file is.
+const SAVES = { A: PLAYED, B: PLAYED_NEXT, C1: PLAYED_C1, C2: PLAYED_C2 }
 
 const readSave = (fixture) => {
   const file = path.resolve(root, fixture.file)
@@ -270,7 +270,7 @@ const main = async () => {
   }
   // A pair letter names a registered save; any other value is the path of a save, resolved against the repository root as a fixture's file is and read as its game with the latest clock.
   const named = (text, name) => {
-    assert.ok(typeof text === 'string' && text.trim() !== '' && !text.startsWith('--'), `--${name} takes A, B, C, D or the path of a save`)
+    assert.ok(typeof text === 'string' && text.trim() !== '' && !text.startsWith('--'), `--${name} takes A, B, C1, C2 or the path of a save`)
 
     return SAVES[text.toUpperCase()] ? { label: text.toUpperCase(), fixture: SAVES[text.toUpperCase()] } : { label: text, fixture: { file: text, gameId: null } }
   }

@@ -5,6 +5,7 @@
 
   The expected values are written here, in SQL over the saves and in a constructed save, never read from the module under test:
   - saves: the migrated Galactic Shogunate save (scripts/lib/fixtures.js, game 141, race 784: 1 own and 10 foreign wrecks in known systems, 6 of a class the race names, no pod). The objects read are the ones the SQL gives, with the labels the game words them with, `Unknown` for a class the race has no alias for, and no field the viewing race may not see in a row, a statement, a record or an observation;
+  - the played chain (A, B and the two branches from B, C1 and C2, of scripts/lib/fixtures.js, game 161), each save read as every race that has surveyed a system of it, since the player's race owns no wreck and no life pod on any of them. The objects, their labels, the count of the objects that match each and the split of the wrecks of a system on the map are the ones SQL gives; the observation of a wreck is the same on two saves exactly when what its race knows of it is the same (a wreck tied to a body is, where its coordinates are not); and a status kept for a wreck on each save is read on each save as SQL says: held, no longer observed (the player's own race sees a foreign wreck of A gone on B), for review where C1 and C2 give one id to another wreck, and listed apart where the save is older than the status. The chain holds no life pod, no foreign wreck of a class its observer names and no wreck the same id of which differs in the ship alone, so the pods, the race's tag in a label and the ship of an own wreck are witnessed by the Shogunate save and the constructed one alone;
   - a constructed save holds the cases the saves do not: twins that only the observer's projection can tell apart, an object in a system the race does not know, a pod with no creation time, an alias the race has and one it has not, and a hidden field that changes while nothing the race may see does;
   - the kind by state matrix: each of the four kinds of object (own pod, foreign pod, own wreck, foreign wreck) against held, gone, returned, id reused, unverified, unread and kept at a later time, each cell with the state, the list and the words it must have; a vanished object reads `No longer observed` with its status kept, never as an outcome, and the same id with the same details seen again is held again;
   - the rewind: a status kept at a later game time than the open save is `ahead` — listed apart, applied to nothing, its old name mapped against no object of that save and nothing written for it — and the save at its base time carries it to the new name once, so a status kept for a pod tied to a point is never rebound to a pod an earlier save shows under the same id at the position the old name holds;
@@ -25,7 +26,7 @@ const { observe, failedObservation, report, HarnessError, installScreen, readFig
 const { assert, subjectModule, runChecks, judged, caughtBy, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
-const { FIXTURE } = require('./lib/fixtures')
+const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2 } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const inRenderer = (...parts) => path.join(root, 'src', 'renderer', ...parts)
@@ -744,6 +745,251 @@ const savesChecks = {
   },
 }
 
+// The played chain of scripts/lib/fixtures.js: A, B and the two branches from B (C1 and C2). Each save is read as every race that has surveyed a system of it, the player's and the others', since the player's race owns no wreck and no pod on any of them.
+const chainSpec = (fixture, letter) => ({ letter, file: fixture.file, GameID: fixture.gameId, RaceID: fixture.raceId })
+
+const PLAYED_SAVES = [chainSpec(PLAYED, 'A'), chainSpec(PLAYED_NEXT, 'B'), chainSpec(PLAYED_C1, 'C1'), chainSpec(PLAYED_C2, 'C2')]
+
+const chainObservers = (spec) => saveOf(spec).query(`select distinct RaceID as id from FCT_RaceSysSurvey where GameID = ${spec.GameID} order by RaceID`).all().map((row) => row.id)
+
+const chainTime = (spec) => saveOf(spec).query(`select GameTime as n from FCT_Game where GameID = ${spec.GameID}`).get().n
+
+const wrecksSeen = new Map()
+
+// The wrecks a race sees in a save, own and foreign apart, as SQL gives them: written here, apart from the statements of the module.
+const chainWrecks = (spec, race) => {
+  const key = `${spec.file}:${race}`
+
+  if (!wrecksSeen.has(key)) {
+    const db = saveOf(spec)
+    const game = spec.GameID
+    const own = db.query(`select w.WreckID as id, w.SystemID as system, w.OrbitBodyID as body, w.OrbitLagrangeID as lagrange, w.Xcor as x, w.Ycor as y, w.Size as size, w.ClassID as class, w.ShipID as ship, sc.ClassName as name from FCT_Wrecks w left join FCT_ShipClass sc on sc.ShipClassID = w.ClassID and sc.GameID = w.GameID where w.GameID = ${game} and w.RaceID = ${race} and w.${known(game, race)} order by w.WreckID`).all()
+    const foreign = db.query(`select w.WreckID as id, w.SystemID as system, w.OrbitBodyID as body, w.OrbitLagrangeID as lagrange, w.Xcor as x, w.Ycor as y, w.Size as size, ac.AlienClassID as alias, ac.ClassName as name, trim(ar.Abbrev) as tag from FCT_Wrecks w left join FCT_AlienClass ac on ac.GameID = w.GameID and ac.ViewRaceID = ${race} and ac.ActualClassID = w.ClassID left join FCT_AlienRace ar on ar.GameID = w.GameID and ar.ViewRaceID = ${race} and ar.AlienRaceID = w.RaceID where w.GameID = ${game} and w.RaceID != ${race} and w.${known(game, race)} order by w.WreckID`).all()
+    const unseen = countOf(db, `select count(*) as n from FCT_Wrecks where GameID = ${game} and SystemID not in (select SystemID from FCT_RaceSysSurvey where GameID = ${game} and RaceID = ${race})`)
+
+    wrecksSeen.set(key, { own, foreign, unseen })
+  }
+
+  return wrecksSeen.get(key)
+}
+
+const KINDS_SEEN = [['ownWreck', 'own'], ['wreck', 'foreign']]
+
+// What a status kept for a wreck holds it to, as the game's own words give it: an own wreck by its system, its class, its size to six decimals and its ship; a foreign one by the system, the size, the body or Lagrange point it is tied to and the class the observer knows it by.
+const heldTo = (kind, row) => (kind === 'ownWreck' ? [row.system, row.class, row.size.toFixed(6), row.ship] : [row.system, row.size.toFixed(6), row.body > 0 ? `body${row.body}` : row.lagrange > 0 ? `lagrange${row.lagrange}` : 'free', row.alias === null ? 'none' : row.alias]).join('|')
+
+// What an observation of a wreck compares: where it is and what the observer knows of it, the position of a free wreck only (a wreck tied to a body or a Lagrange point follows it, and the game rewrites its coordinates at each update), and for an own wreck its class and its ship.
+const watchedOf = (kind, row) => [kind === 'ownWreck' ? 'own' : 'seen', row.system, row.body, row.size.toFixed(6), row.body > 0 ? 'body' : row.lagrange > 0 ? `lagrange${row.lagrange}` : `${Math.round(row.x)},${Math.round(row.y)}`, kind === 'ownWreck' ? `${row.class}/${row.ship}` : row.alias === null ? 'none' : row.alias].join('|')
+
+const objectsOfChain = new Map()
+
+// The objects the module reads of a save for a race, once for each module.
+const chainObjects = (mod, spec, race) => {
+  if (!objectsOfChain.has(mod)) {
+    objectsOfChain.set(mod, new Map())
+  }
+
+  const held = objectsOfChain.get(mod)
+  const key = `${spec.file}:${race}`
+
+  if (!held.has(key)) {
+    held.set(key, loadObjects(mod, saveOf(spec), { GameID: spec.GameID, RaceID: race }))
+  }
+
+  return held.get(key)
+}
+
+const chainChecks = {
+  id: 'chain',
+  name: 'the objects of the played saves, as each race that has surveyed a system of them sees them, are the ones SQL gives, own and foreign apart, with the labels the game words them with, the count of the objects that match each and no field the race may not see',
+  run: async ({ mod }) => {
+    let pods = 0
+    let seen = 0
+    let unseen = 0
+    let twins = 0
+    let unknown = 0
+    let named = 0
+
+    for (const spec of PLAYED_SAVES) {
+      const db = saveOf(spec)
+      const game = spec.GameID
+
+      pods += countOf(db, `select count(*) as n from FCT_Lifepods where GameID = ${game}`)
+
+      for (const race of chainObservers(spec)) {
+        const where = `${spec.letter} as race ${race}`
+        const found = await chainObjects(mod, spec, race)
+        const sql = chainWrecks(spec, race)
+
+        assert.deepEqual([...found.objects.ownWreck.keys()], sql.own.map((row) => row.id), `${where}: the own wrecks by id`)
+        assert.deepEqual([...found.objects.wreck.keys()], sql.foreign.map((row) => row.id), `${where}: the foreign wrecks by id`)
+        assert.deepEqual([found.objects.ownLifepod.size, found.objects.lifepod.size], [countOf(db, `select count(*) as n from FCT_Lifepods where GameID = ${game} and RaceID = ${race} and ${known(game, race)}`), countOf(db, `select count(*) as n from FCT_Lifepods where GameID = ${game} and RaceID != ${race} and ${known(game, race)}`)], `${where}: the pods`)
+
+        seen += sql.own.length + sql.foreign.length
+        unseen += sql.unseen
+
+        for (const oracle of sql.own) {
+          const row = found.objects.ownWreck.get(oracle.id)
+          const parts = /^Wreck of (.+?) class #(\d+): ([\d.]+) tons$/.exec(mod.ledger.labelOf(row))
+
+          assert.notEqual(parts, null, `${where}: the label of own wreck ${oracle.id} is the game's wording: ${mod.ledger.labelOf(row)}`)
+          assert.equal(parts[1], oracle.name || 'Unknown', `${where}: own wreck ${oracle.id}: its class`)
+          assert.equal(Number(parts[2]), oracle.id)
+          assert.ok(Math.abs(Number(parts[3]) - oracle.size * 50) < 0.0001, `${where}: own wreck ${oracle.id}: the tons are the size times fifty`)
+          assert.deepEqual([row.systemId, row.classId, row.shipId, row.own], [oracle.system, oracle.class, oracle.ship, true], `${where}: own wreck ${oracle.id}: its system, class and ship`)
+          assert.equal(row.copies, sql.own.filter((other) => heldTo('ownWreck', other) === heldTo('ownWreck', oracle)).length, `${where}: own wreck ${oracle.id}: the objects that match it`)
+        }
+
+        for (const oracle of sql.foreign) {
+          const row = found.objects.wreck.get(oracle.id)
+          const parts = /^Wreck of (.+?) class( \[(.+?)\])? #(\d+): ([\d.]+) tons$/.exec(mod.ledger.labelOf(row))
+
+          assert.notEqual(parts, null, `${where}: the label of wreck ${oracle.id} is the game's wording: ${mod.ledger.labelOf(row)}`)
+          assert.equal(parts[1], oracle.name || 'Unknown', `${where}: wreck ${oracle.id}: the class as the race names it`)
+          assert.equal(parts[3] === undefined ? null : parts[3], oracle.name && oracle.tag ? oracle.tag : null, `${where}: wreck ${oracle.id}: the race's tag appears with a class the race knows`)
+          assert.equal(Number(parts[4]), oracle.id)
+          assert.ok(Math.abs(Number(parts[5]) - oracle.size * 50) < 0.0001, `${where}: wreck ${oracle.id}: the tons are the size times fifty`)
+          assert.equal(row.copies, sql.foreign.filter((other) => heldTo('wreck', other) === heldTo('wreck', oracle)).length, `${where}: wreck ${oracle.id}: the objects that match it`)
+          assert.deepEqual(Object.keys(row).filter((key) => !FOREIGN_KEYS.includes(key)), [], `${where}: a foreign wreck ${row.id} holds only what the race may see`)
+
+          unknown += oracle.name ? 0 : 1
+          named += oracle.name ? 1 : 0
+          twins += row.copies > 1 ? 1 : 0
+        }
+
+        if (sql.own.length + sql.foreign.length > 0) {
+          const features = await mod.features.loadMapFeatures(adapter(db), { GameID: game, RaceID: race })
+          const split = db.query(`select SystemID as id, count(*) as total, sum(RaceID = ${race}) as own from FCT_Wrecks where GameID = ${game} and ${known(game, race)} group by SystemID`).all()
+
+          assert.deepEqual(split.map((row) => [features[String(row.id)].wrecks, features[String(row.id)].ownWrecks]), split.map((row) => [row.total, row.own]), `${where}: the wrecks of each system, and the own ones among them`)
+          assert.equal(Object.values(features).filter((system) => system.wrecks === 0 && system.ownWrecks !== 0).length, 0, `${where}: a system with no wreck has no own one`)
+        }
+      }
+    }
+
+    assert.equal(pods, 0, 'the played saves hold no life pod, so a pod is witnessed by the Shogunate save and the constructed one')
+    assert.ok(seen > 0, 'the played saves hold wrecks in systems a race knows')
+    assert.ok(unseen > 0, 'a wreck lies in a system some race does not know')
+    assert.ok(unknown > 0, 'a foreign wreck is of a class its observer has no alias for')
+    assert.equal(named, 0, 'no foreign wreck on the played saves is of a class its observer names')
+    assert.ok(twins > 0, 'two foreign wrecks of one observer are alike')
+  },
+}
+
+const chainObsChecks = {
+  id: 'chainobs',
+  name: 'the observations of the wrecks of the played saves are the wrecks SQL gives, and a wreck is the same observation on two saves exactly when what its race knows of it is the same, whatever the coordinates of a wreck tied to a body do',
+  run: async ({ mod }) => {
+    const races = [...new Set(PLAYED_SAVES.flatMap((spec) => chainObservers(spec)))].sort((a, b) => a - b)
+    let alike = 0
+    let apart = 0
+    let tied = 0
+
+    for (const race of races) {
+      const reads = []
+
+      for (const spec of PLAYED_SAVES) {
+        const sql = chainWrecks(spec, race)
+        const watched = new Map([...sql.own.map((row) => [row.id, { own: true, row, text: watchedOf('ownWreck', row) }]), ...sql.foreign.map((row) => [row.id, { own: false, row, text: watchedOf('wreck', row) }])])
+        const observed = await mod.obs.OBSERVED_KINDS.wreck.read(adapter(saveOf(spec)), { GameID: spec.GameID, RaceID: race })
+        const podsObserved = await mod.obs.OBSERVED_KINDS.lifepod.read(adapter(saveOf(spec)), { GameID: spec.GameID, RaceID: race })
+
+        assert.deepEqual(podsObserved.map(([id]) => id), saveOf(spec).query(`select LifepodID as id from FCT_Lifepods where GameID = ${spec.GameID} and ${known(spec.GameID, race)} order by LifepodID`).all().map((row) => row.id), `${spec.letter} as race ${race}: the pods observed`)
+        assert.deepEqual(observed.map(([id]) => id), [...watched.keys()].sort((a, b) => a - b), `${spec.letter} as race ${race}: the wrecks observed`)
+        assert.deepEqual(observed.map(([id, signature]) => [id, signature.split('/')[0], Number(signature.split('/')[1])]), observed.map(([id]) => [id, watched.get(id).own ? 'own' : 'seen', watched.get(id).row.system]), `${spec.letter} as race ${race}: each observation is of an own or a foreign wreck, in its system`)
+        reads.push({ watched, observed: new Map(observed.map(([id, signature]) => [id, signature])) })
+      }
+
+      reads.forEach((left, at) => reads.slice(at + 1).forEach((right) => {
+        for (const [id, signature] of left.observed) {
+          if (right.observed.has(id)) {
+            const same = left.watched.get(id).text === right.watched.get(id).text
+
+            assert.equal(right.observed.get(id) === signature, same, `race ${race}, wreck ${id}: the same observation on two saves exactly when the race knows the same of it`)
+            alike += same ? 1 : 0
+            apart += same ? 0 : 1
+            tied += same && left.watched.get(id).row.body > 0 && (Math.round(left.watched.get(id).row.x) !== Math.round(right.watched.get(id).row.x) || Math.round(left.watched.get(id).row.y) !== Math.round(right.watched.get(id).row.y)) ? 1 : 0
+          }
+        }
+      }))
+    }
+
+    assert.ok(alike > 0 && apart > 0, 'the played saves hold wrecks the same on two saves and wrecks another on them')
+    assert.ok(tied > 0, 'a wreck tied to a body is the same observation on two saves where its coordinates are not')
+  },
+}
+
+const chainRewindChecks = {
+  id: 'chainrewind',
+  name: 'a status kept for a wreck on one of the played saves reads on each save as SQL says: held where the same wreck is under the id, no longer observed where nothing is, for review where another wreck is, and listed apart where the save is older than the status',
+  run: async ({ mod }) => {
+    const tally = {}
+    const races = [...new Set(PLAYED_SAVES.flatMap((spec) => chainObservers(spec)))].sort((a, b) => a - b)
+
+    for (const race of races) {
+      for (const from of PLAYED_SAVES) {
+        const kept = await chainObjects(mod, from, race)
+        const sqlFrom = chainWrecks(from, race)
+        const repository = repositoryOf(mod)
+        const made = { campaignId: 'c1', RaceID: race, branchId: 'b1', gameTime: chainTime(from) }
+
+        for (const [kind, side] of KINDS_SEEN) {
+          for (const row of kept.objects[kind].values()) {
+            const put = await mod.ledger.setStatus(repository, made, { row, status: 'personal', context: contextOf(kept, made) })
+
+            assert.equal(put.ok, true, `${from.letter} as race ${race}: the status of ${kind} ${row.id} is kept: ${put.code} ${put.message}`)
+          }
+
+          assert.equal(kept.objects[kind].size, sqlFrom[side].length)
+        }
+
+        for (const to of PLAYED_SAVES) {
+          const opened = { ...made, gameTime: chainTime(to) }
+          const now = await chainObjects(mod, to, race)
+          const sqlTo = chainWrecks(to, race)
+          const read = mod.ledger.readRecovery(repository, opened, contextOf(now, opened))
+          const rows = mod.ledger.recoveryRows({ objects: now.objects, entries: read.entries })
+          const ahead = chainTime(from) > chainTime(to)
+
+          assert.equal(read.entries.length, sqlFrom.own.length + sqlFrom.foreign.length, `${from.letter} kept, ${to.letter} open, as race ${race}: one entry for each status`)
+
+          for (const [kind, side] of KINDS_SEEN) {
+            for (const was of sqlFrom[side]) {
+              const is = sqlTo[side].find((one) => one.id === was.id)
+              const state = !is ? 'gone' : heldTo(kind, is) === heldTo(kind, was) ? 'held' : 'reused'
+              const entry = entryFor(read, kind, was.id)
+              const row = rows.find((one) => one.entry && one.entry.uuid === entry.uuid)
+              const where = `${from.letter} kept, ${to.letter} open, as race ${race}: ${kind} ${was.id}`
+
+              assert.equal(entry.state, state, `${where}: the state`)
+              assert.equal(entry.ahead, ahead, `${where}: kept at a later game time than the open save`)
+              assert.equal(entry.status, 'personal', `${where}: the status is kept as it was, whatever became of the wreck`)
+              assert.ok(row, `${where}: the entry is in a list of the ledger`)
+              assert.equal(row.group, ahead ? 'ahead' : { held: 'present', gone: 'gone', reused: 'review' }[state], `${where}: the list of the row`)
+
+              if (state === 'gone') {
+                assert.equal(row.object, null, `${where}: no wreck is shown for a vanished id`)
+                assert.equal(entry.row, null, `${where}: no row is read for a vanished id`)
+              }
+
+              if (state === 'reused') {
+                assert.ok(row.current && row.current.id === was.id, `${where}: the wreck now under the id is told`)
+                assert.equal(rows.filter((one) => one.group === 'present' && one.entry && one.entry.uuid === entry.uuid).length, 0, `${where}: the status is not applied to the wreck now under the id`)
+              }
+
+              tally[`${kind} ${state}`] = (tally[`${kind} ${state}`] || 0) + 1
+              tally[`${ahead ? 'ahead' : 'current'} ${state}`] = (tally[`${ahead ? 'ahead' : 'current'} ${state}`] || 0) + 1
+              tally[`race ${race} ${state}`] = (tally[`race ${race} ${state}`] || 0) + 1
+            }
+          }
+        }
+      }
+    }
+
+    ;['ownWreck held', 'ownWreck gone', 'ownWreck reused', 'wreck held', 'wreck gone', 'wreck reused', 'ahead held', 'ahead gone', 'ahead reused', 'current held', 'current gone', 'current reused', 'race 909 gone'].forEach((key) => assert.ok(tally[key] > 0, `the played saves give a status the cell ${key}`))
+  },
+}
+
 // The judge of a browser variant, on results made by hand: a fault is credited only when the checks it names fail by a value and the page raised no error of its own, the fault that plants an error is credited only for that error, and a rewrite only when nothing fails. No page is involved; the judge's verdict is the observation.
 const judgeChecks = {
   id: 'judge',
@@ -785,36 +1031,36 @@ const judgeChecks = {
   },
 }
 
-const CHECKS = [unitChecks, matrixChecks, rewindChecks, identityChecks, hiddenChecks, readerChecks, observationChecks, viewChecks, wordChecks, savesChecks, judgeChecks]
+const CHECKS = [unitChecks, matrixChecks, rewindChecks, identityChecks, hiddenChecks, readerChecks, observationChecks, viewChecks, wordChecks, savesChecks, chainChecks, chainObsChecks, chainRewindChecks, judgeChecks]
 
 // ---------- the faults and the rewrites of the utilities ----------
 
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
-  { name: 'a vanished object reads as held', file: 'recovery-ledger', find: "if (link.status === 'missing') {\n    return STATES.GONE", to: "if (link.status === 'missing') {\n    return STATES.HELD", fails: ['matrix', 'view'] },
-  { name: 'another object under the id reads as the one kept', file: 'recovery-ledger', find: "if (link.status === 'changed') {\n    return STATES.REUSED", to: "if (link.status === 'changed') {\n    return STATES.HELD", fails: ['matrix', 'identity'] },
+  { name: 'a vanished object reads as held', file: 'recovery-ledger', find: "if (link.status === 'missing') {\n    return STATES.GONE", to: "if (link.status === 'missing') {\n    return STATES.HELD", fails: ['matrix', 'view', 'chainrewind'] },
+  { name: 'another object under the id reads as the one kept', file: 'recovery-ledger', find: "if (link.status === 'changed') {\n    return STATES.REUSED", to: "if (link.status === 'changed') {\n    return STATES.HELD", fails: ['matrix', 'identity', 'chainrewind'] },
   { name: 'an own pod with no creation time is certified', file: 'recovery-ledger', find: "return link.status === 'unknown' ? STATES.UNVERIFIED : STATES.HELD", to: 'return STATES.HELD', fails: ['matrix'] },
   { name: 'a kind that was not read reads as gone', file: 'recovery-ledger', find: "if (!link || (link.status === 'unknown' && !link.unverified)) {\n    return STATES.UNREAD", to: "if (!link || (link.status === 'unknown' && !link.unverified)) {\n    return STATES.GONE", fails: ['matrix'] },
-  { name: 'a status kept at a later time is applied', file: 'recovery-ledger', find: 'const applied = entries.filter((entry) => !entry.ahead)', to: 'const applied = entries', fails: ['matrix'] },
+  { name: 'a status kept at a later time is applied', file: 'recovery-ledger', find: 'const applied = entries.filter((entry) => !entry.ahead)', to: 'const applied = entries', fails: ['matrix', 'chainrewind'] },
   { name: 'a status kept at a later time is migrated on the save it is ahead of', file: 'recovery-ledger', find: 'listed.filter((item) => currentInSave(item) && !item.flags.some((flag) => NOT_SHOWN.includes(flag)) && item.links.length === 1', to: 'listed.filter((item) => !item.flags.some((flag) => NOT_SHOWN.includes(flag)) && item.links.length === 1', fails: ['rewind'] },
   { name: 'an old name is mapped on the save its status is ahead of', file: 'recovery-ledger', find: 'const link = linkOf(stored, ref, context, !ahead)', to: 'const link = linkOf(stored, ref, context)', fails: ['rewind'] },
-  { name: 'a vanished object is left out of the ledger', file: 'recovery-ledger', find: 'if (entry.state === STATES.GONE) {\n      rest.push(listed(entry, GROUPS.GONE))', to: 'if (entry.state === STATES.GONE) {\n      return', fails: ['matrix', 'view'] },
+  { name: 'a vanished object is left out of the ledger', file: 'recovery-ledger', find: 'if (entry.state === STATES.GONE) {\n      rest.push(listed(entry, GROUPS.GONE))', to: 'if (entry.state === STATES.GONE) {\n      return', fails: ['matrix', 'view', 'chainrewind'] },
   { name: 'a status belongs to the campaign, not the branch', file: 'recovery-ledger', find: "policy: 'branch', links", to: "policy: 'campaign', links", fails: ['units'] },
   { name: 'pending keeps the status', file: 'recovery-ledger', find: 'return entry ? await removeStatus(repository, scope, entry) : { ok: true, record: null }', to: 'return { ok: true, record: null }', fails: ['units'] },
   { name: 'a duplicate id is kept twice', file: 'recovery-ledger', find: "throw Object.assign(new Error('This id has a status kept already", to: "return\n          throw Object.assign(new Error('This id has a status kept already", fails: ['units'] },
   { name: 'a status is kept for an object picked in another race, branch or save', file: 'recovery-ledger', find: "const checked = checkLink(context, scope, { type: row.type, row }, RECOVERY_TARGETS, 'status')", to: 'const checked = { ok: true, row }', fails: ['units'] },
-  { name: 'the twins of a foreign wreck are counted as one', file: 'recovery-ledger', find: 'return rows.map((row) => ({ ...row, copies: counts.get(RECOVERY_TARGETS[type].fingerprint(row)) }))', to: 'return rows.map((row) => ({ ...row, copies: 1 }))', fails: ['identity', 'objects'] },
+  { name: 'the twins of a foreign wreck are counted as one', file: 'recovery-ledger', find: 'return rows.map((row) => ({ ...row, copies: counts.get(RECOVERY_TARGETS[type].fingerprint(row)) }))', to: 'return rows.map((row) => ({ ...row, copies: 1 }))', fails: ['identity', 'objects', 'chain'] },
   { name: 'the foreign wreck statement selects the ship', file: 'recovery-ledger', find: 'FCT_Wrecks.Size, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr, FCT_AlienRace.Abbrev as RaceTag', to: 'FCT_Wrecks.Size, FCT_Wrecks.ShipID, FCT_AlienClass.AlienClassID, FCT_AlienClass.ClassName as AlienClassName, FCT_HullDescription.HullAbbr, FCT_AlienRace.Abbrev as RaceTag', fails: ['hidden'] },
   { name: 'the foreign pod statement selects the name and the crew', file: 'recovery-ledger', find: 'select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.OrbitBodyID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_AlienClass.AlienClassID', to: 'select FCT_Lifepods.LifepodID, FCT_Lifepods.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Lifepods.OrbitBodyID, FCT_Lifepods.OrbitLagrangeID, FCT_Lifepods.Xcor, FCT_Lifepods.Ycor, FCT_Lifepods.ShipName, FCT_Lifepods.Crew, FCT_AlienClass.AlienClassID', fails: ['hidden'] },
-  { name: 'the objects of a system the race does not know are read', file: 'recovery-ledger', find: 'const KNOWN = (table, { GameID, RaceID }) => `inner join', to: 'const KNOWN = (table, { GameID, RaceID }) => `left join', fails: ['objects', 'observations'] },
-  { name: 'the foreign wrecks hold the own ones too', file: 'recovery-ledger', find: 'and FCT_Wrecks.RaceID != ${RaceID} order by FCT_Wrecks.WreckID', to: 'order by FCT_Wrecks.WreckID', fails: ['objects', 'saves'] },
-  { name: 'a class the race has no alias for is named by its real name', file: 'recovery-ledger', find: "return `Wreck of ${row.className || 'Unknown'} class", to: "return `Wreck of ${row.className || 'Mystery'} class", fails: ['objects', 'saves'] },
+  { name: 'the objects of a system the race does not know are read', file: 'recovery-ledger', find: 'const KNOWN = (table, { GameID, RaceID }) => `inner join', to: 'const KNOWN = (table, { GameID, RaceID }) => `left join', fails: ['objects', 'observations', 'chain', 'chainobs', 'chainrewind'] },
+  { name: 'the foreign wrecks hold the own ones too', file: 'recovery-ledger', find: 'and FCT_Wrecks.RaceID != ${RaceID} order by FCT_Wrecks.WreckID', to: 'order by FCT_Wrecks.WreckID', fails: ['objects', 'saves', 'chain', 'chainobs', 'chainrewind'] },
+  { name: 'a class the race has no alias for is named by its real name', file: 'recovery-ledger', find: "return `Wreck of ${row.className || 'Unknown'} class", to: "return `Wreck of ${row.className || 'Mystery'} class", fails: ['objects', 'saves', 'chain'] },
   { name: 'a pod has an age before it was made', file: 'recovery-ledger', find: ' && gameTime >= row.created ? gameTime - row.created : null', to: ' ? gameTime - row.created : null', fails: ['objects'] },
-  { name: 'the position of a wreck tied to a body is part of its observation', file: 'recovery-ledger', find: '...(row.orbitBodyId ? [] : anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)])', to: '...[spot(row.x), spot(row.y)]', fails: ['observations'] },
+  { name: 'the position of a wreck tied to a body is part of its observation', file: 'recovery-ledger', find: '...(row.orbitBodyId ? [] : anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)])', to: '...[spot(row.x), spot(row.y)]', fails: ['observations', 'chainobs'] },
   { name: 'a vanished object is worded as an outcome', file: 'recovery-ledger', find: "gone: 'The open save holds no object under this id, and nothing says why it is gone, so the status stays as it was kept.'", to: "gone: 'The object was rescued.'", fails: ['words'] },
   { name: 'the lists name a yield', file: 'recovery-ledger', find: "GROUP_TEXT = Object.freeze({\n  present: 'In the save',", to: "GROUP_TEXT = Object.freeze({\n  present: 'In the save, with a yield',", fails: ['words'] },
-  { name: 'the own wrecks are counted as foreign on the map', file: 'map-features', find: 'sum(FCT_Wrecks.RaceID = ${RaceID}) as Own', to: 'sum(FCT_Wrecks.RaceID != ${RaceID}) as Own', fails: ['saves'] },
-  { name: 'the observation of the wrecks reads the pods', file: 'observations', find: 'read: readWreckObservations', to: 'read: readLifepodObservations', fails: ['observations'] },
+  { name: 'the own wrecks are counted as foreign on the map', file: 'map-features', find: 'sum(FCT_Wrecks.RaceID = ${RaceID}) as Own', to: 'sum(FCT_Wrecks.RaceID != ${RaceID}) as Own', fails: ['saves', 'chain'] },
+  { name: 'the observation of the wrecks reads the pods', file: 'observations', find: 'read: readWreckObservations', to: 'read: readLifepodObservations', fails: ['observations', 'chainobs'] },
   { name: 'the observation of an own pod leaves out when it was made and its name', file: 'recovery-ledger', find: '[spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.created), present(row.shipName)] : [])', to: '[spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...[]', fails: ['observations'] },
   { name: 'the observation of an own wreck leaves out its ship', file: 'recovery-ledger', find: 'anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...(row.own ? [present(row.shipId)] : [])', to: 'anchorOf(row) ? [anchorOf(row)] : [spot(row.x), spot(row.y)]), present(row.own ? row.classId : row.aliasId), ...[]', fails: ['observations'] },
   { name: 'an unknown crew is shown as none', file: 'recovery-ledger', find: "row.crew === null ? 'crew unknown' : row.crew === 0 && row.officers > 0 ? 'no crew' : `${count(row.crew)} crew`", to: '`${count(row.crew === null ? 0 : row.crew)} crew`', fails: ['objects'] },
@@ -1340,7 +1586,7 @@ const main = async () => {
   const mutating = !runnerArgs().rest.includes('--no-mutations')
   const totals = await runSuite({
     script: __filename,
-    inputs: [SHOGUNATE.file],
+    inputs: [SHOGUNATE.file, PLAYED.file, PLAYED_NEXT.file, PLAYED_C1.file, PLAYED_C2.file],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {

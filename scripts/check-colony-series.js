@@ -7,7 +7,8 @@
   - rows: the record of a colony (the states, the rounding, a stored zero against a missing value), what is chosen and when it applies, the limit of 50, the size estimate;
   - merge: the series of a branch (the same save again, a colony added, a revision, a failed read over an observation, an older save, the cap, a branch seeded from its parent);
   - single: the recorder over the fixture save (scripts/lib/fixtures.js), read only: no statement and no write without a choice, one statement with one, the figures against SQL written here, a repeat write nothing, a failed read, a pass superseded at every guard, the retention cap;
-  A save that is not there skips the single group and says so; nothing is read from it but SELECTs (the files are opened read only).
+  - chain: the recorder over the played campaign (A, B and the two branches from B, C1 and C2), read only: C2 opened after C1 is a rollback to B and a play on, so a fork cut at the last whole 64 increments the two ledgers share, the colony series the fork is seeded with (up to the cut and none later, though no colony is followed any more and the parent's series is cleared afterwards), the figures of each branch against SQL written here, the first branch left as it was by the fork, and C1 opened again after C2 capturing nothing.
+  A save that is not there skips the group that reads it and says so; nothing is read from a save but SELECTs (the files are opened read only).
 
   Everything else runs on in-memory stores. Each mutation of the utilities is planted in an isolated copy (scripts/lib/mutant-source.js) and must break the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
@@ -20,7 +21,8 @@ const { patched } = require('./lib/mutant-source')
 const { loadPage, replacing, instantiate } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
-const { FIXTURE } = require('./lib/fixtures')
+const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2 } = require('./lib/fixtures')
+const { STEP, partingOf } = require('./lib/played-chain')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -151,7 +153,7 @@ const installation = ({ seed = {}, counter = 1000, clock = 1000000 } = {}) => {
   }
 }
 
-const record = (m, inst, file, { log, failColonies, isCurrent } = {}) => m.history.recordHistory(databaseOf(file, { log, failColonies }), { storage: inst.io, path: `C:/saves/${path.basename(file)}`, now: inst.now, newId: inst.newId, isCurrent })
+const record = (m, inst, file, { log, failColonies, isCurrent, onResolved } = {}) => m.history.recordHistory(databaseOf(file, { log, failColonies }), { storage: inst.io, path: `C:/saves/${path.basename(file)}`, now: inst.now, newId: inst.newId, isCurrent, onResolved })
 
 const settled = async (m, inst, file) => {
   await record(m, inst, file)
@@ -298,6 +300,87 @@ const single = async (m) => {
   result.guards = guards
   result.unchangedGuards = unchangedGuards
   result.later = later
+
+  return result
+}
+
+// ---------- the played campaign ----------
+
+// A, B and the two branches from B, in the order of play (scripts/lib/fixtures.js); the game and the race are the campaign's.
+const CHAIN = [['A', PLAYED], ['B', PLAYED_NEXT], ['C1', PLAYED_C1], ['C2', PLAYED_C2]].map(([letter, played]) => ({ letter, file: path.join(root, played.file), GameID: played.gameId, RaceID: played.raceId }))
+const CHAIN_THERE = CHAIN.every(({ file }) => fs.existsSync(file))
+
+// The ledger of a save as the recorder reads it (an increment is its ID and its game time).
+const ledgerOf = (file, GameID) => rowsOf(file, `select IncrementID, GameTime from FCT_Increments where GameID = ${GameID} order by IncrementID`)
+
+// The campaign recorded in the order of play: the colony of the race with the largest population chosen on A, the colony B added chosen on B, C1, then C2, which parts from C1 at B (a rollback to B and a play on), the colony C2 added chosen on C2, and C1 opened again. A copy of the installation taken before C2 follows a fork made when no colony is followed any more, the parent's series cleared afterwards and a colony chosen on the fork.
+const chain = async (m) => {
+  const { GameID, RaceID } = CHAIN[0]
+  const times = {}
+  const rows = {}
+  const ledgers = {}
+
+  for (const { letter, file } of CHAIN) {
+    times[letter] = await gameTimeOf(file, GameID)
+    rows[letter] = await colonyRowsOf(file, GameID, RaceID)
+    ledgers[letter] = await ledgerOf(file, GameID)
+  }
+
+  const fileOf = (letter) => CHAIN.find((entry) => entry.letter === letter).file
+  const rowOf = (letter, id) => rows[letter].find((row) => row.PopulationID === id)
+  const stamped = (letter, id) => ({ id, since: times[letter], name: rowOf(letter, id).PopName, bodyId: rowOf(letter, id).SystemBodyID, raceId: rowOf(letter, id).RaceID })
+  const added = (from, to) => rows[to].filter((row) => !rows[from].some((other) => other.PopulationID === row.PopulationID)).map((row) => row.PopulationID)
+  const ids = { earth: rows.A.slice().sort((a, b) => b.Population - a.Population)[0].PopulationID, rantz: added('A', 'B')[0], virginis: added('C1', 'C2')[0] }
+  const result = { GameID, RaceID, times, rows, ledgers, ids, added: { B: added('A', 'B'), C2: added('C1', 'C2') }, relations: {} }
+  const inst = installation()
+  let last = null
+
+  const rec = async (target, letter, options = {}) => {
+    await record(m, target, fileOf(letter), { onResolved: (id, resolution) => { last = id === GameID ? resolution : last }, ...options })
+
+    return last
+  }
+
+  result.relations.A = (await rec(inst, 'A')).relation
+
+  const campaignId = inst.campaignId(GameID)
+  const followed = (target) => target.files.get('settings').campaign[campaignId].race[RaceID].historyColonies
+
+  result.campaignId = campaignId
+  chose(m, inst, campaignId, RaceID, [stamped('A', ids.earth)])
+  await rec(inst, 'A')
+  result.relations.B = (await rec(inst, 'B')).relation
+  chose(m, inst, campaignId, RaceID, [...followed(inst), stamped('B', ids.rantz)])
+  await rec(inst, 'B')
+  result.relations.C1 = (await rec(inst, 'C1')).relation
+  result.parent = { registry: inst.registry().campaigns[campaignId], series: inst.colonies(campaignId) }
+
+  const stopped = inst.copy()
+  const emptyFile = { columns: [...m.colony.COLONY_COLUMNS], races: {} }
+
+  result.emptyFile = emptyFile
+
+  const fork = await rec(inst, 'C2')
+
+  result.relations.C2 = fork.relation
+  result.fork = { forked: fork.forked, branchId: fork.branchId, registry: inst.registry().campaigns[campaignId], b1: inst.colonies(campaignId, 'b1'), b2: inst.colonies(campaignId, 'b2') }
+  chose(m, inst, campaignId, RaceID, [...followed(inst), stamped('C2', ids.virginis)])
+  await rec(inst, 'C2')
+  result.chosen = { b1: inst.colonies(campaignId, 'b1'), b2: inst.colonies(campaignId, 'b2') }
+
+  const writes = inst.colonyWrites()
+  const reopened = await rec(inst, 'C1')
+
+  result.reopened = { relation: reopened.relation, branchId: reopened.branchId, writes: inst.colonyWrites() - writes, b1: inst.colonies(campaignId, 'b1'), b2: inst.colonies(campaignId, 'b2') }
+
+  // The colonies are no longer followed when C2 is opened, so the pass that makes the fork captures none; the parent's series is cleared afterwards and a colony is chosen on the fork.
+  chose(m, stopped, campaignId, RaceID, followed(stopped).reduce((entries, entry) => m.colony.withoutColony(entries, entry.id, times.C1), followed(stopped)))
+  await rec(stopped, 'C2')
+  result.stopped = { registry: stopped.registry().campaigns[campaignId], b1: stopped.colonies(campaignId, 'b1'), b2: stopped.colonies(campaignId, 'b2'), writes: stopped.colonyWrites() }
+  stopped.put(`file:campaign-${campaignId}-b1-colonies`, emptyFile)
+  chose(m, stopped, campaignId, RaceID, [stamped('C2', ids.virginis)])
+  await rec(stopped, 'C2')
+  result.cleared = { b1: stopped.colonies(campaignId, 'b1'), b2: stopped.colonies(campaignId, 'b2') }
 
   return result
 }
@@ -679,6 +762,78 @@ check('profile', 'the retention profile in force caps the colony series: a serie
   assert.ok(r.capped.thinning.passes >= 1)
 })
 
+const CHAIN_SERIES = (file) => file.races[CHAIN[0].RaceID].snapshots
+
+check('forkpoint', 'the save that parts from the first branch at B is a fork of it: cut at the last whole 64 increments the two ledgers share, before B\'s own save, the second branch told from the first, and the saves before it continue the first', 'chain', ({ k }) => {
+  const parting = partingOf(k.ledgers.C1, k.ledgers.C2)
+  const { branches } = k.fork.registry
+
+  assert.deepEqual(k.relations, { A: 'new', B: 'continues', C1: 'continues', C2: 'fork' })
+  assert.equal(k.fork.forked, true)
+  assert.equal(k.fork.branchId, 'b2')
+  assert.deepEqual(Object.keys(branches), ['b1', 'b2'])
+  assert.equal(branches.b2.parent, 'b1')
+  assert.ok(parting.common > k.ledgers.B.length && parting.n % STEP === 0 && parting.n < k.ledgers.B.length && parting.common - parting.n < STEP, `${parting.common} increments in common, ${k.ledgers.B.length} in B, cut at ${parting.n}`)
+  assert.deepEqual([branches.b2.fork.n, branches.b2.fork.t], [parting.n, parting.t])
+  assert.ok(branches.b2.fork.t < k.times.B, 'the cut falls before the save of B')
+  assert.deepEqual(k.added, { B: [k.ids.rantz], C2: [k.ids.virginis] })
+})
+
+check('forkseed', 'the fork\'s colony series is the first branch\'s snapshots up to the cut and none later, then its own save\'s: the saves B and C1 are not in it, and the first branch is as it was before the fork', 'chain', ({ k }) => {
+  const parent = CHAIN_SERIES(k.parent.series)
+  const cut = k.fork.registry.branches.b2.fork.t
+  const seeded = parent.filter((snapshot) => snapshot.t <= cut)
+  const child = CHAIN_SERIES(k.fork.b2)
+
+  assert.deepEqual(parent.map((snapshot) => snapshot.t), [k.times.A, k.times.B, k.times.C1])
+  assert.ok(seeded.length > 0 && seeded.length < parent.length, `${seeded.length} of ${parent.length} stay at or before ${cut}`)
+  assert.deepEqual(child.slice(0, seeded.length), seeded)
+  assert.deepEqual(child.slice(seeded.length).map((snapshot) => snapshot.t), [k.times.C2])
+  assert.ok(!child.some((snapshot) => snapshot.t === k.times.B || snapshot.t === k.times.C1), 'neither B nor C1 is the fork\'s')
+  assert.deepEqual(k.fork.b1, k.parent.series)
+})
+
+check('forkfigures', 'each branch holds the figures of its own saves, as SQL written here reads them: the colony both followed reads alike up to the cut and differently at the two ends, a colony chosen on the second branch is in it alone', 'chain', ({ k }) => {
+  const earthOf = (letter) => expectedRow(k.rows[letter].find((row) => row.PopulationID === k.ids.earth))
+  const first = CHAIN_SERIES(k.chosen.b1)
+  const second = CHAIN_SERIES(k.chosen.b2)
+  const at = (snapshots, letter) => snapshots.find((snapshot) => snapshot.t === k.times[letter])
+
+  ;['A', 'B', 'C1'].forEach((letter) => assert.deepEqual(stateOf(at(first, letter), k.ids.earth), earthOf(letter), `the first branch at ${letter}`))
+  ;['A', 'C2'].forEach((letter) => assert.deepEqual(stateOf(at(second, letter), k.ids.earth), earthOf(letter), `the second branch at ${letter}`))
+  assert.notDeepEqual(earthOf('C1'), earthOf('C2'), 'the two branches hold two readings of the colony')
+  assert.equal(stateOf(at(first, 'A'), k.ids.rantz), undefined, 'a colony has no point before it was chosen')
+  assert.deepEqual(stateOf(at(first, 'C1'), k.ids.rantz), expectedRow(k.rows.C1.find((row) => row.PopulationID === k.ids.rantz)))
+  assert.deepEqual(stateOf(at(second, 'C2'), k.ids.virginis), expectedRow(k.rows.C2.find((row) => row.PopulationID === k.ids.virginis)))
+  assert.ok(!first.some((snapshot) => stateOf(snapshot, k.ids.virginis)), 'the first branch never holds the colony of the second')
+})
+
+check('forkreopen', 'the save of the first branch opened again after the fork settles to the first branch, captures nothing, and reads the colony chosen on the other branch as chosen later than itself: no series changes', 'chain', ({ k }) => {
+  assert.equal(k.reopened.relation, 'same')
+  assert.equal(k.reopened.branchId, 'b1')
+  assert.equal(k.reopened.writes, 0)
+  assert.deepEqual(k.reopened.b1, k.chosen.b1)
+  assert.deepEqual(k.reopened.b2, k.chosen.b2)
+})
+
+check('frozen', 'a fork is given its colony series in the pass that creates it, up to the cut and none later, even when no colony is followed any more, and a later clear of the first branch\'s series changes nothing in it', 'chain', ({ k }) => {
+  const { branches } = k.stopped.registry
+  const parent = CHAIN_SERIES(k.parent.series)
+  const seeded = parent.filter((snapshot) => snapshot.t <= branches.b2.fork.t)
+  const after = CHAIN_SERIES(k.cleared.b2)
+
+  assert.equal(branches.b2.parent, 'b1')
+  assert.equal(branches.b2.coloniesSeeded, true, 'the branch is marked once its seed is written')
+  assert.equal(k.stopped.writes, 1, 'the one colony file the pass that makes the fork writes is the fork\'s seed')
+  assert.ok(seeded.length > 0 && seeded.length < parent.length)
+  assert.deepEqual(CHAIN_SERIES(k.stopped.b2), seeded)
+  assert.deepEqual(k.stopped.b1, k.parent.series)
+  assert.deepEqual(k.cleared.b1, k.emptyFile)
+  assert.deepEqual(after.slice(0, seeded.length), seeded)
+  assert.deepEqual(after.slice(seeded.length).map((snapshot) => snapshot.t), [k.times.C2])
+  assert.deepEqual(after[after.length - 1].colonies.map((entry) => entry[0]), [k.ids.virginis])
+})
+
 // ---------- the mutations ----------
 
 // A planted fault in a copy of a utility, and the checks (by key) it must break.
@@ -699,10 +854,10 @@ const MUTATIONS = [
   { name: 'the settings are replaced, not changed', file: 'colony-series.js', find: '    putEntries(stored, campaignId, RaceID, written)\n\n    return stored', replace: '    putEntries(stored, campaignId, RaceID, written)\n\n    return { campaign: stored.campaign }', fails: ['settings'] },
   { name: 'the size estimate is 64 bytes a colony', file: 'colony-series.js', find: 'export const COLONY_BYTES = 55', replace: 'export const COLONY_BYTES = 64', fails: ['estimate'] },
   { name: 'a failed read replaces an observation', file: 'colony-series.js', find: '} else if (!(entry[1] === COLONY_STATES.UNAVAILABLE && old[1] !== COLONY_STATES.UNAVAILABLE) && JSON.stringify(old)', replace: '} else if (JSON.stringify(old)', fails: ['failedread', 'notzero'] },
-  { name: 'a seed takes the parent\'s later snapshots too', file: 'colony-series.js', find: '(record.snapshots || []).filter((snapshot) => snapshot.t <= t)', replace: '(record.snapshots || []).filter(() => true)', fails: ['seed', 'lineage'] },
+  { name: 'a seed takes the parent\'s later snapshots too', file: 'colony-series.js', find: '(record.snapshots || []).filter((snapshot) => snapshot.t <= t)', replace: '(record.snapshots || []).filter(() => true)', fails: ['seed', 'lineage', 'forkseed', 'frozen'] },
   { name: 'a branch with no file is not seeded', file: 'colony-series.js', find: 'isKnownNumber(branch.fork.t) ? colonySeed(io, campaign, branch.parent, branch.fork.t) : {}', replace: 'isKnownNumber(branch.fork.t) ? {} : {}', fails: ['lineage'] },
   { name: 'a seed does not pass through a parent that has no file', file: 'colony-series.js', find: 'colonySeed(io, campaign, branch.parent, Math.min(t, branch.fork.t))', replace: '{}', fails: ['lineage'] },
-  { name: 'an unchanged snapshot is written again', file: 'history.js', find: 'if (next.d === same.d) {', replace: 'if (false) {', fails: ['same', 'repeat'] },
+  { name: 'an unchanged snapshot is written again', file: 'history.js', find: 'if (next.d === same.d) {', replace: 'if (false) {', fails: ['same', 'repeat', 'forkreopen'] },
   { name: 'a revision is not marked', file: 'history.js', find: 'revised: Boolean(same.revised) || joined.revised', replace: 'revised: false', fails: ['revised'] },
   { name: 'a save on another ledger at the same time is written over', file: 'history.js', find: 'if (same.n !== snapshot.n) {', replace: 'if (false) {', fails: ['timeline'] },
   { name: 'an older save is added at the end', file: 'history.js', find: '[...stored.filter((existing) => existing.t !== snapshot.t), next].sort((a, b) => a.t - b.t), limit)', replace: '[...stored.filter((existing) => existing.t !== snapshot.t), next], limit)', fails: ['older'] },
@@ -717,6 +872,9 @@ const MUTATIONS = [
   { name: 'a fork is given a colony file even when its parent holds no series', file: 'colony-series.js', find: 'return hasRaces(seed) ? seed : null', replace: 'return seed', fails: ['cleared'] },
   { name: 'a branch seeded empty is seeded from its parent at its first colony write', file: 'colony-series.js', find: 'return branch && !seeded(branch) && branch.parent && branch.fork && isKnownNumber(branch.fork.t) ? colonySeed(io, campaign, branch.parent, branch.fork.t) : {}', replace: 'return branch && branch.parent && branch.fork && isKnownNumber(branch.fork.t) ? colonySeed(io, campaign, branch.parent, branch.fork.t) : {}', fails: ['lineage'] },
   { name: 'a branch seeded empty is seeded from its parent through a chain', file: 'colony-series.js', find: 'return branch && !seeded(branch) && branch.parent && branch.fork && isKnownNumber(branch.fork.t) ? colonySeed(io, campaign, branch.parent, Math.min(t, branch.fork.t)) : {}', replace: 'return branch && branch.parent && branch.fork && isKnownNumber(branch.fork.t) ? colonySeed(io, campaign, branch.parent, Math.min(t, branch.fork.t)) : {}', fails: ['lineage'] },
+  { name: 'a fork is not given its colony series when it is created', file: 'history.js', find: 'if (resolution.forked) {', replace: 'if (false) {', fails: ['frozen'] },
+  { name: 'a fork is not marked once it was given its colony seed', file: 'history.js', find: 'campaign.branches[resolution.branchId].coloniesSeeded = true', replace: 'void campaign', fails: ['frozen'] },
+  { name: 'a fork is cut at the game time of the save that made it', file: 'campaign.js', find: 'const forkTime = found.common ? opened.times[found.common / STEP - 1] : null', replace: 'const forkTime = found.common ? opened.t : null', fails: ['forkpoint', 'forkseed'] },
   { name: 'the retention change of the page leaves the colony file out', page: replacing('const colonyHeld = this.colonyRecord.file ? seriesOverCap(this.colonyRecord.file, picked.cap) : null', 'const colonyHeld = null'), fails: ['previewcolonies'] },
   { name: 'the retention change of the page measures the colony series against another cap', page: replacing('seriesOverCap(this.colonyRecord.file, picked.cap)', 'seriesOverCap(this.colonyRecord.file, 1)'), fails: ['previewcolonies'] },
   { name: 'the retention change of the page says the empire series thin nothing when only the colony series thin', page: replacing('const none = colonyHeld && colonyHeld.next.thins ?', 'const none = false ?'), fails: ['previewcolonies'] },
@@ -753,14 +911,15 @@ const memo = (work) => {
 
 // The context a check runs in for one set of modules; a scenario is run once, on its first use.
 const contextOf = (m, { mutate = null } = {}) => {
-  const scenarios = { single: memo(() => single(m)), page: memo(() => loadPage('pages/history', { stubs: STUBS, mutate })) }
+  const scenarios = { single: memo(() => single(m)), chain: memo(() => chain(m)), page: memo(() => loadPage('pages/history', { stubs: STUBS, mutate })) }
 
   return {
     run: async ({ needs, run }) => {
       const r = needs === 'single' ? await scenarios.single() : null
+      const k = needs === 'chain' ? await scenarios.chain() : null
       const p = needs === 'page' ? await scenarios.page() : null
 
-      return run({ m, r, p })
+      return run({ m, r, k, p })
     },
   }
 }
@@ -787,6 +946,9 @@ const planted = (mutation) => {
   return { [mutation.file.replace(/\.js$/, '')]: mutation.prelude ? text.replace(from, () => mutation.prelude) : text }
 }
 
+// Whether a check reads a save that is not here: its group is skipped and says so.
+const unread = (entry) => (entry.needs === 'single' && !fs.existsSync(MODDED.file)) || (entry.needs === 'chain' && !CHAIN_THERE)
+
 // What the baseline and each mutation print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
 const baselineEntries = async () => {
   const real = await loadModules()
@@ -797,12 +959,16 @@ const baselineEntries = async () => {
     entries.push({ log: `  skip   ${MODDED.file} is not here, so the single group is not run` })
   }
 
+  if (!CHAIN_THERE) {
+    entries.push({ log: '  skip   a save of the played campaign is not here, so the chain group is not run' })
+  }
+
   entries.push({ log: 'The colony series' })
 
   for (const entry of checks) {
     number++
 
-    if (entry.needs === 'single' && !fs.existsSync(MODDED.file)) {
+    if (unread(entry)) {
       continue
     }
 
@@ -826,7 +992,7 @@ const mutationEntries = async (mutation) => {
     const skipped = []
 
     for (const entry of named) {
-      if (entry.needs === 'single' && !fs.existsSync(MODDED.file)) {
+      if (unread(entry)) {
         skipped.push(entry.key)
         continue
       }

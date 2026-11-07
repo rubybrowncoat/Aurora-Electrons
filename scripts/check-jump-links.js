@@ -5,6 +5,7 @@
 
   The expected values are written here from the rule of the game (a race knows the far side of a point it has explored, and an explored point is explored at both ends), in SQL over the save and in a constructed save, never from the module under test:
   - The fixture (scripts/lib/fixtures.js, game 141): for each of the six races the rows of every reader equal the ones the survey rows give. Race 787 has charted 362 points in the systems it knows and explored none, so every reader finds 0 links where the charted-only reading drew 131 pairs of systems; the player (race 784) has explored 300 of its 392 surveyed points, which join 150 pairs of systems.
+  - The played campaign (scripts/lib/played-chain.js, game 161: A, B and the two branches from B, C1 and C2): on each of the four saves, for each race of the game, the points read, the links drawn from them, the links read from the save and the links the survey page draws equal the ones the survey rows give. A race that has explored none of its 78 charted points has no link where the charted-only reading joined 27 pairs of systems. The discrimination of the naval admin chain between the charted and the explored reading is not witnessed on it: only the player's race has naval admin commands, and in every save its charted and explored links join the same pairs of systems.
   - A constructed save holds the cases the save does not: a point explored from the far end only, a point whose far point is not charted, one whose far point lies in a system the race does not know, and a far point that is explored but not charted.
   Every planted fault must fail the checks it names by a wrong value, never because a call threw (scripts/lib/fault-credit.js), and each rewrite that says the same thing must leave every check passing.
 
@@ -19,6 +20,7 @@ const { assert, subjectModule, runChecks, judged, caughtAll, notCaught, boundary
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { FIXTURE } = require('./lib/fixtures')
+const played = require('./lib/played-chain')
 
 const root = path.resolve(__dirname, '..')
 const SAVE = FIXTURE.file
@@ -304,7 +306,66 @@ const haulingChecks = {
   },
 }
 
-const CHECKS = [identityChecks, linksChecks, directChecks, adminChecks, surveyChecks, haulingChecks]
+// The readers over every save of the played campaign (scripts/lib/played-chain.js: A, B and the two branches from B, C1 and C2), for every race of the game: the points a race has charted in the systems it knows with the link each names, the links drawn from them, the links read straight from the save and, for the player and the races whose charted links the explored rule leaves out, the links the survey page draws, each equal to the survey rows read here. Some races of the campaign have charted points they have not explored (a race that has explored none has charted 78 points that join 27 pairs of systems, which the explored rule draws none of), so a reader that follows a charted link shows.
+const CHAIN_LETTERS = ['A', 'B', 'C1', 'C2']
+
+const chainChecks = {
+  id: 'chain',
+  name: 'on each save of the played campaign every reader of jump links gives each race the explored links its survey rows say, and a race that has charted points it has not explored draws none of their links',
+  run: async ({ mod, page }) => {
+    const seen = { saves: 0, races: 0, unexplored: 0, hidden: 0, pairsHidden: 0, pages: 0 }
+
+    for (const letter of CHAIN_LETTERS) {
+      const db = new Database(played.fileOf(letter), { readonly: true })
+
+      try {
+        const races = db.query(`select distinct RaceID from FCT_RaceSysSurvey where GameID = ${played.GAME} order by RaceID`).all().map((row) => row.RaceID)
+
+        seen.saves += 1
+
+        for (const race of races) {
+          const expected = expectation(db, race, played.GAME)
+          const rows = await readPoints(mod, db, race, played.GAME)
+          const label = `${letter}, race ${race}`
+
+          assert.deepEqual(rows.map((row) => row.WarpPointID).sort((a, b) => a - b), [...expected.read.keys()].sort((a, b) => a - b), `${label}: the points read are the charted ones in known systems`)
+          rows.forEach((row) => {
+            const point = expected.read.get(row.WarpPointID)
+
+            assert.equal(row.SystemID, point.SystemID, `${label}, point ${row.WarpPointID}: its system`)
+            assert.equal(row.Explored, expected.survey.get(row.WarpPointID).Explored, `${label}, point ${row.WarpPointID}: its explored flag`)
+            assert.equal(row.WPLink, expected.linkOf(point), `${label}, point ${row.WarpPointID}: the link it names`)
+          })
+          assert.deepEqual(pairsOf(mod['jump-graph'].jumpLinks(rows)), expected.pairs, `${label}: the links of the points read`)
+          assert.deepEqual(pairsOf(await mod['jump-graph'].loadJumpLinks(adapter(db), { GameID: played.GAME, RaceID: race })), expected.pairs, `${label}: the links read from the save`)
+
+          const hidden = rows.filter((row) => row.WPLink === null && expected.points.get(row.WarpPointID).WPLink !== null).length
+
+          seen.races += 1
+          seen.unexplored += expected.read.size - [...expected.read.values()].filter((point) => expected.survey.get(point.WarpPointID).Explored === 1).length
+          seen.hidden += hidden
+          seen.pairsHidden += joined(expected.chartedPairs) - joined(expected.pairs)
+
+          if (race === played.RACE || joined(expected.chartedPairs) > joined(expected.pairs)) {
+            const vm = instantiate(page, { boundary, $store: { getters: {}, state: {} }, database: adapter(db), GameID: played.GAME, RaceID: race, data: { loadErrors: {} } })
+
+            assert.deepEqual(pairsOf(await vm.runAsync('links')), expected.pairs, `${label}: the links the page draws`)
+            seen.pages += 1
+          }
+        }
+      } finally {
+        db.close()
+      }
+    }
+
+    assert.equal(seen.saves, CHAIN_LETTERS.length)
+    assert.ok(seen.races >= 4 * 14, `${seen.races} races`)
+    assert.ok(seen.hidden > 0 && seen.pairsHidden > 0, `charted links the explored rule leaves out: ${seen.hidden} points, ${seen.pairsHidden} pairs of systems`)
+    assert.ok(seen.pages > 4, `${seen.pages} page reads`)
+  },
+}
+
+const CHECKS = [identityChecks, linksChecks, directChecks, adminChecks, surveyChecks, haulingChecks, chainChecks]
 
 // ---------- the faults and the rewrites ----------
 
@@ -320,14 +381,14 @@ const swap = (from, to) => (text) => {
 const OLD_LINKS = 'select FCT_JumpPoint.SystemID, VIR_Destination.SystemID as DestinationID from FCT_JumpPoint inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 inner join FCT_JumpPoint as VIR_Destination on VIR_Destination.WarpPointID = FCT_JumpPoint.WPLink inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = VIR_Destination.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID} where FCT_JumpPoint.GameID = ${GameID}'
 
 const FAULTS = [
-  { name: 'a charted point names its link whether or not it is explored', file: 'graph', change: swap('case when ${LINK_KNOWN_SQL} then FCT_JumpPoint.WPLink else null end as WPLink', 'FCT_JumpPoint.WPLink'), fails: ['identity'] },
+  { name: 'a charted point names its link whether or not it is explored', file: 'graph', change: swap('case when ${LINK_KNOWN_SQL} then FCT_JumpPoint.WPLink else null end as WPLink', 'FCT_JumpPoint.WPLink'), fails: ['identity', 'chain'] },
   { name: 'the links of the points read draw a point that is explored at neither end', file: 'graph', change: swap(' && (jumpPoint.Explored || byId[jumpPoint.WPLink].Explored))', ')'), fails: ['links'] },
   { name: 'the links of the points read need the point\'s own end explored', file: 'graph', change: swap('(jumpPoint.Explored || byId[jumpPoint.WPLink].Explored)', 'jumpPoint.Explored'), fails: ['links'] },
-  { name: 'the links read from the save include a point that is explored at neither end', file: 'graph', change: swap('where FCT_JumpPoint.GameID = ${GameID} and ${LINK_KNOWN_SQL}`)', 'where FCT_JumpPoint.GameID = ${GameID}`)'), fails: ['direct', 'survey'] },
+  { name: 'the links read from the save include a point that is explored at neither end', file: 'graph', change: swap('where FCT_JumpPoint.GameID = ${GameID} and ${LINK_KNOWN_SQL}`)', 'where FCT_JumpPoint.GameID = ${GameID}`)'), fails: ['direct', 'survey', 'chain'] },
   { name: 'the links read from the save need the point\'s own end explored', file: 'graph', change: swap('where FCT_JumpPoint.GameID = ${GameID} and ${LINK_KNOWN_SQL}`)', 'where FCT_JumpPoint.GameID = ${GameID} and FCT_RaceJumpPointSurvey.Explored = 1`)'), fails: ['direct'] },
   { name: 'the link of a point is known only when its own end is explored', file: 'graph', change: swap('\'(FCT_RaceJumpPointSurvey.Explored = 1 or VIR_FarSurvey.Explored = 1)\'', '\'(FCT_RaceJumpPointSurvey.Explored = 1)\''), fails: ['identity', 'direct'] },
   { name: 'a far point that is not charted counts when it is explored', file: 'graph', change: swap('and VIR_FarSurvey.RaceID = ${RaceID} and VIR_FarSurvey.GameID = FCT_JumpPoint.GameID and VIR_FarSurvey.Charted = 1', 'and VIR_FarSurvey.RaceID = ${RaceID} and VIR_FarSurvey.GameID = FCT_JumpPoint.GameID'), fails: ['identity'] },
-  { name: 'the survey page links the points that are charted', file: 'survey', change: swap('return await loadJumpLinks(this.database, { GameID: this.GameID, RaceID: this.RaceID })', `const { GameID, RaceID } = this\n\n        return await this.database.query(\`${OLD_LINKS}\`).then(([items]) => Object.freeze(items))`), fails: ['survey'] },
+  { name: 'the survey page links the points that are charted', file: 'survey', change: swap('return await loadJumpLinks(this.database, { GameID: this.GameID, RaceID: this.RaceID })', `const { GameID, RaceID } = this\n\n        return await this.database.query(\`${OLD_LINKS}\`).then(([items]) => Object.freeze(items))`), fails: ['survey', 'chain'] },
   { name: 'the hauling page follows the saved link of a transit order whether or not it is explored', file: 'hauling', change: swap('else (case when VIR_ExitSurvey.Explored = 1 or VIR_ExitFar.Explored = 1 then VIR_Exit.WPLink else null end) end', 'else VIR_Exit.WPLink end'), fails: ['hauling'] },
 ]
 
@@ -417,7 +478,7 @@ const main = async () => {
   const mutating = !process.argv.includes('--no-mutations')
   const totals = await runSuite({
     script: __filename,
-    inputs: [SAVE],
+    inputs: [SAVE, played.fileOf('A'), played.fileOf('B'), played.fileOf('C1'), played.fileOf('C2')],
     variants: variantsOf(mutating),
     counts: () => ({ checks, failures }),
     close: async () => {

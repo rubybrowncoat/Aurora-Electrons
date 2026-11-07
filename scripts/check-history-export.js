@@ -8,8 +8,9 @@
   - caption: the lines under the picture: title, race, scope, window, each series with its unit and how many samples are recorded, rules and assumptions, the limits of the sampling, the annotations, the spy mode label;
   - picture: the picture draws the whole caption wrapped to its width and the chart canvas once, on the chart's surface colour, at the chart's density;
   - page: the buttons of the page export what each view draws (its series, the window's snapshots, the annotations drawn), nothing that is hidden, not drawn, out of the window or from another race unless spy mode shows it, in a chart, the Rivals chart and the table, and the PNG goes through the existing save-png channel;
+  - chain: the history files the real recorder leaves for the played saves (A, B and the two branches from B, C1 and C2 of scripts/lib/fixtures.js, game 161, race 909), read only and skipped where they are not there: the snapshots each branch holds are the ones the saves give, a fork is cut at the shared checkpoint before B (the last whole 64 increments the two ledgers share, the cut `partingOf(C1, C2)` of scripts/lib/played-chain.js gives, never the game time of C2, the save that made it), so the fork holds A and its own save and neither B nor C1, and the CSV of every chart, the CSV of the fork and the picture's caption are exported from them against SQL. No snapshot of the chain lacks a figure, so an empty value in a sample is witnessed by the groups above alone;
 
-  Everything runs on in-memory stores and the real scenario repository. Each mutation of the utility or of the page must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
+  Everything runs on in-memory stores and the real scenario repository (the chain group reads the saves read only). Each mutation of the utility or of the page must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
 const os = require('os')
@@ -20,6 +21,7 @@ const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
 const { strictRecords } = require('./lib/csv-records')
+const played = require('./lib/played-chain')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -194,6 +196,41 @@ const annotations = [
 ]
 
 const modelOf = (m, over = {}) => m.exportation.exportModel({ chart: { key: 'wealth', title: 'Wealth', notes: ['Annual income: 1 of 3 snapshots have no figure, so the line breaks there.'] }, series: [treasury, income], annotations, unseen: 2, scope: SCOPE, window: WINDOW, retention: RETENTION, date, dateTime, ...over })
+
+// ---- The played campaign -----------------------------------------------------------------------------------------------
+
+const CHAIN_THERE = ['A', 'B', 'C1', 'C2'].every((letter) => fs.existsSync(played.fileOf(letter)))
+
+const branchesHeld = new WeakMap()
+
+// The played campaign (A, B and the two branches from B, C1 and C2) recorded by the real recorder (utilities/history.js) in the order it was played, into in-memory stores: the race's record in the history file of each branch, what each save settled to and what SQL says of each save. C2 parts from C1 at B, so the first branch holds A, B and C1 and the fork holds A and C2.
+const branchesOf = (m) => {
+  if (!branchesHeld.has(m)) {
+    branchesHeld.set(m, (async () => {
+      const inst = played.installation()
+      const saves = {}
+      const relations = {}
+      let resolved = null
+
+      for (const letter of ['A', 'B', 'C1', 'C2']) {
+        const run = await played.recordSave(m.history, inst, letter, { onResolved: (GameID, resolution) => { resolved = GameID === played.GAME ? resolution : resolved } })
+
+        if (run.failed.length) {
+          throw new Error(`recording ${letter} failed: ${run.failed.map((failure) => failure.error && failure.error.message).join('; ')}`)
+        }
+
+        relations[letter] = resolved.relation
+        saves[letter] = played.rowsOf(played.fileOf(letter), `select FCT_Game.GameTime, FCT_Game.StartYear, FCT_Race.WealthPoints, FCT_Race.AnnualWealth from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${played.GAME} and FCT_Race.RaceID = ${played.RACE}`)[0]
+      }
+
+      const branch = (branchId) => clone(inst.files.get(`file:campaign-${resolved.campaignId}-${branchId}`).races[played.RACE])
+
+      return { saves, relations, campaignId: resolved.campaignId, b1: branch('b1'), b2: branch('b2'), fork: clone(inst.files.get('registry').campaigns[resolved.campaignId].branches.b2.fork) }
+    })())
+  }
+
+  return branchesHeld.get(m)
+}
 
 const suite = (m) => {
   const checks = []
@@ -550,6 +587,29 @@ const suite = (m) => {
     assert.match(drawn, /not a continuous record/)
     assert.match(drawn, new RegExp(uuid(2)))
   })
+
+  // ---- chain ----
+  if (CHAIN_THERE) {
+    check('chain', 'the history file of each branch the recorder keeps holds the saves of its own timeline: the first branch A, B and C1, the fork cut at the shared checkpoint before B, so A and its own save C2 and neither B nor C1, each at its save\'s game time with the treasury and income SQL gives', async () => {
+      const k = await branchesOf(m)
+      const held = (branch, letters) => letters.forEach((letter, index) => {
+        const snapshot = branch.snapshots[index]
+
+        assert.equal(snapshot.t, k.saves[letter].GameTime, `${letter}: the game time`)
+        assert.equal(snapshot.wealth, k.saves[letter].WealthPoints, `${letter}: the treasury`)
+        assert.equal(snapshot.income, k.saves[letter].AnnualWealth, `${letter}: the income`)
+      })
+
+      const parting = played.partingOf(played.ledgerOf('C1'), played.ledgerOf('C2'))
+
+      assert.deepEqual(k.relations, { A: 'new', B: 'continues', C1: 'continues', C2: 'fork' })
+      assert.deepEqual([k.b1.snapshots.length, k.b2.snapshots.length], [3, 2])
+      assert.deepEqual([k.fork.n, k.fork.t], [parting.n, parting.t], 'the fork is cut where the two ledgers part, down to a whole 64 increments')
+      assert.ok(k.fork.t > k.saves.A.GameTime && k.fork.t < k.saves.B.GameTime, 'the cut falls between A and B, before the save of B')
+      held(k.b1, ['A', 'B', 'C1'])
+      held(k.b2, ['A', 'C2'])
+    })
+  }
 
   return checks
 }
@@ -1137,6 +1197,92 @@ const pageSuite = async (m, { mutate = null, sources = {} } = {}) => {
     assert.match(map, /invoke\('save-png', canvas\.toDataURL\('image\/png'\)\.split\(','\)\[1\], `map-\$\{this\.GameID\}-\$\{this\.RaceID\}-\$\{this\.GameTime\}\.png`\)/)
   })
 
+  // ---- the played branches ----
+
+  if (CHAIN_THERE) {
+    const family = async (branch) => {
+      const k = await branchesOf(m)
+
+      return { snapshots: branch.snapshots, StartYear: k.saves.A.StartYear, GameID: played.GAME, RaceID: played.RACE, raceName: branch.raceName }
+    }
+    const mountBranch = (family, extra = {}) => mounted({ snapshots: family.snapshots, rivals: false, startYear: family.StartYear, GameTime: family.snapshots[family.snapshots.length - 1].t, GameID: family.GameID, RaceID: family.RaceID, raceName: family.raceName, ...extra })
+    const FIELDS = { population: ['population', 'colonies'], wealth: ['wealth', 'income'], fleet: ['militaryTons', 'commercialTons'], research: ['research', 'systems'], logistics: ['fuel', 'msp'] }
+
+    checks.push({
+      group: 'chain',
+      name: 'every chart\'s CSV from the played branches has the sample times of the saves, their own figures and empty cells where a save holds none',
+      run: async () => {
+        const k = await branchesOf(m)
+
+        for (const branch of [k.b1, k.b2]) {
+          const { vm } = mountBranch(await family(branch))
+
+          Object.entries(FIELDS).forEach(([key, names]) => {
+            const table = csvOf(vm, key)
+            const labels = vm.charts.find((chart) => chart.key === key).data.datasets.map((dataset) => dataset.label)
+
+            names.forEach((name, index) => {
+              const rows = samplesOf(table, labels[index])
+
+              assert.deepEqual(rows.map((row) => Number(row[SAMPLE_TIME])), branch.snapshots.map((snapshot) => snapshot.t), `${key} ${name}`)
+              assert.deepEqual(rows.map((row) => row.Value), branch.snapshots.map((snapshot) => numberOr(snapshot[name] === undefined ? null : snapshot[name])), `${key} ${name}`)
+              assert.deepEqual(rows.map((row) => row['Value status']), branch.snapshots.map((snapshot) => (snapshot[name] === null || snapshot[name] === undefined ? 'not recorded' : 'recorded')))
+            })
+          })
+
+          assert.deepEqual(samplesOf(csvOf(vm, 'minerals'), 'Duranium').map((row) => row.Value), branch.snapshots.map((snapshot) => numberOr(snapshot.minerals ? snapshot.minerals[0] : null)))
+        }
+      },
+    })
+
+    checks.push({
+      group: 'chain',
+      name: 'the CSV of the fork holds the saves of the fork and never B or the first branch\'s own save, the first branch\'s holds never the fork\'s, and the past they share reads alike in both',
+      run: async () => {
+        const k = await branchesOf(m)
+        const first = mountBranch(await family(k.b1)).vm
+        const second = mountBranch(await family(k.b2)).vm
+        const times = (vm, key) => [...new Set(samplesOf(csvOf(vm, key)).map((row) => Number(row[SAMPLE_TIME])))]
+
+        Object.keys(FIELDS).forEach((key) => {
+          assert.deepEqual(times(first, key), [k.saves.A.GameTime, k.saves.B.GameTime, k.saves.C1.GameTime], `the first branch's ${key}`)
+          assert.deepEqual(times(second, key), [k.saves.A.GameTime, k.saves.C2.GameTime], `the fork's ${key}`)
+
+          const past = (vm) => samplesOf(csvOf(vm, key)).filter((row) => Number(row[SAMPLE_TIME]) === k.saves.A.GameTime).map((row) => [row.Series, row.Value, row['Value status']])
+
+          assert.ok(past(first).length > 0)
+          assert.deepEqual(past(second), past(first), `the shared past of ${key}`)
+        })
+      },
+    })
+
+    checks.push({
+      group: 'chain',
+      name: 'the picture from the played branches has a caption with the real counts and the sampling limits',
+      run: async () => {
+        const k = await branchesOf(m)
+
+        for (const branch of [k.b1, k.b2]) {
+          const { vm } = mountBranch(await family(branch))
+          const calls = ipc()
+          const sheet = recording()
+
+          withCanvas(vm)
+          await withDocument(sheet, () => vm.exportChartPng('research'))
+
+          const drawn = norm(sheet.texts().map((event) => event.args[0]).join(' '))
+          const recorded = branch.snapshots.filter((snapshot) => snapshot.research !== null && snapshot.research !== undefined).length
+
+          assert.equal(calls.length, 1)
+          assert.ok(drawn.includes(`Research (RP) (RP): ${recorded} of ${branch.snapshots.length} samples recorded`), drawn)
+          assert.ok(drawn.includes(`Every retained snapshot: ${branch.snapshots.length} of ${branch.snapshots.length} retained snapshots`), drawn)
+          assert.match(drawn, /never observed/)
+          assert.match(drawn, /not a continuous record/)
+        }
+      },
+    })
+  }
+
   return checks
 }
 
@@ -1159,6 +1305,9 @@ const UTILITY_MUTATIONS = [
   { name: 'a number that is negative is guarded like a text cell', file: 'history-export.js', find: 'csvCell(value, { guard: !NUMBER_COLUMNS.has(column) })', replace: "csvCell(/^[=+\\-@\\t\\r]/.test(String(value)) ? `'#{value}` : value)", fails: ['csv: a text cell that starts like a formula'] },
   { name: 'the sampling of every race is the first race\'s', file: 'history-export.js', find: "races.map((race) => `#{race.label}: #{race.retention}`).join(' ')", replace: "races.map((race) => `#{race.label}: #{races[0].retention}`).join(' ')", fails: ['csv: a view of several races'] },
   { name: 'the window of every race is the first race\'s', file: 'history-export.js', find: '`#{race.label}: #{spanText(race.window, date)}`', replace: '`#{race.label}: #{spanText(races[0].window, date)}`', fails: ['csv: a view of several races'] },
+  // The recorder of the played campaign (utilities/campaign.js) seeds the fork's history file; the export of each branch is read from what it leaves.
+  { name: 'a fork is cut at the game time of the save that made it', file: 'campaign.js', find: 'const forkTime = found.common ? opened.times[found.common / STEP - 1] : null', replace: 'const forkTime = found.common ? opened.t : null', pages: true, fails: ['chain: the history file', 'chain: the CSV of the fork'] },
+  { name: 'a fork is seeded with every snapshot of its parent', file: 'campaign.js', find: 'const snapshots = (record.snapshots || []).filter((snapshot) => snapshot.t <= t)', replace: 'const snapshots = record.snapshots || []', pages: true, fails: ['chain: the history file', 'chain: the CSV of the fork'] },
 ]
 
 const csvCellFaulted = (find, replace) => {
@@ -1180,9 +1329,10 @@ const PAGE_MUTATIONS = [
   { name: 'the Rivals chart is built without spy mode', mutate: replacing('const races = this.spyNPR && this.gameHistory && this.gameHistory.races ?', 'const races = this.gameHistory && this.gameHistory.races ?'), fails: ['page: spy mode off'] },
   { name: 'the Rivals export does not say spy mode', mutate: replacing("spy: key === 'rivals' }", 'spy: false }'), fails: ['page: spy mode on'] },
   { name: 'a figure not recorded is exported as 0', mutate: replacing('value: dataset.data[position].y,', 'value: dataset.data[position].y || 0,'), fails: ['page: a figure not recorded is empty', 'page: every chart'] },
+  { name: 'a sample is exported at the time of the sample before it', mutate: replacing('trace.times.map((t, position) => ({ t, value: dataset.data[position].y,', 'trace.times.map((t, position) => ({ t: trace.times[Math.max(position - 1, 0)], value: dataset.data[position].y,'), fails: ['page: every chart', 'chain: every chart'] },
   { name: 'the table is exported from the charts view and a chart from the table view', mutate: replacing("this.view === 'charts' ? [...this.charts, ...(this.rivals ? [this.rivals] : [])] : [this.tableChart]", '[...this.charts, ...(this.rivals ? [this.rivals] : []), this.tableChart]'), fails: ['page: a view that is not on screen is not exported'] },
   { name: 'the window states every retained snapshot as the window', mutate: replacing('retained: this.allSnapshots.length,', 'retained: times.length,'), fails: ['page: the window: a span exports only the samples in it'] },
-  { name: 'the picture is drawn from part of the caption', mutate: replacing('caption: captionLines(model), legend', 'caption: captionLines(model).slice(0, 6), legend'), fails: ['page: the picture is saved through the save-png channel', 'page: the picture drawn is the caption of the export'] },
+  { name: 'the picture is drawn from part of the caption', mutate: replacing('caption: captionLines(model), legend', 'caption: captionLines(model).slice(0, 6), legend'), fails: ['page: the picture is saved through the save-png channel', 'page: the picture drawn is the caption of the export', 'chain: the picture'] },
   { name: 'the picture is saved without its title', mutate: replacing(unhashed(', `Save #{model.title} as PNG`)'), ')'), fails: ['page: the picture is saved through the save-png channel'] },
   { name: 'a picture is asked of a view with nothing to show', mutate: replacing('        if (!asked) {\n          return\n        }\n\n        const wanted', '        const wanted'), fails: ['page: the picture is not made for a view with nothing to show'] },
   { name: 'the picture is made of the model taken before the wait for the fonts', mutate: replacing('const exported = this.exportOf(key)\n\n        if (!exported || exportCsv', 'const exported = asked\n\n        if (!exported || exportCsv'), fails: ['page: the picture is not made of a chart that changed while the fonts were awaited'] },
@@ -1293,7 +1443,9 @@ const mutantEntries = async ({ mutant, page }) => {
       results = await runChecks(await pageSuite(await loadModules(utilitiesDirectory), { mutate: mutant.mutate, sources: mutant.sources ? mutant.sources() : {} }), mutant.fails)
     } else {
       directory = mutatedCopy(mutant)
-      results = await runChecks(suite(await loadModules(directory)), mutant.fails)
+      const modules = await loadModules(directory)
+
+      results = await runChecks(mutant.pages ? [...suite(modules), ...await pageSuite(modules)] : suite(modules), mutant.fails)
     }
 
     return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results)] }]
@@ -1308,8 +1460,9 @@ const mutantEntries = async ({ mutant, page }) => {
 
 const controlEntries = async () => {
   const real = await loadModules(utilitiesDirectory)
-  const control = await runChecks(suite(real), [...new Set(UTILITY_MUTATIONS.flatMap((mutant) => mutant.fails))])
-  const controlPage = await runChecks(await pageSuite(real), [...new Set(PAGE_MUTATIONS.flatMap((mutant) => mutant.fails))])
+  const named = (list) => [...new Set(list.flatMap((mutant) => mutant.fails))]
+  const control = await runChecks(suite(real), named(UTILITY_MUTATIONS))
+  const controlPage = await runChecks(await pageSuite(real), named([...PAGE_MUTATIONS, ...UTILITY_MUTATIONS.filter((mutant) => mutant.pages)]))
   const wrong = [...control, ...controlPage].filter(([, result]) => result !== true).map(([name]) => name)
 
   return [{ show: ['a control run of the unchanged code passes every check the mutants name', wrong.length === 0 ? true : `fails ${wrong.join('; ')}`] }]

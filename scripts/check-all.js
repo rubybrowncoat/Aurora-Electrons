@@ -53,7 +53,7 @@ const FIRST = ['check-event-archive.js', 'check-section-accents.js', 'check-hist
 const ARGS = { 'check-design-rules.js': ['--fixtures'] }
 // The scripts whose gate is several invocations of the same script, one per entry, each printed on its own line and each able to fail the gate: the two-save witness measures one pair per run, because a run carries one explicit load count, so the gate runs the three pairs of the played campaign rather than letting the first pair stand for the others.
 const PAIRS = {
-  'check-orbit-two-saves.js': [['--from=A', '--to=B', '--load-count=1'], ['--from=B', '--to=C', '--load-count=1'], ['--from=A', '--to=C', '--load-count=2']],
+  'check-orbit-two-saves.js': [['--from=A', '--to=B', '--load-count=1'], ['--from=B', '--to=C1', '--load-count=1'], ['--from=A', '--to=C1', '--load-count=2']],
 }
 
 const option = (name) => {
