@@ -19,7 +19,7 @@ const GAS_AESTUSIUM = 20
 const GAS_FRIGUSIUM = 22
 const GAS_NITROGEN = 7
 
-// The two levers that raise an eccentric body's temperature dampening (`SystemBody.method_1`: 0.1 for each atm of pressure up to 0.5, 0.003 for each percent of surface water up to 0.3, both times a factor that falls with the length of the year), which a plan pulls only where the greenhouse and anti-greenhouse gases cannot bring both extremes into the species' range: more water on the surface, more pressure in the air. `NO_LEVER` is a plan that pulls none; a lever is `{ hydroExt, pressure }`, the least surface water in percent and the least pressure in atm the plan holds (0 for no floor).
+// The two levers that raise an eccentric body's temperature dampening (0.1 for each atm of pressure up to 0.5, 0.003 for each percent of surface water up to 0.3, both times a factor that falls with the length of the year), which a plan pulls only where the greenhouse and anti-greenhouse gases cannot bring both extremes into the species' range: more water on the surface, more pressure in the air. `NO_LEVER` is a plan that pulls none; a lever is `{ hydroExt, pressure }`, the least surface water in percent and the least pressure in atm the plan holds (0 for no floor).
 export const LEVER = Object.freeze({ WATER: 'water', PRESSURE: 'pressure' })
 const NO_LEVER = Object.freeze({ hydroExt: 0, pressure: 0 })
 // The pressure term of the dampening stops growing at 5 atm, so more air gains nothing; the lever searches in this many equal rungs from what the body has to what the lever can reach.
@@ -109,7 +109,7 @@ export const hydrosphereState = (temperature, pressure) => {
   return hydrosphereAtTemperature(temperature)
 }
 
-// An oxygen breather aims for 20 % water (no colony cost), then for what keeps the most people: liquid water between 50 and 75 % (above 75 % the body holds fewer people), ice anywhere. Any other breather pays for liquid water by its extent (sulphur dioxide for ice as well) and never for water it lacks, so a plan for one keeps the extent as saved unless `drain` is set, when it aims for none: the game's terraformer, set to remove water vapour, keeps removing it until the surface holds no water (`Population.ProcessTerraforming`) and the oceans evaporate to refill the air (`Game.ProcessWaterVapourEvaporation`).
+// An oxygen breather aims for 20 % water (no colony cost), then for what keeps the most people: liquid water between 50 and 75 % (above 75 % the body holds fewer people), ice anywhere. Any other breather pays for liquid water by its extent (sulphur dioxide for ice as well) and never for water it lacks, so a plan for one keeps the extent as saved unless `drain` is set, when it aims for none: the game's terraformer, set to remove water vapour, keeps removing it until the surface holds no water and the oceans evaporate to refill the air.
 const plainHydroExtent = (current, hydrosphere, species, drain) => {
   if (species.BreatheID !== GAS.OXYGEN) {
     return drain ? 0 : current
@@ -856,7 +856,7 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
 // Years a plan takes at a yearly capacity (atm of an Earth-sized body); Infinity without capacity.
 export const planYears = (work, capacity) => (work <= 0 ? 0 : capacity > 0 ? work / capacity : Infinity)
 
-// What the years of a plan are. `capacity`: the terraformers' time for the plan's work, the estimate of every plan that takes no surface water off. `minimum`: a plan that drains the surface takes at least that time and no more is known. The terraformer removes only the water vapour in the air (`Population.ProcessTerraforming`, Population.cs:1074-1093) and the surface adds vapour only by evaporation, in steps that depend on the vapour already there (`Game.ProcessWaterVapourEvaporation`, Game.cs:27440-27485), so more installations do not shorten the drain and it can take longer than their capacity needs. That evaporation is not modelled: no tick is replayed.
+// What the years of a plan are. `capacity`: the terraformers' time for the plan's work, the estimate of every plan that takes no surface water off. `minimum`: a plan that drains the surface takes at least that time and no more is known. The terraformer removes only the water vapour in the air and the surface adds vapour only by evaporation, in steps that depend on the vapour already there, so more installations do not shorten the drain and it can take longer than their capacity needs. That evaporation is not modelled: no tick is replayed.
 export const TIME_BASIS = Object.freeze({ CAPACITY: 'capacity', MINIMUM: 'minimum' })
 
 // The reason a drain's time is a minimum, for every place that shows the figure.

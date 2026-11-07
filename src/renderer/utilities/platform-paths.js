@@ -8,7 +8,7 @@ import { refitRate, retoolCost, retoolTime, yardEligibility } from './refits'
 import { yardWorkers } from './workforce-demand'
 
 const VERSIONS = ['3.2.x']
-// The versions of the rules written against the line's source: the components a station project takes from the colony's stock for the whole batch, and the floor of a platform's cost.
+// The versions the rules hold for: the components a station project takes from the colony's stock for the whole batch, and the floor of a platform's cost.
 const LINE_VERSIONS = ['3.2.x']
 const DAYS_PER_YEAR = 365
 const EPSILON = 1e-9
@@ -31,7 +31,7 @@ registerRule({
   units: 'verdict',
   verification: 'estimated',
   structure: ['FCT_ShipClass.NoArmour, Obsolete', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.Prototype'],
-  note: 'Whether a colony\'s industry can build a class as a Space station project: the class is on the race\'s own list (the class read is scoped to the race, and a class copied or captured from another race is the race\'s own once copied), not obsolete, has no armour (the class\'s No Armour setting) and mounts no prototype component. The game states no size limit, no hull type and no shipyard for it; what the project takes from the colony\'s stock is the industry rule\'s. Read from the game\'s rules and seen in the stock sample\'s stored Space station projects, all of armourless classes; a refused class is not tried in a played game.',
+  note: 'Whether a colony\'s industry can build a class as a Space station project: the class is on the race\'s own list (the class read is scoped to the race, and a class copied or captured from another race is the race\'s own once copied), not obsolete, has no armour (the class\'s No Armour setting) and mounts no prototype component. The game states no size limit, no hull type and no shipyard for it; what the project takes from the colony\'s stock is the industry rule\'s. Read from the game\'s rules and seen in the Space station projects stored in the saves examined, all of armourless classes; a refused class is not tried in a played game.',
   assumptions: ['The component called a structural shell is part of an armourless class and is no armour.', 'A component with no research row of the race is not researched.'],
 })
 
@@ -55,13 +55,13 @@ registerRule({
   assumptions: ['The tasks start at once, one platform each, and the colony\'s rates do not change while they run.', 'The stored components credit the first tasks made and are used up in turn.', 'The retool\'s own mineral draw is not counted.'],
 })
 
-// A Space station or Light Naval project is created by `Population.method_147` (Population.cs:7104-7198, the SpaceStation and LightNaval cases at 7145-7156 and 7181-7193) and `Population.method_37` (Population.cs:3059-3104) takes its stored components as it is made: for each component the class mounts it sums the colony's stored rows of that component against the whole batch (`NumComponent * Amount`, Population.cs:3066) and takes them only where that sum covers the batch. A component of technology the race has not researched must be there or the project is refused (Population.cs:3075-3080), and one it has researched is taken only where the Industry tab's Use Components box is ticked (`chkUseComponentsIndustry`, Economics.cs:1946), which no project row stores. Each component taken lowers the cost a unit and the minerals a unit by its own (Population.cs:3085-3086), the whole batch leaves the colony's stock (Population.cs:3087), and the cost a unit is held at 1 BP (Population.cs:3093-3096).
+// A Space station or Light Naval project is created by the game's project creation, which takes the stored components as it is made: for each component the class mounts it sums the colony's stored rows of that component against the whole batch (`NumComponent * Amount`) and takes them only where that sum covers the batch. A component of technology the race has not researched must be there or the project is refused, and one it has researched is taken only where the Industry tab's Use Components box is ticked, which no project row stores. Each component taken lowers the cost a unit and the minerals a unit by its own, the whole batch leaves the colony's stock, and the cost a unit is held at 1 BP.
 registerRule({
   id: 'platformPaths.industry',
   versions: LINE_VERSIONS,
   units: 'days',
   verification: 'estimated',
-  structure: ['production.populationCapacity', 'FCT_IndustrialProjects.Queue, Percentage, ProductionType', 'platformPaths.stationClass', 'platformPaths.spaceport', 'FCT_PopComponent.Amount, ComponentID', 'FCT_RaceTech.TechID', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.Cost and the mineral columns', 'Population.method_37 (the whole batch)'],
+  structure: ['production.populationCapacity', 'FCT_IndustrialProjects.Queue, Percentage, ProductionType', 'platformPaths.stationClass', 'platformPaths.spaceport', 'FCT_PopComponent.Amount, ComponentID', 'FCT_RaceTech.TechID', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.Cost and the mineral columns', 'the game\'s project creation (the whole batch)'],
   note: 'The days a colony\'s industry takes to build the platforms as one Space station project: the platforms\' build points over the construction capacity at the share the colony\'s projects out of the queue (running or paused) leave free. Making the project takes the stored components the whole batch needs from the colony\'s stock, each only where the colony holds the whole batch of it: a component of technology the race has not researched must be there or the project is refused, and one it has researched is taken only where the Use Components box is ticked, which a project stores nowhere, so the forecast takes it. Each component taken lowers the build points and the minerals of a platform by its own, and a platform costs at least 1 BP. The project takes no shipyard slipway; its minerals are charged as it progresses and each platform is made when its share is complete. Capacity uses the colony\'s production modifiers, which the save may not hold.',
   assumptions: ['The project takes the whole free share from the start and the shares and rates do not change while it runs.', 'The Use Components box is ticked for the components of researched technology the colony\'s stock covers the whole batch of.', 'The colony\'s minerals are not held up by its other projects.'],
 })
@@ -128,7 +128,7 @@ const admissionOf = ({ shipClass, components, researched, stock, hulls, wording 
   return { blockers, missing }
 }
 
-// What a station or Light Naval project takes from the colony's stock for the whole batch, as `Population.method_37` takes it: a component the class mounts is taken only where the colony holds the whole batch of it (`NumComponent * Amount`), an alien one being mandatory (admissionOf refuses the project without it) and one of researched technology taken only where the Use Components box is ticked, which no project row stores, so the forecast takes it. Returns { credit ({ bp, minerals } one platform's worth of the components taken, null while unknown), missing }. `researched` and `stock` as loadPlatformSources reads them; `quantity` the platforms of the batch, the project's amount.
+// What a station or Light Naval project takes from the colony's stock for the whole batch, as the game's project creation takes it: a component the class mounts is taken only where the colony holds the whole batch of it (`NumComponent * Amount`), an alien one being mandatory (admissionOf refuses the project without it) and one of researched technology taken only where the Use Components box is ticked, which no project row stores, so the forecast takes it. Returns { credit ({ bp, minerals } one platform's worth of the components taken, null while unknown), missing }. `researched` and `stock` as loadPlatformSources reads them; `quantity` the platforms of the batch, the project's amount.
 const batchCreditOf = ({ shipClass, components, researched, stock, quantity }) => {
   const missing = []
   const minerals = Object.fromEntries(MINERALS.map(({ name }) => [name, 0]))

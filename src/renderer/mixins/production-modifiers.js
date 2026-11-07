@@ -4,7 +4,7 @@ import { loadNavalAdmins } from '../utilities/naval-admins'
 import { PRODUCTION_BONUS, loadOrbitalOrdnance, orbitalOrdnanceTerms, withOrbitalTerm } from '../utilities/ordnance-modules'
 import capabilityGates from './capability-gates'
 
-// The engineer share, from the game's own code: Population.RecalculateAnnualProductionCapacities adds ConstructionProduction × GroundFormationConstructionModifier × GroundFormationConstructionRating to a colony's construction capacity (Population.cs:4737), GroundFormationConstructionModifier is declared 1 (Population.cs:297) and its one assignment, RecalculateGroundFormationConstructionModifier (Population.cs:4715), has no caller, so the share is the race's construction rate times the rating and no economic or radiation factor scales it. The rating is the ground formations' own, read as mineBootstrap.groundAssistance reads it.
+// The engineer share: the game adds the construction production times the ground formations' construction modifier times their construction rating to a colony's construction capacity, and nothing in the game ever changes that modifier from its starting value of 1, so the share is the race's construction rate times the rating and no economic or radiation factor scales it. The rating is the ground formations' own, read as mineBootstrap.groundAssistance reads it.
 registerRule({
   id: 'production.populationCapacity',
   versions: ['3.2.x'],

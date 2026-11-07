@@ -1,5 +1,5 @@
 /*
-  Checks the orbital-temperature rule of SystemBody.method_1/method_2/method_3 (Aurora 3.1.0) on hand-worked bodies, including moons and the distinct temperature floors. The save comparison requires a finite stored temperature, prediction and delta: a non-finite figure is a failed comparison, never a match. The optional saves are read only: the migrated save records the delta between the temperatures the earlier game stored and the 3.1 rule's, not an oracle; the shipped save records a time-zero comparison, but its body rows are identical to the shipped 3.0.0 save (root measurement, AE-302-02 evidence). Specimen S2 of AE-310-03 remains the played-and-saved moon oracle.
+  Checks the orbital-temperature rule of the 3.1.0 game on hand-worked bodies, including moons and the distinct temperature floors. The save comparison requires a finite stored temperature, prediction and delta: a non-finite figure is a failed comparison, never a match. The optional saves are read only: the migrated save records the delta between the temperatures the earlier game stored and the 3.1 rule's, not an oracle; the shipped save records a time-zero comparison, but its body rows are identical to the shipped 3.0.0 save (root measurement, AE-302-02 evidence). Specimen S2 of AE-310-03 remains the played-and-saved moon oracle.
   bun scripts/check-habitability.js [--no-mutations]
 */
 const fs = require('fs')
@@ -46,7 +46,7 @@ check('moon', 'a moon takes its parent orbit and year but its own atmosphere and
   close(h.orbitalTemperatureDampening({ ...moon, ParentOrbitalDistance: undefined, ParentEccentricity: undefined, ParentYear: undefined }), 0, 'missing parent follows the game no-parent rule')
 })
 
-check('floors', 'method_3 floors the base at 4 K and only an undampened result at 1 K; stored temperatures floor at 4 K', (h) => {
+check('floors', 'the prediction at a distance floors the base at 4 K and only an undampened result at 1 K; stored temperatures floor at 4 K', (h) => {
   const barren = bodyOf({ AtmosPress: 0, HydroExt: 0, Atmosphere: [], Albedo: 0.5, BaseTemp: 4 })
   close(h.temperatureAtDistance(barren, 1e8), 2, '4 K base floor')
   close(h.temperatureAtDistance({ ...barren, Albedo: 0.01 }, 1e8), 1, '1 K undampened floor')
@@ -222,7 +222,7 @@ const oracle = async (h) => {
         const planets = compared(h, bodies.filter((body) => body.BodyClass !== 2 && eccentricWet(body)))
 
         assert.equal(planets.count, 7, 'the time-zero specimen has seven eccentric atmosphere/ocean planets')
-        assert.equal(planets.match, 7, 'the seven planets match the source rule within 0.01 K')
+        assert.equal(planets.match, 7, 'the seven planets match the game\'s rule within 0.01 K')
         assert.equal(planets.invalid, 0, 'every one of the seven planets compares as a finite number')
         console.log('OPEN 3.1 moon check: specimen S2 of AE-310-03 must be played and saved after an orbital update; the shipped lunar temperatures predate that observation')
       }

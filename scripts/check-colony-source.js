@@ -1,5 +1,5 @@
 /* eslint-disable no-template-curly-in-string */
-// Source arithmetic at the public Colony Outlook seams. Population.cs:9457-9569 supplies the worked growth figures; no expected value is calculated by the implementation under test.
+// Arithmetic from the game's rules at the public Colony Outlook seams. The game's growth rules supply the worked growth figures; no expected value is calculated by the implementation under test.
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')

@@ -47,7 +47,7 @@ const NAMED_CLASSES = [64475, 62944]
 const MODDED_MISSILE_ROWS = [
   { game: 140, id: 500724, field: 'Cost', stored: 211.85, computed: 349.05, reason: "the stored cost equals the sum of the stored minerals and is 137.2 BP under the rule's: the design carries a thermal sensor of strength 150 on the modded thermal level 10000, far above the stock levels, and its stored Uridium (15.1) is 136.3 under the rule's; the cause is not identified" },
   { game: 140, id: 500724, field: 'Uridium', stored: 15.1, computed: 151.4, reason: "the rule's Uridium is the thermal sensor's 150 plus 0.9 of terminal guidance and 0.5 of retargeting; the stored 15.1 is 136.3 BP less, nearly all of the difference in the stored cost, and the cause is not identified" },
-  { game: 140, id: 500724, field: 'UnstoredMinerals', stored: 0, computed: 0.9, reason: 'the stored cost equals the stored minerals, so the 0.9 Corundium the rule adds for the laser warhead is not in the cost of this design (the laser designs of the other races in the sample do match the rule); the cause is not identified, and it may be the same one as in the Uridium' },
+  { game: 140, id: 500724, field: 'UnstoredMinerals', stored: 0, computed: 0.9, reason: 'the stored cost equals the stored minerals, so the 0.9 Corundium the rule adds for the laser warhead is not in the cost of this design (the laser designs of the other races of game 140 do match the rule); the cause is not identified, and it may be the same one as in the Uridium' },
 ]
 
 const STOCK_MISSILE_ROWS = [
@@ -1491,7 +1491,7 @@ const evaluatorChecks = (library, data) => {
         expectThat('a design with second stages has a flight time or an endurance that is confirmed', flight.every((name) => statusOf(staged.figures[name]) === 'estimated' && ruleOf(staged.figures[name]) === 'design.missileAccountingExtended' && isAvailable(staged.figures[name]))),
         expectThat('the speed, fuel, size or cost of a design with second stages is not confirmed', [staged.figures.speed, staged.figures.fuelRequired, staged.totals.size].every((result) => statusOf(result) === 'confirmed') && confirmed(staged)),
         expectThat('an estimated endurance or range is counted', !counted(staged, 'endurance') && !counted(staged, 'maxRange') && counted(staged, 'speed')),
-        expectThat('an estimated endurance is not excluded with its reason', staged.efficacy.excluded.some((entry) => entry.id === 'endurance' && entry.reason.includes('estimated') && entry.reason.includes('154678'))),
+        expectThat('an estimated endurance is not excluded with its reason', staged.efficacy.excluded.some((entry) => entry.id === 'endurance' && entry.reason.includes('estimated') && entry.reason.includes('0.08% under'))),
         expectThat('the flight figures of a design with no second stage are not confirmed', flight.every((name) => statusOf(inside.figures[name]) === 'confirmed') && counted(inside, 'endurance') && counted(inside, 'maxRange'))
       )
     }],

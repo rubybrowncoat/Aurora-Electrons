@@ -997,7 +997,7 @@ const loaders = (ctx) => {
     return true
   })
 
-  add('loaders: a project row the game does not load is no project: a species of 0 or one the game does not hold, a wealth use DIM_WealthUse does not hold and a colony the game does not hold are skipped (Game.LoadIndustrialProjects, Game.cs:18652-18679), and a save without the tables that say so is not read', async () => {
+  add('loaders: a project row the game does not load is no project: a species of 0 or one the game does not hold, a wealth use DIM_WealthUse does not hold and a colony the game does not hold are skipped when the game loads the save, and a save without the tables that say so is not read', async () => {
     const { projects } = await read()
     const noSpecies = await read(['FCT_Species'])
     const noWealth = await read(['DIM_WealthUse'])

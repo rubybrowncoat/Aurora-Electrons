@@ -3,16 +3,16 @@
 
   Run: bun scripts/check-loading-strength.js [--no-mutations]
 
-  Every expected figure is worked out here from the game's rule (`Ship.GetCargoShuttleTransferMultiplier`: the race's load modifier L times the ship's bays Q, Q being 1 for a ship of 10 hull spaces or less and for one whose undamaged bays add up to exactly zero, plus L where the colony's cargo shuttle capacity is at least 1, the sum times the ship commander's, the naval admin command's, the governor's and the sector commander's Logistics multipliers; `Fleet.CalculateLoadOperationTime`: the free capacity times 20 s, times Class Crew over Current Crew where the crew is short, over that multiplier), never read from the module:
+  Every expected figure is worked out here from the game's rule (the loading strength: the race's load modifier L times the ship's bays Q, Q being 1 for a ship of 10 hull spaces or less and for one whose undamaged bays add up to exactly zero, plus L where the colony's cargo shuttle capacity is at least 1, the sum times the ship commander's, the naval admin command's, the governor's and the sector commander's Logistics multipliers; the load time: the free capacity times 20 s, times Class Crew over Current Crew where the crew is short, over that multiplier), never read from the module:
   - `formula`: the worked cases (a bayless freighter of 50,000 t at a colony with a spaceport at technology 1 loads in 500,000 s, a ship with 3 bays and a 1.2 commander at technology 1.5 has 7.2, not the 6.9 of the officer multiplying only the ship's own term), the colony's addition inside the officers' product, a colony with no service adding nothing, however many stations the colony has;
   - `bays`: a ship of 10 hull spaces or less has a ship term of 1 whatever bays it has (the limit included), a larger one the undamaged bays' strength, 1 for a ship with no bays and a ship with every bay damaged alike, a bay strength below 1 kept, and a bay count not in the save giving no strength for a ship over the limit;
   - `load-all`: move action 237 is a cargo load of the free capacity of the hold at 20 s a tonne on the same timer as Load All Minerals, a cycle of orders giving it a time and a hold already filled by another load leaving it nothing to load;
-  - `components`: the ship components a load puts in the hold stay in it until an unload takes them (`Ship.LoadShipComponentsFromPopulation`, `Ship.UnloadShipComponentsToPopulation`, `Ship.GetAvailableCargoCapacity`): a second load finds the hold full, a load of minerals the space the components left, Unload All Ship Components (189) and Unload Ship Component (141) take them out, Load Ship Component (140) is a load of one component, an unload to another fleet is a transfer between ships, and a load of a set number of components has no cycle;
+  - `components`: the ship components a load puts in the hold stay in it until an unload takes them: a second load finds the hold full, a load of minerals the space the components left, Unload All Ship Components (189) and Unload Ship Component (141) take them out, Load Ship Component (140) is a load of one component, an unload to another fleet is a transfer between ships, and a load of a set number of components has no cycle;
   - `component-types`: a typed unload after a bulk load leaves an unknown remainder, no downstream free space or exact timer, whereas matching and non-matching typed loads are exact;
   - `fleet-timer`: component tonnes times 20 divided by crew and ship-to-ship strength, with the receiving fleet's addition after the commander and naval command, no landing exemption, governor or sector;
   - `component-display`: the real page's computed route and compiled moved-cargo slot display components delivered, not counted in tonnage, on components-only and mixed routes;
-  - `unserved`: a ship with its crew aboard loads at a colony with no spaceport or cargo shuttle station whatever bays it has (`Ship.GetCargoShuttleTransferMultiplier` is positive there, `Ship.method_159` counting one bay for none): a craft of 10 hull spaces or less, a ship over it with no bays or with every bay damaged and a ship with bays, in the stop, the Transport round trip and the Hauling cycle;
-  - `versions`: the loading rules hold for the 3.2 line only, the 10 hull space limit of the ship term is the 3.2 line's own, a ship with no bays has a verdict there, and the rule notes cite the members of the source;
+  - `unserved`: a ship with its crew aboard loads at a colony with no spaceport or cargo shuttle station whatever bays it has (the loading strength is positive there, the bay term counting one bay for none): a craft of 10 hull spaces or less, a ship over it with no bays or with every bay damaged and a ship with bays, in the stop, the Transport round trip and the Hauling cycle;
+  - `versions`: the loading rules hold for the 3.2 line only, the 10 hull space limit of the ship term is the 3.2 line's own, a ship with no bays has a verdict there, and the rule notes name no code identifier or file name;
   - `footers`: the footers of Hauling and Information say that a ship with no bays loads at the technology alone, not that loading at a colony with no service is not settled;
   - `fixture`: on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784) the loaders' ship and colony columns, the officers' bonuses and the strength and time of a stop at a colony with a spaceport and one without each equal what is worked out here from the stored rows by SQL and arithmetic written apart from the loaders, for the fleet's ships as saved and for copies in which a freighter class has no bays or a ship has its bay damaged (the fixture has no such ship);
   - `recorded`: the loading times the migrated save stores for loads in progress (the time still to run, the full time is not stored) are no longer than the full-hold time of the same fleet at the same colony by the rule above.
@@ -623,7 +623,7 @@ check('unserved', 'a ship with its crew aboard loads and unloads at a colony wit
   assert.deepEqual(transport.shipEligibility(ship(bayless), bare, '3.0.0').reasons.map((reason) => [reason.status, reason.code]), [['unsupported', 'landing-unverified']], 'another line has no verdict for a bayless ship at a colony with no service')
 })
 
-check('versions', 'the loading rules hold for the 3.2 line only (the order of the officers and the colony\'s addition and the zero-bay ship term are that line\'s), the 10 hull space limit of the ship term is the 3.2 line\'s own, a ship with no bays has a verdict on 3.2, a colony with a spaceport lets the ship load, the officers\' rule is the 3.2 one, and the members of the source are cited in a comment above each rule while the notes, which a tooltip shows, name none', async (w) => {
+check('versions', 'the loading rules hold for the 3.2 line only (the order of the officers and the colony\'s addition and the zero-bay ship term are that line\'s), the 10 hull space limit of the ship term is the 3.2 line\'s own, a ship with no bays has a verdict on 3.2, a colony with a spaceport lets the ship load, the officers\' rule is the 3.2 one, and the notes, which a tooltip shows, name no code identifier or file name', async (w) => {
   const { transport, provenance } = await w.modules()
   const versions = (id) => (provenance.getRule(id) || {}).versions
   const note = (id) => (provenance.getRule(id) || {}).note || ''
@@ -645,22 +645,22 @@ check('versions', 'the loading rules hold for the 3.2 line only (the order of th
   assert.equal(transport.shipEligibility(bayless, transport.colonyEndpoint(colony()), VERSION).status, 'permitted', 'a spaceport lets it load')
   assert.equal(transport.shipEligibility(ship(), bareColony, VERSION).status, 'permitted', 'undamaged bays let it load')
 
-  // The evidence of the rules is the source's members, cited in the comment above the registration; a note is shown in a tooltip and names none of them.
-  const cited = (id) => {
-    const text = w.texts.transport
-    const at = text.indexOf(`  id: '${id}'`)
+  const commentOf = (id) => {
+    const at = w.texts.transport.indexOf(`registerRule({\n  id: '${id}'`)
 
-    return text.slice(text.lastIndexOf('\n\n', at), at)
+    assert.ok(at > 0, `the registration of ${id} is present`)
+    return w.texts.transport.slice(0, at).trimEnd().split('\n').pop()
   }
 
-  for (const member of ['Ship.GetCargoShuttleTransferMultiplier', 'Ship.LoadShipComponentsFromPopulation', 'Ship.UnloadShipComponentsToPopulation', 'HasSelfShuttledCargoCapacity', 'Commander.method_5']) {
-    assert.ok(cited('transport.cargoEligibility').includes(member), `the comment of the eligibility rule cites ${member}`)
+  for (const words of ['the loaders of ship components, minerals, colonists and installations', 'the unloaders of the same', 'proceed when the loading strength is not zero and do nothing otherwise', 'an absent percentage bonus counts as 1 for a commander', 'the loaders do not repeat it']) {
+    assert.ok(commentOf('transport.cargoEligibility').includes(words), `the eligibility comment states: ${words}`)
   }
 
-  assert.ok(cited('transport.ownStrength').includes('Ship.method_159') && cited('transport.ownStrength').includes('Size <= 10m'), 'the comment of the own strength cites the zero-bay helper and the limit')
+  assert.ok(commentOf('transport.ownStrength').includes('a size of 10 hull spaces or less') && commentOf('transport.ownStrength').includes('the bay term is 1 for a bay sum of exactly zero'), 'the own-strength comment states the small-craft limit and zero-bay term')
 
+  // A note is shown in a tooltip and names no code identifier or file name: a qualified member, a numbered member or class, a code file, a bare capitalised compound or a named call.
   for (const id of ['transport.cargoEligibility', 'transport.ownStrength', 'transport.handlingTime']) {
-    assert.ok(!/\bShip\.|\bFleet\.|\bCommander\.|HasSelfShuttled|method_\d+|\.cs\b/.test(note(id)), `the note of ${id} names a member of the source`)
+    assert.ok(!/\b[A-Z][a-z]\w*\.[A-Z]\w*\b|\b(?:s?method_\d+|G(?:Class|Enum)\d+)\b|\.cs\b|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b|\b[A-Za-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\s*\(/.test(note(id)), `the note of ${id} names a code identifier or file name`)
   }
 
   assert.ok(note('transport.cargoEligibility').includes('a bayless ship over 10 hull spaces at a colony with neither service at the technology alone'), 'the note states the condition')
@@ -903,9 +903,17 @@ const FAULTS = [
   { name: 'a ship whose bays are not in the save waits for them to be told whether it loads', target: 'transport', from: "} else if (loadingRulesHold(version)) {\n    return verdict('permitted'", to: "} else if (loadingRulesHold(version) && Number.isFinite(bays)) {\n    return verdict('permitted'", fails: ['unserved'] },
   { name: 'a ship with no crew aboard is let load', target: 'transport', from: '} else if (share === 0) {', to: '} else if (false) {', fails: ['unserved'] },
   { name: 'the loading rules hold for no line', target: 'transport', from: "export const loadingRulesHold = (version) => ruleSupports('transport.ownStrength', version) === true", to: 'export const loadingRulesHold = (version) => false', fails: ['versions', 'unserved'] },
-  { name: 'the comment of the own strength leaves out the helper that counts one bay for none', target: 'transport', from: 'Ship.method_159 (Ship.cs 6991-7024)', to: 'the bay helper (Ship.cs 6991-7024)', fails: ['versions'] },
-  { name: 'the comment of the eligibility rule leaves out the order list that does not offer the order', target: 'transport', from: 'HasSelfShuttledCargoCapacity', to: 'HasShuttles', fails: ['versions'] },
-  { name: 'the note of the eligibility rule names the transfer multiplier of the source', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: 'Every loader and unloader of the game (Ship.GetCargoShuttleTransferMultiplier) proceeds on that test alone', fails: ['versions'] },
+  { name: 'the eligibility comment leaves out the loading test', target: 'transport', from: 'proceed when the loading strength is not zero and do nothing otherwise; ', to: '', fails: ['versions'] },
+  { name: 'the own-strength comment leaves out the zero-bay term', target: 'transport', from: 'the bay term is 1 for a bay sum of exactly zero, ', to: '', fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a code file with a line cite', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: `Every loader and unloader of the game (see ${['Specimen', 'cs'].join('.')}:12-15) proceeds on that test alone`, fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a qualified member call', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: 'Every loader and unloader of the game (Specimen.ForbiddenCall()) proceeds on that test alone', fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a qualified member reference', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: 'Every loader and unloader of the game (Specimen.ForbiddenReference) proceeds on that test alone', fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a standalone numbered member', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: `Every loader and unloader of the game (${['method', '900001'].join('_')}) proceeds on that test alone`, fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a standalone numbered static member', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: `Every loader and unloader of the game (${['smethod', '900001'].join('_')}) proceeds on that test alone`, fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a numbered class', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: `Every loader and unloader of the game (G${'Class'}900001) proceeds on that test alone`, fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a numbered enum', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: `Every loader and unloader of the game (G${'Enum'}900001) proceeds on that test alone`, fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a standalone named member', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: 'Every loader and unloader of the game (RecalculateWidgetTotals) proceeds on that test alone', fails: ['versions'] },
+  { name: 'the note of the eligibility rule names a named call', target: 'transport', from: 'Every loader and unloader of the game proceeds on that test alone', to: 'Every loader and unloader of the game (hasWidgetFlag()) proceeds on that test alone', fails: ['versions'] },
   { name: 'the plan footer of Hauling says loading at a colony with no service is not settled', target: 'haulingPage', from: 'so it loads at a colony with no spaceport or cargo shuttle station at the technology alone', to: 'and whether it can load at a colony with no spaceport or cargo shuttle station is not settled', fails: ['footers'] },
   { name: 'the routes footer of Hauling says loading at a colony with no service is not settled', target: 'haulingPage', from: 'so it loads and unloads at a colony with no spaceport or cargo shuttle station at the technology alone', to: 'and whether it can load or unload at a colony with no spaceport or cargo shuttle station is not settled', fails: ['footers'] },
   { name: 'the footer of Information says loading at a colony with no service is not settled', target: 'informationPage', from: 'so it loads at a colony with no spaceport or cargo shuttle station at the technology alone', to: 'and whether it can load at a colony with no spaceport or cargo shuttle station is not settled', fails: ['footers'] },

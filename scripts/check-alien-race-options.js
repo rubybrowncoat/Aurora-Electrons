@@ -3,8 +3,8 @@
 
   Run: bun scripts/check-alien-race-options.js [--no-mutations]
 
-  The rule is the game's: `Game.SaveRaces` saves the colour of an alien race as `Color.ToArgb()` (a signed 32-bit ARGB number, 0 for `Color.Empty`) and the load reads it back with `Color.FromArgb`; the 3D galactic map draws a race whose colour has an alpha of 0 in white (`GalacticMap3D`); `Game.SaveRaceSysSurvey` saves one FCT_AlienRaceSystemStatus row for each setting of a system of the viewing race against one alien race, and `IncrementManager.method_5` leaves the interrupt (`GameInstance.bool_0`, `bool_1`) unset for a NewHostileContact or HostileContactUpdate event of a race that is not an NPR when that row's `NoHostileInterrupt` is true, after the event has been added to the log, and does so for no other event or race. A system with no row is not silenced. Every expected figure is written here from that rule and from the saved rows, never read from the module:
-  - `colour`: the stored number decoded as the game's `Color.FromArgb` reads it, built here from the four bytes (an opaque colour, a translucent one, a colour with an alpha of 0, a saved 0, the same colour written unsigned), a value that is not an integer of 32 bits unavailable and named, and the words for each;
+  The rule is the game's: the game saves the colour of an alien race as a signed 32-bit ARGB number (0 for no colour) and the load reads it back; the 3D galactic map draws a race whose colour has an alpha of 0 in white; the game saves one FCT_AlienRaceSystemStatus row for each setting of a system of the viewing race against one alien race, and leaves the interrupt unset for a NewHostileContact or HostileContactUpdate event of a race that is not an NPR when that row's `NoHostileInterrupt` is true, after the event has been added to the log, and does so for no other event or race. A system with no row is not silenced. Every expected figure is written here from that rule and from the saved rows, never read from the module:
+  - `colour`: the stored number decoded by the game's colour rule, built here from the four bytes (an opaque colour, a translucent one, a colour with an alpha of 0, a saved 0, the same colour written unsigned), a value that is not an integer of 32 bits unavailable and named, and the words for each;
   - `flag`: the setting of each system from the rows stored for the race and the systems it was seen in (a stored 1 silenced, a stored 0 not, the boolean, numeric and True/False forms of the stored flag, a flag that is not one unknown, a system with no row not silenced and said so, a system with a row that the race was not seen in listed, the names of the viewing race), and the summary of them in words;
   - `fixture`: on the interim 3.1 fixture (scripts/lib/fixtures.js, game 141, race 784) the page's reads give the three alien races with the colour the rows store and the settings the table stores, equal to SQL written here; the fixture stores no colour (every race holds 0) and no setting (the table is empty), so both are planted into in-memory copies and a saved case needs the specimen S18 of AE-310-03;
   - `page`: the page's own script, run over the fixture and the planted copies (scripts/lib/page-loader.js), reads the race options as an input of its own, shows each race's colour and its hostile contact settings system by system (a race of another viewing race never among them), with the facts of the selected race, and its rows carry the swatch only for a colour that is set;
@@ -78,7 +78,7 @@ const worldOf = (texts = { ...ORIGINALS }) => ({
 })
 
 // ---- The fixture, as in-memory copies ------------------------------------------------------------------------------
-// The colour the game saves for (alpha, red, green, blue): `Color.ToArgb()`, a signed 32-bit number.
+// The colour the game saves for (alpha, red, green, blue): a signed 32-bit number.
 const argbOf = (alpha, red, green, blue) => ((alpha << 24) | (red << 16) | (green << 8) | blue) | 0
 
 const DODGER = argbOf(255, 30, 144, 255)
@@ -138,7 +138,7 @@ const oracleColours = (database) => database.query(`select AlienRaceID, AlienRac
 
 const oracleSettings = (database) => database.query(`select VIR_Status.AlienRaceID, VIR_Status.SystemID, VIR_Status.NoHostileInterrupt, (select VIR_Survey.Name from FCT_RaceSysSurvey as VIR_Survey where VIR_Survey.GameID = VIR_Status.GameID and VIR_Survey.RaceID = ${RACE} and VIR_Survey.SystemID = VIR_Status.SystemID) as Name from FCT_AlienRaceSystemStatus as VIR_Status where VIR_Status.GameID = ${GAME} and VIR_Status.ViewingRaceID = ${RACE} order by VIR_Status.AlienRaceID, VIR_Status.SystemID`).all()
 
-// The colour the game reads back from a saved number (`Color.FromArgb`), from its four bytes: { alpha, red, green, blue } of the 32-bit pattern.
+// The colour the game reads back from a saved number, from its four bytes: { alpha, red, green, blue } of the 32-bit pattern.
 const bytesOf = (stored) => {
   const pattern = stored < 0 ? stored + 2 ** 32 : stored
 

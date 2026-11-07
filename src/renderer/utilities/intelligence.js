@@ -1,4 +1,4 @@
-// Intelligence: what one race knows about the others, decoded. Codes and thresholds come from the maintainer's reference, references/mechanics/intelligence.md, which was written for the earlier line; the queries and their sample checks are in docs/plans/aurcalcs/sql-fleet.md § 7.
+// Intelligence: what one race knows about the others, decoded. Codes and thresholds come from the maintainer's reference, references/mechanics/intelligence.md, which was written for the earlier line; the queries and their checks on saved games are in docs/plans/aurcalcs/sql-fleet.md § 7.
 // Every read goes through the viewing race's own intelligence tables. The `Actual*` columns (and alien ship or population IDs) point at the real objects, so they're never joined.
 
 import { STATUS, UNVERIFIED_SAVE, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull, weakestStatus } from './provenance'
@@ -191,7 +191,7 @@ registerRule({
   assumptions: ['a captain with no stored Communications row has the bonus 1'],
 })
 
-// Source member of the outcome rule, 3.1.0: `Game.ProcessAlienCommunicationAttempts` (Game.cs 25934-26162) runs an attempt only for a race whose communication status is Attempting communication (Game.cs 25938-25940); the Diplomacy window (Diplomacy.cs 602-641) starts one only from no communication, and communication that is impossible is final.
+// The outcome rule: the game runs an attempt only for a race whose communication status is Attempting communication; the Diplomacy window starts one only from no communication, and communication that is impossible is final.
 registerRule({
   id: 'intelligence.attemptOutcome',
   versions: LINE_VERSIONS,
@@ -302,7 +302,7 @@ const DIPLOMACY_DAMAGE = 'from FCT_DamagedComponent where FCT_DamagedComponent.S
 
 const CAPTAIN_ROWS = 'from FCT_Commander where FCT_Commander.GameID = FCT_Ship.GameID and FCT_Commander.RaceID = FCT_Ship.RaceID and FCT_Commander.CommandType = 1 and FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.Deceased = 0 limit 1'
 
-// The captain's Communications bonus and whether the save holds a row for it at all: a missing row and a stored row whose value is NULL both read as a NULL value, so the row's existence is read beside the value (`Commander.method_5`: a bonus the commander has no row for is 1).
+// The captain's Communications bonus and whether the save holds a row for it at all: a missing row and a stored row whose value is NULL both read as a NULL value, so the row's existence is read beside the value (a bonus the commander has no row for is 1).
 const COMMUNICATIONS_BONUS = `(select FCT_CommanderBonuses.BonusValue from FCT_CommanderBonuses where FCT_CommanderBonuses.BonusID = ${COMMUNICATIONS} and FCT_CommanderBonuses.CommanderID = (select FCT_Commander.CommanderID ${CAPTAIN_ROWS})) as Communications`
 const COMMUNICATIONS_STORED = `case when exists (select 1 from FCT_CommanderBonuses where FCT_CommanderBonuses.BonusID = ${COMMUNICATIONS} and FCT_CommanderBonuses.CommanderID = (select FCT_Commander.CommanderID ${CAPTAIN_ROWS})) then 1 else 0 end as CommunicationsStored`
 
@@ -313,7 +313,7 @@ const roundRating = (value) => Math.round(value * 1e6) / 1e6
 // The rating a contact brings (`base`) with what the prisoners add (`added`, 0 or 1): prisoners count only below 1, and the rating is held at 1 then.
 const withPrisoners = (base, added) => (base < 1 ? Math.min(1, roundRating(base + added)) : base)
 
-// The contact ratings an attempt runs at in each situation the game tells apart, as a result of 'intelligence.contactRating' whose value is { rows, working, crewed, unresolved }: `rows` are [{ key, label, base, rating, result }], `rating` being `base` with the prisoners' part added (`prisoners` is a result of `prisonerRating`), and `working` and `crewed` count the ships with a working module and those with a captain too. `base` is the captain's stored Communications bonus, 1 for a captain whose bonus row is not stored (`Commander.method_5`) and null where a row is stored without a value: such a rating has no figure and its `result` names the value it lacks, the default 1 never standing for one the save leaves unknown. The prisoners count only below a base of 1, so while `prisoners` is unavailable a row of a base below 1 has no rating either: `rating` is null and `result` names what the prisoners' part lacks, while a row of a base of 1 or more keeps its rating and a null `result`. `unresolved` are the reasons a rating has no figure, in order, as [{ key, label, result }]: `prisoners` for the prisoners' count and `bonus` for a stored bonus without a value, which the page draws as the columns of the roll that rest on them. `ships` are the rows of `diplomacyShipsSql`; a ship whose working modules are not saved is left out and named, and one with none left is not a source. `blocked` are the bonus IDs the save's lookup rows do not confirm (utilities/capabilities.js `blockedBonuses`): with the Communications bonus among them the captains' ratings are left out and named.
+// The contact ratings an attempt runs at in each situation the game tells apart, as a result of 'intelligence.contactRating' whose value is { rows, working, crewed, unresolved }: `rows` are [{ key, label, base, rating, result }], `rating` being `base` with the prisoners' part added (`prisoners` is a result of `prisonerRating`), and `working` and `crewed` count the ships with a working module and those with a captain too. `base` is the captain's stored Communications bonus, 1 for a captain whose bonus row is not stored and null where a row is stored without a value: such a rating has no figure and its `result` names the value it lacks, the default 1 never standing for one the save leaves unknown. The prisoners count only below a base of 1, so while `prisoners` is unavailable a row of a base below 1 has no rating either: `rating` is null and `result` names what the prisoners' part lacks, while a row of a base of 1 or more keeps its rating and a null `result`. `unresolved` are the reasons a rating has no figure, in order, as [{ key, label, result }]: `prisoners` for the prisoners' count and `bonus` for a stored bonus without a value, which the page draws as the columns of the roll that rest on them. `ships` are the rows of `diplomacyShipsSql`; a ship whose working modules are not saved is left out and named, and one with none left is not a source. `blocked` are the bonus IDs the save's lookup rows do not confirm (utilities/capabilities.js `blockedBonuses`): with the Communications bonus among them the captains' ratings are left out and named.
 export const contactRatings = (ships, prisoners, blocked = new Set()) => {
   const rule = 'intelligence.contactRating'
   const known = isAvailable(prisoners)
@@ -506,7 +506,7 @@ export const COMM_STATUS = {
 
 export const communicationLabel = (code) => COMM_STATUS[code] || (isNumber(code) ? `Status ${code}` : 'Unknown')
 
-// The statuses the Intelligence page tells apart: the game runs attempts only for the one below (`Game.ProcessAlienCommunicationAttempts`), and the Diplomacy window starts them from none.
+// The statuses the Intelligence page tells apart: the game runs attempts only for the one below, and the Diplomacy window starts them from none.
 export const NO_COMMUNICATION = 0
 export const ATTEMPTING_COMMUNICATION = 1
 export const COMMUNICATION_IMPOSSIBLE = 3

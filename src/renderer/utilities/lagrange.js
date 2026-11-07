@@ -4,12 +4,12 @@ import { crewFraction } from './crew'
 import { UNVERIFIED_SAVE, combine, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LAGRANGE_VERSIONS = ['3.2.x']
-// The two timing rules hold on 3.2, which skips a ship with no crew aboard and caps the duration at Int32.MaxValue seconds before converting it to an integer (`Fleet.CalculateGateBuildTime` and `Fleet.CalculateLagrangePointStabilisationTime` of the 3.1.0 source, the reference for the 3.2 line; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
+// The two timing rules hold on 3.2, which skips a ship with no crew aboard and caps the duration at 2,147,483,647 seconds, the largest 32-bit integer, before converting it to an integer (the game's gate build time and Lagrange point stabilisation time; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
 const TIMING_VERSIONS = ['3.2.x']
 // Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
 export const BASE_DAYS = 60 * 30
 const SECONDS_PER_DAY = 86400
-// The game returns the duration as a 32-bit integer number of seconds, so a longer one is capped at Int32.MaxValue seconds before the conversion (3.1); the cap is carried here in days, the unit the page shows.
+// The game returns the duration as a 32-bit integer number of seconds, so a longer one is capped at 2,147,483,647 seconds, the largest 32-bit integer, before the conversion (3.1); the cap is carried here in days, the unit the page shows.
 const MAX_SECONDS = 2147483647
 const MAX_DAYS = MAX_SECONDS / SECONDS_PER_DAY
 
@@ -122,7 +122,7 @@ export const bestStabilisation = (rows) => {
   return { ship: best, result: combine({ rule, parts: { ship: best.result }, compute: ({ ship }) => ship, assumptions: [`${unknown === 1 ? 'a ship' : `${unknown} ships`} whose crew is not in the save ${unknown === 1 ? 'is' : 'are'} left out, though quicker`] }) }
 }
 
-// Days to stabilise a body of `mass` Earth masses with the quickest ship's multiplier (`bestStabilisation`'s result), capped at the game's Int32.MaxValue seconds (3.1) so that a very short crew or a tiny body gives the cap and never a figure that overflows. A mass that is missing or not above 0 gives no time, and so does a multiplier that is unavailable; the result then lists every missing input.
+// Days to stabilise a body of `mass` Earth masses with the quickest ship's multiplier (`bestStabilisation`'s result), capped at the game's 2,147,483,647 seconds (3.1) so that a very short crew or a tiny body gives the cap and never a figure that overflows. A mass that is missing or not above 0 gives no time, and so does a multiplier that is unavailable; the result then lists every missing input.
 export const stabilisationDays = (mass, multiplier) => {
   const rule = 'lagrange.stabilisationDays'
   const massKnown = Number.isFinite(mass) && mass > 0

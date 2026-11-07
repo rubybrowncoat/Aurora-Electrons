@@ -3022,7 +3022,7 @@ const plantOn = async (raw, save, modules) => {
   return { point, bodies, fleets: { park, ordered, apart }, ids, at, off, where }
 }
 
-// `Fleet.CalculateTotalMoveOrderDistance` (Fleet.cs 7742-7783) for orders to bodies of the fleet's system with no minimum distance, no new warp point and no jump inside the system: the distance from where the fleet is to the destination of the first order and on from each to the next, each destination being where the save has the body, read by queries of its own.
+// The game's total distance of the move orders to bodies of the fleet's system with no minimum distance, no new warp point and no jump inside the system: the distance from where the fleet is to the destination of the first order and on from each to the next, each destination being where the save has the body, read by queries of its own.
 const orderDistanceOf = async (raw, save, fleet, start) => {
   const orders = await rowsOf(raw, 'select DestinationID from FCT_MoveOrders where FleetID = ? and GameID = ? order by MoveOrder', fleet, save.gameId)
   let position = start
@@ -3040,7 +3040,7 @@ const orderDistanceOf = async (raw, save, fleet, start) => {
 
 const sameXY = (position) => ({ Xcor: position.Xcor, Ycor: position.Ycor })
 
-// Independent transcription of Game.cs 27669-27687 / 27760-27763, restricted to the planted eccentric planet and its point. Inputs are queried from the copy, not taken from the app's orbit/arrival adapters. A snapshot applies whole calls then one final source-formula call for the remainder; movement arrivals explicitly request their phase's whole-call time.
+// Independent transcription of the game's orbit update, restricted to the planted eccentric planet and its point. Inputs are queried from the copy, not taken from the app's orbit/arrival adapters. A snapshot applies whole calls then one final update call for the remainder; movement arrivals explicitly request their phase's whole-call time.
 const sourceOrbitOf = async (raw, save, point) => {
   const [body] = await rowsOf(raw, 'select b.OrbitalDistance as a, b.Bearing as bearing, b.Year as year, b.Eccentricity as e, b.EccentricityDirection as direction, s.Xcor as x, s.Ycor as y from FCT_SystemBody b join FCT_Star s on s.StarID = b.StarID where b.GameID = ? and b.SystemBodyID = ?', save.gameId, point.PlanetID)
   const [lp] = await rowsOf(raw, 'select Distance as a from FCT_LagrangePoint where GameID = ? and LagrangePointID = ?', save.gameId, point.id)
@@ -3160,7 +3160,7 @@ check('anchor-planted-saves', 'on a copy of each save of the line with objects p
         assert.deepEqual(sameXY(flown.legs[0].positions.records.find((record) => record.identity.key === fleet.key).position), at, `${label}, ${fleet.key}: and is placed there`)
       })
 
-      // Q7 acceptance substitution: there is no stored order distance. Fleet.cs 7742-7777 computes it live; 6222-6223 divides by Speed. With orbital movement explicitly off, this source-grounded saved-order oracle also predicts the actual returned per-leg seconds, not another expression of plan.km.
+      // Q7 acceptance substitution: there is no stored order distance. The game computes it live and divides by Speed. With orbital movement explicitly off, this saved-order oracle, written from the game's rules, also predicts the actual returned per-leg seconds, not another expression of plan.km.
       for (const fleet of [ordered, rides[0]]) {
         const controlled = planner.planRoute([stopOf(fleet), ...bodyStops], { ...options, facts: { ...facts, clock: { ...facts.clock, orbitalMotion: 0 } }, adapters: rp.ADAPTERS, speed })
         let previous = at
@@ -3170,11 +3170,11 @@ check('anchor-planted-saves', 'on a copy of each save of the line with objects p
           const body = bodies[index]
           const seconds = Math.hypot(previous.Xcor - body.Xcor, previous.Ycor - body.Ycor) / speed
 
-          assert.ok(Math.abs(leg.seconds - seconds) <= seconds * 1e-9, `${label}, ${fleet.key}: actual leg ${index} seconds match the source order/time oracle`)
+          assert.ok(Math.abs(leg.seconds - seconds) <= seconds * 1e-9, `${label}, ${fleet.key}: actual leg ${index} seconds match the order/time oracle`)
           expectedSeconds += seconds
           previous = body
         })
-        assert.ok(Math.abs(controlled.legs.reduce((sum, leg) => sum + leg.seconds, 0) - expectedSeconds) <= expectedSeconds * 1e-9, `${label}: actual ETA is the sum of the source-timed orders`)
+        assert.ok(Math.abs(controlled.legs.reduce((sum, leg) => sum + leg.seconds, 0) - expectedSeconds) <= expectedSeconds * 1e-9, `${label}: actual ETA is the sum of the timed orders`)
       }
 
       // Route Finder takes a leg to an anchored fleet as the leg to its point.
@@ -3265,7 +3265,7 @@ check('anchor-waited-visitors', 'real Hauling cycles on both planted copies leav
         vm.positionRead = positionRead
 
         for (const [wait, delay] of [[length * 2.5, 0], [0, length * 2.5], [length, length * 2]]) {
-          // Game.cs 6323-6333: nonzero-time Salvage (107) copies wreck associations. 6399-6417 copies stationary fleet associations for all nine listed actions, including the three ordnance-hub actions.
+          // Nonzero-time Salvage (107) copies wreck associations. The game copies stationary fleet associations for all nine listed actions, including the three ordnance-hub actions.
           for (const [destination, action, carries] of [[waypoint, 2, false], [body, 2, true], [wreck, 107, wait > 0], [wreck, 151, false], [fleet, 2, false], ...[191, 192, 194, 210, 224, 230, 231, 233, 234].map((action) => [fleet, action, true])]) {
             const sourceArrival = mode ? sourceAt(length, length, destination !== body) : destination
             const firstKm = Math.hypot(sourceArrival.Xcor - fixed.Xcor, sourceArrival.Ycor - fixed.Ycor)
@@ -3277,9 +3277,9 @@ check('anchor-waited-visitors', 'real Hauling cycles on both planted copies leav
             const label = `${save.file}, mode ${mode}, ${destination.family}, action ${action}, wait ${wait}, delay ${delay}`
 
             assert.ok(result, `${label}: real page returns a cycle`)
-            assert.ok(Math.abs(result.first.km[0] - firstKm) < 1e-4, `${label}: arrival uses the source movement phase`)
+            assert.ok(Math.abs(result.first.km[0] - firstKm) < 1e-4, `${label}: arrival uses the game's movement phase`)
             assert.ok(Math.abs(result.first.km[1] - returnKm) < 1e-4, `${label}: departure follows the visitor association, not the destination's motion`)
-            assert.ok(Math.abs(result.first.seconds - (firstKm / speed + wait + delay + returnKm / speed)) < 1e-4, `${label}: actual cycle seconds include the source-ordered departure`)
+            assert.ok(Math.abs(result.first.seconds - (firstKm / speed + wait + delay + returnKm / speed)) < 1e-4, `${label}: actual cycle seconds include the departure in the game's order`)
             if (!carries) {
               const wronglyCarried = sourceAt(leaveTime, length)
 

@@ -259,7 +259,7 @@ where ${where} and (${fields}) is not null and (FCT_AtmosphericGas.GasAtm is nul
   return Object.freeze({ species: chosen.SpeciesName, systems: Object.freeze(systems), gaps: Object.freeze(gaps), options })
 }
 
-// The colony cost of the three rules below is the planner's own (utilities/habitability.js), the formula of SystemBody.CalculateColonyCost. The bands are counted as the game's Galaxy Map counts them (RaceSysSurvey.RebuildSystemBodySummaryAndSupernovaForecast, with the badge choice of RaceSysSurvey.method_34), for the species the race lives as, by the Galaxy Map's own options for each band; the tactical map's gravity gate is not used. The game's option to count by the worst cost over the orbit is not followed: the cost is the cost now.
+// The colony cost of the three rules below is the planner's own (utilities/habitability.js). The bands are counted as the game's Galaxy Map counts them, for the species the race lives as, by the Galaxy Map's own options for each band; the tactical map's gravity gate is not used. The game's option to count by the worst cost over the orbit is not followed: the cost is the cost now.
 const COST_VERSIONS = ['3.2.x']
 
 registerRule({

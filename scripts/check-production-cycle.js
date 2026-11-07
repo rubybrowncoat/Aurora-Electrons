@@ -644,7 +644,7 @@ const ledger = ({ years, capacity, stock, projects, arrivals = [], cycles }) => 
         requested = ZERO_FRACTION
       }
 
-      // The game floors every mineral balance at 0 after the debit (`MineralData.method_0`, MineralData.cs:37, at the end of `SubtractIndustrialProjectMinerals`, MineralData.cs:994-1011); the fuel is no mineral and a build is cut to it exactly.
+      // The game floors every mineral balance at 0 after the debit of an industrial project; the fuel is no mineral and a build is cut to it exactly.
       state.needs.forEach(([name, need]) => {
         const after = minus(have(name), times(need, requested))
 

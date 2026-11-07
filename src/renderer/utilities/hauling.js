@@ -44,9 +44,9 @@ export const CARGO_POINTS = { minerals: 2, installations: 1, components: 1 }
 export const CARGO_UNSETTLED = 'The cargo of this cycle does not settle within the passes, so what a trip carries and the time its stops take to load and unload are not worked out.'
 // What the page says of a cycle with an order that loads a set number of ship components: the tonnes that put in the hold, and so the free space the next load finds, are not known.
 export const CARGO_COUNTED = 'The cargo of this cycle is not worked out: an order loads a set number of ship components and carries no size for the component, so what it puts in the hold is not known, and with it what a trip carries and the time its stops take to load and unload.'
-// Fleet.CalculateUnloadOrTransferOperationTime (Fleet.cs 3303-3310) and Ship.UnloadShipComponentsToPopulation (Ship.cs 6599) select only the named component; a bulk load (Fleet.method_93, 3550-3573) does not record its composition in an order.
+// The game times a component unload or transfer by the named component alone, and a bulk load does not record its composition in an order.
 export const CARGO_COMPOSITION = 'The cargo of this cycle is not worked out: a typed unload can remove some or none of the components loaded in bulk. Their composition is not known, so the hold has an unknown remainder and the next load has no known free space or handling time.'
-// Game.cs 6580-6585 sends both component unloads to Fleet.UnloadShipComponentsToPopulation even without a population; that is not evidence of a successful transfer to a fleet. Do not free the hold on the strength of the timer.
+// The game sends both component unloads to the colony unload even without a population; that is not evidence of a successful transfer to a fleet. Do not free the hold on the strength of the timer.
 export const CARGO_TRANSFER = 'The cargo of this cycle is not worked out: the component unload to another fleet has a handling timer, but its transfer outcome is not established. The hold has an unknown remainder, not a guaranteed empty hold.'
 
 // The rules this module implements, registered once (utilities/provenance.js). Loading time is `transport.handlingTime`, whose strength and landing rules the Hauling page shares with Transport. Evidence: docs/plans/backlog/evidence/AE-080-01.md.

@@ -25,7 +25,7 @@ registerRule({
   note: 'What a number of one installation type takes: its build cost times the number, its cargo points times the number (an installation weighs its cargo points in tonnes of cargo), the workers it needs and the minerals of its recipe. A type with Workers above 0 is manned, one with 0 is automated and needs no workers.',
 })
 
-// Worker arithmetic: Population.RecalculateWorkforceBreakdown, Population.cs:9219-9253. Fresh bare-result wrappers still erase the retained Ark membership (B11, family 13) and capacity geometry (B06, family 12), so this registration is not released by the arithmetic repair.
+// Worker arithmetic. Fresh bare-result wrappers still erase the retained Ark membership (B11, family 13) and capacity geometry (B06, family 12), so this registration is not released by the arithmetic repair.
 registerRule({
   id: 'mineBootstrap.localBuild',
   versions: ['2.7.x'],
@@ -47,7 +47,7 @@ registerRule({
   assumptions: ['the freighters are free and fully crewed', 'full holds', 'the stock at the builder covers the recipe', 'mines already installed elsewhere are not counted'],
 })
 
-// The formula, from the game's own code: Population.RecalculateAnnualProductionCapacities adds ConstructionProduction × GroundFormationConstructionModifier × GroundFormationConstructionRating to the colony's construction capacity, and RecalculateGroundFormationConstructionModifier has no caller, so the modifier keeps its initial 1: the engineer term is the race's construction rate times the rating and nothing scales it by the economic or radiation modifier. The rating is Population.RecalculateGroundFormationConstructionRating over GroundUnitFormation.GetConstructionRating (its elements' units times the class ConstructionRating, times the commander's effective Production multiplier, Commander.GetEffectiveGroundCommandBonusMultiplier over the integer Commander.GetGroundCommandCapacityModifier), and the chain of parents is GroundUnitFormation.method_1, whose share is Helpers.decimal_7 (0.25). The per-turn refresh calls the rating with the fortification engineers included and the load-time one with them excluded.
+// The formula: the game adds the construction production times the ground formations' construction modifier times their construction rating to the colony's construction capacity, and nothing in the game changes the modifier from its initial 1: the engineer term is the race's construction rate times the rating and nothing scales it by the economic or radiation modifier. The rating is the formations' construction rating (its elements' units times the class's construction rating, times the commander's effective Production multiplier, which the game works over a whole-number command capacity modifier), and the chain of parents passes on a share of 0.25. The per-turn refresh calls the rating with the fortification engineers included and the load-time one with them excluded.
 registerRule({
   id: 'mineBootstrap.groundAssistance',
   versions: GROUND_VERSIONS,

@@ -9,7 +9,7 @@ import { handleEvent, nebulaGapOf, routeEvents, speedIn, timingGaps, walkEvents 
 export const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
 
-// Move actions that load or unload cargo, by what they carry. Ship components are cargo like the rest: Load Ship Component (140) and Load All Ship Components (237) put them in the free capacity of the hold on the timer of the other loads (`Fleet.CalculateLoadOperationTime`), the hold's free capacity counts what it holds of them (`Ship.GetAvailableCargoCapacity`) and they stay in it until Unload Ship Component (141) or Unload All Ship Components (189) takes them to the colony (`Ship.UnloadShipComponentsToPopulation`).
+// Move actions that load or unload cargo, by what they carry. Ship components are cargo like the rest: Load Ship Component (140) and Load All Ship Components (237) put them in the free capacity of the hold on the timer of the other loads, the hold's free capacity counts what it holds of them and they stay in it until Unload Ship Component (141) or Unload All Ship Components (189) takes them to the colony.
 export const LOADS = { 4: 'colonists', 140: 'components', 176: 'installations', 62: 'minerals', 178: 'minerals', 180: 'minerals', 223: 'minerals', 165: 'minerals', 237: 'components' }
 export const UNLOADS = { 6: 'colonists', 96: 'installations', 141: 'components', 177: 'installations', 63: 'minerals', 179: 'minerals', 165: 'minerals', 189: 'components' }
 // Move actions that load or unload ground units (Load Ground Unit, Unload Ground Unit, Unload All Ground Units from Transport Bay).
@@ -23,7 +23,7 @@ const LOAD_CARGO = 62
 const LOAD_COLONISTS = 4
 const UNLOAD_CARGO = 63
 const UNLOAD_COLONISTS = 6
-// A class of this size (in hull spaces, 500 t) or less lands on a colony: its own loading strength is 1 whatever bays it has. The limit is inclusive. The game source keeps it at 10 (the shuttle branch of `Ship.GetCargoShuttleTransferMultiplier`); the light naval limit of 20 hull spaces is a separate rule and does not move it.
+// A class of this size (in hull spaces, 500 t) or less lands on a colony: its own loading strength is 1 whatever bays it has. The limit is inclusive. The game keeps it at 10 (the shuttle branch of the loading strength); the light naval limit of 20 hull spaces is a separate rule and does not move it.
 const SMALL_CRAFT_SIZE = 10
 const TONNES_PER_HULL_SPACE = 50
 // DIM_ComponentType: Cargo Shuttle Bay.
@@ -48,7 +48,7 @@ const TRANSPORT_VERSIONS = ['3.2.x']
 // The loading rules the later line states: the colony's spaceport or cargo shuttle station joins the base of a ship's strength before any officer multiplies it, and a ship with no undamaged cargo shuttle bays counts one bay, so that no ship's bays keep it from loading at a colony.
 const LOADING_VERSIONS = ['3.2.x']
 
-// Source of the eligibility: the loaders Ship.LoadShipComponentsFromPopulation (Ship.cs 6092-6096), Ship.LoadMineralsFromPopulation, Ship.LoadColonistsFromPopulation and the installation loaders, and the unloaders Ship.UnloadShipComponentsToPopulation, Ship.UnloadColonistsToPopulation and the mineral and installation unloaders, proceed when Ship.GetCargoShuttleTransferMultiplier is not zero and do nothing otherwise; the multiplier is the own term plus the colony term times four Logistics multipliers (Ship.cs 5150-5201), and Commander.method_5 counts an absent percentage bonus as 1. The order list's move requirement HasSelfShuttledCargoCapacity (Fleet.cs) is the only test of bays at a colony with no spaceport or cargo shuttle station, and the loaders do not repeat it.
+// The eligibility rule: the loaders of ship components, minerals, colonists and installations, and the unloaders of the same, proceed when the loading strength is not zero and do nothing otherwise; the strength is the ship's own term plus the colony's term times four Logistics multipliers, and an absent percentage bonus counts as 1 for a commander. The order list's move requirement (the ship's own shuttled cargo capacity) is the only test of bays at a colony with no spaceport or cargo shuttle station, and the loaders do not repeat it.
 registerRule({
   id: 'transport.cargoEligibility',
   versions: LOADING_VERSIONS,
@@ -63,11 +63,11 @@ registerRule({
   versions: LOADING_VERSIONS,
   verification: 'estimated',
   structure: ['FCT_ShipClass.Size', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue', 'FCT_DamagedComponent', 'FCT_Race.CargoShuttleLoadModifier', 'DIM_PlanetaryInstallation.CargoShuttleValue'],
-  note: 'A ship\'s loading strength is its base times the officers\' Logistics factors. The base is the ship\'s own term (the race\'s shuttle technology for a craft of 10 hull spaces or less, else its undamaged bay strength times the technology, the bay strength counting as 1 where the ship has none) plus, at a colony with a spaceport or cargo shuttle station, the technology once more: the colony\'s addition joins the base before any officer multiplies. Read from the game\'s source and its worked examples; not compared with a loading time the game stores.',
+  note: 'A ship\'s loading strength is its base times the officers\' Logistics factors. The base is the ship\'s own term (the race\'s shuttle technology for a craft of 10 hull spaces or less, else its undamaged bay strength times the technology, the bay strength counting as 1 where the ship has none) plus, at a colony with a spaceport or cargo shuttle station, the technology once more: the colony\'s addition joins the base before any officer multiplies. Worked from the game\'s rules and worked examples; not compared with a loading time the game stores.',
   assumptions: ['a Logistics bonus the save cannot settle counts as 1, so the time errs long'],
 })
 
-// Source of the strength: Ship.GetCargoShuttleTransferMultiplier (Ship.cs 5150-5201) takes the race's technology for Size <= 10m and else Ship.method_159 (Ship.cs 6991-7024) times it; method_159 returns 1 for a bay sum of exactly zero, a ship built without bays and a ship with every bay damaged alike.
+// The strength: the game takes the race's technology for a size of 10 hull spaces or less and otherwise the ship's bay term times it; the bay term is 1 for a bay sum of exactly zero, a ship built without bays and a ship with every bay damaged alike.
 registerRule({
   id: 'transport.ownStrength',
   versions: LOADING_VERSIONS,
@@ -107,7 +107,7 @@ registerRule({
   assumptions: ['every ship at the stop loads at once', 'a ship short of crew loads in proportion to the crew it has', 'a Logistics bonus the save cannot settle counts as 1'],
 })
 
-// Game.cs 6161-6172 starts Fleet.CalculateUnloadOrTransferOperationTime for 141/189; Fleet.cs 3303-3324,3331-3368 gives seconds = floor(max_ship(component.Size * Amount * Helpers.TonsPerHS(50) * Helpers.decimal_24(20) / crewFraction / (Ship.GetShipToShipCargoShuttleTransferMultiplier() + receiverBonus))). Ship.cs 5210-5222 gives that multiplier = Ship.method_159(CargoShuttleBay, false) * CargoShuttleLoadModifier * commander Logistics * parent naval command Logistics; method_159 (6991-7024) counts one for zero bays, with no small-craft exemption. receiverBonus is 1 if the destination fleet has positive CalculateComponentCapacity(CargoShuttleBay) OR CalculateComponentCapacity(MaintenanceModule), else 0; it is added after the officers, not multiplied by technology. No governor or sector applies. A missing receiver input is unavailable, never zero time. The fleet maximum is truncated to whole seconds.
+// The game times the unload or transfer of a component (141/189) as seconds = floor(max over the ships of (component size * amount * 50 t a hull space * 20 s / crewFraction / (the ship-to-ship cargo shuttle multiplier + receiverBonus))). That multiplier = the bay term (CargoShuttleBay, which counts one for zero bays, with no small-craft exemption) * CargoShuttleLoadModifier * commander Logistics * parent naval command Logistics. receiverBonus is 1 if the destination fleet has a positive capacity of CargoShuttleBay OR MaintenanceModule components, else 0; it is added after the officers, not multiplied by technology. No governor or sector applies. A missing receiver input is unavailable, never zero time. The fleet maximum is truncated to whole seconds.
 registerRule({
   id: 'transport.componentFleetTime',
   versions: LOADING_VERSIONS,
@@ -180,7 +180,7 @@ export const UNVERIFIED_VERSION = 'the landing and shuttle rules, though the sav
 // The sentence a note states when the save does not state its game rules, or an empty text when it does.
 export const describeFormulaVersion = (version) => (version ? '' : 'The save does not state which game rules it was played under, so the landing rule is not verified against the save.')
 
-// Whether the loading rules hold for a game version: true for the line they are registered for, false for any other version and for a save that states none (the patch notes' 1000 t is not the game source's shuttle limit, which is 10 hull spaces, and 20 hull spaces is the light naval classification limit). Where they do not hold, a ship's verdict and strength are not settled. On the line (`Size <= 10m` in `Ship.GetCargoShuttleTransferMultiplier`) the 10 hull spaces are the shuttle branch of the ship's own strength alone, since no ship's bays keep it from a colony there.
+// Whether the loading rules hold for a game version: true for the line they are registered for, false for any other version and for a save that states none (the patch notes' 1000 t is not the game's shuttle limit, which is 10 hull spaces, and 20 hull spaces is the light naval classification limit). Where they do not hold, a ship's verdict and strength are not settled. On the line (a size of 10 hull spaces or less) the 10 hull spaces are the shuttle branch of the ship's own strength alone, since no ship's bays keep it from a colony there.
 export const loadingRulesHold = (version) => ruleSupports('transport.ownStrength', version) === true
 
 // Move actions that unload ship components at a colony or hand them to another fleet: Unload Ship Component and Unload All Ship Components are the only cargo unloads that take a fleet as their destination (a destination of type 10), and there the transfer is between ships, not cargo at a colony.

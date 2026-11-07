@@ -1,7 +1,7 @@
 /*
   Checks the propagation of known bodies to a fleet's arrival (src/renderer/utilities/orbit-propagation.js and what carries it: the adapters of route-position.js, the flights of jump-graph.js and the cycles and plans of route-plan.js) without a save.
 
-  The fixture is a small save made here in an in-memory SQLite database, read by the real loader. Every position the checks expect comes from an oracle written in this file from the orbit rules in closed form (a circle, an ellipse by its polar equation, a bisection for the arrival) and, for an eccentric body, from the game's own orbit update transcribed from the source with the source's names (`sourceCall`: Game.cs 27669-27687 with SystemBody.cs 806-829), not from the utilities; the one thing it shares with them is the cadence it is told, the lengths of the sub-pulse and of the increment on the clock below. The statements cover the acceptance of AE-087-03 and of AE-302-14:
+  The fixture is a small save made here in an in-memory SQLite database, read by the real loader. Every position the checks expect comes from an oracle written in this file from the orbit rules in closed form (a circle, an ellipse by its polar equation, a bisection for the arrival) and, for an eccentric body, from the game's own orbit update transcribed with the game's own terms (`sourceCall`), not from the utilities; the one thing it shares with them is the cadence it is told, the lengths of the sub-pulse and of the increment on the clock below. The statements cover the acceptance of AE-087-03 and of AE-302-14:
   - a position is rebuilt from the orbit fields only when it lands within a kilometre of the saved one; a body that misses, an unsurveyed system, a missing field and a family that is not supported keep the saved position and say why;
   - an arrival is solved to a second in at most eight evaluations for circular bodies, moons, trojans, Lagrange points and eccentric bodies, a fleet that is not faster than the body or has no engines has none, and a fleet that does not converge keeps the saved figure with its reason;
   - an eccentric body is carried for less than one orbit from the last update and states the call length it rests on; a circular body is carried over any horizon;
@@ -93,16 +93,16 @@ const ellipsePoint = (star, body, bearing) => {
   }
 }
 
-// One call of the game's orbit update on an eccentric body at `bearing`, written out from the source with its names: `initial` is `double_25` (`SystemBody.InitialiseOrbitalSpeed`, SystemBody.cs 806-816), `current` is `double_24` (`UpdateCurrentOrbitalSpeed`, SystemBody.cs 819-829) from the distance to the parent in AU the body had after the previous call, and the bearing falls by `deltaSeconds / (Year x 3600)` of a turn at the ratio of the two (Game.cs 27669-27687).
+// One call of the game's orbit update on an eccentric body at `bearing`, written out from the game's rules: `initial` is the mean orbital speed, `current` the orbital speed from the distance to the parent in AU the body had after the previous call, and the bearing falls by `deltaSeconds / (Year x 3600)` of a turn at the ratio of the two.
 const sourceCall = (body, bearing, deltaSeconds) => {
   const star = STARS[body.star]
   const orbitalDistance = body.a
   const initial = Math.sqrt(2.0 / orbitalDistance - 1.0 / orbitalDistance)
   const distanceToParent = between(ellipsePoint(star, body, bearing), star) / KM
   const current = Math.sqrt(2.0 / distanceToParent - 1.0 / orbitalDistance)
-  const num3 = body.e !== 0 ? current / initial : 1.0
-  const num = (deltaSeconds / (body.year * 3600.0)) * num3
-  let next = bearing - num * 360.0
+  const ratio = body.e !== 0 ? current / initial : 1.0
+  const turns = (deltaSeconds / (body.year * 3600.0)) * ratio
+  let next = bearing - turns * 360.0
 
   while (next < 0.0) {
     next += 360.0
@@ -130,7 +130,7 @@ const afterCalls = (id, call, calls) => {
   return table[calls]
 }
 
-// A snapshot advances circular bearings for the full elapsed time. Eccentric snapshots use whole source calls then one local final call; the oracle table contains whole calls only.
+// A snapshot advances circular bearings for the full elapsed time. Eccentric snapshots use whole update calls then one local final call; the oracle table contains whole calls only.
 const bearingAt = (id, elapsed, call = SUBPULSE) => {
   const body = BODIES[id]
   const year = body.year * 3600
@@ -438,7 +438,7 @@ check('eccentric-horizon', 'an eccentric body is carried for less than one orbit
     const expected = bodyAt(id, elapsed)
 
     assert.ok(!found.reasons, `body ${id}: carried`)
-    assert.ok(between(found.position, expected) <= 1, `body ${id}: where the source's calls put it (${between(found.position, expected)} km)`)
+    assert.ok(between(found.position, expected) <= 1, `body ${id}: where the game's calls put it (${between(found.position, expected)} km)`)
     assert.deepEqual(found.conditions, ['eccentric-cadence'], `body ${id}: states the cadence it rests on`)
   })
 
@@ -470,7 +470,7 @@ check('saved-epoch', 'the played construction-clock gap is not replayed: saved p
 
   assert.equal(saved.observedAt, epoch)
   assert.ok(between(saved.position, ENDPOINTS.b27) <= 1e-6)
-  assert.ok(between(one.position, bodyAt(27, 1, 1)) <= 1e-6, 'one exact source second from the saved bearing')
+  assert.ok(between(one.position, bodyAt(27, 1, 1)) <= 1e-6, 'one exact update second from the saved bearing')
   assert.ok(Math.abs(between(saved.position, one.position) - 7.119526) < 1e-5, 'the continuity probe moves about 7.12 km, not 525378 km')
   assert.ok(between(ask(1800, epoch - 73800, 1800).position, bodyAt(27, 1800, 1800)) <= 1e-6, 'one played-length sub-pulse')
   ;[epoch, epoch - 73800, null, epoch + 10].forEach((growth) => {
@@ -531,13 +531,13 @@ check('movement-phase', 'move orders see the pulse-opening orbital update, but t
   const old = m.solveArrival({ from: nearSaved, depart: GAME_TIME, speed, speedOf: () => 1, positionAt: () => saved })
 
   assert.ok(Math.abs(old.seconds - 5 / 30) <= 1e-9, 'the old floor policy has its own self-consistent certified arrival')
-  assert.ok(Math.abs(short.solved.seconds - old.seconds) > 100, 'residual certification alone cannot distinguish the wrong policy; source order must select the destination')
+  assert.ok(Math.abs(short.solved.seconds - old.seconds) > 100, 'residual certification alone cannot distinguish the wrong policy; the game\'s order must select the destination')
   const laterFrom = { Xcor: first.Xcor, Ycor: first.Ycor + 5 }
   const later = ask(1, length + 100, laterFrom)
 
   assert.ok(later.solved && between(later.position, second) <= 1e-6, 'a flight within the subsequent pulse uses its opening call')
   assert.ok(later.solved.time > GAME_TIME + length && later.solved.time < GAME_TIME + 2 * length)
-  // Use the rebuilt coordinates to place a representable exact distance on the boundary, while the destination oracle remains the independent source transcription above.
+  // Use the rebuilt coordinates to place a representable exact distance on the boundary, while the destination oracle remains the independent transcription of the game's update above.
   const rebuiltFirst = ask(1, length).position
   const rebuiltSaved = ask(0, 0).position
   const boundaryFrom = { Xcor: rebuiltFirst.Xcor + Math.sign(saved.Xcor - first.Xcor) * speed * length, Ycor: rebuiltFirst.Ycor }
@@ -565,11 +565,11 @@ check('movement-phase', 'move orders see the pulse-opening orbital update, but t
   const figure = rp.withPositions(scene.m.provenance.ofRule({ rule: 'route.positionAge', value: 1 }), summary)
 
   assert.ok(between(record.position, first) <= 1e-6, 'the consumer contract keeps the movement destination')
-  assert.ok(rp.ASSUMPTIONS.propagated.includes('pulse-opening') && rp.ASSUMPTIONS.propagated.includes('preceding increment') && record.conditions.includes('eccentric-cadence'), 'visible provenance names both source-ordered phases and keeps the cadence condition')
+  assert.ok(rp.ASSUMPTIONS.propagated.includes('pulse-opening') && rp.ASSUMPTIONS.propagated.includes('preceding increment') && record.conditions.includes('eccentric-cadence'), 'visible provenance names both phases in the game\'s order and keeps the cadence condition')
   assert.ok(JSON.stringify(figure).includes('pulse-opening'), 'the position-dependent figure retains the phase provenance')
 })
 
-check('source-calls', 'an eccentric body is advanced as the source does it: a call of the update for each sub-pulse, or for each increment when the save moves bodies after movement, lowering the bearing by the call\'s seconds at the ratio of the current to the mean speed, with no fixed step; a trojan follows its parent through the same calls; a cadence that is not read is not guessed', async (w) => {
+check('update-calls', 'an eccentric body is advanced as the game does it: a call of the update for each sub-pulse, or for each increment when the save moves bodies after movement, lowering the bearing by the call\'s seconds at the ratio of the current to the mean speed, with no fixed step; a trojan follows its parent through the same calls; a cadence that is not read is not guessed', async (w) => {
   const scene = await w.scene()
   const m = scene.m['orbit-propagation']
   // The clock stands at the last body update, so that every `at` is a time after the save and the body is worked out for it.
@@ -579,11 +579,11 @@ check('source-calls', 'an eccentric body is advanced as the source does it: a ca
   const onCircle = (body, bearing) => circlePoint(STARS[body.star], body.a, bearing)
   const dropped = (body, seconds) => placed(body, turn(body.B - (360 * seconds) / (body.year * 3600)))
 
-  // One sub-pulse is one call of 7200 seconds, written out from the source, and the ratio of the speeds moves the body from where the bare turn would put it.
+  // One sub-pulse is one call of 7200 seconds, written out from the game's rules, and the ratio of the speeds moves the body from where the bare turn would put it.
   const pulse = at('b11', SUBPULSE)
 
   assert.ok(!pulse.reasons, 'one sub-pulse is carried')
-  assert.ok(between(pulse.position, placed(planet, sourceCall(planet, planet.B, SUBPULSE))) <= 1, `one sub-pulse: one call of the source (${between(pulse.position, placed(planet, sourceCall(planet, planet.B, SUBPULSE)))} km)`)
+  assert.ok(between(pulse.position, placed(planet, sourceCall(planet, planet.B, SUBPULSE))) <= 1, `one sub-pulse: one call of the game's update (${between(pulse.position, placed(planet, sourceCall(planet, planet.B, SUBPULSE)))} km)`)
   assert.ok(between(pulse.position, dropped(planet, SUBPULSE)) > 1000, 'the ratio of the current to the mean speed is in it')
   assert.deepEqual(pulse.conditions, ['eccentric-cadence'])
 
@@ -591,13 +591,13 @@ check('source-calls', 'an eccentric body is advanced as the source does it: a ca
   const increment = at('b11', INCREMENT, { orbitalMovementInSubPulse: 0 })
   const sixty = at('b11', INCREMENT)
 
-  assert.ok(between(increment.position, placed(planet, sourceCall(planet, planet.B, INCREMENT))) <= 1, `one increment: one call of the source (${between(increment.position, placed(planet, sourceCall(planet, planet.B, INCREMENT)))} km)`)
+  assert.ok(between(increment.position, placed(planet, sourceCall(planet, planet.B, INCREMENT))) <= 1, `one increment: one call of the game's update (${between(increment.position, placed(planet, sourceCall(planet, planet.B, INCREMENT)))} km)`)
   assert.ok(between(sixty.position, bodyAt(11, INCREMENT)) <= 1, 'the same seconds with the option on are the calls of the sub-pulses')
   assert.ok(between(increment.position, sixty.position) > 100, 'so the option picks the cadence')
   assert.ok(between(at('b11', INCREMENT, { orbitalMovementInSubPulse: 0, subPulseLength: null }).position, increment.position) <= 1e-6, 'a save that moves bodies after movement does not need the sub-pulse')
   assert.ok(between(at('b11', INCREMENT, { incrementLength: null }).position, sixty.position) <= 1e-6, 'nor one that moves them in each sub-pulse the increment')
 
-  // Each whole call starts from where the last left the body; a snapshot remainder is one final source call from that boundary.
+  // Each whole call starts from where the last left the body; a snapshot remainder is one final update call from that boundary.
   let bearing = planet.B
 
   for (let call = 0; call < 3; call += 1) {
@@ -605,13 +605,13 @@ check('source-calls', 'an eccentric body is advanced as the source does it: a ca
   }
 
   assert.ok(between(at('b11', 3 * SUBPULSE).position, placed(planet, bearing)) <= 1, 'three sub-pulses are three calls')
-  assert.ok(between(at('b11', 3 * SUBPULSE + SUBPULSE / 2).position, placed(planet, sourceCall(planet, bearing, SUBPULSE / 2))) <= 1e-6, 'half a sub-pulse adds one final source call')
-  assert.ok(between(at('b11', 1.5 * INCREMENT, { orbitalMovementInSubPulse: 0 }).position, placed(planet, sourceCall(planet, sourceCall(planet, planet.B, INCREMENT), INCREMENT / 2))) <= 1e-6, 'half an increment also adds one final source call')
+  assert.ok(between(at('b11', 3 * SUBPULSE + SUBPULSE / 2).position, placed(planet, sourceCall(planet, bearing, SUBPULSE / 2))) <= 1e-6, 'half a sub-pulse adds one final update call')
+  assert.ok(between(at('b11', 1.5 * INCREMENT, { orbitalMovementInSubPulse: 0 }).position, placed(planet, sourceCall(planet, sourceCall(planet, planet.B, INCREMENT), INCREMENT / 2))) <= 1e-6, 'half an increment also adds one final update call')
 
   // Circular geometry combines the full elapsed time without cadence.
   const rock = BODIES[14]
 
-  assert.ok(between(at('b14', SUBPULSE).position, placed(rock, sourceCall(rock, rock.B, SUBPULSE))) <= 1, 'an eccentric asteroid: one call of the source')
+  assert.ok(between(at('b14', SUBPULSE).position, placed(rock, sourceCall(rock, rock.B, SUBPULSE))) <= 1, 'an eccentric asteroid: one call of the game\'s update')
   assert.ok(between(at('b10', 5e6).position, bodyAt(10, 5e6)) <= 1 && between(at('b10', 5e6, { orbitalMovementInSubPulse: 0 }).position, bodyAt(10, 5e6)) <= 1, 'a circle uses the full elapsed time in either mode')
   assert.ok(between(at('b10', 5e6, { orbitalMovementInSubPulse: null, subPulseLength: null, incrementLength: null }).position, bodyAt(10, 5e6)) <= 1e-6, 'a circular snapshot does not require cadence')
 
@@ -662,7 +662,7 @@ check('snapshot-partial', 'snapshots use the entire elapsed time, including belo
       const id = ENDPOINTS[key].id
       const expected = key.startsWith('p') ? pointAt(id, seconds, length) : bodyAt(key === 'c701' ? 10 : id, seconds, length)
 
-      assert.ok(!found.reasons && between(found.position, expected) <= 1e-6, `${key}: ${seconds} s uses the independent source oracle`)
+      assert.ok(!found.reasons && between(found.position, expected) <= 1e-6, `${key}: ${seconds} s uses the independent orbital-rule oracle`)
     })
   })
 })
@@ -683,7 +683,7 @@ check('snapshot-cadence', 'only movement and eccentric propagation need cadence;
 
   assert.ok(!found.reasons && between(found.position, expected) <= 1e-6, 'a circular parent and moon need no cadence')
   assert.deepEqual(adapt(scene, 'b12', { facts: { ...scene.facts, clock }, at: GAME_TIME + seconds }).reasons, ['cadence-unread'], 'an eccentric ancestor needs cadence')
-  assert.deepEqual(adapt(scene, 'b10', { facts, at: GAME_TIME, from: { Xcor: ENDPOINTS.b10.Xcor + 5, Ycor: ENDPOINTS.b10.Ycor }, speed: 50000 }).reasons, ['cadence-unread'], 'even circular movement needs its source phase')
+  assert.deepEqual(adapt(scene, 'b10', { facts, at: GAME_TIME, from: { Xcor: ENDPOINTS.b10.Xcor + 5, Ycor: ENDPOINTS.b10.Ycor }, speed: 50000 }).reasons, ['cadence-unread'], 'even circular movement needs its movement phase')
 })
 
 check('partial-cache', 'partial snapshots never enter the whole-call cache: forward, backward and repeated queries leave snapshots and movement unchanged', async (w) => {
@@ -1225,7 +1225,7 @@ check('anchor-read', 'the loaders select non-fleet followers by same-game/system
       assert.equal(found, undefined, `${label}: not read`)
     } else {
       assert.ok(found, `${label}: read`)
-      assert.equal(Boolean(found.riding), object.read === 'riding', `${label}: source follower eligibility`)
+      assert.equal(Boolean(found.riding), object.read === 'riding', `${label}: follower eligibility`)
       assert.equal(Boolean(found.pointInconsistent), object.read === 'inconsistent', `${label}: a point outside its game or system is stated`)
 
       if (object.family !== 'waypoint' || object.point) {
@@ -1323,7 +1323,7 @@ check('anchor-rides', 'an object a Lagrange point carries is at the point\'s sav
   assert.ok(!scene.m['orbit-propagation'].anchorAdapter.serves({}) && scene.m['orbit-propagation'].anchorAdapter.serves({ anchor: { point: 31 } }))
 })
 
-check('anchor-displaced', 'non-fleet followers snap by point reference on the first source-ordered update: every positive snapshot elapsed time, the opening sub-pulse or preceding movement increment, never at the saved epoch', async (w) => {
+check('anchor-displaced', 'non-fleet followers snap by point reference on the first update in the game\'s order: every positive snapshot elapsed time, the opening sub-pulse or preceding movement increment, never at the saved epoch', async (w) => {
   const scene = await anchorScene(w)
   const rp = scene.m['route-position']
   const displaced = OBJECTS.filter((object) => object.family !== 'fleet' && object.dx > 0)
@@ -1350,13 +1350,13 @@ check('anchor-displaced', 'non-fleet followers snap by point reference on the fi
         const expected = calls === 0 ? saved : pointAt(object.point, calls * mode.call, mode.call)
 
         assert.equal(arrival.basis, 'propagated', `${label}: arrival is served`)
-        assert.ok(between(arrival.position, expected) < 1e-5, `${label}: movement from ${elapsed} sees the source-ordered call`)
+        assert.ok(between(arrival.position, expected) < 1e-5, `${label}: movement from ${elapsed} sees the call in the game's order`)
       }
       for (const elapsed of mode.clock.orbitalMovementInSubPulse === 0 ? [0, mode.call] : [0]) {
         const zero = rp.positionRecord(endpoint, { facts, adapters: rp.ADAPTERS, at: GAME_TIME + elapsed, from: endpoint, speed: 1e8 })
 
         assert.equal(zero.basis, 'propagated', `${label}: zero-duration arrival is served`)
-        assert.deepEqual(coordinatesOf(zero.position), saved, `${label}: zero-duration arrival at ${elapsed} sees no source-ordered update`)
+        assert.deepEqual(coordinatesOf(zero.position), saved, `${label}: zero-duration arrival at ${elapsed} sees no update in the game's order`)
       }
       const unread = rp.positionRecord(endpoint, { facts: withClock(facts, { orbitalMovementInSubPulse: null }), adapters: rp.ADAPTERS, at: GAME_TIME + mode.call / 2 })
 
@@ -1573,7 +1573,7 @@ check('anchor-plan', 'a plan takes an anchored object as it takes the point: a l
   })
 })
 
-// `Fleet.CalculateTotalMoveOrderDistance` (Fleet.cs 7742-7783) for orders to bodies of the fleet's system with no minimum distance, no new warp point and no jump inside the system: the distances from where the fleet is to the destination of the first order, and on from each to the next, the destination's position being the body's position when the sum is made.
+// The game's total distance of the move orders to bodies of the fleet's system with no minimum distance, no new warp point and no jump inside the system: the distances from where the fleet is to the destination of the first order, and on from each to the next, the destination's position being the body's position when the sum is made.
 const orderDistanceOf = async (database, fleet, start) => {
   const [orders] = await database.query(`select DestinationID from FCT_MoveOrders where FleetID = ${fleet} and GameID = ${GAME} order by MoveOrder`)
   let position = start
@@ -1622,7 +1622,7 @@ check('anchor-order-distance', 'the route of a fleet parked at a Lagrange point 
 })
 
 // ---- The saves, when they are there ---------------------------------------------------------------------------------------
-// Not run: the independent asteroids of one save, moved to the last body update of a later save of the same game, must land on the later save's positions, which needs two saves of one game a year or more apart (the saves A and B of AE-310-03). The calls of the source are checked above against their own transcription, which a single save cannot do against the game over time.
+// Not run: the independent asteroids of one save, moved to the last body update of a later save of the same game, must land on the later save's positions, which needs two saves of one game a year or more apart (the saves A and B of AE-310-03). The calls of the game's update are checked above against their own transcription, which a single save cannot do against the game over time.
 const NOT_RUN = new Map()
 
 check('saves', 'the independent asteroids of one save, moved to the last body update of a later save of the same game, are where that save has them, to a kilometre (needs tier b: two saves of one game a year apart)', async () => ({ skipped: 'needs tier b: two saves of one game a year or more apart (the saves A and B of AE-310-03)' }))
@@ -1939,26 +1939,26 @@ const FAULTS = [
   ['an arrival is solved only to a minute', 'orbit', 'export const ARRIVAL_TOLERANCE_SECONDS = 1', 'export const ARRIVAL_TOLERANCE_SECONDS = 60', ['circular-arrival', 'registration']],
   ['an arrival is searched for eighty times', 'orbit', 'export const ARRIVAL_MAX_EVALUATIONS = 8', 'export const ARRIVAL_MAX_EVALUATIONS = 80', ['solver-bounds', 'registration']],
   ['a rebuild is trusted a kilometre in a thousand', 'orbit', 'export const REBUILD_TOLERANCE_KM = 1', 'export const REBUILD_TOLERANCE_KM = 1000', ['rebuild', 'registration']],
-  ['the fitted step is restored', 'orbit', 'const call = length', 'const call = 561600', ['source-calls', 'eccentric-horizon']],
+  ['the fitted step is restored', 'orbit', 'const call = length', 'const call = 561600', ['update-calls', 'eccentric-horizon']],
   ['the fitted step constant is exported again', 'orbit', 'export const MAX_CALLS = 100000', 'export const MAX_CALLS = 100000\nexport const ECCENTRIC_STEP_SECONDS = 561600', ['registration']],
-  ['the ratio of the current to the mean speed is dropped', 'orbit', 'const turn = (deltaSeconds / (body.year * 3600)) * (current / mean)', 'const turn = (deltaSeconds / (body.year * 3600)) * 1', ['source-calls', 'eccentric-horizon']],
-  ['the sub-pulse option is ignored', 'orbit', 'perPulse ? clock.subPulseLength : clock.incrementLength', 'clock.incrementLength', ['source-calls']],
-  ['the sub-pulse option is read the wrong way round', 'orbit', 'perPulse ? clock.subPulseLength : clock.incrementLength', 'perPulse ? clock.incrementLength : clock.subPulseLength', ['source-calls']],
-  ['the snapshot remainder is dropped', 'orbit', 'bearing = advance(body, star, bearing, remainder)', 'bearing = bearing', ['source-calls', 'snapshot-partial']],
+  ['the ratio of the current to the mean speed is dropped', 'orbit', 'const turn = (deltaSeconds / (body.year * 3600)) * (current / mean)', 'const turn = (deltaSeconds / (body.year * 3600)) * 1', ['update-calls', 'eccentric-horizon']],
+  ['the sub-pulse option is ignored', 'orbit', 'perPulse ? clock.subPulseLength : clock.incrementLength', 'clock.incrementLength', ['update-calls']],
+  ['the sub-pulse option is read the wrong way round', 'orbit', 'perPulse ? clock.subPulseLength : clock.incrementLength', 'perPulse ? clock.incrementLength : clock.subPulseLength', ['update-calls']],
+  ['the snapshot remainder is dropped', 'orbit', 'bearing = advance(body, star, bearing, remainder)', 'bearing = bearing', ['update-calls', 'snapshot-partial']],
   ['the snapshot partial pollutes the whole-call cache', 'orbit', 'bearing = advance(body, star, bearing, remainder)', 'bearing = advance(body, star, bearing, remainder)\n      calls[whole] = bearing', ['partial-cache']],
   ['the snapshot partial is not budgeted', 'orbit', 'const evaluations = whole + (remainder > 0 ? 1 : 0)', 'const evaluations = whole', ['partial-budget']],
-  ['the budget refusal calls the remainder a full call', 'orbit', 'the horizon needs ${needs} against a budget of ${MAX_CALLS}', 'the horizon needs ${evaluations} calls of ${length} s; the app computes at most ${MAX_CALLS}', ['partial-budget', 'saved-epoch', 'source-calls']],
+  ['the budget refusal calls the remainder a full call', 'orbit', 'the horizon needs ${needs} against a budget of ${MAX_CALLS}', 'the horizon needs ${evaluations} calls of ${length} s; the app computes at most ${MAX_CALLS}', ['partial-budget', 'saved-epoch', 'update-calls']],
   ['a circular snapshot drops its elapsed remainder', 'orbit', 'const seconds = !planets ? 0 : movement ? whole * (length || 1) : elapsed', 'const seconds = whole * (length || 1)', ['snapshot-partial']],
-  ['the call cap silently coarsens the cadence again', 'orbit', 'const call = length', 'const call = Math.max(length, year / MAX_CALLS)', ['source-calls']],
-  ['the exact call budget is ignored', 'orbit', 'if (evaluations > MAX_CALLS) {', 'if (false) {', ['source-calls']],
-  ['a cadence that is not read is guessed', 'orbit', "if (planets && elapsed > 0 && length === null && (movement || family === 'eccentric')) {", 'if (false) {', ['source-calls']],
+  ['the call cap silently coarsens the cadence again', 'orbit', 'const call = length', 'const call = Math.max(length, year / MAX_CALLS)', ['update-calls']],
+  ['the exact call budget is ignored', 'orbit', 'if (evaluations > MAX_CALLS) {', 'if (false) {', ['update-calls']],
+  ['a cadence that is not read is guessed', 'orbit', "if (planets && elapsed > 0 && length === null && (movement || family === 'eccentric')) {", 'if (false) {', ['update-calls']],
   ['a boundary arrival skips residual certification', 'orbit', 'if (Math.abs(distance(arrived) / speed - next) <= ARRIVAL_TOLERANCE_SECONDS) {', 'if (true) {', ['solver-bounds']],
   ['movement restores floor in sub-pulse mode', 'orbit', 'switchOf(clock.orbitalMovementInSubPulse) ? Math.ceil(count)', 'switchOf(clock.orbitalMovementInSubPulse) ? Math.floor(count)', ['movement-phase']],
   ['movement applies ceil in increment mode', 'orbit', ': Math.ceil(count) - 1 : Math.floor(count)', ': Math.ceil(count) : Math.floor(count)', ['movement-phase']],
   ['increment movement takes the post-update boundary', 'orbit', ': Math.ceil(count) - 1 : Math.floor(count)', ': Math.floor(count) : Math.floor(count)', ['movement-phase']],
   ['the saved snapshot at t0 is advanced', 'orbit', 'const depart = isNumber(at) ? at : clock.gameTime', 'const depart = (isNumber(at) ? at : clock.gameTime) + (from ? 0 : callLength(clock))', ['movement-phase', 'rebuild']],
   ['movement phase is lost on a moon parent', 'orbit', "if (family === 'moon') {\n    parent = stateAt(orbits, clock, body.parentId, elapsed, { horizon, depth: depth + 1, movement })", "if (family === 'moon') {\n    parent = stateAt(orbits, clock, body.parentId, elapsed, { horizon, depth: depth + 1 })", ['circular-arrival']],
-  ['a trojan turns on a circle of its own', 'orbit', 'bearing = planets ? wrap(parent.bearing + body.trojan) : body.bearing', 'bearing = wrap(body.bearing - (360 * seconds) / year)', ['source-calls']],
+  ['a trojan turns on a circle of its own', 'orbit', 'bearing = planets ? wrap(parent.bearing + body.trojan) : body.bearing', 'bearing = wrap(body.bearing - (360 * seconds) / year)', ['update-calls']],
   ['a fleet with half an engine moves', 'orbit', '} else if (speed <= 1) {', '} else if (speed < 0.5) {', ['solver-bounds']],
   ['a fleet slower than the body is not refused', 'orbit', 'if (!(speed > fastest)) {', 'if (false) {', ['solver-bounds']],
   ['an eccentric body past one orbit is carried', 'orbit', 'if (horizon && elapsed >= year) {', 'if (false) {', ['eccentric-horizon']],

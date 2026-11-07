@@ -172,7 +172,7 @@ const buildCycle = (state, left, unlimited) => {
     return { built: ZERO, cut, stall: reason, finishing }
   }
 
-  // The game floors every mineral balance at 0 after the debit (`MineralData.SubtractIndustrialProjectMinerals`, MineralData.cs:994-1011, with its helper `MineralData.method_0`, MineralData.cs:37), so a build rounded up past what a mineral's stock covers leaves 0. The fuel is no mineral: a build is cut to it exactly.
+  // The game floors every mineral balance at 0 after the debit, so a build rounded up past what a mineral's stock covers leaves 0. The fuel is no mineral: a build is cut to it exactly.
   state.needs.forEach(([resource, need]) => {
     const after = subtract(left[resource] || ZERO, multiply(need, requested))
 

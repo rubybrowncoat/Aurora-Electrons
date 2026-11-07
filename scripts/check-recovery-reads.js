@@ -3,11 +3,11 @@
 
   Run: bun scripts/check-recovery-reads.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every case is planted: the migrated fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784) holds no life pod, no ordnance, no wreck of the race and no wreck that was salvaged in part, and no save played under 3.1 will be supplied (the owner's decision Q7 of AE-31), so each case is a copy of the fixture held in memory with the rows the game's own loaders and savers read and write:
-  - a life pod is a row of FCT_Lifepods with the fourteen columns `Game.LoadLifepods` (Game.cs:20856) reads and `Game.SaveLifepods` (Game.cs:12401) writes, among them OrbitBodyID and OrbitLagrangeID (the body or the Lagrange point it is tied to, 0 for neither) and the crew; an officer aboard is a commander of the race whose stored pod is the pod (`FCT_Commander.LifepodID`, written at Game.cs:11942) and who is not retired (`RetireStatus` 0), so a retired officer and an officer of another race that the pod holds as a prisoner are not counted;
-  - an object tied to a body or a Lagrange point has its coordinates rewritten as that point moves (Game.cs:27955-28030), so the planted copy `moved` is the same save with the same objects and other coordinates;
-  - a wreck is a row of FCT_Wrecks with its minerals, its components (FCT_WreckComponents) and its tech (FCT_WreckTech), saved whole by `Game.SaveWrecks` (Game.cs:11401); an incomplete salvage (`Fleet.CompleteWreckSalvage`, Fleet.cs:2608-2790) clears the tech, loads components from the first row on and lowers each Amount in place (`Ship.method_134`, Ship.cs:6047: the row stays with an Amount of 0), loads minerals, and returns before the wreck is removed (Fleet.cs:2815) with an Incomplete Salvage event, so the planted copy `partial` is the same wreck with its first rows at 0, the minerals halved, no tech and its Size unchanged, and `complete` is the same save with the wreck removed;
-  - a ship is a row of FCT_Ship with its construction time (`FCT_Ship.Constructed`), and a ShipID may come back for another ship after the highest ID is gone: the game takes the larger of the highest FCT_Ship and FCT_AlienShip ShipID when it starts (`Game.LoadMaxIds`, Game.cs:3463-3530), which keeps an ID a remembered alien hull holds out of reuse and no other.
+  The rules are the game's, written here from the game's rules, never read from the modules, and every case is planted: the migrated fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784) holds no life pod, no ordnance, no wreck of the race and no wreck that was salvaged in part, and no save played under 3.1 will be supplied (the owner's decision Q7 of AE-31), so each case is a copy of the fixture held in memory with the rows the game's own loaders and savers read and write:
+  - a life pod is a row of FCT_Lifepods with the fourteen columns the game's loader reads and its saver writes, among them OrbitBodyID and OrbitLagrangeID (the body or the Lagrange point it is tied to, 0 for neither) and the crew; an officer aboard is a commander of the race whose stored pod is the pod (`FCT_Commander.LifepodID`) and who is not retired (`RetireStatus` 0), so a retired officer and an officer of another race that the pod holds as a prisoner are not counted;
+  - an object tied to a body or a Lagrange point has its coordinates rewritten as that point moves, so the planted copy `moved` is the same save with the same objects and other coordinates;
+  - a wreck is a row of FCT_Wrecks with its minerals, its components (FCT_WreckComponents) and its tech (FCT_WreckTech), saved whole by the game; an incomplete salvage clears the tech, loads components from the first row on and lowers each Amount in place (the row stays with an Amount of 0), loads minerals, and returns before the wreck is removed with an Incomplete Salvage event, so the planted copy `partial` is the same wreck with its first rows at 0, the minerals halved, no tech and its Size unchanged, and `complete` is the same save with the wreck removed;
+  - a ship is a row of FCT_Ship with its construction time (`FCT_Ship.Constructed`), and a ShipID may come back for another ship after the highest ID is gone: the game takes the larger of the highest FCT_Ship and FCT_AlienShip ShipID when it starts, which keeps an ID a remembered alien hull holds out of reuse and no other.
   The checks:
   - `officer-only`: the ledger reads the active officers of an own pod, says `no crew, 2 officers` for a pod with officers and no crew, leaves a crewed pod and a pod with neither as they were, and `isOfficerOnly` is true for the first only;
   - `pod-anchors`: the fingerprint and the observation signature of a foreign pod and the signature of an own pod tied to a body or a Lagrange point carry the point and no coordinates, so they do not change when the coordinates do; a free pod is still named by its position, and the unanchored text is what it always was;
@@ -21,7 +21,7 @@
   - `legacy-records`: a status kept under the name a foreign pod or a foreign wreck had before it was named by its point (a pod by its position, a wreck at a Lagrange point by an orbit body of 0), planted in a store made as the code before the change made it, is read as held where the object under its id has the old details and no other object of its kind has them, `migrateRecoveryRecords` stores the new name once (so the status stays held when the point moves its coordinates) and writes nothing at a second run, an object that moved or was replaced is mapped by nothing and reads as reused, and objects that share the old details leave the status unverified, with the ambiguity recorded in it once and the name never rewritten;
   - `legacy-observations`: a pod or a wreck tied to a point gives the text it was observed by before beside the text it is observed by now, the digest of each reaches the capture, a span kept under the old digest goes on under the new one (in the recorder, when the same save is read again and in what the page shows), and the span of an object that moved or changed starts again;
   - `legacy-wiring`: the mixin of the ledger runs the migration once the objects are read and gives the observation both digests, and the observation view compares an object with both.
-  Where the source does not give a rule the check does not guess it: no figure here is compared with what a played save wrote, because none exists for these cases, and no check claims how long a pod lasts beyond the two weeks the source gives.
+  Where the game gives no rule the check does not guess it: no figure here is compared with what a played save wrote, because none exists for these cases, and no check claims how long a pod lasts beyond the two weeks the game gives.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
 
@@ -125,18 +125,18 @@ const IDS = { podOfficers: 9100001, podCrew: 9100002, podMixed: 9100003, podEmpt
 const CREATED = 1000000
 const MOVE = 3000000
 
-// A pod as `Game.SaveLifepods` writes it (Game.cs:12401-12440).
+// A pod as the game saves it.
 const addPod = (database, { id, race = RACE, crew, name, body = 0, lagrange = 0, x = 4000000.4, y = -8000000.6 }) => {
   database.run(`insert into FCT_Lifepods (LifepodID, GameID, RaceID, SpeciesID, SystemID, OrbitBodyID, OrbitLagrangeID, ClassID, ShipName, Crew, Xcor, Ycor, CreationTime, GradePoints) values (${id}, ${GAME}, ${race}, ${SPECIES}, ${SYSTEM}, ${body}, ${lagrange}, ${race === RACE ? MINING_CLASS : 0}, ${literal(name)}, ${crew}, ${x}, ${y}, ${CREATED}, 0)`)
 }
 
-// An officer aboard a pod: a commander whose stored pod is the pod (Game.cs:11942).
+// An officer aboard a pod: a commander whose stored pod is the pod.
 const addOfficer = (database, { pod, race = RACE, retired = 0 }) => {
   cloneRow(database, 'FCT_Commander', 'CommanderID', COMMANDER_TEMPLATE, { CommanderID: IDS.commander + addOfficer.count++, RaceID: race, LifepodID: pod, RetireStatus: retired })
 }
 addOfficer.count = 0
 
-// The wreck of the template with its components and its tech, as the game saves a wreck whole (Game.cs:11401-11480).
+// The wreck of the template with its components and its tech, as the game saves a wreck whole.
 const addWreck = (database, over) => {
   cloneRow(database, 'FCT_Wrecks', 'WreckID', WRECK_TEMPLATE, over)
   database.run(`insert into FCT_WreckComponents (WreckID, ComponentID, GameID, Amount) select ${over.WreckID}, ComponentID, GameID, Amount from FCT_WreckComponents where WreckID = ${WRECK_TEMPLATE} order by rowid`)
@@ -162,7 +162,7 @@ const GROUND = (database) => {
   addWreck(database, { WreckID: IDS.foreignBody, SystemID: SYSTEM, OrbitBodyID: BODY, OrbitLagrangeID: 0, ShipID: 0 })
 }
 
-// What an incomplete salvage leaves of a wreck (Fleet.cs:2608-2790): the tech cleared, the first two component rows loaded to 0 and kept, the rest as they were, half of the minerals; the Size is not touched.
+// What an incomplete salvage leaves of a wreck: the tech cleared, the first two component rows loaded to 0 and kept, the rest as they were, half of the minerals; the Size is not touched.
 const salvagedInPart = (database, wreck) => {
   database.run(`delete from FCT_WreckTech where WreckID = ${wreck}`)
   database.run(`update FCT_WreckComponents set Amount = 0 where rowid in (select rowid from FCT_WreckComponents where WreckID = ${wreck} order by rowid limit 2)`)

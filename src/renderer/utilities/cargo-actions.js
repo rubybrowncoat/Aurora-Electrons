@@ -6,5 +6,5 @@ export const ITEM_LOADS = new Set([140, 176, 178, 180])
 // Unload Ship Component, Unload Installation, Unload Mineral Type: they unload only the cargo of that type and leave the rest of the hold. Every other unload takes all it can (Unload Colonists carries a quantity flag but ignores it).
 export const ITEM_UNLOADS = new Set([141, 177, 179])
 
-// The item unloads that stop at their quantity: Unload Installation and Unload Mineral Type. Unload Ship Component carries a quantity flag but unloads every unit of its component (`Fleet.UnloadShipComponentsToPopulation` takes the component alone).
+// The item unloads that stop at their quantity: Unload Installation and Unload Mineral Type. Unload Ship Component carries a quantity flag but unloads every unit of its component, whatever the quantity.
 export const QUANTITY_UNLOADS = new Set([177, 179])

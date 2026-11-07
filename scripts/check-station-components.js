@@ -3,13 +3,13 @@
 
   Run: bun scripts/check-station-components.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no played save holds a Light Naval or Space Station project made from stored components with its Use Components box known (the owner's decision Q7 of AE-31: game-shaped planted cases stand in), so each case plants rows into in-memory copies of the migrated fixture (scripts/lib/fixtures.js, game 141, race 784), as scripts/check-industry-projects.js does, with the project made by an oracle of the game's own creation (`Population.method_147`, Population.cs:7104-7198, and `Population.method_37`, Population.cs:3059-3104):
-  - the project's cost a unit starts as the class's cost and its minerals as the class's, and each component the class mounts is looked at in the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds (a RaceTech row) is taken only when the Use Components box is Checked and the stock covers the batch, a component of alien technology is taken whenever the stock covers it and refuses the project when it does not (Population.cs:3066-3082);
-  - each component taken lowers the cost a unit by its cost times its count and the minerals by its minerals times its count, and takes the batch from the stock (Population.cs:3083-3092);
-  - a unit never costs less than 1 BP (Population.cs:3093-3095);
-  - `Population.ProcessIndustrialProjects` builds a project at its share of the capacity of its kind, a Space Station on construction and a Light Naval project on its own light naval capacity;
-  - `MineralData.SubtractIndustrialProjectMinerals` (MineralData.cs:994-1011) floors each mineral balance at 0 after the debit (the helper `MineralData.method_0`, MineralData.cs:37), as `SubtractShipyardTaskMinerals` (MineralData.cs:1017) and `SubtractScaledMinerals` (MineralData.cs:1043) do;
-  - a shipyard task stores the box as the player left it (`Shipyard.cs:287`) and a repeat or an automatic refit copies it (Population.cs:2020 and 1921).
+  The rules are the game's, written here from the game's rules, never read from the modules, and every figure is worked from them: no played save holds a Light Naval or Space Station project made from stored components with its Use Components box known (the owner's decision Q7 of AE-31: game-shaped planted cases stand in), so each case plants rows into in-memory copies of the migrated fixture (scripts/lib/fixtures.js, game 141, race 784), as scripts/check-industry-projects.js does, with the project made by an oracle of the game's own creation:
+  - the project's cost a unit starts as the class's cost and its minerals as the class's, and each component the class mounts is looked at in the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds (a RaceTech row) is taken only when the Use Components box is Checked and the stock covers the batch, a component of alien technology is taken whenever the stock covers it and refuses the project when it does not;
+  - each component taken lowers the cost a unit by its cost times its count and the minerals by its minerals times its count, and takes the batch from the stock;
+  - a unit never costs less than 1 BP;
+  - the game builds a project at its share of the capacity of its kind, a Space Station on construction and a Light Naval project on its own light naval capacity;
+  - the game floors each mineral balance at 0 after the debit of an industrial project, as it does after the debit of a shipyard task and of a scaled amount;
+  - a shipyard task stores the box as the player left it and a repeat or an automatic refit copies it.
   The checks:
   - `credit`: `componentCredit`, `creditedCost` and `creditLines` on hand-worked classes: the credit is the class's cost less the stored cost, held at the 1 BP floor, and what the stored cost shows of the box (components of researched technology taken where the credit goes past the components alien now, which a research made since explains as well as a ticked box; the box untold at the alien-only cost; nothing for the box to decide where the class mounts nothing of researched technology; unexplained for a cost the components cannot give; unknown where the save leaves a count, a cost or the research of a component) with the minerals credited;
   - `stations`: the Production page on a copy with Space Station projects made by the oracle (box ticked with alien components and a partly covered stock, box not ticked, every component in stock so the unit costs the floor, an alien component the stock does not cover so the game refuses the project): the lines under each job, its rate and its date, against what the oracle stored;
@@ -23,7 +23,7 @@
   - `floors`: the stock projection of the Minerals page, the free stock of a colony and the MSP run on a stock it exhausts never go below 0;
   - `registry`: the rules of the credit and the box are of the line and the finish of an industrial project is too;
   - `text`: the panel foot, the lines and the rule notes are in the impersonal voice with no release number.
-  Where the source does not give a rule the check does not guess it: the Use Components box of an industrial project is not stored (FCT_IndustrialProjects has no such column) and the race's research is read as it now stands, so a component that was alien when the project was made and is researched since cannot be told from one researched then; what a project's stored cost shows of the box is checked only as far as it proves which components were taken, never as the box's setting.
+  Where the game gives no rule the check does not guess it: the Use Components box of an industrial project is not stored (FCT_IndustrialProjects has no such column) and the race's research is read as it now stands, so a component that was alien when the project was made and is researched since cannot be told from one researched then; what a project's stored cost shows of the box is checked only as far as it proves which components were taken, never as the box's setting.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
 
@@ -146,7 +146,7 @@ const cloneRow = (database, table, key, from, over) => {
   database.run(`insert into ${table} (${names.map((name) => `"${name}"`).join(', ')}) select ${select} from ${table} where ${key} = ${from}`)
 }
 
-// The wealth use `Population.method_147` (Population.cs:7104-7198) gives a project: GEnum90 const_2 (DIM_WealthUse 3, Fighter Production) for Light Naval and const_24 (45, Orbital Habitat Construction) for a Space Station. The type of each by `AuroraProductionType`.
+// The wealth use the game's project creation gives a project: DIM_WealthUse 3 (Fighter Production) for Light Naval and 45 (Orbital Habitat Construction) for a Space Station. The production type of each is the game's number (utilities/production-types.js).
 const LIGHT_NAVAL = 2
 const SPACE_STATION = 4
 const WEALTH_OF = { [LIGHT_NAVAL]: 3, [SPACE_STATION]: 45 }
@@ -168,7 +168,7 @@ const stockOf = (database, population, id) => {
   return row ? row.Amount : 0
 }
 
-// The game's creation of a Light Naval or Space Station project from the colony's stock (`Population.method_37`, Population.cs:3059-3104): null where it refuses (a component of alien technology the stock does not cover for the whole batch), otherwise what the project stores and what it took from the stock, which the copy's stock then holds. `ticked`: the Use Components box.
+// The game's creation of a Light Naval or Space Station project from the colony's stock: null where it refuses (a component of alien technology the stock does not cover for the whole batch), otherwise what the project stores and what it took from the stock, which the copy's stock then holds. `ticked`: the Use Components box.
 const createProject = (database, { population, classId, amount, ticked }) => {
   const cls = classOf(database, classId)
   const taken = []
@@ -216,7 +216,7 @@ const createProject = (database, { population, classId, amount, ticked }) => {
   }
 }
 
-// A project row as `Game.SaveIndustrialProjects` writes it (Game.cs:11479-11546: the 28 columns ProjectID, GameID, RaceID, PopulationID, SpeciesID, Percentage, ProductionType, ProductionID, RefitClassID, WealthUse, Amount, PartialCompletion, ProdPerUnit, Description, Pause, Queue, FuelRequired and the eleven minerals), the ProductionID the class (`Population.method_147`), nothing built yet and the colony's species.
+// A project row as the game saves it (the 28 columns ProjectID, GameID, RaceID, PopulationID, SpeciesID, Percentage, ProductionType, ProductionID, RefitClassID, WealthUse, Amount, PartialCompletion, ProdPerUnit, Description, Pause, Queue, FuelRequired and the eleven minerals), the ProductionID the class, nothing built yet and the colony's species.
 const insertProject = (database, row) => {
   const species = database.query(`select SpeciesID from FCT_Population where PopulationID = ${row.population}`).get().SpeciesID
   const columns = ['ProjectID', 'GameID', 'RaceID', 'PopulationID', 'SpeciesID', 'Percentage', 'ProductionType', 'ProductionID', 'RefitClassID', 'WealthUse', 'Amount', 'PartialCompletion', 'ProdPerUnit', 'Description', 'Pause', 'Queue', 'FuelRequired', ...MINERAL_NAMES]
@@ -406,7 +406,7 @@ const expectedLines = (vm, fact, rate) => {
   return lines
 }
 
-// The days the game takes to build `amount` units of `perUnit` BP at `perYear` BP a year with the colony's cycle of one day and no stock short: each cycle builds the units its share buys (`perYear` over the 365 days, over the cost of a unit) rounded to 4 decimals (`Population.ProcessIndustrialProjects` keeps the build to 4 decimals), so a unit that costs much more than a cycle buys is built in a coarse step; Infinity where a cycle builds nothing.
+// The days the game takes to build `amount` units of `perUnit` BP at `perYear` BP a year with the colony's cycle of one day and no stock short: each cycle builds the units its share buys (`perYear` over the 365 days, over the cost of a unit) rounded to 4 decimals (the game keeps the build to 4 decimals), so a unit that costs much more than a cycle buys is built in a coarse step; Infinity where a cycle builds nothing.
 const gameDays = (amount, perUnit, perYear) => {
   const units = Math.round(perYear / DAYS_PER_YEAR / perUnit * 1e4) / 1e4
 

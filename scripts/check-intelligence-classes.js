@@ -3,18 +3,18 @@
 
   Run: bun scripts/check-intelligence-classes.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source, and none is compared with a played 3.1 save (the owner's decision AE-31 Q7: no played save is supplied, so the figures are source-derived and the planted copies of the interim fixture carry the cases):
-  - the branch: `Race.method_397` (Race.cs 21480-21609) works the type of every class out each time the intelligence window is drawn, Light Naval for a class whose observed size is above 0 and at most 20, else Military for engine type 1, Commercial for 2 and Unknown for any other, and saves it in `AlienClassType`;
-  - the prisoners: `Game.ProcessAlienCommunicationAttempts` (Game.cs 25934-26162) adds `processed / 200` (integer division) to a contact rating below 1, over the prisoner groups the viewing race holds of the alien race, and holds the rating at 1; `Population.ConductPrisonerInterrogations` (Population.cs 2504) stops a group of a race it has no communication with at 200 processed; the groups are saved in FCT_Prisoners (Game.cs 10592);
-  - the contact rating: `Game.CalculateActiveCommunicationMissionBonus` (Game.cs 25873-25932), 0 without a system where each race currently detects the other, else 0.5 or the best captain's Communications bonus on a ship with an undamaged Diplomacy Module (`Ship.method_159`, `Commander.method_5`: a bonus the commander has no row for is 1 for a multiplier);
-  - the outcome of an attempt: Game.cs 25985-26090 and `ApplyCommunicationAttemptProgress` (Game.cs 26164).
+  The rules are the game's, and none is compared with a played 3.1 save (the owner's decision AE-31 Q7: no played save is supplied, so the figures are worked from the rules and the planted copies of the interim fixture carry the cases):
+  - the branch: the game works the type of every class out each time the intelligence window is drawn, Light Naval for a class whose observed size is above 0 and at most 20, else Military for engine type 1, Commercial for 2 and Unknown for any other, and saves it in `AlienClassType`;
+  - the prisoners: an attempt adds `processed / 200` (integer division) to a contact rating below 1, over the prisoner groups the viewing race holds of the alien race, and holds the rating at 1; the game stops a group of a race it has no communication with at 200 processed; the groups are saved in FCT_Prisoners;
+  - the contact rating: 0 without a system where each race currently detects the other, else 0.5 or the best captain's Communications bonus on a ship with an undamaged Diplomacy Module (a bonus the commander has no row for is 1 for a multiplier);
+  - the outcome of an attempt: the game's cascade of the roll and the rating into the attempt's progress.
 
-  - `type`: the branch of a class from its observed size and engine, as an if-chain written here from the source reads it, over a grid of sizes (none, 0, a fraction, 19.99, 20, 20.0001, a large one) and engines; a size or an engine the save does not hold is unavailable and named where it decides; the saved type is read beside it and a class saved under another type is marked with it;
+  - `type`: the branch of a class from its observed size and engine, as an if-chain written here from the rule reads it, over a grid of sizes (none, 0, a fraction, 19.99, 20, 20.0001, a large one) and engines; a size or an engine the save does not hold is unavailable and named where it decides; the saved type is read beside it and a class saved under another type is marked with it;
   - `fixture`: on the interim 3.1 fixture (saves/AuroraDB-310-spookyerol-migrated.db, game 141, race 784) the 18 classes of the race sit one each under a branch (8 Military, 2 Commercial, 1 Light Naval, 7 Unknown), the branch of every one equal to the type the game saved for it, and the page's read names the saved type;
   - `page`: the page's own script groups the classes of each alien race by the branch and not by the saved type (a copy with every saved type 0, one with two swapped), at the limits of 20 and just above, a class with no saved size or engine is placed under Unknown and said not to be placed, and the table sorts the branches in the game's order, inside one by class name or the column picked;
   - `prisoners`: the groups the race holds of each alien race (the groups on colonies of another race, of another game, or of another race's prisoners never counted), the processed count over all the groups together, the rating one for each full 200, held at 1, a race with none held a real 0 and a group with no saved count unavailable;
   - `rating`: the ships with a working Diplomacy Module read from planted ships (a damaged module, a module of unknown damage, a ship of another race, no captain, a captain who died, a captain with no Communications row at 1, a Communications row stored with no value unknown and never 1), the rating rows from them and what the prisoners add to a rating below 1, and a blocked Communications bonus leaving the captains' rows out and named;
-  - `outcome`: what an attempt does at a roll and a rating, as the source's cascade reads it, over a grid of rolls and ratings with every edge, and the game's wording of a change;
+  - `outcome`: what an attempt does at a roll and a rating, as the game's cascade reads it, over a grid of rolls and ratings with every edge, and the game's wording of a change;
   - `communication`: the page's own script shows the prisoners processed and the rating they add beside a race's communication while it is not established, the panel of the selected race with the prisoners, the rating rows and the bands, and no panel once communication is established;
   - `capability`: the registry no longer declares the saved type as read by another item, the page's reads name it and the prisoners and the ships, a save without the saved type or the prisoners cannot give the page, and Communications is a gated bonus of the page;
   - `text`: the class table is grouped by the branch under the game's own headings, the foots open with what the panel is for and state the limits of the rules in the impersonal voice with no release named, and the page help and the rule notes say the same.
@@ -186,8 +186,8 @@ const closeCopies = () => {
 
 const loaderOf = (database) => ({ query: async (sql) => [database.query(sql).all()] })
 
-// ---- The rules, written here from the source ---------------------------------------------------------------------------
-// Race.method_397: the type of a class from its observed size and engine.
+// ---- The rules, written here from the game's rules ---------------------------------------------------------------------------
+// The type of a class from its observed size and engine.
 const oracleType = (size, engine) => {
   if (size > 0 && size <= 20) {
     return 3
@@ -200,12 +200,12 @@ const oracleType = (size, engine) => {
   return 0
 }
 
-// Whether the source's rule can be applied: a size that is not saved decides nothing, and an engine that is not saved matters where the size does not make the class Light Naval.
+// Whether the game's rule can be applied: a size that is not saved decides nothing, and an engine that is not saved matters where the size does not make the class Light Naval.
 const oracleDecides = (size, engine) => size !== null && ((size > 0 && size <= 20) || engine !== null)
 
 const BRANCH_OF = { 0: 'Unknown', 1: 'Commercial', 2: 'Military', 3: 'Light Naval' }
 
-// Game.ProcessAlienCommunicationAttempts: the change to the progress a roll sets at a rating, and the progress description of the change.
+// The change to the progress a roll sets at a rating, and the progress description of the change.
 const oracleChange = (roll, rating) => {
   if (roll > 90) {
     return 10 * rating
@@ -405,7 +405,7 @@ check('type', 'the branch of a class is the game\'s: Light Naval for an observed
         assert.equal(i.classBranch(result), 'Unknown', `${label} sits under Unknown`)
       } else {
         assert.notEqual(result.status, 'unavailable', `${label} has a branch`)
-        assert.deepEqual([value(result).type, value(result).label, i.classBranch(result)], [oracleType(size, engine), BRANCH_OF[oracleType(size, engine)], BRANCH_OF[oracleType(size, engine)]], `${label} is read as the source's rule reads it`)
+        assert.deepEqual([value(result).type, value(result).label, i.classBranch(result)], [oracleType(size, engine), BRANCH_OF[oracleType(size, engine)], BRANCH_OF[oracleType(size, engine)]], `${label} is read as the game's rule reads it`)
         assert.equal(result.status, 'confirmed', `${label} is a confirmed figure`)
       }
     }
@@ -423,7 +423,7 @@ check('type', 'the branch of a class is the game\'s: Light Naval for an observed
   assert.equal(value(saved(3, 20, 0)).differs, false, 'a class of 20 hull spaces saved as Light Naval is the rule\'s')
 })
 
-check('fixture', 'on the fixture the 18 classes of the race sit one each under a branch (8 Military, 2 Commercial, 1 Light Naval, 7 Unknown) and the branch of every one is the type the game saved for it, as the rule gives it from the observed size and engine, the page\'s read names the saved type, and what the fixture cannot show is named as source-derived', async (w) => {
+check('fixture', 'on the fixture the 18 classes of the race sit one each under a branch (8 Military, 2 Commercial, 1 Light Naval, 7 Unknown) and the branch of every one is the type the game saved for it, as the rule gives it from the observed size and engine, the page\'s read names the saved type, and what the fixture cannot show is named as worked from the rules', async (w) => {
   const { intelligence: i } = await w.modules()
   const database = copyOf('intact')
   const classes = oracleClasses(database)
@@ -437,7 +437,7 @@ check('fixture', 'on the fixture the 18 classes of the race sit one each under a
 
     assert.notEqual(result.status, 'unavailable', `${row.ClassName} has a branch`)
     assert.equal(value(result).type, row.AlienClassType, `${row.ClassName}: the branch is the type the game saved, ${row.AlienClassType}`)
-    assert.equal(value(result).type, oracleType(row.TCS, row.EngineType), `${row.ClassName}: and the source's rule`)
+    assert.equal(value(result).type, oracleType(row.TCS, row.EngineType), `${row.ClassName}: and the game's rule`)
     assert.equal(value(result).differs, false, `${row.ClassName} is not marked`)
     counts[i.classBranch(result)] = (counts[i.classBranch(result)] || 0) + 1
   }
@@ -455,7 +455,7 @@ check('fixture', 'on the fixture the 18 classes of the race sit one each under a
   // The classes of the other viewers were never drawn in a window, so their saved types are the default: not a case the page shows.
   if (!NOTED.has('fixture')) {
     NOTED.add('fixture')
-    console.log(`NOTE  fixture: the type of every class the race has observed matches the saved one; ${stored} of the ${other} classes of other viewing races hold a saved type other than the default (the window was never drawn for them); the rules of observation are source-derived, not compared with a played 3.1 save`)
+    console.log(`NOTE  fixture: the type of every class the race has observed matches the saved one; ${stored} of the ${other} classes of other viewing races hold a saved type other than the default (the window was never drawn for them); the rules of observation are worked from the game's rules, not compared with a played 3.1 save`)
   }
 })
 
@@ -567,7 +567,7 @@ check('prisoners', 'the prisoners are read for the player\'s colonies only (a co
 
   if (!NOTED.has('prisoners')) {
     NOTED.add('prisoners')
-    console.log('NOTE  prisoners: the fixture holds no prisoner group (FCT_Prisoners is empty), so every case is planted from the source\'s rule; source-derived, not fixture-verified')
+    console.log('NOTE  prisoners: the fixture holds no prisoner group (FCT_Prisoners is empty), so every case is planted from the game\'s rule; worked from the rule, not fixture-verified')
   }
 })
 
@@ -672,7 +672,7 @@ check('rating', 'the ships with a working Diplomacy Module are read from planted
   assert.equal(Object.keys(rowsOf(i.contactRatings([], none))).join(), 'none,bare', 'with no ship there are the two rows')
 })
 
-check('outcome', 'what an attempt does at a roll and a rating is the source\'s cascade (100 or more establishes communication, a change of ten, five, three, two or one times the rating above 90, 80, 70, 50 and 25, minus one, two and three times above 0, -25 and -50, and -500 below), its wording the game\'s, every edge as the cascade reads it, and a change below -3 ends the attempts', async (w) => {
+check('outcome', 'what an attempt does at a roll and a rating is the game\'s cascade (100 or more establishes communication, a change of ten, five, three, two or one times the rating above 90, 80, 70, 50 and 25, minus one, two and three times above 0, -25 and -50, and -500 below), its wording the game\'s, every edge as the cascade reads it, and a change below -3 ends the attempts', async (w) => {
   const { intelligence: i } = await w.modules()
   const rolls = [-100, -75, -50.5, -50, -49.5, -30, -25.5, -25, -24.5, -1, 0, 0.5, 10, 25, 25.5, 40, 50, 50.5, 60, 70, 70.5, 75, 80, 80.5, 85, 90, 90.5, 95, 99.5, 99.99, 100, 100.5, 150]
   const ratings = [0.5, 1, 1.05, 1.25, 1.4, 1.5]
@@ -944,7 +944,7 @@ check('text', 'the class table is grouped by the branch under the game\'s own he
   assert.ok(/Light Naval when the observed size is above 0 and at most 20 hull spaces \(1,000 tons, the limit included\)/.test(classes), `it states the limit of the rule: ${classes}`)
   assert.ok(/otherwise Military for a military engine, Commercial for a commercial one and Unknown for any other engine or none seen/.test(classes), 'and the engines')
   assert.ok(/an active sensor contact raises the observed size to the largest seen, which makes a class of 20 hull spaces or fewer Light Naval whatever its designation/.test(classes) && /a kill raises the observed size to the hull's, which moves a Light Naval class above 20 hull spaces to Military/.test(classes), 'and the rules of observation')
-  assert.ok(!/1000 tons|less than 1000/.test(classes), 'the forum\'s figure of 1000 tons is not used: the source says 20 hull spaces')
+  assert.ok(!/1000 tons|less than 1000/.test(classes), 'the forum\'s figure of 1000 tons is not used: the game says 20 hull spaces')
   assert.ok(/^Use it to see how an attempt at communication with the selected race stands/.test(attempt), 'the communication foot opens with what the panel is for')
   assert.ok(/add 1 for each full 200 processed, up to 1 in all/.test(attempt) && /A roll of 100 or more establishes communication/.test(attempt) && /a change below -3 ends the attempts/.test(attempt), `it states the rules: ${attempt}`)
   assert.ok(/is not saved, so the rating is listed by its sources/.test(attempt), 'and that the rating is shown by its sources, since where the races detect each other is not saved')
@@ -975,14 +975,12 @@ check('text', 'the class table is grouped by the branch under the game\'s own he
   assert.ok(/A change below -3 ends the attempts/.test(i.attemptOutcome(50, 1).rule.note), 'the outcome rule\'s note says when the attempts end')
   assert.ok(/The game runs an attempt only for a race whose communication status is Attempting communication/.test(i.attemptOutcome(50, 1).rule.note), 'the outcome rule\'s note says that only that status runs attempts')
 
-  const outcomeSource = w.texts.intelligence
-  const outcomeAt = outcomeSource.indexOf('id: \'intelligence.attemptOutcome\'')
-  const outcomeComment = outcomeSource.slice(0, outcomeAt).trimEnd().split('\n').slice(-2)[0]
+  const outcomeAt = w.texts.intelligence.indexOf("registerRule({\n  id: 'intelligence.attemptOutcome'")
+  const outcomeComment = w.texts.intelligence.slice(0, outcomeAt).trimEnd().split('\n').pop()
 
-  assert.ok(outcomeAt > 0 && /^\/\/ Source member of the outcome rule, 3\.1\.0: /.test(outcomeComment), 'a comment sits above the outcome rule and names its source')
-
-  for (const member of ['Game.ProcessAlienCommunicationAttempts', 'Game.cs 25934-26162', 'Game.cs 25938-25940', 'Diplomacy.cs 602-641']) {
-    assert.ok(outcomeComment.includes(member), `the comment above the outcome rule cites ${member}`)
+  assert.ok(outcomeAt > 0 && outcomeComment.startsWith('// The outcome rule: '), 'a comment above the outcome rule states it in plain words')
+  for (const words of ['the game runs an attempt only for a race whose communication status is Attempting communication', 'the Diplomacy window starts one only from no communication', 'communication that is impossible is final']) {
+    assert.ok(outcomeComment.includes(words), `the outcome comment states: ${words}`)
   }
 
   assert.ok(/A rating below 1 rests on what the prisoners add, so where a group's processed count is not saved such a rating is unavailable and names it/.test(i.contactRatings([], i.prisonerRating(undefined)).rule.note) && /a rating of 1 or more does not rest on the prisoners and stays as it is/.test(i.contactRatings([], i.prisonerRating(undefined)).rule.note), 'the contact rule\'s note says that a rating below 1 has no figure where the prisoners\' count is not saved')
@@ -1126,8 +1124,8 @@ const FAULTS = [
   { name: 'the page help leaves out which status runs attempts', target: 'glossary', from: '; while the status is Attempting communication, the only status the game runs attempts for, it also shows', to: '; it also shows', fails: ['text'] },
   { name: 'the contact rule\'s note leaves out the unknown prisoners', target: 'intelligence', from: ' A rating below 1 rests on what the prisoners add, so where a group\\\'s processed count is not saved such a rating is unavailable and names it, and is never taken as the contact\\\'s part alone; a rating of 1 or more does not rest on the prisoners and stays as it is.', to: '', fails: ['text'] },
   { name: 'the outcome rule\'s note leaves out which status runs attempts', target: 'intelligence', from: ' The game runs an attempt only for a race whose communication status is Attempting communication; with any other status (none, impossible, established) no attempt runs and none of what follows applies.', to: '', fails: ['text'] },
-  { name: 'the comment above the outcome rule leaves out the status member', target: 'intelligence', from: ' (Game.cs 25938-25940)', to: '', fails: ['text'] },
-  { name: 'the comment above the outcome rule leaves out the window member', target: 'intelligence', from: '; the Diplomacy window (Diplomacy.cs 602-641) starts one only from no communication, and communication that is impossible is final', to: '', fails: ['text'] },
+  { name: 'the outcome comment leaves out which status runs attempts', target: 'intelligence', from: 'the game runs an attempt only for a race whose communication status is Attempting communication; ', to: '', fails: ['text'] },
+  { name: 'the outcome comment leaves out the window and final status rules', target: 'intelligence', from: 'the Diplomacy window starts one only from no communication, and communication that is impossible is final', to: '', fails: ['text'] },
   { name: 'the class cell leaves out the saved type', target: 'intelligencePage', from: '<div v-if="item.typeNote" class="caption warning--text">', to: '<div v-if="false" class="caption warning--text">', fails: ['page'] },
   { name: 'the saved type is named as the rule\'s type', target: 'intelligencePage', from: '`Saved as ${result.value.storedLabel}', to: '`Saved as ${result.value.label}', fails: ['page'] },
   { name: 'the note leaves out the branch the rule gives', target: 'intelligencePage', from: '; the observed size and engine place the class under ${result.value.label}', to: '', fails: ['page'] },

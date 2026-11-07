@@ -73,7 +73,7 @@ registerRule({
   note: 'The race\'s ships of non-shipping-line fleets, military or commercial by their class, when the snapshot was taken. No ship of a kind is a known 0.',
 })
 
-// The game's own fleet and sub-fleet military tonnage is the hull spaces of the ships of a kind, summed as stored (they are fractional), converted once at 50 t each: Fleet.cs:5784-5799 (method_141, `Sum(Ship.Size) * Helpers.TonsPerHS`) and SubFleet.cs:82-84 (method_3, the same over a sub-fleet's ships). The earlier line cut the summed hull spaces to a whole number before converting (Fleet.cs:5634-5637 of the earlier line's source).
+// The game's own fleet and sub-fleet military tonnage is the hull spaces of the ships of a kind, summed as stored (they are fractional), converted once at 50 t each (a sub-fleet's the same over its own ships). The earlier line cut the summed hull spaces to a whole number before converting.
 registerRule({
   id: 'history.fleetTonnage',
   versions: TONNAGE_VERSIONS,

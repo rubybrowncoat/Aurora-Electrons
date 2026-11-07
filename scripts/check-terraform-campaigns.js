@@ -258,10 +258,10 @@ const governedColony = async (modules) => {
 }
 
 // ---- The Environment tab's one-year lines (AE-304-05) ------------------------------------------------------------------
-// What the game's Environment tab writes for a colony that terraforms (SystemBody.PopulateAtmosphereListView, SystemBody.cs:4316-4320): "Add Aestusium for one year" as a plus before the change that `method_37` (2079-2100) gives with the colony's yearly pressure on the body added to the greenhouse gas, "Add Frigusium for one year" as the change with a tenth of it added to the greenhouse gas and the whole of it to the anti-greenhouse gas, each against the temperature `method_2` (303-344, with the dampening of `method_1`, 262-301) has just written. Worked here from the saved rows and those methods, never by the app's helper. The base temperature is the game's: 255 / sqrt(distance / sqrt(luminosity)) at the distance now, never under 4 K, and a moon takes its planet's (SystemBody.cs:895, 909-912, 2594-2598).
+// What the game's Environment tab writes for a colony that terraforms : "Add Aestusium for one year" as a plus before the change that the game's temperature estimate gives with the colony's yearly pressure on the body added to the greenhouse gas, "Add Frigusium for one year" as the change with a tenth of it added to the greenhouse gas and the whole of it to the anti-greenhouse gas, each against the temperature the game has just written (with its dampening). Worked here from the saved rows and those rules, never by the app's helper. The base temperature is the game's: 255 / sqrt(distance / sqrt(luminosity)) at the distance now, never under 4 K, and a moon takes its planet's.
 const TAB_LABELS = { aestusium: 'Add Aestusium for one year', frigusium: 'Add Frigusium for one year' }
 
-// A .NET double written with `#,0.#` (Helpers.smethod_60): the value read at 15 significant digits, rounded half away from zero at one decimal, the thousands set apart, and a negative that rounds to nothing without its sign. Worked on the digits, not on a number.
+// A double written in the game's number format `#,0.#`: the value read at 15 significant digits, rounded half away from zero at one decimal, the thousands set apart, and a negative that rounds to nothing without its sign. Worked on the digits, not on a number.
 const tabFigureOf = (value) => {
   const text = Math.abs(value) < 1e-6 ? '0.00000000000000' : Math.abs(value).toPrecision(15)
   const [whole, fraction = ''] = text.split('.')
@@ -893,7 +893,7 @@ const PRODUCTION_CHECKS = [
       const modifiers = { MinConstructionPeriod: 31536000 }
       const ordinary = { TerraformStatus: 1, MaxAtm: 1, GasName: 'Oxygen', GasAtm: 0.5, GasAtmUnknown: 0 }
 
-      // Population.ProcessTerraforming:1057 returns before any update below Helpers.cs:861's 0.1 g minimum, including clearing empty removals. Equality is eligible; an unknown gravity is not assumed eligible.
+      // The game's terraforming returns before any update below its 0.1 g minimum, including clearing empty removals. Equality is eligible; an unknown gravity is not assumed eligible.
       for (const job of [ordinary, waterJob(), ...[null, 0].map((GasAtm) => ({ ...ordinary, TerraformStatus: 0, MaxAtm: 0, GasAtm }))]) {
         const blocked = production.terraformFinish(modifiers, { ...job, Gravity: 0.05 }, rate)
 
@@ -978,7 +978,7 @@ const PRODUCTION_CHECKS = [
       const terraform = { PopulationID: 1, Gravity: 1, TerraformStatus: 1, MaxAtm: 0.6, GasName: 'Oxygen', GasAtm: 0.3 }
       const modifiers = { MinConstructionPeriod: 31536000 }
 
-      // Population.ProcessTerraforming:1098-1099: repeated double additions give 0.4, 0.5, 0.6, 0.7; equality on the third increment does not stop addition.
+      // The game: repeated double additions give 0.4, 0.5, 0.6, 0.7; equality on the third increment does not stop addition.
       assert.equal(production.terraformFinish(modifiers, terraform, rate).result.value, 1460, 'non-binary addition needs four increments, not the quotient-rounded three')
       assert.equal(production.terraformFinish(modifiers, { ...terraform, GasAtm: 0.1, MaxAtm: 0.3 }, rate).result.value, 730, '0.1 + 0.1 + 0.1 exceeds 0.3 after two updates; no blanket extra increment or rounding')
       const source = { installations: 1, radius: 1, gravity: 1, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, ships: [] }
@@ -998,7 +998,7 @@ const PRODUCTION_CHECKS = [
       const terraform = { PopulationID: 1, Gravity: 1, TerraformStatus: 0, MaxAtm: 0.3, GasName: 'Oxygen', GasAtm: 0.6 }
       const modifiers = { MinConstructionPeriod: 31536000 }
 
-      // Population.ProcessTerraforming:1074-1077: repeated double subtractions give 0.5, 0.4, 0.30000000000000004, 0.20000000000000004; the third remains above the target.
+      // The game: repeated double subtractions give 0.5, 0.4, 0.30000000000000004, 0.20000000000000004; the third remains above the target.
       assert.equal(production.terraformFinish(modifiers, terraform, rate).result.value, 1460, 'non-binary removal needs four increments, not the quotient-rounded three')
       const source = { installations: 1, radius: 1, gravity: 1, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, ships: [] }
       const vm = instantiate(page, { $store: { getters: {}, state: {}, dispatch: async () => {} }, data: { terraforms: [terraform], terraformSources: { raceRate: 0.1 / (EARTH_ATMOSPHERE_UNITS / (4 * PI)), speed: 100, colonies: { 1: source } }, navalAdmins: {}, populationProductionModifiers: { 1: modifiers }, colony: () => ({ colonyName: 'Test colony', place: '', body: null }) } })
@@ -1016,7 +1016,7 @@ const PRODUCTION_CHECKS = [
       const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
       const modifiers = { MinConstructionPeriod: 31536000 }
 
-      // Population.ProcessTerraforming:1065-1088,1107-1110: a selected ordinary-gas removal is cleared only during the next production tick, whether no atmosphere row exists or a present row starts at zero pressure.
+      // The game: a selected ordinary-gas removal is cleared only during the next production tick, whether no atmosphere row exists or a present row starts at zero pressure.
       for (const GasAtm of [null, 0]) {
         const terraform = { Gravity: 1, PopulationID: 1, TerraformStatus: 0, MaxAtm: 0, GasName: 'Oxygen', GasAtm, GasAtmUnknown: 0 }
 
@@ -1042,7 +1042,7 @@ const PRODUCTION_CHECKS = [
       const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.125 })
       const modifiers = { MinConstructionPeriod: 31536000 }
 
-      // At 369 K the first cycle condenses 0.1 atm: gas 0.025, pressure 0.9, hydro 24; adding 0.125 leaves gas 0.15 and pressure 1.025. The source update gives 350 × 1.1025 = 385.875 K and a vapour hydrosphere. Next cycle cannot condense; it evaporates 0.1 atm then adds 0.125, passing 0.25.
+      // At 369 K the first cycle condenses 0.1 atm: gas 0.025, pressure 0.9, hydro 24; adding 0.125 leaves gas 0.15 and pressure 1.025. The game's temperature update gives 350 × 1.1025 = 385.875 K and a vapour hydrosphere. Next cycle cannot condense; it evaporates 0.1 atm then adds 0.125, passing 0.25.
       assert.equal(production.terraformFinish(modifiers, waterJob(), rate).result.value, 730, 'the increment warms the body above the condensation gate')
       assert.equal(production.terraformFinish(modifiers, waterJob({ SurfaceTemp: 370, MaxAtm: 0.1875 }), rate).result.value, 365, 'above 369 K the initial cycle cannot condense')
       assert.equal(production.terraformFinish(modifiers, waterJob({ MaxAtm: 0.1875 }), rate).result.value, 730, 'at exactly 369 K the initial cycle does condense')
@@ -1055,7 +1055,7 @@ const PRODUCTION_CHECKS = [
       const rate = provenance.ofRule({ rule: 'production.terraformRate', value: 0.001 })
       const job = waterJob({ MaxAtm: 0.002999, GasAtm: 0, HydroID: 4, AtmosPress: 0.999, SurfaceTemp: 270, BaseTemp: 325.67, Atmosphere: [{ AtmosGasID: 7, GasAtm: 0.999, FrozenOut: 0, FreezingPoint: 63, GHGas: 0, AntiGHGas: 0 }, { AtmosGasID: 5, GasAtm: 0, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }] })
 
-      // SystemBody.ProcessHydrosphereTransition:2507-2514 and Game.ProcessWaterVapourEvaporation:27464-27475: the first addition leaves pressure 1 and vapour 0.001; thaw refills 0.001, leaving extent 19.96 before albedo rises to 1.02994. Temperature is 325.67 × 1.1001 × 1.02994 = 368.99615783598 K, not 369.01765401 K. Next condensation leaves vapour 0.001997996, so the second addition reaches only 0.002997996; the third increment passes the target.
+      // The game's hydrosphere transition and water vapour evaporation: the first addition leaves pressure 1 and vapour 0.001; thaw refills 0.001, leaving extent 19.96 before albedo rises to 1.02994. Temperature is 325.67 × 1.1001 × 1.02994 = 368.99615783598 K, not 369.01765401 K. Next condensation leaves vapour 0.001997996, so the second addition reaches only 0.002997996; the third increment passes the target.
       assert.equal(production.terraformFinish({ MinConstructionPeriod: 31536000 }, job, rate).result.value, 1095, 'thaw evaporation precedes albedo, preserving next-increment condensation and a third-increment finish')
     },
   },
@@ -1066,7 +1066,7 @@ const PRODUCTION_CHECKS = [
       const modifiers = { MinConstructionPeriod: 31536000 }
       const job = waterJob({ MaxAtm: 0.1875, SurfaceTemp: 300, BaseTemp: 300, Atmosphere: [{ AtmosGasID: 7, GasAtm: 0.875, FrozenOut: 0, FreezingPoint: 63, GHGas: 1, AntiGHGas: 0 }, { AtmosGasID: 5, GasAtm: 0.125, FrozenOut: 0, FreezingPoint: 0, GHGas: 0, AntiGHGas: 0 }] })
 
-      // SystemBody.UpdateSurfaceTemp:2024-2027: both giant types stay at BaseTemp = 300 K, ignoring the non-neutral atmosphere. First condensation/addition leaves gas 0.15 and pressure 1.025; ordinary-body temperature would be 300 × (1 + 1.025 / 10 + 0.875) = 593.25 K. Giants keep condensing, reaching 0.175 then 0.2 atm: the third increment passes 0.1875, not the ordinary body's second.
+      // The game's surface temperature: both giant types stay at BaseTemp = 300 K, ignoring the non-neutral atmosphere. First condensation/addition leaves gas 0.15 and pressure 1.025; ordinary-body temperature would be 300 × (1 + 1.025 / 10 + 0.875) = 593.25 K. Giants keep condensing, reaching 0.175 then 0.2 atm: the third increment passes 0.1875, not the ordinary body's second.
       for (const BodyTypeID of [4, 5]) {
         assert.equal(production.terraformFinish(modifiers, { ...job, BodyTypeID }, rate).result.value, 1095, `body type ${BodyTypeID} stays at its base temperature`)
       }

@@ -20,7 +20,7 @@ const GROWTH_VERSIONS = ['3.2.x']
 const COST_VERSIONS = ['3.2.x']
 const TOTALS = 'colonies.totals'
 
-// SystemBody.CalculateMaxPopulationCapacity, SystemBody.cs:3844-3876; Math.PI remains retained for family 12.
+// Math.PI remains retained for family 12.
 registerRule({
   id: 'colonies.capacity',
   versions: ['2.7.x'],
@@ -31,7 +31,7 @@ registerRule({
   assumptions: ['the geometric area is an approximation'],
 })
 
-// Game.RecalculatePopulatedBodyTotalPopulations, Game.cs:38685-38698, sums every race's surface residents on each body.
+// The game sums every race's surface residents on each body.
 registerRule({
   id: 'colonies.crowding',
   versions: COLONY_VERSIONS,
@@ -42,7 +42,6 @@ registerRule({
   assumptions: ['a body whose colonies include an unknown population has no crowding figure'],
 })
 
-// Population.RecalculateAnnualSurfaceGrowthAndOvercrowding, Population.cs:9475-9569; RecalculateRadiationColonyEffects:9457-9466.
 registerRule({
   id: 'colonies.growthRate',
   versions: GROWTH_VERSIONS,
@@ -53,7 +52,7 @@ registerRule({
   assumptions: ['current colony cost, gravity and infrastructure are evaluated at the snapshot climate; no temperature evolution or unrest is forecast'],
 })
 
-// Population.ProcessPopulationProductionTick, Population.cs:433-455; monthly horizon approximation, not a replay of saved increments.
+// A monthly horizon approximation, not a replay of saved increments.
 registerRule({
   id: 'colonies.populationProjection',
   versions: COLONY_VERSIONS,
@@ -73,7 +72,7 @@ registerRule({
   note: 'The colony\'s stored infrastructure requirement over its population in millions; the requirement already holds the doubling on a low-gravity body. A requirement of 0 is a colony that needs none. Arithmetic on two stored values.',
 })
 
-// Population.ProcessTradeGoodBalances(Infrastructure), Population.cs:4032-4034; RecalculateColonyInfrastructureMetrics:9374-9402. Game.LoadPlanetaryInstallations:20334-20397 does not load LGInfrastructureValue.
+// The game reads no LGInfrastructureValue.
 registerRule({
   id: 'colonies.infrastructureCap',
   versions: COLONY_VERSIONS,
@@ -98,10 +97,10 @@ registerRule({
   units: 'colony cost',
   verification: 'confirmed',
   structure: ['FCT_Population.ReqInf, Population', 'FCT_Species.PopulationDensityModifier, Gravity, GravDev', 'FCT_SystemBody.Gravity'],
-  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of the stock sample save (largest difference 0.0027), so the halving holds there. Against the planner\'s colony cost of the body, now or worst of the orbit, it agrees on every colony with people of the migrated fixture (22, oxygen breathers) and of a played save (44, oxygen, methane, ammonia and sulphur dioxide breathers), within a hundredth of the cost and five thousandths of a unit: the stored requirement is one step older than the climate and the people it is read against, and a colony of a few hundred people tells its cost only as a range.',
+  note: 'The colony cost the stored infrastructure requirement implies (requirement times density over 100 per million people), halved on a low-gravity body. It sets the share of people in agriculture and environment, and through the worker split it reproduced the stored efficiency of 5 low-gravity colonies of a save it was checked on (largest difference 0.0027), so the halving holds there. Against the planner\'s colony cost of the body, now or worst of the orbit, it agrees on every colony with people of the migrated fixture (22, oxygen breathers) and of a played save (44, oxygen, methane, ammonia and sulphur dioxide breathers), within a hundredth of the cost and five thousandths of a unit: the stored requirement is one step older than the climate and the people it is read against, and a colony of a few hundred people tells its cost only as a range.',
 })
 
-// Population.RecalculateWorkforceBreakdown, Population.cs:9219-9253; TotalPopulation includes orbital people (:9342).
+// The game's total population includes orbital people.
 registerRule({
   id: 'colonies.workers',
   versions: COLONY_VERSIONS,
@@ -181,7 +180,7 @@ export const baseGrowthRate = (population) => (population > 0 ? Math.min(0.1, 0.
 // Full growth up to a third of the body's capacity, then a linear fall to none at capacity. A capacity that is not positive has no crowding figure.
 export const crowdingFactor = (bodyPopulation, capacity) => (capacity > 0 ? (bodyPopulation <= capacity / 3 ? 1 : Math.max(0, (capacity - bodyPopulation) / (capacity * 0.6667))) : 0)
 
-// Population.RecalculateAnnualSurfaceGrowthAndOvercrowding subtracts the rounded radiation penalty before crowding and never crowds a negative rate.
+// The game subtracts the rounded radiation penalty before crowding and never crowds a negative rate.
 export const growthRate = (colony, population, bodyPopulation, capacity, infrastructure = infrastructureOf(colony, null)) => {
   if (!(population > 0)) {
     return 0
@@ -226,7 +225,7 @@ export const infrastructureSupportRateResult = (colony) => derive({
   },
 })
 
-// Population.ProcessTradeGoodBalances(Infrastructure), Population.cs:4032-4034, counts only InfrastructureValue; low gravity changes the requirement, not the balance.
+// The game counts only InfrastructureValue; low gravity changes the requirement, not the balance.
 export const infrastructureOf = (colony, arriving) => {
   const terms = [colony.Infrastructure, arriving ? arriving.Infrastructure : 0]
 

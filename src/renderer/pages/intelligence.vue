@@ -883,7 +883,7 @@ export default {
 
       return race.CommStatus === ATTEMPTING_COMMUNICATION ? `${this.count(processed)} prisoners processed: ${added ? 'adds 1 to the contact rating' : 'adds nothing to the contact rating yet'}` : `${this.count(processed)} prisoners processed: ${added ? 'would add 1' : 'would add nothing yet'} to the contact rating of an attempt, and no attempt is running`
     },
-    // Why the panel of a race whose communication is not established shows no attempt: the game runs attempts only for the status Attempting communication (`Game.ProcessAlienCommunicationAttempts`), and the Diplomacy window starts them only from no communication.
+    // Why the panel of a race whose communication is not established shows no attempt: the game runs attempts only for the status Attempting communication, and the Diplomacy window starts them only from no communication.
     inactiveText(race) {
       const attempting = communicationLabel(ATTEMPTING_COMMUNICATION)
       const status = communicationLabel(race.CommStatus)

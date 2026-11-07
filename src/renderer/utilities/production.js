@@ -10,7 +10,7 @@ import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } f
 import { researchAnnualRate, researchOutputPerLab } from './research'
 
 const PRODUCTION_VERSIONS = ['3.2.x']
-// The versions of the rules written against the line's source: the credit of stored components and the cycle forecast's mineral floor.
+// The versions the rules hold for: the credit of stored components and the cycle forecast's mineral floor.
 const LINE_VERSIONS = ['3.2.x']
 const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
@@ -26,7 +26,7 @@ const ORDINARY_GAS_INCREMENT_CAP = 100000
 
 const ESTIMATE = 'The rate is not compared with a saved figure of the job.'
 
-// Population.ProcessTerraforming (Population.cs:1053-1059, 1098-1103): an adding target of zero does not stop the job.
+// The game's terraforming: an adding target of zero does not stop the job.
 registerRule({
   id: 'production.jobCount',
   versions: PRODUCTION_VERSIONS,
@@ -128,7 +128,7 @@ registerRule({
   assumptions: ['The date is approximate: the game\'s own steps are not reproduced exactly'],
 })
 
-// The cycle forecast debits what a build takes from the colony's stock as `MineralData.SubtractIndustrialProjectMinerals` does (MineralData.cs:994-1011): every one of the eleven balances is floored at 0 after the subtraction (the helper `MineralData.method_0`, MineralData.cs:37), so a build rounded up to 4 decimals past what a mineral's stock covers leaves 0, never a negative balance that would hold back the next cycle and take from what arrives. The shipyard and scaled debits (`SubtractShipyardTaskMinerals`, MineralData.cs:1017, and `SubtractScaledMinerals`, MineralData.cs:1043) floor the same way. docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since the earlier line lists this floor (B341, B355), the creation of the Light Naval and Space Station projects (B343, `production.componentCredit`), the development project types and the ordnance capacity term as its changes to industrial production, and no other step of the cycle (`Population.ProcessIndustrialProjects`, Population.cs:2186).
+// The cycle forecast debits what a build takes from the colony's stock as the game does: every one of the eleven balances is floored at 0 after the subtraction, so a build rounded up to 4 decimals past what a mineral's stock covers leaves 0, never a negative balance that would hold back the next cycle and take from what arrives. The shipyard and scaled debits floor the same way. docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since the earlier line lists this floor (B341, B355), the creation of the Light Naval and Space Station projects (B343, `production.componentCredit`), the development project types and the ordnance capacity term as its changes to industrial production, and no other step of the cycle.
 registerRule({
   id: 'production.industryFinish',
   versions: LINE_VERSIONS,
@@ -145,7 +145,7 @@ registerRule({
   { key: 'training', versions: ['2.7.x'], note: 'The task\'s remaining build points over its rate, in days.' },
 ].forEach(({ key, note, versions = PRODUCTION_VERSIONS, structure = [`production.${key}Rate`], assumptions = [] }) => registerRule({ id: `production.${key}Finish`, versions, units: 'days', verification: 'estimated', structure, note: `${note} ${ESTIMATE}`, assumptions }))
 
-// Population.ProcessTerraforming (Population.cs:1057-1130; minimum gravity in Helpers.cs:861), Game.ProcessConstructionCycleStrategicUpdates (Game.cs:23908-23909, 23984), ProcessWaterVapourCondensation/Evaporation (Game.cs:27382-27499) and SystemBody.ProcessHydrosphereTransition/UpdateAtmosPress/UpdateSurfaceTemp (SystemBody.cs:2020-2045, 2415-2524).
+// The terraforming job, with the strategic water update (condensation and evaporation of water vapour) before it and, at the end of each increment, the hydrosphere transition, atmospheric pressure and surface temperature updates; terraforming has a minimum gravity of 0.1 g.
 registerRule({
   id: 'production.terraformFinish',
   versions: PRODUCTION_VERSIONS,
@@ -184,7 +184,7 @@ registerRule({
   assumptions: ['The order the game takes a colony\'s projects in each cycle is not saved'],
 })
 
-// A Light Naval or Space Station project is made by `Population.method_147` (Population.cs:7104-7198): it clones the class's minerals (`gclass123_5.ShallowClone()`, Population.cs:7147 and 7185) and takes the class's cost as the cost a unit (`ProdPerUnit`, set from `ShipClass.Cost` in `SetSelectedIndustrialProjectAndPopulateRequirementsListView`, Population.cs:8388-8479), and `Population.method_37` (Population.cs:3059-3104) then takes the stored components. For each component the class mounts it counts the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds (`RaceTechByRaceID.ContainsKey`) is taken only when the Industry tab's Use Components box is Checked (`chkUseComponentsIndustry`, Economics.cs:1946), one of technology the race does not hold is always taken and its shortage refuses the project (Population.cs:7148-7164 and 7185-7194); each component taken lowers the cost a unit by `Cost * NumComponent` and the project's minerals by the component's, scaled by `NumComponent`, and the colony's stock by the batch; after the last the cost a unit is floored at 1 BP (`if (ProdPerUnit < 1m) ProdPerUnit = 1m`, Population.cs:3093). A Space Station refuses a class with prototype components (Population.cs:7183 and 7197). The box is an argument of the creation and no column of `FCT_IndustrialProjects` (`Game.SaveIndustrialProjects`, Game.cs:11479-11546 writes the stored cost a unit and the eleven minerals, nothing else of it). docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since the earlier line (B343).
+// A Light Naval or Space Station project is made by the game's project creation: it clones the class's minerals and takes the class's cost as the cost a unit (`ProdPerUnit`, set from the class's cost when the project is chosen), and then takes the stored components. For each component the class mounts it counts the colony's stock against the whole batch (`NumComponent * Amount`); a component of technology the race holds is taken only when the Industry tab's Use Components box is Checked, one of technology the race does not hold is always taken and its shortage refuses the project; each component taken lowers the cost a unit by `Cost * NumComponent` and the project's minerals by the component's, scaled by `NumComponent`, and the colony's stock by the batch; after the last the cost a unit is floored at 1 BP. A Space Station refuses a class with prototype components. The box is an argument of the creation and no column of `FCT_IndustrialProjects` (a saved project stores the cost a unit and the eleven minerals, nothing else of it). docs/PRODUCTION_MECHANICS_REFERENCE.md § Changes since the earlier line (B343).
 registerRule({
   id: 'production.componentCredit',
   versions: LINE_VERSIONS,
@@ -195,7 +195,7 @@ registerRule({
   assumptions: ['The class\'s cost, components and minerals are the ones the project was made from', 'A component with no research row of the race is not researched', 'The research is the race\'s current research, not the one it held when the project was made'],
 })
 
-// The Use Components box of a shipyard task is stored as the player left it: `Shipyard.method_4` writes `UseComponents = Helpers.smethod_43(checkState)` (Shipyard.cs:287), where the earlier game forced it true, and a repeat or an automatic refit copies it from the task before (`UseComponents = gclass196_0.UseComponents`, Population.cs:2020; `completedAutoRefitTask.UseComponents`, Population.cs:1921). A construction task takes a component of researched technology from the stock only when the box is Checked and one of alien technology always (`Population.method_35`, Population.cs:2974-3006); a refit takes the components it adds the same way (`ApplyStoredComponentsToRefitTask`, Population.cs:3008-3057); the next task of an automatic refit takes stock only when the stored box is true (Population.cs:1922-1925), and a repeat of a construction task applies the stored box (Population.cs:2025-2029). docs/SHIPYARD_DEVELOPMENT_AND_SHIP_WORK_REFERENCE.md § Changes since the earlier line (B354).
+// The Use Components box of a shipyard task is stored as the player left it, where the earlier game forced it true, and a repeat or an automatic refit copies it from the task before. A construction task takes a component of researched technology from the stock only when the box is Checked and one of alien technology always; a refit takes the components it adds the same way; the next task of an automatic refit takes stock only when the stored box is true, and a repeat of a construction task applies the stored box. docs/SHIPYARD_DEVELOPMENT_AND_SHIP_WORK_REFERENCE.md § Changes since the earlier line (B354).
 registerRule({
   id: 'production.useComponents',
   versions: LINE_VERSIONS,
@@ -210,7 +210,7 @@ const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 // A 0 or 1 flag column as true or false, null when the save does not hold one.
 export const flagOf = (value) => (value === 0 || value === 1 ? Boolean(value) : null)
 
-// The least a unit of a Light Naval or Space Station project costs, in build points: the game holds the cost a unit at 1 BP after the stored components are taken off (`Population.method_37`, Population.cs:3093-3095).
+// The least a unit of a Light Naval or Space Station project costs, in build points: the game holds the cost a unit at 1 BP after the stored components are taken off.
 export const UNIT_COST_FLOOR = 1
 
 // The cost a unit takes once `credit` BP of stored components is taken off the class's `classCost`, held at the floor.
@@ -652,7 +652,7 @@ export const queuedResearch = (project, queue) => ({
   ActualAnomalyBonus: !isNumber(queue.ProjectField) || (project.AnomalyID != null && !isNumber(project.AnomalyField)) ? null : project.AnomalyField === queue.ProjectField ? project.AnomalyBonus : 1,
 })
 
-// The RP a queued tech still costs: its stored development cost less the points saved from cancelled research on it (none saved is 0), never below 0; null when the cost, or the points of a saved row, are not stored. The stored cost is used as the game set it: `Game.CalculateDevelopmentCost` (Game.cs:30919-30933) floors a computed development cost at the build cost before it is stored, so the figure is never recomputed here.
+// The RP a queued tech still costs: its stored development cost less the points saved from cancelled research on it (none saved is 0), never below 0; null when the cost, or the points of a saved row, are not stored. The stored cost is used as the game set it: the game floors a computed development cost at the build cost before it is stored, so the figure is never recomputed here.
 export const queuedRemaining = (queue) => (!isNumber(queue.DevelopCost) || !isNumber(queue.Saved) ? null : Math.max(0, queue.DevelopCost - queue.Saved))
 
 // When each industrial project of one colony and category starts and finishes, in days from now, as the game runs them. Every project out of the queue builds at its share of the capacity; a paused one keeps its share and builds nothing. When a project finishes, the queued ones start in queue order, each that fits in the share the running and paused ones leave, skipping any that don't, until none is left. Minerals aren't simulated. `capacity`: BP a year at 100%. Returns { [ProjectID]: { start, finish } }, null where that never happens.
@@ -1022,7 +1022,7 @@ export const shortageOf = (project) => {
   return { shortage: null, covers: unknown.length ? unavailable({ rule: 'production.shortage', missing: unknown }) : null, unknown }
 }
 
-// The weight a class's size carries in a shipyard's build rate: a quarter for a commercial class, the whole size for any other, and null when the save does not give the flag. It is the class's own `FCT_ShipClass.Commercial`, which `Shipyard.cs RecalculateBuildRateForClass` multiplies the size by, wherever the class is built and whatever the yard's type.
+// The weight a class's size carries in a shipyard's build rate: a quarter for a commercial class, the whole size for any other, and null when the save does not give the flag. It is the class's own `FCT_ShipClass.Commercial`, which the game multiplies the size by when it works out the yard's build rate for a class, wherever the class is built and whatever the yard's type.
 export const commercialSizeFactor = (commercial) => (commercial === null || commercial === undefined ? null : commercial ? 0.25 : 1)
 
 // A shipyard task's rate in BP a year: the colony's build rate times a factor for the class's size. `ship`: { Size, CommercialModifier }, the class's size and `commercialSizeFactor` of its `Commercial` flag; a class or a rate the save does not give makes the rate unavailable and names it.
@@ -1037,7 +1037,7 @@ export const shipRate = (modifiers, ship) => {
   return ofRule({ rule, value: modifiers.ShipyardBuildRate * (1 + ((ship.Size * ship.CommercialModifier) / 100 - 1) / 2), inputs: { present: [MODIFIER_TEXT.ShipyardBuildRate, 'the class\'s size and commercial flag'] } })
 }
 
-// The build points a shipyard task has left over all its hulls, the measure of the game's own completion date (Population.cs `RefreshShipyardTasksListView`): the current hull's balance plus the whole cost of each later hull, |TotalBP - CompletedBP| + max(NumShips - 1, 0) x |TotalBP|. A later hull counts at the current hull's cost, whatever stock credit it will take or repair it will be priced by. `task`: { remaining (TotalBP - CompletedBP), totalBP, hulls (the stored NumShips) }. { value, missing }: `missing` names what the save does not give, with `value` null.
+// The build points a shipyard task has left over all its hulls, the measure of the game's own completion date: the current hull's balance plus the whole cost of each later hull, |TotalBP - CompletedBP| + max(NumShips - 1, 0) x |TotalBP|. A later hull counts at the current hull's cost, whatever stock credit it will take or repair it will be priced by. `task`: { remaining (TotalBP - CompletedBP), totalBP, hulls (the stored NumShips) }. { value, missing }: `missing` names what the save does not give, with `value` null.
 export const shipTaskLeft = (task) => {
   if (!isNumber(task.remaining)) {
     return { value: null, missing: 'the task\'s remaining build points' }
@@ -1132,7 +1132,7 @@ export const trainingRate = (capacity, training) => {
   return combine({ rule, parts: { capacity }, compute: (values) => (values.capacity * training.TaskPercentage) / 100, inputs: { present: ['the task\'s share of the capacity'] } })
 }
 
-// The strategic water update precedes terraforming (Game.ProcessConstructionCycleStrategicUpdates). Liquid water evaporates to its humidity; a vapour hydrosphere evaporates at most 4 percent of coverage a year, or 0.1 atm.
+// The strategic water update precedes terraforming. Liquid water evaporates to its humidity; a vapour hydrosphere evaporates at most 4 percent of coverage a year, or 0.1 atm.
 const evaporateWater = (body, water, years) => {
   if (!(body.HydroExt > 0) || ![HYDROSPHERE.LIQUID, HYDROSPHERE.VAPOUR].includes(body.HydroID)) {
     return false
@@ -1153,10 +1153,10 @@ const evaporateWater = (body, water, years) => {
   return true
 }
 
-// Population.ProcessTerraforming ends each increment with RecalculateTotalAtmosphericPressure, ProcessHydrosphereTransition and UpdateAtmosPress. Reuse the shared dampened temperature, but count each greenhouse flag independently as SystemBody.UpdateSurfaceTemp does.
+// Terraforming ends each increment with the recalculation of the total atmospheric pressure, the hydrosphere transition and the atmospheric pressure update. Reuse the shared dampened temperature, but count each greenhouse flag independently as the game does.
 const updateWaterClimate = (body, water) => {
   const temperature = () => {
-    // SystemBody.UpdateSurfaceTemp:2024-2027 bypasses every atmospheric, albedo, dust and orbital-dampening factor for both giant types.
+    // The game's surface temperature update bypasses every atmospheric, albedo, dust and orbital-dampening factor for both giant types.
     if (body.BodyTypeID === BODY_TYPE.GAS_GIANT || body.BodyTypeID === BODY_TYPE.SUPERJOVIAN) {
       body.SurfaceTemp = body.BaseTemp
 
@@ -1175,7 +1175,7 @@ const updateWaterClimate = (body, water) => {
 
   body.HydroID = hydrosphereAtTemperature(body.SurfaceTemp)
 
-  // SystemBody.ProcessHydrosphereTransition:2455-2514: thaw refills humidity before its albedo step; ice-to-vapour and liquid/vapour-to-ice retain their distinct branches.
+  // The game's hydrosphere transition: thaw refills humidity before its albedo step; ice-to-vapour and liquid/vapour-to-ice retain their distinct branches.
   if (was === HYDROSPHERE.ICE_SHEET && body.HydroID === HYDROSPHERE.LIQUID) {
     evaporateWater(body, water, 0)
     body.Albedo += 0.0015 * body.HydroExt
@@ -1204,7 +1204,7 @@ const updateWaterClimate = (body, water) => {
   }
 }
 
-// The water forecast at uniform increments, with the source's order and stop comparisons. Its climate evolves after each increment; the present orbital distance, dust and other gas amounts are held. Null means no finish within the horizon, not proof that the job can never end.
+// The water forecast at uniform increments, with the game's order and stop comparisons. Its climate evolves after each increment; the present orbital distance, dust and other gas amounts are held. Null means no finish within the horizon, not proof that the job can never end.
 export const waterVapourCycles = (terraform, step, years) => {
   const body = { ...terraform, Atmosphere: terraform.Atmosphere.map((gas) => ({ ...gas })) }
   let water = body.Atmosphere.find((gas) => gas.AtmosGasID === GAS.WATER_VAPOUR)
@@ -1261,7 +1261,7 @@ export const waterVapourCycles = (terraform, step, years) => {
   return null
 }
 
-// A terraforming job's finish as { result, idle, note }: the first uniform increment that satisfies the source's stopping comparison, with strategic water updates and evolving climate for water vapour. The flattened body row carries the shared climate fields and Atmosphere for water, and GasAtmUnknown distinguishes an absent selected gas (0) from a row with unknown pressure (1).
+// A terraforming job's finish as { result, idle, note }: the first uniform increment that satisfies the game's stopping comparison, with strategic water updates and evolving climate for water vapour. The flattened body row carries the shared climate fields and Atmosphere for water, and GasAtmUnknown distinguishes an absent selected gas (0) from a row with unknown pressure (1).
 export const terraformFinish = (modifiers, terraform, rate) => {
   const rule = 'production.terraformFinish'
   const waterOnSurface = terraform.GasName === 'Water Vapour'
@@ -1273,7 +1273,7 @@ export const terraformFinish = (modifiers, terraform, rate) => {
     return { result: unavailable({ rule, missing: ['a positive stop target (0 atm means unlimited addition)'], present: rate.inputs.present }), idle: true, note }
   }
 
-  // Population.ProcessTerraforming (Population.cs:1057) and Helpers.cs:861: no gas update or order clearing below 0.1 g.
+  // The game updates no gas and clears no order below 0.1 g.
   if (isNumber(terraform.Gravity) && terraform.Gravity < 0.1) {
     const note = 'No completion while body gravity is below 0.1 g'
 
@@ -1338,7 +1338,7 @@ export const terraformFinish = (modifiers, terraform, rate) => {
   let gas = isNumber(terraform.GasAtm) ? terraform.GasAtm : 0
   let present = isNumber(terraform.GasAtm)
 
-  // Population.ProcessTerraforming (Population.cs:1074-1077, 1098-1099, 1113-1121): apply each double update before testing; a quotient or multiplication by the cycle count changes floating-point boundary crossings.
+  // The game applies each double update before testing; a quotient or multiplication by the cycle count changes floating-point boundary crossings.
   for (let cycle = 1; cycle <= ORDINARY_GAS_INCREMENT_CAP; cycle++) {
     let done = false
 

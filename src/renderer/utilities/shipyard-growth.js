@@ -257,7 +257,7 @@ export const continualTime = (modifiers, yard, target, price) => {
   return shipyardContinualDays(modifiers, shapeOf(yard, { taskType: CONTINUAL_ACTIVITY, paused: false, remaining: null, target }))
 }
 
-// A shipyard task's time left as { rate, result, idle }: the Production Recap's, which is the colony's build rate for the task's class (its size, with a quarter of the weight for a commercial class) over the build points the task has left over all its hulls (`shipTaskFinish`). A refit dates by its target class, as the game's own date does (Population.cs `RefreshShipyardTasksListView`), so its row takes that class's size and flag. `task` is one of a yard's `taskRows`.
+// A shipyard task's time left as { rate, result, idle }: the Production Recap's, which is the colony's build rate for the task's class (its size, with a quarter of the weight for a commercial class) over the build points the task has left over all its hulls (`shipTaskFinish`). A refit dates by its target class, as the game's own date does, so its row takes that class's size and flag. `task` is one of a yard's `taskRows`.
 export const taskFinish = (modifiers, task) => {
   const refit = REFIT_TASK_TYPES.includes(task.taskType)
   const rate = shipRate(modifiers, { Size: refit ? task.targetSize : task.size, CommercialModifier: commercialSizeFactor(refit ? task.targetCommercial : task.commercial) })

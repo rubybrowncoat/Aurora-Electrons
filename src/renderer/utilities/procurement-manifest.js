@@ -41,7 +41,7 @@ const colonyOf = (colonies, id) => (colonies && colonies[id]) || { id: Number(id
 // The units a component project will deliver: the remaining amount the game stores plus the part-built unit, which is a whole number of units (a project of 47 units with 0.0498 of one done stores 46.9502). Null when either figure is not known.
 export const projectUnits = (project) => (isNumber(project.amount) && isNumber(project.partial) ? Math.max(0, Math.floor(project.amount + project.partial + 1e-6)) : null)
 
-// The production types whose completed units go into a colony's component stock: a component project (`method_71` in the Components case of Population.cs:2288-2292) and an Engineering Project, which adds the component it develops and researches its tech (Population.cs:2293-2300). An Ordnance Project adds ordnance (`method_153`) and researches the missile, a Ground Unit Project only researches the class (Population.cs:2264-2271 and 2301-2308): neither adds a component, so neither is supply. A project with no production type stated (rows made before the type was read) is a component project.
+// The production types whose completed units go into a colony's component stock: a component project and an Engineering Project, which adds the component it develops and researches its tech. An Ordnance Project adds ordnance and researches the missile, a Ground Unit Project only researches the class: neither adds a component, so neither is supply. A project with no production type stated (rows made before the type was read) is a component project.
 const SUPPLY_TYPES = Object.freeze([PRODUCTION_TYPE.COMPONENTS, PRODUCTION_TYPE.ENGINEERING_PROJECTS])
 
 export const suppliesComponents = (project) => project.productionType === undefined || SUPPLY_TYPES.includes(project.productionType)
@@ -112,7 +112,7 @@ export const reservationsOf = ({ tasks = [], parts = {}, read = true, entered = 
   tasks.forEach((task) => {
     const base = { taskId: task.id, populationId: task.populationId, typeId: task.typeId, classId: task.classId, refitId: task.refitId === undefined ? null : task.refitId, useComponents: task.useComponents === undefined ? null : task.useComponents, hulls: task.hulls === undefined ? null : task.hulls, credited: isNumber(task.classCost) && isNumber(task.totalBP) && task.typeId === TASK_TYPE.CONSTRUCTION ? Math.max(0, task.classCost - task.totalBP) : null }
 
-    // A task that makes more tasks takes the stock again for each (Population.cs `method_19` credits the stored components to the next task as it is made), the amount being whatever stock is then in hand: every component it may take is held back, with no amount proven. `ids` the components, null when the classes are not known.
+    // A task that makes more tasks takes the stock again for each (the game credits the stored components to the next task as it is made), the amount being whatever stock is then in hand: every component it may take is held back, with no amount proven. `ids` the components, null when the classes are not known.
     const holdBack = (ids, reason, unknownClasses) => {
       if (ids === null) {
         claims.push({ populationId: task.populationId, componentId: null, units: null, proof: 'unknown', source: 'task', taskId: task.id, reason: `${reason} ${unknownClasses}` })

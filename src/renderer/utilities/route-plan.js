@@ -256,7 +256,7 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
   const start = endpointOf(hops[0].from)
   const departure = start && isServed(start, { facts, adapters }) ? [positionRecord(start, { facts, adapters, at: time })] : []
   const unserved = [...new Map(walks.flatMap((hop) => [hop.from, hop.to, hop.leave]).map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && !isServed(endpoint, { facts, adapters })).map((endpoint) => [endpoint.key, endpoint])).values()].map((endpoint) => positionRecord(endpoint, { facts }))
-  // Association is assigned by the arrival action, not merely by the destination's motion. A body-associated waypoint uses Game.cs 5818-5822's body guard; point-only waypoints assign nothing. Nonzero-time Salvage (107) copies wreck associations (6323-6333). The stationary-fleet branch (6399-6417) copies associations for ordnance hub actions 191/192/194 and refuel/resupply actions 210/224/230/231/233/234.
+  // Association is assigned by the arrival action, not merely by the destination's motion. A body-associated waypoint uses the game's body guard; point-only waypoints assign nothing. Nonzero-time Salvage (107) copies wreck associations. The stationary-fleet branch copies associations for ordnance hub actions 191/192/194 and refuel/resupply actions 210/224/230/231/233/234.
   const carries = (point, action, wait) => {
     const endpoint = endpointOf(point)
 

@@ -1,5 +1,5 @@
 /*
-  Checks the stabilisation time of the Lagrange page (src/renderer/utilities/lagrange.js `stabilisationMultiplier`, `bestStabilisation` and `stabilisationDays`, and the stabilisation activity of utilities/crew.js `crewEffects`) against the 3.1 rule: a ship with no crew aboard is skipped and contributes nothing, and the duration is capped at Int32.MaxValue seconds before the game converts it to an integer (`Fleet.CalculateGateBuildTime`, `Fleet.CalculateLagrangePointStabilisationTime`; docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
+  Checks the stabilisation time of the Lagrange page (src/renderer/utilities/lagrange.js `stabilisationMultiplier`, `bestStabilisation` and `stabilisationDays`, and the stabilisation activity of utilities/crew.js `crewEffects`) against the 3.1 rule: a ship with no crew aboard is skipped and contributes nothing, and the duration is capped at 2,147,483,647 seconds, the largest 32-bit integer, before the game converts it to an integer (docs `MOVEMENT_AND_LOGISTICS_REFERENCE.md` § Changes since the earlier line, line 918).
 
   Run: bun scripts/check-lagrange-times.js [--no-mutations]
 
@@ -297,7 +297,7 @@ const FAULTS = [
   { name: 'a missing current crew read as crewless, so a class that needs no crew is timed as no-crew rather than unknown', target: 'lagrange', from: 'const aboard = Number.isFinite(ship.CurrentCrew) ? ship.CurrentCrew > 0 : null', to: 'const aboard = ship.CurrentCrew > 0', fails: ['multiplier', 'skip'] },
   { name: 'a missing current crew read as crewless in the crew effects, so a class that needs no crew reads blocked at 0 rather than unknown', target: 'crew', from: 'const aboard = Number.isFinite(ship.CurrentCrew) ? ship.CurrentCrew > 0 : null', to: 'const aboard = ship.CurrentCrew > 0', fails: ['crew'] },
   { name: 'the duration is not capped at the game\'s 32-bit integer time', target: 'lagrange', from: 'Math.min((BASE_DAYS / Math.sqrt(mass)) * factor, MAX_DAYS)', to: '(BASE_DAYS / Math.sqrt(mass)) * factor', fails: ['days', 'save'] },
-  { name: 'the cap is below the game\'s Int32.MaxValue seconds', target: 'lagrange', from: 'const MAX_SECONDS = 2147483647', to: 'const MAX_SECONDS = 2000000000', fails: ['days', 'save'] },
+  { name: 'the cap is below the game\'s 2,147,483,647 seconds', target: 'lagrange', from: 'const MAX_SECONDS = 2147483647', to: 'const MAX_SECONDS = 2000000000', fails: ['days', 'save'] },
   { name: 'a ship with no crew is shown as stopped at 0% rather than blocked', target: 'crew', from: 'time: true, aboard: true, versions: STABILISATION_VERSIONS', to: 'time: true, versions: STABILISATION_VERSIONS', fails: ['crew'] },
 ]
 

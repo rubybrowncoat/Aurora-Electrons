@@ -3,14 +3,14 @@
 
   Run: bun scripts/check-industry-projects.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no save played under 3.1 holds a development project (the owner's decision Q7 of AE-31: none will be supplied), so each case plants rows into in-memory copies of the migrated fixture (scripts/lib/fixtures.js, game 141, race 784), as scripts/check-treasury-categories.js does. A planted project row is game-shaped: every column `Game.LoadIndustrialProjects` reads is set as `Game.SaveIndustrialProjects` writes it and `Population.method_147` makes it, on a design of the race that the game offers for a development project and the race has not researched (Population.method_178, method_179, method_180; Race.method_305), and the loader skips a row whose race, colony, species or wealth use the game does not hold, so the readers of the three kinds leave such a row out:
-  - `Population.ProcessIndustrialProjects` (Population.cs:2202-2213) takes the build points of a cycle from the construction capacity for Engineering, Ground Unit, Component, Construction and Space Station projects and from the ordnance capacity for Ordnance and Ordnance Projects; Light Naval has its own (`Game.LoadIndustrialProjects`, Game.cs:18652-18779, sets the category of a project from its type);
-  - a development project's cost is twice the stored development cost of its item's tech and its minerals the item's, scaled by that cost over the item's own (Population.cs:8388-8479; `Game.cs:11499-11517` says what ProductionID is: the component of types 3 and 5, the missile of types 1 and 6, the ground unit class of type 7);
-  - a completed Engineering Project adds the component to the colony's stock and researches its tech (Population.cs:2288-2300); an Ordnance Project adds ordnance and a Ground Unit Project adds nothing but the research (Population.cs:2264-2271 and 2301-2308);
-  - a race with No Research Projects gets no idle-facilities event (Population.cs:822) and its research buttons are hidden and refused (Economics.cs:1548, 3653, 3824, 3919 and 4144-4174).
+  The rules are the game's, written here from the game's rules, never read from the modules, and every figure is worked from them: no save played under 3.1 holds a development project (the owner's decision Q7 of AE-31: none will be supplied), so each case plants rows into in-memory copies of the migrated fixture (scripts/lib/fixtures.js, game 141, race 784), as scripts/check-treasury-categories.js does. A planted project row is game-shaped: every column the game's loader reads is set as the game's saver writes it and its project creation makes it, on a design of the race that the game offers for a development project and the race has not researched, and the loader skips a row whose race, colony, species or wealth use the game does not hold, so the readers of the three kinds leave such a row out:
+  - the game takes the build points of a cycle from the construction capacity for Engineering, Ground Unit, Component, Construction and Space Station projects and from the ordnance capacity for Ordnance and Ordnance Projects; Light Naval has its own (the game sets the category of a project from its type);
+  - a development project's cost is twice the stored development cost of its item's tech and its minerals the item's, scaled by that cost over the item's own (ProductionID is the component of types 3 and 5, the missile of types 1 and 6, the ground unit class of type 7);
+  - a completed Engineering Project adds the component to the colony's stock and researches its tech; an Ordnance Project adds ordnance and a Ground Unit Project adds nothing but the research;
+  - a race with No Research Projects gets no idle-facilities event and its research buttons are hidden and refused.
   The checks:
   - `types`: the capacity of every production type from 0 to 7 (a type that is not a number is unknown) through `capacityKind`, `categoryOf` and the facility the mineral demand passes to its capacity callback, the names and items of the development types, and which types are development projects;
-  - `warnings`: the free capacity checks of the Industry tab on a copy with the projects at 100% of their capacity, each colony list worked out here from SQL and the type lists of the source, and the capacity kind of paused projects;
+  - `warnings`: the free capacity checks of the Industry tab on a copy with the projects at 100% of their capacity, each colony list worked out here from SQL and the type lists of the game, and the capacity kind of paused projects;
   - `legacy`: the NPR ordnance note of the queue's basis stands for an Ordnance Project and not for an Engineering Project;
   - `jobs`: the Production page's own industry and developments reads and its `industryJobs` on the planted copy: a development project is named by its type, builds at its share of the capacity of its kind, and carries the line of its item, its cost (twice the development cost, or stated as stored when it is not), its minerals and what the save does not hold;
   - `render`: the name cell of the Industry jobs shows the line of a development project and no line for another job;
@@ -20,7 +20,7 @@
   - `no-research`: the warnings of idle research labs and of dead research projects are silent for a race with the setting on, unevaluated for a race whose setting is not stored (a missing column or a NULL) and as before for one with it off; the Research page says so and leaves the idle-lab flag off, the Commanders suggestions skip the race and say why;
   - `registry`: the capability registry no longer declares the column as unread, and the new reads are optional inputs that name their columns;
   - `text`: the panel feet, the page help and the new notices say what the code does, in the impersonal voice and with no release number.
-  Where the source does not give a rule the check does not guess it: the game's own NoShieldTechnology filter of the research list, an NPR's treatment of an Ordnance Project's minerals and what a played 3.1 save holds are not modelled and are not asserted.
+  Where the game gives no rule the check does not guess it: the game's own NoShieldTechnology filter of the research list, an NPR's treatment of an Ordnance Project's minerals and what a played 3.1 save holds are not modelled and are not asserted.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
 
@@ -123,7 +123,7 @@ const worldOf = (texts = { ...ORIGINALS }) => {
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const MISSILE_MINERALS = ['Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite']
 
-// The planted projects, each on a design of the race that the game offers for a development project and the race has not researched. The game offers (Population.method_178, method_179 and method_180, Population.cs:8857-8909) the techs of `Race.method_305` (Race.cs:17146: a tech of the game whose race is the race, which the race holds no RaceTech row for), a component only when it is no prototype, no shipping line system and no missile engine; it takes a foreign design nowhere, and `Population.method_147` (Population.cs:7102-7195) makes the project the colony's own (its species the colony's). The fixture holds no such design (all 177 techs of the race are researched and it has no missile of its own), so each is a copy of a row of the fixture, every column kept, under a new id and name as the race's own tech of the game: the Engineering Project on a copy of the component 500250 (CAD025-P010), the Ordnance Project on a copy of the ship decoy 154002 (Dart Ship Decoy, a missile with no engine of another race to carry over) and the Ground Unit Project on a copy of the class 22445 (INF-REG Trooper - Rifle), at colonies of the race with factories (48977 Earth with a replicator, 48979 Aurelia with replicators and 200 assembly factories).
+// The planted projects, each on a design of the race that the game offers for a development project and the race has not researched. The game offers the techs of the game whose race is the race and which the race holds no RaceTech row for, a component only when it is no prototype, no shipping line system and no missile engine; it takes a foreign design nowhere, and its project creation makes the project the colony's own (its species the colony's). The fixture holds no such design (all 177 techs of the race are researched and it has no missile of its own), so each is a copy of a row of the fixture, every column kept, under a new id and name as the race's own tech of the game: the Engineering Project on a copy of the component 500250 (CAD025-P010), the Ordnance Project on a copy of the ship decoy 154002 (Dart Ship Decoy, a missile with no engine of another race to carry over) and the Ground Unit Project on a copy of the class 22445 (INF-REG Trooper - Rifle), at colonies of the race with factories (48977 Earth with a replicator, 48979 Aurelia with replicators and 200 assembly factories).
 const SPECS = [
   { id: 9001, population: 48977, type: 5, source: 500250, percentage: 50 },
   { id: 9002, population: 48979, type: 6, source: 154002, percentage: 100 },
@@ -140,10 +140,10 @@ const ITEM_SQL = {
   7: (id) => ({ item: `select ClassName as Name, Cost, ${MINERAL_NAMES.join(', ')} from FCT_GroundUnitClass where GroundUnitClassID = ${id}`, tech: `select FCT_TechSystem.DevelopCost from FCT_TechSystem inner join FCT_GroundUnitClass on FCT_GroundUnitClass.TechSystemID = FCT_TechSystem.TechSystemID where FCT_GroundUnitClass.GroundUnitClassID = ${id}`, label: 'ground unit class' }),
 }
 const TYPE_NAMES = { 0: 'Construction', 1: 'Ordnance', 2: 'Light Naval', 3: 'Component', 4: 'Space station', 5: 'Engineering project', 6: 'Ordnance project', 7: 'Ground unit project' }
-// The capacity each type draws on, written from Population.cs:2202-2213 and Game.cs:18652-18779.
+// The capacity each type draws on, as the game gives it.
 const KIND_OF = { 0: 'construction', 1: 'ordnance', 2: 'fighter', 3: 'construction', 4: 'construction', 5: 'construction', 6: 'ordnance', 7: 'construction' }
 const TYPES_OF = { construction: [0, 3, 4, 5, 7], ordnance: [1, 6], fighter: [2] }
-// The wealth use `Population.method_147` (Population.cs:7119-7180) gives each type: GEnum90 const_20 (40, Ship Component Production) for Components and const_30, const_31 and const_32 (53, 54 and 55) for the three development projects.
+// The wealth use the game's project creation gives each type: 40 (Ship Component Production) for Components and 53, 54 and 55 for the three development projects.
 const WEALTH_OF = { 3: 40, 5: 53, 6: 54, 7: 55 }
 
 const literal = (value) => (typeof value === 'string' ? `'${value.replace(/'/g, '\'\'')}'` : String(value))
@@ -189,14 +189,14 @@ const plantDesign = (database, type, source) => {
   return classId
 }
 
-// The queue a new project gets: `Population.method_138` (Population.cs:6917-6931) gives 0 while the colony's running projects of the capacity leave room for its share (100 less their shares at least the new share), else one past the highest queue among its projects of that capacity.
+// The queue a new project gets: the game gives 0 while the colony's running projects of the capacity leave room for its share (100 less their shares at least the new share), else one past the highest queue among its projects of that capacity.
 const queueOf = (database, population, type, percentage) => {
   const same = database.query(`select Queue, Percentage, ProductionType from FCT_IndustrialProjects where PopulationID = ${population}`).all().filter((row) => KIND_OF[row.ProductionType] === KIND_OF[type])
 
   return 100 - same.filter((row) => row.Queue === 0).reduce((sum, row) => sum + row.Percentage, 0) >= percentage ? 0 : Math.max(...same.map((row) => row.Queue)) + 1
 }
 
-// A project row as `Game.SaveIndustrialProjects` writes it (Game.cs:11479-11540: the 28 columns ProjectID, GameID, RaceID, PopulationID, SpeciesID, Percentage, ProductionType, ProductionID, RefitClassID, WealthUse, Amount, PartialCompletion, ProdPerUnit, Description, Pause, Queue, FuelRequired and the eleven minerals) with what `Population.method_147` sets on a new project (Population.cs:7102-7195): the colony's species, the type's wealth use, no refit class, no fuel for these types, the item's name for its description. `row` gives `id`, `population`, `type`, `item`, `percentage`, `amount`, `partial`, `perUnit`, `description`, `pause` and the item's `minerals`; `species`, `wealth` and `queue` default to the game's and are changed only to plant a row the loader skips.
+// A project row as the game saves it (the 28 columns ProjectID, GameID, RaceID, PopulationID, SpeciesID, Percentage, ProductionType, ProductionID, RefitClassID, WealthUse, Amount, PartialCompletion, ProdPerUnit, Description, Pause, Queue, FuelRequired and the eleven minerals) with what the game's project creation sets on a new project: the colony's species, the type's wealth use, no refit class, no fuel for these types, the item's name for its description. `row` gives `id`, `population`, `type`, `item`, `percentage`, `amount`, `partial`, `perUnit`, `description`, `pause` and the item's `minerals`; `species`, `wealth` and `queue` default to the game's and are changed only to plant a row the loader skips.
 const insertProject = (database, row) => {
   const species = row.species !== undefined ? row.species : database.query(`select SpeciesID from FCT_Population where PopulationID = ${row.population}`).get().SpeciesID
   const wealth = row.wealth !== undefined ? row.wealth : WEALTH_OF[row.type]
@@ -209,7 +209,7 @@ const insertProject = (database, row) => {
   return { species, wealth, queue }
 }
 
-// A development project on a design of the race, as the game makes it: its cost twice the stored development cost of the item's tech and its minerals the item's, scaled by that cost over the item's own cost (Population.cs:8388-8479), its amount 1 and nothing built yet, named "<item> Project". `over` changes what is stored (`perUnit`, `percentage`, `pause`, and for a row the loader skips `species`, `wealth`, `population`), `over.item` puts the project on a design already planted. Gives what the row says, for the checks to hold the app to.
+// A development project on a design of the race, as the game makes it: its cost twice the stored development cost of the item's tech and its minerals the item's, scaled by that cost over the item's own cost, its amount 1 and nothing built yet, named "<item> Project". `over` changes what is stored (`perUnit`, `percentage`, `pause`, and for a row the loader skips `species`, `wealth`, `population`), `over.item` puts the project on a design already planted. Gives what the row says, for the checks to hold the app to.
 const plantProject = (database, spec, over = {}) => {
   const item = over.item !== undefined ? over.item : plantDesign(database, spec.type, spec.source)
   const sql = ITEM_SQL[spec.type](item)
@@ -230,14 +230,14 @@ const plantProject = (database, spec, over = {}) => {
 
 const plantAll = (database, specs, over = {}) => specs.map((spec) => plantProject(database, spec, over[spec.id] || {}))
 
-// A component project of the same colony (type 3: ProductionID is the component), for the loader to read beside the others and for the type 2 projects the fixture holds to stay out of the read. The game gives it the component's own cost and minerals and its name (`Population.method_147`); 2 units are ordered and half of one is built.
+// A component project of the same colony (type 3: ProductionID is the component), for the loader to read beside the others and for the type 2 projects the fixture holds to stay out of the read. The game gives it the component's own cost and minerals and its name; 2 units are ordered and half of one is built.
 const plantComponentProject = (database) => {
   const component = database.query(`select Name, Cost, ${MINERAL_NAMES.join(', ')} from FCT_ShipDesignComponents where SDComponentID = 500250`).get()
 
   insertProject(database, { id: 9004, population: 48977, type: 3, item: 500250, percentage: 25, amount: 2, partial: 0.5, perUnit: component.Cost, description: component.Name, minerals: component })
 }
 
-// Rows the loader skips (Game.LoadIndustrialProjects, Game.cs:18652-18679), each on a design of the planted projects and the race's own colony but for one thing: a species of 0, which is the column's default and the game's species list lacks (the earlier plants wrote it); a species the game does not hold; a wealth use `DIM_WealthUse` does not hold; and a colony the game does not hold.
+// Rows the loader skips, each on a design of the planted projects and the race's own colony but for one thing: a species of 0, which is the column's default and the game's species list lacks (the earlier plants wrote it); a species the game does not hold; a wealth use `DIM_WealthUse` does not hold; and a colony the game does not hold.
 const SKIPPED = [
   { id: 9011, why: 'species 0', flag: 'species', of: 9001, over: { species: 0 } },
   { id: 9012, why: 'a species the game does not hold', flag: 'species', of: 9002, over: { species: 99999 } },
@@ -368,7 +368,7 @@ const productionOn = async (w, database) => {
 const CHECKS = []
 const check = (name, description, run) => CHECKS.push({ name, description, run })
 
-check('types', 'every production type from 0 to 7 draws on the capacity the source gives it (Engineering, Ground Unit, Component, Construction and Space Station on construction, Ordnance and Ordnance Projects on ordnance, Light Naval on its own) through capacityKind, categoryOf and the capacity the mineral demand asks for, a type that is no number is unknown, and only 5, 6 and 7 are development projects with their names and items', async (w) => {
+check('types', 'every production type from 0 to 7 draws on the capacity the game gives it (Engineering, Ground Unit, Component, Construction and Space Station on construction, Ordnance and Ordnance Projects on ordnance, Light Naval on its own) through capacityKind, categoryOf and the capacity the mineral demand asks for, a type that is no number is unknown, and only 5, 6 and 7 are development projects with their names and items', async (w) => {
   const { 'production-types': t, production: p, minerals: m } = await w.modules()
 
   for (let type = 0; type <= 7; type++) {
@@ -402,7 +402,7 @@ check('types', 'every production type from 0 to 7 draws on the capacity the sour
   assert.deepEqual(undecided, [], 'a project without a type asks for no capacity')
 })
 
-check('warnings', 'the Industry free capacity checks on a copy with an Engineering Project at 100% of Earth\'s construction, a Ground Unit Project at 100% of Aurelia\'s and an Ordnance Project at 100% of its ordnance list the colonies the SQL and the type lists of the source give, and the paused list names the capacity of each project (Construction, Ordnance, Construction)', async (w) => {
+check('warnings', 'the Industry free capacity checks on a copy with an Engineering Project at 100% of Earth\'s construction, a Ground Unit Project at 100% of Aurelia\'s and an Ordnance Project at 100% of its ordnance list the colonies the SQL and the type lists of the game give, and the paused list names the capacity of each project (Construction, Ordnance, Construction)', async (w) => {
   const cases = [
     ['free-construction-capacity', { value: 'ConstructionValue', minimum: 0.00006, types: TYPES_OF.construction }],
     ['free-ordnance-capacity', { value: 'OrdnanceProductionValue', minimum: 0, types: TYPES_OF.ordnance }],
@@ -440,7 +440,7 @@ check('warnings', 'the Industry free capacity checks on a copy with an Engineeri
   }
 })
 
-check('legacy', 'the queue basis of the Legacy consumption notes an NPR\'s ordnance for an Ordnance Project (the category of its capacity is ordnance, Population.cs:2240) and not for an Engineering or a Ground Unit Project, and not for a race that is no NPR', async (w) => {
+check('legacy', 'the queue basis of the Legacy consumption notes an NPR\'s ordnance for an Ordnance Project (the category of its capacity is ordnance) and not for an Engineering or a Ground Unit Project, and not for a race that is no NPR', async (w) => {
   const { 'legacy-consumption': legacy } = await w.modules()
   const basis = (type, npr) => legacy.industryBasis({ projects: [{ ProductionType: type }, { ProductionType: 0 }], npr })
   const note = /an NPR's ordnance is not charged to its minerals in the game/
@@ -553,16 +553,16 @@ check('manifest-read', 'the procurement loader gives each queued component, Engi
   assert.equal(database.query(`select count(*) as N from FCT_IndustrialProjects where GameID = ${GAME} and RaceID = ${RACE} and ProductionType = 2`).get().N, 10, 'the fixture holds ten Light Naval projects, none of them read')
 })
 
-// The columns `Game.LoadIndustrialProjects` reads of a project row (Game.cs:18652-18779): the 28 that `SaveIndustrialProjects` writes (Game.cs:11479-11540).
+// The columns the game's loader reads of a project row: the 28 that the game saves.
 const LOADER_COLUMNS = ['ProjectID', 'GameID', 'RaceID', 'PopulationID', 'SpeciesID', 'Percentage', 'ProductionType', 'ProductionID', 'RefitClassID', 'WealthUse', 'Amount', 'PartialCompletion', 'ProdPerUnit', 'Description', 'Pause', 'Queue', 'FuelRequired', ...MINERAL_NAMES]
 
-// What decides whether the game loads a row, in SQL written here: the loader looks the row's race, colony, species and wealth use up in the lists it has loaded (`LoadSpecies` reads the `FCT_Species` rows of the game, Game.cs:19940, and `LoadWealthUses` the rows of `DIM_WealthUse`) and skips the row when one is missing (Game.cs:18652-18679).
+// What decides whether the game loads a row, in SQL written here: the loader looks the row's race, colony, species and wealth use up in the lists it has loaded (it reads the `FCT_Species` rows of the game and the rows of `DIM_WealthUse`) and skips the row when one is missing.
 const FLAGS = 'exists (select 1 from FCT_Race where FCT_Race.GameID = p.GameID and FCT_Race.RaceID = p.RaceID) as race, exists (select 1 from FCT_Population where FCT_Population.GameID = p.GameID and FCT_Population.PopulationID = p.PopulationID) as colony, exists (select 1 from FCT_Species where FCT_Species.GameID = p.GameID and FCT_Species.SpeciesID = p.SpeciesID) as species, exists (select 1 from DIM_WealthUse where DIM_WealthUse.WealthUseID = p.WealthUse) as wealth'
 const flagsOf = (database, id) => database.query(`select ${FLAGS} from FCT_IndustrialProjects as p where p.GameID = ${GAME} and p.ProjectID = ${id}`).get()
 const loadedIds = (database) => database.query(`select ProjectID as ID from (select p.ProjectID, ${FLAGS} from FCT_IndustrialProjects as p where p.GameID = ${GAME} and p.RaceID = ${RACE}) where race and colony and species and wealth order by ProjectID`).all().map((row) => row.ID)
 const byNumber = (a, b) => a - b
 
-// The queue a project got when it was made, from the projects of its colony made before it (`Population.method_138`, Population.cs:6917-6931).
+// The queue a project got when it was made, from the projects of its colony made before it.
 const queueBefore = (database, row) => {
   const same = database.query(`select Queue, Percentage, ProductionType from FCT_IndustrialProjects where PopulationID = ${row.PopulationID} and ProjectID < ${row.ProjectID}`).all().filter((one) => KIND_OF[one.ProductionType] === KIND_OF[row.ProductionType])
   const taken = same.filter((one) => one.Queue === 0).reduce((sum, one) => sum + one.Percentage, 0)
@@ -617,12 +617,12 @@ check('loader', 'every planted project row is a row of the shape the game writes
       const tech = database.query(`select GameID, RaceID from FCT_TechSystem where TechSystemID = ${techId}`).get()
 
       assert.deepEqual(tech && [tech.GameID, tech.RaceID], [GAME, RACE], `${where}: its ${kindOfProject[fact.type]} is a tech of the race in this game, not a stock or foreign design`)
-      assert.equal(database.query(`select count(*) as N from FCT_RaceTech where GameID = ${GAME} and RaceID = ${RACE} and TechID = ${techId}`).get().N, 0, `${where}: the race has not researched it (Race.method_305, Race.cs:17146)`)
+      assert.equal(database.query(`select count(*) as N from FCT_RaceTech where GameID = ${GAME} and RaceID = ${RACE} and TechID = ${techId}`).get().N, 0, `${where}: the race has not researched it`)
 
       if (fact.type === 5) {
         const component = database.query(`select GameID, Prototype, ShippingLineSystem, ComponentTypeID from FCT_ShipDesignComponents where SDComponentID = ${fact.item}`).get()
 
-        assert.deepEqual([component.GameID, component.Prototype, component.ShippingLineSystem], [GAME, 0, 0], `${where}: the component is no prototype and no shipping line system (Population.method_178)`)
+        assert.deepEqual([component.GameID, component.Prototype, component.ShippingLineSystem], [GAME, 0, 0], `${where}: the component is no prototype and no shipping line system`)
         assert.notEqual(component.ComponentTypeID, missileEngine, `${where}: the component is no missile engine`)
       } else if (fact.type === 6) {
         const missile = database.query(`select GameID, EngineID from FCT_MissileType where MissileID = ${fact.item}`).get()

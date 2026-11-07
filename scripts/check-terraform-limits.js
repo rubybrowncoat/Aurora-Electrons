@@ -1167,7 +1167,7 @@ check('thaw', 'a gas frozen out now is removed when the plan warms the body past
 })
 
 // ---- Dampening levers ------------------------------------------------------------------------------------------------
-// The dampening of a body's seasons and its temperatures at both ends of the orbit, worked from the game's formula (SystemBody.method_1: 0.1 an atm of pressure up to 0.5, 0.003 a percent of surface water up to 0.3, times the year's factor) and the habitability module's temperature at a distance, not by the stage code under check.
+// The dampening of a body's seasons and its temperatures at both ends of the orbit, worked from the game's formula (0.1 an atm of pressure up to 0.5, 0.003 a percent of surface water up to 0.3, times the year's factor) and the habitability module's temperature at a distance, not by the stage code under check.
 const swingOf = (habitability, state) => {
   const { distance, eccentricity, year } = habitability.orbitOf(state)
   const dampening = !distance || !eccentricity || (state.AtmosPress <= 0 && state.HydroExt <= 0) ? 0 : (Math.min(0.5, state.AtmosPress / 10) + Math.min(0.3, state.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(year / 8760))

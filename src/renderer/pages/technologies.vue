@@ -273,7 +273,7 @@ export default {
       const busy = isAvailable(labs.assigned) ? this.count(labs.assigned.value) : UNKNOWN_TEXT
       const built = isAvailable(labs.built) ? this.count(labs.built.value) : UNKNOWN_TEXT
       const idle = isAvailable(labs.idle) ? labs.idle.value : null
-      // A race that starts no research projects has no idle labs to flag (Population.cs:822 leaves the event out for it).
+      // A race that starts no research projects has no idle labs to flag (the game leaves the event out for it).
       const exempt = this.noResearch.value === true
       const unrated = output.unknown ? `, ${this.count(output.unknown)} of them with no rate known` : ''
       const idleText = idle && !exempt ? `, ${this.count(idle)} idle` : ''
@@ -367,7 +367,7 @@ export default {
         const [fields] = await this.database.query('select DIM_ResearchField.ResearchFieldID, DIM_ResearchField.FieldName, DIM_ResearchField.Abbreviation, DIM_ResearchField.DoNotDisplay from DIM_ResearchField')
         const [categories] = await this.database.query('select DIM_ResearchCategories.CategoryID, DIM_ResearchCategories.Name from DIM_ResearchCategories')
         const eligible = await this.database.query(`select FCT_EligibleProjects.TechSystemID from FCT_EligibleProjects where FCT_EligibleProjects.GameID = ${this.GameID} and FCT_EligibleProjects.RaceID = ${this.RaceID}`).then(([rows]) => rows.map((row) => row.TechSystemID))
-        // The techs the game loads (Game.LoadTechSystems, Game.cs:22107-22112): the baseline (GameID 0) and those of the game, of which the race's own designs belong to its list (Population.method_112, Population.cs:5241-5294) beside the baseline and the alien projects it is eligible for.
+        // The techs the game loads: the baseline (GameID 0) and those of the game, of which the race's own designs belong to its list beside the baseline and the alien projects it is eligible for.
         const [techs] = await this.database.query(`select FCT_TechSystem.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.TechDescription, FCT_TechSystem.DevelopCost, FCT_TechSystem.RaceID, FCT_TechSystem.CategoryID, FCT_TechSystem.Prerequisite1, FCT_TechSystem.Prerequisite2, FCT_TechSystem.RuinOnly, FCT_TechSystem.AutomaticResearch, FCT_TechSystem.StartingSystem, FCT_TechSystem.ConventionalSystem, FCT_TechSystem.TechTypeID, DIM_TechType.Description as TypeName, DIM_TechType.FieldID from FCT_TechSystem inner join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_TechSystem.GameID = 0 or (FCT_TechSystem.GameID = ${this.GameID} and FCT_TechSystem.RaceID = ${this.RaceID})${eligible.length ? ` or FCT_TechSystem.TechSystemID in (${eligible.join(', ')})` : ''}`)
 
         return Object.freeze({ fields, categories, techs: Object.freeze(techs), eligible })

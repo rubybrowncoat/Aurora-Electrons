@@ -95,7 +95,7 @@ const numberOf = (value) => (isNumber(value) ? value : null)
 // Whether `target` lies within the 20% size window of `source`, the window the Refits view filters its matrix of pairs by: true or false, or null when either size is not known.
 export const inBand = (source, target) => (isNumber(source.sizeHS) && isNumber(target.sizeHS) ? target.sizeHS >= source.sizeHS * (1 - SIZE_BAND) && target.sizeHS <= source.sizeHS * (1 + SIZE_BAND) : null)
 
-// Whether a yard tooled for `tooled` lists `source` as the class a refit is from: the tooled class's size lies between 80% and 120% of the source's (Shipyard.cs:521 for the commercial branch and :524 for the other, the candidate class's own size against the class the yard is tooled for), so a source far smaller or larger than the tooled class is left out; true or false, or null when either size is not known.
+// Whether a yard tooled for `tooled` lists `source` as the class a refit is from: the tooled class's size lies between 80% and 120% of the source's (the candidate class's own size against the class the yard is tooled for), so a source far smaller or larger than the tooled class is left out; true or false, or null when either size is not known.
 export const sourceWithinBand = (tooled, source) => (isNumber(tooled.sizeHS) && isNumber(source.sizeHS) ? tooled.sizeHS >= source.sizeHS * SOURCE_BAND_LOW && tooled.sizeHS <= source.sizeHS * SOURCE_BAND_HIGH : null)
 
 // A figure of `rule` as a result: the rule's own verification where the save's version is shown to be covered, estimated where a confirmed rule meets a save that is not, with the standing note.
@@ -231,7 +231,7 @@ export const loadYards = async (database, { GameID, RaceID }) => {
 
 const MINERAL_COLUMNS = MINERALS.map(({ name }) => `FCT_ShipyardTask.${name}`).join(', ')
 
-// The running refits (refit and automatic refit tasks) of the race, one row each as stored: { ID, ShipyardTaskType, PopulationID, Name, ShipyardName, SourceClassID, TargetClassID, TotalBP (the current hull's), CompletedBP, RemainingProduction (the current hull's balance), Hulls (the ships the task still builds, the current one and the later ones; null where the save does not say), Paused, Size, CommercialModifier, ...the minerals }. `RemainingProduction`, `Hulls`, `Paused`, `Size` and `CommercialModifier` are what the Production Recap reads for any shipyard task, so a refit's time left is the same figure there; `Size` and `CommercialModifier` are the target class's, its size and the factor of its `Commercial` flag, as the game dates a refit task (Population.cs `RefreshShipyardTasksListView`: `RecalculateBuildRateForClass(item.gclass22_1)`, the class a refit is to).
+// The running refits (refit and automatic refit tasks) of the race, one row each as stored: { ID, ShipyardTaskType, PopulationID, Name, ShipyardName, SourceClassID, TargetClassID, TotalBP (the current hull's), CompletedBP, RemainingProduction (the current hull's balance), Hulls (the ships the task still builds, the current one and the later ones; null where the save does not say), Paused, Size, CommercialModifier, ...the minerals }. `RemainingProduction`, `Hulls`, `Paused`, `Size` and `CommercialModifier` are what the Production Recap reads for any shipyard task, so a refit's time left is the same figure there; `Size` and `CommercialModifier` are the target class's, its size and the factor of its `Commercial` flag, as the game dates a refit task (by the class a refit is to).
 export const loadRefitTasks = async (database, { GameID, RaceID }) => {
   const taskColumns = await columnsOf(database, 'FCT_ShipyardTask')
   const hulls = taskColumns.has('NumShips') ? 'FCT_ShipyardTask.NumShips' : 'null'
@@ -355,7 +355,7 @@ export const costShare = (total, base) => {
   return combine({ rule, parts: { 'the refit\'s cost': total }, compute: (values) => values['the refit\'s cost'] / base.cost * 100, units: '%', inputs: { present: [`the cost of ${base.name}`] } })
 }
 
-// Whether a yard tooled for `tooling` builds, or refits to, `target` without retooling: true only for a class with the tooled class's own id, false for every other class (a retool is what admits it), null when the save does not give an id for one of them. The game's yard adds the class it is tooled for to its list (`Shipyard.cs:466`) and then the alternatives its filter passes; that filter compares each candidate with itself (`gclass22_0 != gclass22_0`, Shipyard.cs:468 and :471), so it passes nothing, and the 80% to 120% window with the at-most-a-fifth cost share at Shipyard.cs:476 (`withinSize`, `affordable` and `limit`, always null here) decides nothing. The source of the earlier line, Shipyard.cs:454, reads the same. `version` is the save's formula version (`loadFormulaVersion`).
+// Whether a yard tooled for `tooling` builds, or refits to, `target` without retooling: true only for a class with the tooled class's own id, false for every other class (a retool is what admits it), null when the save does not give an id for one of them. The game's yard adds the class it is tooled for to its list and then the alternatives its filter passes; that filter compares each candidate with itself, so it passes nothing, and the 80% to 120% window with the at-most-a-fifth cost share (`withinSize`, `affordable` and `limit`, always null here) decides nothing. The earlier line's yard reads the same. `version` is the save's formula version (`loadFormulaVersion`).
 export const noRetoolCheck = (tooling, target, version = null) => {
   const rule = 'refit.noRetool'
   const known = tooling.id !== null && tooling.id !== undefined && target.id !== null && target.id !== undefined
@@ -365,7 +365,7 @@ export const noRetoolCheck = (tooling, target, version = null) => {
   return { ok, withinSize: null, affordable: null, limit: null, result: ok === null ? unavailable({ rule, missing: ['the ids of the two classes'], units: 'yes or no' }) : envelope({ value: ok, status: getRule(rule).verification, rule, inputs: { present: ['the class the yard is tooled for'] }, units: 'yes or no', assumptions }) }
 }
 
-// The no-retool verdict of a class a Light yard lists, as `noRetoolCheck`'s members: true, with no size window and no cost test (`withinSize`, `affordable` and `limit` are null: a Light yard asks neither, Shipyard.cs:485-488, which lists every class of the race within the yard's capacity). The caller has established that the class passes the yard's list (its race's, not obsolete, not a shipping line's or another race's, within the capacity); a refit to it is still priced by `refitTotal`, size-change surcharge and all.
+// The no-retool verdict of a class a Light yard lists, as `noRetoolCheck`'s members: true, with no size window and no cost test (`withinSize`, `affordable` and `limit` are null: a Light yard asks neither, and lists every class of the race within the yard's capacity). The caller has established that the class passes the yard's list (its race's, not obsolete, not a shipping line's or another race's, within the capacity); a refit to it is still priced by `refitTotal`, size-change surcharge and all.
 export const listedNoRetool = (version = null) => {
   const rule = 'refit.noRetool'
   const assumptions = ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE]
@@ -525,7 +525,7 @@ export const yardEligibility = (yard, target, operation, context, source = null)
 
     const light = yard.type === SHIPYARD_TYPE.LIGHT
 
-    // A Light yard has no tooling and lists the classes it can take (Shipyard.cs:485-488): every class of the race within its capacity, less those whose stored flags exclude them.
+    // A Light yard has no tooling and lists the classes it can take: every class of the race within its capacity, less those whose stored flags exclude them.
     if (light) {
       const overCapacity = isNumber(yard.capacity) && isNumber(target.sizeHS) && target.sizeHS > yard.capacity / TONS_PER_HS
 
@@ -590,7 +590,7 @@ export const yardEligibility = (yard, target, operation, context, source = null)
       sizeAndType(source, 'source', blockers, missing)
       flagged(blockers, missing, source.shippingLine, 'The source class belongs to a shipping line', `whether ${own} belongs to a shipping line`)
 
-      // A refit's source class is its own selector (Population.cs:6589-6592), not the target list: the size of the class tooled when the refit is made must lie between 80% and 120% of the source's (Shipyard.cs:521 and :524). At the yard's current tooling that is the class the yard is tooled for; a yard that needs a retool first, or has no class and is given one, is tooled for the target by then, so the band is asked of the target instead, and a source outside it is refused after the retool too. A Light yard passes no tooled class and so asks no band (Economics.cs:2568 and :2572).
+      // A refit's source class is its own selector, not the target list: the size of the class tooled when the refit is made must lie between 80% and 120% of the source's. At the yard's current tooling that is the class the yard is tooled for; a yard that needs a retool first, or has no class and is given one, is tooled for the target by then, so the band is asked of the target instead, and a source outside it is refused after the retool too. A Light yard passes no tooled class and so asks no band.
       if (yard.type !== null && yard.type !== SHIPYARD_TYPE.LIGHT) {
         const afterRetool = yard.tooledId !== target.id
         const tooled = afterRetool ? target : tooledClassOf(yard, classesById)

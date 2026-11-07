@@ -114,7 +114,7 @@ export const loadPlacesByKeys = async (database, context, keys) => {
   return [...bodies, ...locations]
 }
 
-// Where an object stands, for a subtitle: in the system, or at a Lagrange point of it when the object is anchored to one (`OrbitLagrangeID` above 0, which the game's position update moves with the point after every call: Game.cs 27963-27967 for a waypoint, 27989-27992 a wreck, 28015-28018 a life pod).
+// Where an object stands, for a subtitle: in the system, or at a Lagrange point of it when the object is anchored to one (`OrbitLagrangeID` above 0, which the game's position update moves with the point after every call).
 const standing = (row) => (row.OrbitLagrangeID > 0 ? `at a Lagrange point in ${row.SystemName}` : `in ${row.SystemName}`)
 
 // The race's own waypoints, in order of number.

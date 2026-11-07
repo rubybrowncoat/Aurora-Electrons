@@ -15,7 +15,7 @@ const EPSILON = 1e-9
 const BUILD_ROUNDING = 0.00005
 const NPR_GAP = 'the stock of the capital, which a spied empire\'s colony builds from'
 
-// Population.RecalculateWorkforceBreakdown, Population.cs:9219-9253. The split is repaired; queued completion dates still erase the retained B13 industrial-cycle primitive (family 8).
+// The workforce breakdown. The split is repaired; queued completion dates still erase the retained B13 industrial-cycle primitive (family 8).
 registerRule({
   id: RULE,
   versions: ['2.7.x'],
@@ -53,7 +53,7 @@ export const YARD_ACTIVITIES = Object.freeze({
 
 const CAPACITY_ADDED = Object.freeze({ 2: 500, 3: 1000, 4: 2000, 5: 5000, 6: 10000 })
 
-// The workers a yard needs, in millions: capacity times slipways, a tenth of it at a commercial or repair yard, over 4,000 (a naval or a light yard counts the whole, Population.cs `GetTotalShipyardWorkers`).
+// The workers a yard needs, in millions: capacity times slipways, a tenth of it at a commercial or repair yard, over 4,000 (a naval or a light yard counts the whole).
 export const yardWorkers = (yardType, capacity, slipways) => (capacity * slipways * (isFullCapacityYard(yardType) ? 1 : 0.1)) / 4000
 
 // What one yard activity changes in the yard's workers: { delta } (0 for one that changes none, a retool) or { missing } naming what the save lacks or the activity this does not know.

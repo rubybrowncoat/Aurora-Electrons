@@ -7,7 +7,7 @@
 
   The page runs over scripts/lib/page-loader.js: its template is read as text and its script runs the summary computed over the rows shaped like the page's own reads, and the panel is held to its summary sentence, its foot and the marks of its columns.
 
-  The oracle is the game's civilian mining tab, Race.cs `method_94` (the CMC Potential tab of Economics.cs), ported here from the 3.1.0 source and computed from the raw tables beside the page: the systems of the race's surveyed bodies with more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better within reach of their star, and of its colonies holding a complex; for each, the controlling other race, the largest colony in millions, the colonies with a complex, the bodies free and blocked, and the year's tax and purchase figures. Every system of the fixture and of the played save is compared in both directions: the systems listed, the name, control, largest colony, active colonies and wealth against the tab, and the free and blocked bodies against the founding rule the page and the Colonization Planner share (utilities/colonization.js `cmcBlocks`: people, an automated mine, a civilian or ex-civilian complex, a mass driver or orbital miners at work).
+  The oracle is the game's civilian mining tab (the CMC Potential tab of the Economics window), worked out here from the game's rules and computed from the raw tables beside the page: the systems of the race's surveyed bodies with more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better within reach of their star, and of its colonies holding a complex; for each, the controlling other race, the largest colony in millions, the colonies with a complex, the bodies free and blocked, and the year's tax and purchase figures. Every system of the fixture and of the played save is compared in both directions: the systems listed, the name, control, largest colony, active colonies and wealth against the tab, and the free and blocked bodies against the founding rule the page and the Colonization Planner share (utilities/colonization.js `cmcBlocks`: people, an automated mine, a civilian or ex-civilian complex, a mass driver or orbital miners at work).
 
   The tab's own body test disagrees with that founding rule: it reads the race's population records alone, counts a record with no orbital mining modules as keeping a complex off, and names neither a mass driver nor a complex. The check proves the disagreement body by body, proves the summary keeps the founding rule, and reports every body where the two differ, so that a system whose counts differ from the tab's is named with its cause.
 
@@ -317,7 +317,7 @@ const starReachOf = (stars, points) => {
   return reach
 }
 
-// SystemBody.method_23(80, false): the body's farthest point from its star (a moon's planet orbital distance), not a gas giant.
+// The body's farthest point from its star (a moon's planet orbital distance), not a gas giant.
 const bodyInReach = (body, reach, eccentric) => {
   if (!reach) {
     return false
@@ -416,13 +416,13 @@ const oracleOf = async (database, { game, race }) => {
 
     return [fleet.Xcor, fleet.Ycor, body.Xcor, body.Ycor].every(Number.isFinite) ? within(fleet.Xcor, body.Xcor) && within(fleet.Ycor, body.Ycor) : fleet.OrbitBodyID === population.SystemBodyID
   }
-  // Population.method_211: the undamaged orbital mining modules of the fleets of the colony's race at its body, assigned to it or to none.
+  // The undamaged orbital mining modules of the fleets of the colony's race at its body, assigned to it or to none.
   const modulesAt = (population) => rawFleets.filter((fleet) => fleet.RaceID === population.RaceID && atColony(fleet, population) && (!(fleet.AssignedPopulationID > 0) || !everyPopulation.has(fleet.AssignedPopulationID) || fleet.AssignedPopulationID === population.PopulationID)).reduce((total, fleet) => total + (shipsOf.get(fleet.FleetID) || []).reduce((sum, ship) => sum + modulesOf(ship), 0), 0)
   const has = (population, id) => (installs.get(population.PopulationID) || []).some((row) => row.PlanetaryInstallationID === id)
   const complexes = (population) => (installs.get(population.PopulationID) || []).filter((row) => row.PlanetaryInstallationID === COMPLEX).reduce((total, row) => total + Math.floor(row.Amount || 0), 0)
   const own = populations.filter((row) => row.RaceID === race)
   const visible = populations.filter((row) => row.RaceID === race || knownAliens.has(row.PopulationID))
-  // The tab's own body test (Race.cs `method_94`): a population record of the race with people, an automated mine or an ex-civilian complex, or with no orbital mining modules at all.
+  // The tab's own body test: a population record of the race with people, an automated mine or an ex-civilian complex, or with no orbital mining modules at all.
   const tabSecond = new Set(own.filter((population) => population.Population > 0 || has(population, 12) || has(population, 52) || modulesAt(population) === 0).map((population) => population.SystemBodyID))
   // The founding rule the page and the Planner share (colonization.js `cmcBlocks`): people, an automated mine, a mass driver, a civilian or ex-civilian complex, or orbital miners at work.
   const reasonsOf = (population) => [population.Population > 0 ? 'people' : null, has(population, 12) ? 'an automated mine' : null, has(population, 24) ? 'a mass driver' : null, has(population, 39) ? 'a complex' : null, has(population, 52) ? 'an ex-complex' : null, modulesAt(population) > 0 ? 'orbital miners' : null].filter(Boolean)

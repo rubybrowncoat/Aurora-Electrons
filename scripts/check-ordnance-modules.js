@@ -3,10 +3,10 @@
 
   Run: bun scripts/check-ordnance-modules.js [--no-mutations]
 
-  The rules are the game's, read from the 3.1.0 source and written here, never read from the modules, and every figure is source-derived: no save played under 3.1 holds a ship with orbital mining modules assigned to a colony, a class with an Ordnance Factory Module or a colony's ordnance capacity written with one (the owner's decision Q7 of AE-31: no played save will be supplied; the played 3.2.0 save holds no ordnance module either), so each case is planted on an in-memory copy of the migrated fixture (saves/AuroraDB-310-spookyerol-migrated.db) with rows shaped as the game writes and loads them:
-  - a class keeps its Ordnance Factory Modules in `FCT_ShipClass.OrdnanceModules` (`Game.LoadShipClasses`, Game.cs:17908, and `Game.SaveShipClasses`, Game.cs:10723) as the sum of the NumComponent of its lines of that component type (`ShipClass.cs:3603`), and the summary line gives the race's ordnance production times the modules as the build points a year (ShipClass.cs:4327);
-  - a colony's annual ordnance capacity is the installations' product plus `Population.method_211(OrbitalMiningModule, Production)` (Population.cs:4727-4741), a sum over the fleets of the colony's race that lie within one unit of the colony's body on both axes (`Game.AreCoordinatesWithinOneUnit`, Game.cs:37170, strictly less than 1 on each) and are assigned to the colony, a fleet with no colony being given to the first colony that asks (Population.cs:9933-9939), of the fleet's capacity of the Orbital Mining Module (`Ship.method_159`, Ship.cs:6991-7088: the undamaged modules times the race's mine production, times the commander's Mining bonus, times the share of the class crew aboard) times the command's Production bonus at the Industrial share (`NavalAdminCommand.method_5`, NavalAdminCommand.cs:197-300); a fleet assigned to another colony, or to this one but away from it, adds nothing; the game takes the Orbital Mining Module there, not the Ordnance Factory Module, and the colony's modifiers do not multiply the added term;
-  - the danger rating counts the protection value a class stores (`FCT_ShipClass.ProtectionValue`), which in the 3.1.0 source comes from beam weapons and missile launchers only (ShipClass.cs:3691 and 3756).
+  The rules are the game's, written here from the game's rules, never read from the modules, and every figure is worked from them: no save played under 3.1 holds a ship with orbital mining modules assigned to a colony, a class with an Ordnance Factory Module or a colony's ordnance capacity written with one (the owner's decision Q7 of AE-31: no played save will be supplied; the played 3.2.0 save holds no ordnance module either), so each case is planted on an in-memory copy of the migrated fixture (saves/AuroraDB-310-spookyerol-migrated.db) with rows shaped as the game writes and loads them:
+  - a class keeps its Ordnance Factory Modules in `FCT_ShipClass.OrdnanceModules` as the sum of the NumComponent of its lines of that component type, and the summary line gives the race's ordnance production times the modules as the build points a year;
+  - a colony's annual ordnance capacity is the installations' product plus the capacity of the Orbital Mining Module (not the Ordnance Factory Module), a sum over the fleets of the colony's race that lie within one unit of the colony's body on both axes (strictly less than 1 on each) and are assigned to the colony, a fleet with no colony being given to the first colony that asks, of the fleet's capacity of the Orbital Mining Module (the undamaged modules times the race's mine production, times the commander's Mining bonus, times the share of the class crew aboard) times the command's Production bonus at the Industrial share; a fleet assigned to another colony, or to this one but away from it, adds nothing; the game takes the Orbital Mining Module there, and the colony's modifiers do not multiply the added term;
+  - the danger rating counts the protection value a class stores (`FCT_ShipClass.ProtectionValue`), which in the 3.1.0 game comes from beam weapons and missile launchers only.
   Every planted row is a copy of a row the fixture holds (a ship, a fleet, a naval admin command, a commander, a class, a class component) with the columns the game's loaders read set to what the case needs.
   The checks:
   - `class-totals`: `classOrdnance` gives the stored module count and, times the race's ordnance production, the build points a year; a class whose component lines disagree with the stored count says so; an unknown count or rate leaves the figure unavailable;
@@ -20,7 +20,7 @@
   - `capacity`: the colony's ordnance capacity adds the term after the installations' product and never multiplies it by the colony's modifier, and the other capacities and a row without the term are as before;
   - `mixin`: the production modifiers mixin reads the term on the planted copy and gives the colony's capacity through `populationCapacityResult`;
   - `registry`: the rules the figures name are registered for the 3.2 line, and their notes carry no code.
-  Where the source does not give a rule the check does not guess it: no figure here is compared with a build rate the game wrote, because none exists.
+  Where the game gives no rule the check does not guess it: no figure here is compared with a build rate the game wrote, because none exists.
 
   Every planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
 
@@ -128,14 +128,14 @@ const addCaptain = (database, shipId, commanderId, bonus) => {
 // The body of a colony and where it is, as `{ SystemBodyID, Xcor, Ycor }`.
 const bodyOf = (database, colony) => database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.PopulationID = ${colony}`).get()
 
-// A ship of `classId` in a fleet assigned to `colony` (0 for none) under `command` (the loaders of Game.cs read FCT_Ship, FleetID, FCT_Fleet and FCT_ClassComponent: Game.cs:17227 and 17298-17327). The fleet is where the template fleet is, at the body of colony 48979, unless `at` sets other columns of the fleet (its coordinates and the body it orbits).
+// A ship of `classId` in a fleet assigned to `colony` (0 for none) under `command` (the game's loaders read FCT_Ship, FleetID, FCT_Fleet and FCT_ClassComponent). The fleet is where the template fleet is, at the body of colony 48979, unless `at` sets other columns of the fleet (its coordinates and the body it orbits).
 const addShip = (database, { ship, fleet, classId = MINING_CLASS, crew, colony = COLONY, command = IDS.command, race = RACE, name = 'Miner', at = {} }) => {
   cloneRow(database, 'FCT_Fleet', 'FleetID', FLEET_TEMPLATE, { FleetID: fleet, FleetName: `${name} fleet`, AssignedPopulationID: colony, ParentCommandID: command, SystemID: SYSTEM, RaceID: race, ...at })
   cloneRow(database, 'FCT_Ship', 'ShipID', SHIP_TEMPLATE, { ShipID: ship, FleetID: fleet, ShipClassID: classId, CurrentCrew: crew, ShipName: name, RaceID: race })
 }
 
 const PLANTS = {
-  // A race whose ordnance production (900) is not its mine production (600), a ship of the mining class with half its crew, a captain with a Mining bonus of 1.5, 11 of its 151 modules damaged and a naval admin command of the Industrial type (share 0.1) whose commander holds a Production bonus of 1.3 (`NavalAdminCommand.method_5`).
+  // A race whose ordnance production (900) is not its mine production (600), a ship of the mining class with half its crew, a captain with a Mining bonus of 1.5, 11 of its 151 modules damaged and a naval admin command of the Industrial type (share 0.1) whose commander holds a Production bonus of 1.3.
   orbital: (database) => {
     database.run(`update FCT_Race set OrdnanceProduction = 900 where GameID = ${GAME} and RaceID = ${RACE}`)
     cloneRow(database, 'FCT_NavalAdminCommand', 'NavalAdminCommandID', ADMIN_TEMPLATE, { NavalAdminCommandID: IDS.command, ParentAdminCommandID: 0, PopulationID: COLONY, ShipID: 0, AdminCommandTypeID: 4, MinimumRankPriority: 7 })
@@ -196,7 +196,7 @@ const PLANTS = {
     PLANTS.orbital(database)
     addShip(database, { ship: IDS.freeShip, fleet: IDS.freeFleet, crew: 7566, colony: 0, name: 'Blind and free', at: { Xcor: null, Ycor: null, OrbitBodyID: 0 } })
   },
-  // A class with 7 Ordnance Factory Modules, as `Game.cs:17908` loads it and the class recalculation (ShipClass.cs:3603) sums it, and a class whose stored count (7) is not what its lines add up to (5), each with a ship in service, and a stored protection value for the danger case.
+  // A class with 7 Ordnance Factory Modules, as the game loads it and its class recalculation sums it, and a class whose stored count (7) is not what its lines add up to (5), each with a ship in service, and a stored protection value for the danger case.
   classes: (database) => {
     for (const [classId, name, stored, lines, protection] of [[IDS.barge, 'Factory Barge', 7, 7, 12.5], [IDS.stale, 'Stale Barge', 7, 5, 0]]) {
       cloneRow(database, 'FCT_ShipClass', 'ShipClassID', MINING_CLASS, { ShipClassID: classId, ClassName: name, OrdnanceModules: stored, MiningModules: 0, ProtectionValue: protection })

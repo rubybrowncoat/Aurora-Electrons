@@ -418,7 +418,7 @@ export const WARHEAD_BP_DIVISOR = 4
 export const ECCM_MSP = 0.25
 export const TERMINAL_GUIDANCE_MSP = 0.25
 export const RETARGETING_MSP = 0.5
-// A lurker missile (the game's `FCT_MissileType.Lurker`, set from the designer's Lurker Mode box in `Game.CreateMissileType`) stays dormant where it is launched or deployed: it adds 0.5 to the size, 0.5 to the cost and 0.5 to the Boronide, once, whatever the stages.
+// A lurker missile (the game's `FCT_MissileType.Lurker`, set from the designer's Lurker Mode box) stays dormant where it is launched or deployed: it adds 0.5 to the size, 0.5 to the cost and 0.5 to the Boronide, once, whatever the stages.
 export const LURKER_MSP = 0.5
 export const LURKER_BP = 0.5
 export const LASER_WARHEAD_MSP = 0.25
@@ -690,7 +690,7 @@ const GROUND_POD_REASON = 'a ground pod\'s size, cost and Vendarite are not cove
 const ENHANCED_RADIATION_REASON = 'the cost of a warhead with an enhanced radiation share is not covered by the missile accounting rules'
 const RETARGETING_REASON = `a retargeting level above ${VALIDATED_RETARGETING} has no saved design to check its size and cost against`
 const MULTIPLE_WARHEADS_ASSUMPTION = 'Each warhead after the first adds 0.1 MSP, which the size floor or limit of some saved designs hides'
-const STAGED_FLIGHT_ASSUMPTION = 'The flight time and the endurance of a design with second stages reproduce for every saved design but one (design 154678 of the stock sample, 0.08% under, the cause not identified), so they are not confirmed'
+const STAGED_FLIGHT_ASSUMPTION = 'The flight time and the endurance of a design with second stages reproduce for every saved design checked but one (0.08% under, the cause not identified), so they are not confirmed'
 
 // The quantities the cost and mineral formulas read, each { id, label, read(input, raw) }: the value in a candidate, null where the candidate does not give it (an unknown tech) or the quantity does not apply. The ids are those of MISSILE_COST_DOMAIN.
 const COST_QUANTITIES = Object.freeze([
@@ -1388,7 +1388,7 @@ registerRule({
   units: 'EP, L/EPH, HS, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.EnginePowerMod', 'FCT_ShipDesignComponents.BGTech1..3', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
-  note: 'Reproduces the power, fuel per engine-power hour, cost, crew, HTK, explosion figures, thermal share and military flag of every stored engine of a stock sample save, the played save of the line, a modded save and a migrated one; the rows of the modded and migrated saves it cannot reproduce are set outside the rule.',
+  note: 'Reproduces the power, fuel per engine-power hour, cost, crew, HTK, explosion figures, thermal share and military flag of every stored engine of the saves it was checked on, a played save of the line, a modded save and a migrated one among them; the rows of the modded and migrated saves it cannot reproduce are set outside the rule.',
 })
 
 registerRule({
@@ -1397,7 +1397,7 @@ registerRule({
   units: 'km/s',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.EnginePower, Size, MaxSpeed', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue'],
-  note: 'Reproduces the stored top speed of every class of both sample saves. A class without engines keeps the game\'s starting speed of 1, which this formula does not give.',
+  note: 'Reproduces the stored top speed of every class of the saves it was checked on. A class without engines keeps the game\'s starting speed of 1, which this formula does not give.',
 })
 
 registerRule({
@@ -1493,7 +1493,7 @@ registerRule({
   units: 'HS, BP',
   verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, BGTech1..4', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
-  note: 'Reproduces the size, cost, crew, HTK and capacity of every stored jump drive of a modded save. The one commercial drive of the stock sample save was designed under an older rule that kept the size to 1 decimal, and is explained, not reproduced.',
+  note: 'Reproduces the size, cost, crew, HTK and capacity of every stored jump drive of a modded save. The one commercial drive of a save it was checked on was designed under an older rule that kept the size to 1 decimal, and is explained, not reproduced.',
 })
 
 registerRule({
@@ -1549,7 +1549,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size, Cost, MaintSupplies', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
-  note: 'Half the class cost over the coverage factor (size x 0.04 over the engineering), cut to a whole number. Reproduced with the storage rule in every stored maintenance supplies of a stock sample save and a modded save, bar the rows explained as set outside the rule.',
+  note: 'Half the class cost over the coverage factor (size x 0.04 over the engineering), cut to a whole number. Reproduced with the storage rule in every stored maintenance supplies of two saves it was checked on, one of them modded, bar the rows explained as set outside the rule.',
 })
 
 registerRule({
@@ -1567,7 +1567,7 @@ registerRule({
   units: 'MSP',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MaintSupplies', 'design.engineeringMsp', 'design.maintenanceStorage'],
-  note: 'Engineering MSP plus storage; a class without engineering holds its storage alone. Compared with the stored maintenance supplies of every class of both sample saves.',
+  note: 'Engineering MSP plus storage; a class without engineering holds its storage alone. Compared with the stored maintenance supplies of every class of the saves it was checked on.',
   assumptions: ['The class is a stored or designed class whose cost, size and component rows are final'],
 })
 
@@ -1577,7 +1577,7 @@ registerRule({
   units: '% a year',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.Size, BaseFailureChance', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
-  note: 'Half the size times size x 0.04 over the engineering, in percent at a clock of one year; a class without engineering fails at 10% a year per HS. Compared with the stored base failure chance of every class of both sample saves.',
+  note: 'Half the size times size x 0.04 over the engineering, in percent at a clock of one year; a class without engineering fails at 10% a year per HS. Compared with the stored base failure chance of every class of the saves it was checked on.',
 })
 
 registerRule({
@@ -1586,7 +1586,7 @@ registerRule({
   units: 'damage roll',
   verification: 'confirmed',
   structure: ['FCT_ShipClass.MaxDACRoll', 'FCT_ClassComponent.ChanceToHit, NumComponent', 'FCT_ShipDesignComponents.Size, ComponentTypeID 11'],
-  note: 'Each component other than armour takes size times count rounded up of the roll; the thresholds are the running total and damage allocation roll the sum. Compared with every stored damage allocation roll and chance to hit of both sample saves.',
+  note: 'Each component other than armour takes size times count rounded up of the roll; the thresholds are the running total and damage allocation roll the sum. Compared with every stored damage allocation roll and chance to hit of the saves it was checked on.',
 })
 
 registerRule({

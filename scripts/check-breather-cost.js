@@ -1,9 +1,9 @@
 /*
-  Checks the colony cost of a body for a species of each of the four breathing gases (oxygen, methane, sulphur dioxide, ammonia) and the gravity classes the game suffixes to it (src/renderer/utilities/habitability.js, terraforming.js, terraform-limits.js, colonization-data.js, map-features.js, colonies.js; SystemBody.method_71 for the water term, method_54 for the danger set, method_59 for LG, LGR and N, method_43 for the water of a body at a temperature, method_46 for the frozen-out flag, RaceSysSurvey.RebuildSystemBodySummaryAndSupernovaForecast and method_34 for the Galaxy Map's band counts and badges, Population.ProcessTerraforming and Game.ProcessWaterVapourEvaporation for the drain of surface water).
+  Checks the colony cost of a body for a species of each of the four breathing gases (oxygen, methane, sulphur dioxide, ammonia) and the gravity classes the game suffixes to it (src/renderer/utilities/habitability.js, terraforming.js, terraform-limits.js, colonization-data.js, map-features.js, colonies.js).
 
-  Two kinds of evidence. The oracle: on the migrated fixture and on the played save (the two saves of scripts/lib/fixtures.js), every colony with people has its stored infrastructure requirement turned back into a colony cost by the rule of colonies.js, and the planner's cost of the body for the colony's species (now or worst of the orbit) must be that cost, within the rounding of the stored integer and the growth of the population since it was stored. The saves hold colonies of oxygen, methane, ammonia and sulphur dioxide breathers (the fixture holds oxygen only), reported per breathing gas below. The same saves are the oracle of the freezing rule: a gas is frozen out below its freezing point on every stored row. The planted cases: bodies made here with every column the loaders read, whose costs are worked by hand from the source, for what no stored colony shows (liquid water, ice and vapour for each breather, the water at periapsis and apoapsis, the danger of water vapour per breather, a gas that is dangerous to its own breather, LG, LGR and N at their boundaries, the water a plan drains for each breather, the water vapour of a plan under, at and over its limit, the Galaxy Map's colony-cost bands of a race by its own band options).
+  Two kinds of evidence. The oracle: on the migrated fixture and on the played save (the two saves of scripts/lib/fixtures.js), every colony with people has its stored infrastructure requirement turned back into a colony cost by the rule of colonies.js, and the planner's cost of the body for the colony's species (now or worst of the orbit) must be that cost, within the rounding of the stored integer and the growth of the population since it was stored. The saves hold colonies of oxygen, methane, ammonia and sulphur dioxide breathers (the fixture holds oxygen only), reported per breathing gas below. The same saves are the oracle of the freezing rule: a gas is frozen out below its freezing point on every stored row. The planted cases: bodies made here with every column the loaders read, whose costs are worked by hand from the game's rules, for what no stored colony shows (liquid water, ice and vapour for each breather, the water at periapsis and apoapsis, the danger of water vapour per breather, a gas that is dangerous to its own breather, LG, LGR and N at their boundaries, the water a plan drains for each breather, the water vapour of a plan under, at and over its limit, the Galaxy Map's colony-cost bands of a race by its own band options).
 
-  The N predicate is settled by the source: N tests the species' maximum gravity against 0.1, not the body's gravity. `retention` states where the two readings part and counts the species and bodies of the saves where they do.
+  The N predicate is settled by the game's rule: N tests the species' maximum gravity against 0.1, not the body's gravity. `retention` states where the two readings part and counts the species and bodies of the saves where they do.
 
   Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults.
 
@@ -279,7 +279,7 @@ check('planned freeze', 'a gas of a body that does not exist yet is frozen out b
   close(danger(methane(300, 1), false), 0, 'a saved body keeps the flag the game stored: frozen at 300 K')
   close(danger(methane(50, 0), false), 2, 'a saved body keeps the flag the game stored: not frozen at 50 K')
 
-  // The greenhouse of a gas works only above its freezing point at the temperature of the point (SystemBody.method_65): methane at 0.5 atm warms a body at 100 K by half a unit of greenhouse where it freezes at 91 K, and not where it freezes at 105 K.
+  // The greenhouse of a gas works only above its freezing point at the temperature of the point: methane at 0.5 atm warms a body at 100 K by half a unit of greenhouse where it freezes at 91 K, and not where it freezes at 105 K.
   const warmed = (FreezingPoint) => m.h.temperatureAtDistance({ BodyClass: 1, StarLuminosity: 1, SurfaceTemp: 100, BaseTemp: 100, Albedo: 1, AtmosPress: 0.5, DustLevel: 0, HydroExt: 0, HydroID: 1, Eccentricity: 0, Atmosphere: [gasOf(3, 0.5, 100, { FreezingPoint })] }, 6.5025)
 
   close(warmed(91), 155, 'the gas freezes at 91 K and the point is at 100 K: 1 + 0.05 + 0.5 of greenhouse')
@@ -314,7 +314,7 @@ check('gravity', 'a body below the species\' minimum gravity is LG under 0.1 g a
 const WITNESS = { IdealGravity: 0.125, GravityDeviation: 0.0625 }
 const LIGHT = { IdealGravity: 0.0625, GravityDeviation: 0.03125 }
 
-check('retention', 'N is told by the species\' maximum gravity against 0.1 g, as the source reads it: a species whose range lies under 0.1 g has N above its minimum, a species that reaches 0.1 g has none', (m) => {
+check('retention', 'N is told by the species\' maximum gravity against 0.1 g, as the game reads it: a species whose range lies under 0.1 g has N above its minimum, a species that reaches 0.1 g has none', (m) => {
   const light = speciesRow(10, LIGHT)
   const witness = speciesRow(10, WITNESS)
 
@@ -324,7 +324,7 @@ check('retention', 'N is told by the species\' maximum gravity against 0.1 g, as
   assert.equal(classOf(m, light, 0.0625), 'N', 'above the minimum, and the species cannot reach 0.1 g')
   assert.equal(classOf(m, light, 0.09375), 'N', 'at the maximum of such a species')
 
-  // A species of 0.0625 to 0.1875 g reaches 0.1 g. A body of 0.078125 g is above its minimum and under 0.1 g: the source gives it no class, where the reading of the 3.0 patch note (above the minimum, body under 0.1 g) gives N.
+  // A species of 0.0625 to 0.1875 g reaches 0.1 g. A body of 0.078125 g is above its minimum and under 0.1 g: the game gives it no class, where the reading of the 3.0 patch note (above the minimum, body under 0.1 g) gives N.
   assert.equal(classOf(m, witness, 0.05), 'LG', 'under the minimum')
   assert.equal(classOf(m, witness, 0.0625), null, 'at the minimum')
   assert.equal(classOf(m, witness, 0.078125), null, 'the witness: the maximum is 0.1875 g, so there is no N')
@@ -336,7 +336,7 @@ check('retention', 'N is told by the species\' maximum gravity against 0.1 g, as
 
   assert.deepEqual([cost.gravityClass, cost.lowGravity], ['N', false], 'N does not double the infrastructure')
 
-  // Where the two readings part, on the species and the bodies of the saves: N needs a body above the species' minimum, and the note's reading needs it under 0.1 g, the source's a species whose maximum is under 0.1 g. A species whose minimum is 0.1 g or more can have neither.
+  // Where the two readings part, on the species and the bodies of the saves: N needs a body above the species' minimum, and the note's reading needs it under 0.1 g, the game's a species whose maximum is under 0.1 g. A species whose minimum is 0.1 g or more can have neither.
   for (const { label, save, database, species } of m.world) {
     const limits = [...species.values()]
     const reaching = limits.filter((row) => row.MinimumGravity < 0.1)
@@ -351,7 +351,7 @@ check('retention', 'N is told by the species\' maximum gravity against 0.1 g, as
       for (const Gravity of gravities) {
         const told = m.h.gravityClassOf({ Gravity }, row)
 
-        assert.equal(told === 'N', bySource({ Gravity }, row) === 'N', `${label}: the module's N for a species of ${row.MinimumGravity} to ${row.MaximumGravity} g at ${Gravity} g is the predicate of the source`)
+        assert.equal(told === 'N', bySource({ Gravity }, row) === 'N', `${label}: the module's N for a species of ${row.MinimumGravity} to ${row.MaximumGravity} g at ${Gravity} g is the predicate of the game`)
         source += told === 'N' ? 1 : 0
         note += byNote({ Gravity }, row) === 'N' ? 1 : 0
         differ += (told === 'N') !== (byNote({ Gravity }, row) === 'N') ? 1 : 0
@@ -359,7 +359,7 @@ check('retention', 'N is told by the species\' maximum gravity against 0.1 g, as
     }
 
     limits.filter((row) => row.MinimumGravity >= 0.1).forEach((row) => assert.ok([0.2, 0.5, 1, 1.5, 3].every((Gravity) => m.h.gravityClassOf({ Gravity }, row) !== 'N'), `${label}: a species of minimum ${row.MinimumGravity} g has no N`))
-    console.log(`RETENTION ${label}: ${limits.length} species, ${reaching.length} with a minimum under 0.1 g, ${gravities.length} distinct body gravities; N by the source ${source} species-body pairs, by the patch note ${note}, the readings part on ${differ}`)
+    console.log(`RETENTION ${label}: ${limits.length} species, ${reaching.length} with a minimum under 0.1 g, ${gravities.length} distinct body gravities; N by the game ${source} species-body pairs, by the patch note ${note}, the readings part on ${differ}`)
   }
 })
 
@@ -502,7 +502,7 @@ check('drain order', 'a frozen ammonia world warms before draining, and costly s
 })
 
 // ---- The time a drain takes ------------------------------------------------------------------------------------------------------
-// Sol's probe: an ammonia breather's body with 50 % of liquid water at 280.5 K under 1 atm (0.2 atm of ammonia, 0.8 of nitrogen). The drain is 1.2472547819851116 Earth atm of work, so 100 Earth atm a year of terraformers (100 installations of rate 1) move it in 0.0125 years, 4.55 days: the bound of the capacity. The terraformer removes only the vapour in the air and the surface adds vapour in small steps (Game.ProcessWaterVapourEvaporation, Population.ProcessTerraforming): one such step of 0.005 atm (0.2 % of the surface) leaves 49.8 % of the water, which still costs 4.98.
+// Sol's probe: an ammonia breather's body with 50 % of liquid water at 280.5 K under 1 atm (0.2 atm of ammonia, 0.8 of nitrogen). The drain is 1.2472547819851116 Earth atm of work, so 100 Earth atm a year of terraformers (100 installations of rate 1) move it in 0.0125 years, 4.55 days: the bound of the capacity. The terraformer removes only the vapour in the air and the surface adds vapour in small steps: one such step of 0.005 atm (0.2 % of the surface) leaves 49.8 % of the water, which still costs 4.98.
 const YEARS = (years) => `${years} years`
 // How a page that writes years at one decimal shows them: the precision a minimum is floored to before it is handed over.
 const ONE_PLACE = (years) => `${years.toFixed(1)} years`
@@ -635,7 +635,7 @@ check('vapour plan', 'water vapour a breather rates dangerous is toxic over its 
 })
 
 // ---- The colony-cost bands of a race by its Galaxy Map options -------------------------------------------------------------
-// The columns of FCT_Race the Galaxy Map's own band options are stored in (normal gravity only, then include low gravity, for the bands under 2, 3 and 5: RaceSysSurvey.method_34 draws the badges by them) and the three the tactical map's body colours are (SystemBody.method_92 paints the discs by them, which no page of the app shows).
+// The columns of FCT_Race the Galaxy Map's own band options are stored in (normal gravity only, then include low gravity, for the bands under 2, 3 and 5: the game draws the badges by them) and the three the tactical map's body colours are (the game paints the discs by them, which no page of the app shows).
 const GALAXY_COLUMNS = ['chkHabRangeWorlds', 'chkHabRangeWorldsLowG', 'chkLowCCNormalG', 'chkLowCCLowG', 'chkMediumCCNormalG', 'chkMediumCCLowG']
 const TACTICAL_COLUMNS = ['chkShowBodyColours', 'chkCCIncludeLowG', 'chkGasGiantColour']
 const PLANTED_SCHEMA = [

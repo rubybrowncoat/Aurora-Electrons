@@ -22,7 +22,7 @@ registerRule({
   note: 'Stabilising a jump point is an order of the builder\'s own fleet (move action 64); the point holds no progress. An order that has arrived is construction in progress, counting down while its time required is above 0 and waiting for completion at 0; one that has not arrived is queued or on its way. Only the race\'s own orders are readable, so another race\'s work is not known. The time required has no verified unit, so no time left is given.',
 })
 
-// Source members of the salvo rule, 3.1.0 (the formula of the 3.2 line): `Game.UpdateOrbitalPositions` (Game.cs 27901-27909) sets the position of a missile salvo whose `OrbitLagrangeID` names a Lagrange point to the point's, after the point itself has moved.
+// The salvo rule: the game's orbital position update sets the position of a missile salvo whose `OrbitLagrangeID` names a Lagrange point to the point's, after the point itself has moved.
 registerRule({
   id: 'jumpInfrastructure.ownObjects',
   versions: ['3.2.x'],

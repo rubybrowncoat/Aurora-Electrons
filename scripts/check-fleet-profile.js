@@ -1586,7 +1586,7 @@ check('manual-speed', 'the fleet sails at its hand-set speed held to its maximum
   })
 })
 
-// The tables a fleet's rearming reads, and the columns that name the same rule: the ordnance series and the missile types it holds (Game.cs:8694-8703), the class's and the ship's ordnance template and the ships' and the populations' weapons (Game.cs:10417-10582, 10682, 11018-11304), the stored missile rows (Game.cs:11561-11649), and the missile design's required and available stock with a ship's hangar load, which the substitution list (Race.method_329) and the carrier path order.
+// The tables a fleet's rearming reads, and the columns that name the same rule: the ordnance series and the missile types it holds, the class's and the ship's ordnance template and the ships' and the populations' weapons, the stored missile rows, and the missile design's required and available stock with a ship's hangar load, which the substitution list and the carrier path order.
 const REARMING_TABLES = ['FCT_OrdnanceSeries', 'FCT_OrdnanceSeriesMissileType', 'FCT_ClassOrdnanceTemplate', 'FCT_ShipOrdnanceTemplate', 'FCT_MissileAssignment', 'FCT_Missile', 'FCT_ShipWeapon', 'FCT_PopulationWeapon']
 const REARMING_COLUMNS = ['OrdnanceSeriesID', 'MissileTypeID', 'MissileNumber', 'RemainingDecoys', 'MissilesRequired', 'MissilesAvailable', 'PrecursorMissile', 'HangarLoadType']
 

@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-commander-lists.js [--no-mutations]
 
-  The rules are the game's, read from its source: `CommandersWindow.ButtonRestore_Click` (a restored commander is Active with health risk 1, a seniority one behind the others of the rank, and a history entry), `Fleet.RescueSurvivors` (a commander of the rescuing race found in a pod is rescued, not held: the flags stay as they were, the ship and pod pointers are cleared and a history entry is added; a commander of another race is captured: the prisoner flag is set, the processed flag cleared, the rescuing ship is the transport ship), `Game.LoadRankThemes` with `Race.ApplyRankTheme` (the ranks a race is given are the rows of its theme in order: the naval names, abbreviations and priorities, and the ground ones counted apart, an empty abbreviation becoming R and the number), and `NavalAdminCommand.method_5` (the multiplier a command passes down is 1 plus the commander's bonus less 1 times the share of the command type, times its parent's, where the parent counts only if the child's own system is in the parent's range; the Light Tactical bonus takes the Tactical share, as the Tactical bonus does).
+  The rules are the game's: restoring a commander (a restored commander is Active with health risk 1, a seniority one behind the others of the rank, and a history entry), rescuing survivors (a commander of the rescuing race found in a pod is rescued, not held: the flags stay as they were, the ship and pod pointers are cleared and a history entry is added; a commander of another race is captured: the prisoner flag is set, the processed flag cleared, the rescuing ship is the transport ship), the rank themes (the ranks a race is given are the rows of its theme in order: the naval names, abbreviations and priorities, and the ground ones counted apart, an empty abbreviation becoming R and the number), and a naval admin command's multiplier (the multiplier a command passes down is 1 plus the commander's bonus less 1 times the share of the command type, times its parent's, where the parent counts only if the child's own system is in the parent's range; the Light Tactical bonus takes the Tactical share, as the Tactical bonus does).
   - `table`: the table of the bonus and share pairs the game works with, every wrong pair refused by name, the command type column of each share in the save, and every caller in the source asking for a pair the table holds.
   - `admin`: on the interim 3.1 save (game 141, race 784) and the played 3.2 save (game 161, race 909) the commands carrying the Light Tactical bonus, the Tactical bonus and (as a control) the Mining bonus hold the stored value and the share of their command type, and the multiplier of every command at every system equals the game's recursion.
   - `lists`: the page's own roster, former and held reads, taken from its source and run on the saves and on planted copies, give the commanders of the race as the stored flags say: a retired commander in the former list and not the roster, restored in the roster and not the former list, a commander rescued from a pod of the own race in the roster and in neither other list, a commander captured from a foreign pod in the captor's held list with the processed flag clear and in the former list of the home race with the captor named, and the career entry of the capture.
@@ -11,7 +11,7 @@
   - `b024`: the ship class flag Commercial is stored on the fixture's harvester class and not on the survey class, and the page's ship rows and the specialist ship suggestions are the same whichever way it is set.
   - `text`: the Commanders page's footer says what the lists hold.
 
-  The interim save holds no retired commander, no rescue, no capture and no theme change (every commander serving, every pod pointer empty), so those are planted into in-memory copies with the columns the game's loader reads (`Game.LoadCommanders`: RetireStatus, Prisoner, Processed, HealthRisk, the transport ship, the pod pointer); the played save holds none either, so a stored case needs a game in which one happened. The ranks of 26 races and the commands of two saves are real stored witnesses.
+  The interim save holds no retired commander, no rescue, no capture and no theme change (every commander serving, every pod pointer empty), so those are planted into in-memory copies with the columns the game's loader reads (RetireStatus, Prisoner, Processed, HealthRisk, the transport ship, the pod pointer); the played save holds none either, so a stored case needs a game in which one happened. The ranks of 26 races and the commands of two saves are real stored witnesses.
 
   A planted fault must fail the checks it names by a wrong value, never because a call threw. The rewrites that say the same thing must leave every check green.
 
@@ -124,10 +124,10 @@ const facts = memo(() => {
 
 const history = (id, text, time) => `insert into FCT_CommanderHistory (GameID, CommanderID, HistoryText, GameTime) values (${GAME}, ${id}, ${quote(text)}, ${time})`
 
-// A commander retired and kept by the player (`Commander.Retire`: the status is set and the assignment cleared; the game saves a retired commander only when kept, `Game.SaveCommanders`).
+// A commander retired and kept by the player (the status is set and the assignment cleared; the game saves a retired commander only when kept).
 const retire = (id) => `update FCT_Commander set RetireStatus = 2, RetainRetired = 1, CommandType = 0, CommandID = 0 where CommanderID = ${id}`
 
-// What `CommandersWindow.ButtonRestore_Click` stores: health risk 1, Active, a seniority one behind the other active commanders of the rank, and the history entry.
+// What restoring a commander stores: health risk 1, Active, a seniority one behind the other active commanders of the rank, and the history entry.
 const restore = (person) => [`update FCT_Commander set HealthRisk = 1, RetireStatus = 0, Seniority = (select count(*) from FCT_Commander as VIR_Other where VIR_Other.GameID = ${GAME} and VIR_Other.RankID = ${person.RankID} and VIR_Other.RetireStatus = 0 and VIR_Other.CommanderID <> ${person.CommanderID}) + 1 where CommanderID = ${person.CommanderID}`, history(person.CommanderID, `Restored to ${person.RankName}`, facts().time)]
 
 const PLANTS = {
@@ -161,7 +161,7 @@ const ranksOf = (database, race) => {
   return { naval: rows.filter((row) => row.RankType === 0).map((row) => [row.RankName, row.RankAbbrev]), ground: rows.filter((row) => row.RankType === 1).map((row) => [row.RankName, row.RankAbbrev]) }
 }
 
-// The ranks `Game.LoadRankThemes` builds for each theme and `Race.ApplyRankTheme` gives a race, in the game's order: a row with a naval name makes the next naval rank, a row with a ground name the next ground rank, an empty abbreviation becoming R and the rank's number.
+// The ranks the game builds for each theme and gives a race, in the game's order: a row with a naval name makes the next naval rank, a row with a ground name the next ground rank, an empty abbreviation becoming R and the rank's number.
 const themesOf = (database) => {
   const themes = new Map()
 
@@ -223,7 +223,7 @@ const SOURCES = memo(() => walk(path.join(root, 'src', 'renderer')).filter((file
 const CHECKS = []
 const check = (name, description, run) => CHECKS.push({ name, description, run })
 
-// The pairs of commander bonus row and command type column the game works with (`NavalAdminCommand.method_5`, each branch: the bonus row the commander's value is read from, the column of the command type that scales it). Survey 2, Production 5, Mining 6, Terraforming 9, Reaction 13, Tactical 21 and Light Tactical 39, Logistics 24, Engineering 28; Crew Training 1 under its own share and under Fleet Training's.
+// The pairs of commander bonus row and command type column the game works with (each branch of the naval admin command's multiplier: the bonus row the commander's value is read from, the column of the command type that scales it). Survey 2, Production 5, Mining 6, Terraforming 9, Reaction 13, Tactical 21 and Light Tactical 39, Logistics 24, Engineering 28; Crew Training 1 under its own share and under Fleet Training's.
 const GAME_PAIRS = [[1, 'CrewTraining'], [1, 'FleetTraining'], [2, 'Survey'], [5, 'Industrial'], [6, 'Industrial'], [9, 'Industrial'], [13, 'Reaction'], [21, 'Tactical'], [24, 'Logistics'], [28, 'Engineering'], [39, 'Tactical']]
 const SHARE_COLUMNS = ['Survey', 'Industrial', 'FleetTraining', 'Engineering', 'CrewTraining', 'Tactical', 'Reaction', 'Logistics']
 
@@ -387,7 +387,7 @@ check('lists', 'the page\'s roster, former and held reads give the commanders of
   assert.equal(intact.former.length + intact.held.length, 0, 'and has no former commander and no prisoner')
   assert.equal(read('intact', OTHER_RACE).roster.length, 278, 'the other race serves 278')
 
-  // Restore (CommandersWindow.ButtonRestore_Click).
+  // Restore a retired commander.
   const retired = read('retired')
 
   agrees('retired', retired)
@@ -404,7 +404,7 @@ check('lists', 'the page\'s roster, former and held reads give the commanders of
   assert.equal(restored.held.length, 0, 'and not held')
   assert.equal(restored.history.length, 0, 'the entry of the restoration is of a serving commander, so no former commander\'s record holds it')
 
-  // Rescue of the own race (Fleet.RescueSurvivors).
+  // Rescue of the own race.
   const rescued = read('rescued')
 
   agrees('rescued', rescued)

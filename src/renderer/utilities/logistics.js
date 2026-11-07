@@ -56,7 +56,7 @@ export const loadMspFacilities = async (database, { GameID, RaceID, colonies }) 
   })
 }
 
-// L/yr while production is on: refineries x racial rate x the colony's production modifier, as a 'logistics.refineryOutput' result. A colony with no refineries or with production off makes 0 whatever else is missing; one whose switch, refineries, rate or modifier is not in the save has no figure. Matches the game's mineral ledger (Sorium for fuel refining) on every sample colony.
+// L/yr while production is on: refineries x racial rate x the colony's production modifier, as a 'logistics.refineryOutput' result. A colony with no refineries or with production off makes 0 whatever else is missing; one whose switch, refineries, rate or modifier is not in the save has no figure. Matches the game's mineral ledger (Sorium for fuel refining) on the saves it was checked on.
 export const refineryOutput = (colony, modifier) => {
   const rule = 'logistics.refineryOutput'
 
@@ -556,7 +556,7 @@ export const compact = (value) => {
 const LOGISTICS_VERSIONS = ['3.2.x']
 // The two harvester rules a played save of the line reproduces: its stored tank levels equal the rule's fuel over the gap between two saves (scripts/check-harvesters.js with --since).
 const HARVESTER_VERSIONS = ['3.2.x']
-const LEDGER = 'matches the game\'s own mineral ledger on every sample colony'
+const LEDGER = 'matches the game\'s own mineral ledger on the saves it was checked on'
 
 registerRule({
   id: 'logistics.refineryOutput',

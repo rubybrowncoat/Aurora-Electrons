@@ -3,7 +3,7 @@
 
   Run: bun scripts/check-ground-organisation.js [--no-mutations]
 
-  The rules are the game's, read from its source: the role is `GroundUnitFormation.method_15`, the symbol `GClass147.smethod_9` with `smethod_17` (the tonnage test of the elements) and the headquarters pass `smethod_12` and `smethod_14`, the echelon `smethod_18` (the place of the ground rank of the required rank's priority among the race's ground ranks), the naming `GroundUnitFormationTemplate.GenerateNextFormationName` and `NamingThemeType.method_2`, the template settings `Game.LoadGroundUnitFormationTemplates`. The game saves none of the three figures, so no saved value can confirm them; this check works them out again in SQL and arithmetic written here, from the same stored rows, and compares.
+  The rules are the game's: the role, the symbol (the tonnage test of the elements and the headquarters pass), the echelon (the place of the ground rank of the required rank's priority among the race's ground ranks), the naming and the template settings. The game saves none of the three figures, so no saved value can confirm them; this check works them out again in SQL and arithmetic written here, from the same stored rows, and compares.
   - `role`: the five vehicle bases, infantry and static; the exact 40% and 60% ties (also with fractional sizes, where a float sum would round the wrong way); logistics against twice the rest; the order of the kinds; the class's surface-to-orbit weapon, which counts for the symbol and not for the role; a component counted once per class; a logistics vehicle that counts as a vehicle while the rest leaves logistics out.
   - `symbol`: the template's own symbol type, the auto detection in the game's order, a template that is none, missing, foreign or not stored, the headquarters pass (the commonest symbol below, ties by the order of the game's own string comparison, which puts A2 before A-2 where JavaScript's puts it after and leaves a tie it does not order unknown, only formations at the same colony, a ship-borne formation outside the chart), and the symbol types the game has no name for.
   - `echelon`: the template's own echelon, the place of the ground rank of the required rank's priority among the race's ground ranks (company to army, army above), a naval rank that holds a ground rank's priority, one whose priority no ground rank holds, a required rank of 0 or one the race has not, and ranks not read.
@@ -335,7 +335,7 @@ check('headquartersOrder', 'every child of a tied commonest symbol can be first 
   const symbolOf = async (rows) => (await w.build({ classes, formations: [{ id: 1, elements: [[1, 1]] }, ...rows.map((row) => ({ parent: 1, ...row }))] })).byId.get(1).organisation.symbol
   const unresolved = await symbolOf(children)
 
-  // Terra's counterexample, with exactly these ids and equal capacities: .NET compares the em dash before A, so the game draws Artillery. The port deliberately leaves the em dash outside its measured table and must report unknown rather than Infantry.
+  // Terra's counterexample, with exactly these ids and equal capacities: the game compares the em dash before A, so it draws Artillery. The port deliberately leaves the em dash outside its measured table and must report unknown rather than Infantry.
   assert.equal(unresolved.status, 'unavailable', '2:A Infantry, 3:B Artillery, 4:C Infantry, 5:em dash Artillery: every competing child counts, including the second artillery child hidden by the former id fallback')
   assert.ok(missing(unresolved).some((text) => /order the game gives two formations/.test(text)), `the missing comparison is named: ${missing(unresolved).join(' | ')}`)
   assert.equal((await symbolOf([...children].reverse())).status, 'unavailable', 'reversing the stored rows does not establish the missing comparison')
@@ -583,7 +583,7 @@ const symbolWorked = (rows) => {
   return kind ? kind[1] : s.infantry > 0 && s.vehicles > 0 ? 4 : 14
 }
 
-// The order the game gives two texts: .NET's culture-sensitive comparison drops a hyphen at its first level and only then puts the shorter text first, then weighs the letters and digits, the case and the places of the hyphens. Worked again here, as the game has it, so that a tie is not settled in JavaScript's order.
+// The order the game gives two texts: the game's culture-sensitive comparison drops a hyphen at its first level and only then puts the shorter text first, then weighs the letters and digits, the case and the places of the hyphens. Worked again here, as the game has it, so that a tie is not settled in JavaScript's order.
 const WEIGHTS = ' #&()./_~+0123456789abcdefghijklmnopqrstuvwxyz'
 
 const levelsOf = (text) => {
@@ -830,7 +830,7 @@ check('planted', 'game-shaped template rows on copies of the interim save: a tem
   const intact = await loadedOn(w, copyOf('migrated'))
   const picks = PICKS()
 
-  // A template that sets its symbol, echelon and naming (the columns `Game.LoadGroundUnitFormationTemplates` reads).
+  // A template that sets its symbol, echelon and naming (the columns the game's loader reads).
   const explicit = await loadedOn(w, planted('explicit'))
   const users = intact.formations.filter((node) => node.templates.original.id === picks.used.id)
 
@@ -1014,7 +1014,7 @@ check('text', 'the expanded row of the formations table draws the organisation l
   const sentence = foot.slice(0, foot.indexOf('</div>'))
 
   assert.ok(/The expanded row also gives the role, symbol and echelon the game works out for the formation and how its original template names new formations\./.test(sentence), 'the footer says what the expanded row adds')
-  assert.ok(/The game saves none of the three, so each is read from the rule of its source, and shows as unknown where the save lacks what the rule starts from or where the game would work the required rank out for itself\./.test(sentence), 'and that none is saved, so each is a reading of a rule and may be unknown')
+  assert.ok(/The game saves none of the three, so each is worked out from the game's rule, and shows as unknown where the save lacks what the rule starts from or where the game would work the required rank out for itself\./.test(sentence), 'and that none is saved, so each is a reading of a rule and may be unknown')
 })
 
 // ---- The faults and the rewrites ------------------------------------------------------------------------------------
@@ -1069,7 +1069,7 @@ const FAULTS = [
   { name: 'the page\'s method gives no lines', target: 'surveyPage', from: 'return organisationLines(organisation)', to: 'return []', fails: ['text'] },
   { name: 'the page does not import the lines of the module', target: 'surveyPage', from: 'import { organisationLines } from \'../utilities/ground-organisation\'\n', to: '', fails: ['text'] },
   { name: 'the footer does not say what the expanded row adds', target: 'surveyPage', from: 'The expanded row also gives the role, symbol and echelon the game works out for the formation and how its original template names new formations. ', to: '', fails: ['text'] },
-  { name: 'the footer says the game saves the three', target: 'surveyPage', from: 'The game saves none of the three, so each is read from the rule of its source, and shows as unknown where the save lacks what the rule starts from or where the game would work the required rank out for itself. ', to: 'The game saves all three. ', fails: ['text'] },
+  { name: 'the footer says the game saves the three', target: 'surveyPage', from: 'The game saves none of the three, so each is worked out from the game\'s rule, and shows as unknown where the save lacks what the rule starts from or where the game would work the required rank out for itself. ', to: 'The game saves all three. ', fails: ['text'] },
 ]
 
 // Rewrites that say the same thing: a product with its factors the other way round, a guard written from the other side, a minimum with its operands swapped, a comparison with its operands swapped, a conditional turned round, a copy of an array taken another way, and a class and the order of the columns of a select.

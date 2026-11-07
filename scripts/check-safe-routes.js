@@ -779,7 +779,7 @@ const fixtures = (world) => {
     assert.ok(Array.isArray(safe.AVOID_OPTIONS) && safe.AVOID_OPTIONS.map((option) => option.key).join() === KEYS.join())
   })
 
-  add('voice: what the settings say is impersonal, and no tracked file of the settings cites the game\'s source', () => {
+  add('voice: what the settings say is impersonal, and no tracked file of the settings names a code identifier or file name', () => {
     const vm = transportVm(ON('avoidDanger'), { errors: { avoidSystems: 'boom' } })
     const texts = [
       ...safe.AVOID_OPTIONS.flatMap((option) => [option.label, option.hint]),
@@ -792,7 +792,7 @@ const fixtures = (world) => {
     ]
 
     texts.forEach((text) => assert.ok(!PRONOUNS.test(text), `a pronoun in: ${text}`))
-    ;['safe-routes', 'avoid-routes', 'options'].forEach((key) => assert.ok(!/\b\w+\.cs\b/.test(world.text[key]), `${key} names a source file`))
+    ;['safe-routes', 'avoid-routes', 'options'].forEach((key) => assert.ok(!/\b\w+\.cs\b/.test(world.text[key]), `${key} names a code file`))
   })
 
   add('direction: a haul is planned the way it sails, from the colony that gives to the one that is short, so it is allowed exactly when a run between the same two places is, over the same kilometres, and a short colony in a barred system is not supplied', () => {

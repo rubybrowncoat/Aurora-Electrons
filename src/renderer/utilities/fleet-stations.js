@@ -463,7 +463,7 @@ export const compareStation = (fleet, station) => {
     return { role: 'station', state: 'on', basis: 'orbit', movement: 'follows', where: null, distance: distanceResult(km), reason: '', result: stateResult('on', inputs) }
   }
 
-  // Only exact fleet-to-point coordinates select a source follower (Game.cs 27598-27604). The waypoint can be displaced from its point, and the movement proximity tolerance proves no follow relationship.
+  // Only exact fleet-to-point coordinates make the game's update move a fleet with a point. The waypoint can be displaced from its point, and the movement proximity tolerance proves no follow relationship.
   if (following.following === true && km !== null && km < ON_STATION_KM) {
     return { ...following, role: 'station', state: 'on', basis: 'orbit', onPoint: true, movement: 'follows', where: null, distance: distanceResult(km), reason: '', result: stateResult('on', inputs) }
   }

@@ -164,7 +164,30 @@ const isText = (value) => typeof value === 'string'
 const hasClass = (name) => (value) => isText(value) && value.split(/\s+/).includes(name)
 
 const PRONOUNS = /\b(I|me|my|mine|you|your|yours|we|our|ours)\b/i
-const SOURCE_NAMES = new RegExp(['\\.' + 'cs\\b', 'Record' + 'WealthIncome', 'Civilian' + 'Constracts', 'Ship' + '\\.cs'].join('|'))
+const SOURCE_NAMES = /\b[A-Z][a-z]\w*\.[A-Z]\w*\b|\b(?:s?method_\d+|G(?:Class|Enum)\d+)\b|\.cs\b/
+// The app's own capitalised compounds, each a component, save column or query field these sources must name and none of them the game's code: the bare-name test below lets them through.
+const APP_NAMES = new Set([
+  'AnnualWealth', // the saved yearly balance of a wealth row, shown apart from the window
+  'ChartCanvas', // the shared component that draws the chart
+  'DisplayOrder', // the saved order of a wealth use
+  'FinancesPage', // the page component that mounts the panel
+  'GameID', // the saved game key every read is scoped by
+  'GameTime', // the saved time the window and its scale are read from
+  'LoadState', // the shared component that shows a read's loading and failed states
+  'ProvenanceMark', // the shared component that names the rule behind a figure
+  'RaceID', // the saved race key every read is scoped by
+  'SeriesKey', // the legend key of a chart series
+  'ShippingLineTax', // the tax field of the shipping tax read
+  'ShippingRunway', // the panel component the page mounts
+  'StartYear', // the saved calendar start the dates are counted from
+  'TimeUsed', // the saved time of a wealth row, which the window filters on
+  'UseID', // the saved wealth use of a row
+  'WealthPoints', // the saved balance a wealth row carries
+  'WealthUseID', // the saved wealth use key of a row
+])
+// A bare capitalised compound names a class or a member unless it is one of the app's own words above: no game name may be spelled, so the shape is tested instead.
+const BARE_NAME = /\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b/g
+const namesCode = (text) => SOURCE_NAMES.test(text) || [...text.matchAll(BARE_NAME)].some(([name]) => !APP_NAMES.has(name))
 
 // ---------- the world worked by hand ----------
 
@@ -914,10 +937,10 @@ const componentChecks = (ctx) => {
 
     return seen.every((one) => typeof one.summary === 'string' && one.summary === written && one.summary.trim() !== '') && seen.every((one) => one.problems.length === 0) ? true : short(seen.map((one) => [one.summary === written, one.problems]))
   })
-  add('component: the template compiles, and the panel speaks in no first or second person nor names the game\'s sources', () => {
+  add('component: the template compiles, and the panel speaks in no first or second person nor names a code identifier or file name', () => {
     const errors = templateErrors(componentText)
 
-    return errors.length ? short(errors) : !PRONOUNS.test(componentText.replace(/<style[\s\S]*$/, '').replace(/<script[\s\S]*?<\/script>/, (script) => script.replace(/\/\/[^\n]*/g, ''))) && !SOURCE_NAMES.test(componentText) ? true : 'a pronoun or a source name'
+    return errors.length ? short(errors) : !PRONOUNS.test(componentText.replace(/<style[\s\S]*$/, '').replace(/<script[\s\S]*?<\/script>/, (script) => script.replace(/\/\/[^\n]*/g, ''))) && !namesCode(componentText) ? true : 'a pronoun or a source name'
   })
   add('component: every figure shown in the panel carries a provenance mark, its own or its row\'s, the cells of the balance table having theirs on the column heads', () => {
     const ast = panelAst()
@@ -1086,16 +1109,16 @@ const componentChecks = (ctx) => {
 
     return typeof own === 'string' && own.trim() !== '' && labelKeys.filter((key) => key !== READ).every((key) => labelOf(key) !== own) && failed.includes(own) ? true : short([own, failed])
   })
-  add('page: the template compiles, and the page speaks in no first or second person nor names the game\'s sources', () => {
+  add('page: the template compiles, and the page speaks in no first or second person nor names a code identifier or file name', () => {
     const errors = templateErrors(pageText)
 
-    return errors.length ? short(errors) : !SOURCE_NAMES.test(pageText) && !PRONOUNS.test(mountTag) ? true : 'a pronoun or a source name'
+    return errors.length ? short(errors) : !namesCode(pageText) && !PRONOUNS.test(mountTag) ? true : 'a pronoun or a source name'
   })
-  add('wiring: the utility and the check speak in no first or second person in their texts, and name no source of the game', () => {
+  add('wiring: the utility and the check speak in no first or second person in their texts, and name no code identifier or file name', () => {
     const text = utilityText
     const strings = [...text.matchAll(/'((?:[^'\\\n]|\\.)*)'/g)].map((match) => match[1]).filter((item) => item.length > 12)
 
-    return strings.every((item) => !PRONOUNS.test(item)) && !SOURCE_NAMES.test(text) && !SOURCE_NAMES.test(componentText) ? true : short(strings.filter((item) => PRONOUNS.test(item)))
+    return strings.every((item) => !PRONOUNS.test(item)) && !namesCode(text) && !namesCode(componentText) ? true : short(strings.filter((item) => PRONOUNS.test(item)))
   })
 
   return statements
@@ -1272,7 +1295,15 @@ const MUTATIONS = [
   { name: 'the panel links nowhere for the observed rate', file: V, tag: { name: 'router-link', has: { to: '/history' }, span: 'element' }, to: (text) => text.replace(/^<router-link\b(?:"[^"]*"|'[^']*'|[^>"'])*>|<\/router-link>$/g, ''), fails: ['component'] },
   { name: 'the panel works out the observed rate itself', file: V, at: /historyRecorded: \{ type: Boolean, default: false \},/, to: (m) => `${m[0]}\n    stockRate: { type: Number, default: 0 },`, fails: ['component'] },
   { name: 'the panel speaks to the reader', file: V, tag: { name: 'v-text-field', has: { ':value': 'futureTaxShown' } }, to: (text) => setAttribute(text, 'hint', 'Untouched: your rate carries on'), fails: ['component'] },
-  { name: 'the panel names a source of the game', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${'Ship' + '.cs'} `, fails: ['component'] },
+  { name: 'the panel names a code file with a line cite', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${['Specimen', 'cs'].join('.')}:12-15 `, fails: ['component'] },
+  { name: 'the panel names a qualified member call', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}Specimen.ForbiddenCall() `, fails: ['component'] },
+  { name: 'the panel names a qualified member reference', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}Specimen.ForbiddenReference `, fails: ['component'] },
+  { name: 'the panel names a standalone numbered member', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${['method', '900001'].join('_')} `, fails: ['component'] },
+  { name: 'the panel names a standalone numbered static member', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}${['smethod', '900001'].join('_')} `, fails: ['component'] },
+  { name: 'the panel names a numbered class', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}G${'Class'}900001 `, fails: ['component'] },
+  { name: 'the panel names a numbered enum', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}G${'Enum'}900001 `, fails: ['component'] },
+  { name: 'the panel names a standalone named member of two parts', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}WidgetTotals `, fails: ['component'] },
+  { name: 'the panel names a standalone named member of three parts', file: V, tag: { name: 'div', has: { class: hasClass('panel-foot') } }, to: (text) => `${text}RecalculateWidgetTotals `, fails: ['component'] },
   { name: 'the horizon is left out of the words for an exhaustion past it', file: V, at: /(case 'beyond':\s*return )`[^`]*`/, to: (m) => `${m[1]}'Lasts, to'`, fails: ['component'] },
   { name: 'the exhaustion is not dated', file: V, at: /(case 'exhausted':\s*return )`[^`]*`/, to: (m) => `${m[1]}'Exhausted'`, fails: ['component'] },
   { name: 'the page waits for the tax read', file: P, at: /const OPTIONAL_INPUTS = \[[^\]]*\]/, to: () => 'const OPTIONAL_INPUTS = []', fails: ['page'] },

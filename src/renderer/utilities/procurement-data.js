@@ -4,7 +4,7 @@ import { loadOwnComponents, quantityOf } from './design-data'
 import { PRODUCTION_TYPE, loadedProject } from './production-types'
 import { valueOrNull } from './provenance'
 
-// The production type of a component project (its ProductionID is the component's ID), and the types of the development projects the manifest reads beside it (Engineering, Ordnance and Ground Unit Projects; utilities/production-types.js): only the component and Engineering Projects add components to a colony's stock (Population.cs:2288-2300), the manifest counts the other two by kind.
+// The production type of a component project (its ProductionID is the component's ID), and the types of the development projects the manifest reads beside it (Engineering, Ordnance and Ground Unit Projects; utilities/production-types.js): only the component and Engineering Projects add components to a colony's stock, the manifest counts the other two by kind.
 export const COMPONENT_PROJECT = PRODUCTION_TYPE.COMPONENTS
 
 const PROJECT_TYPES = [COMPONENT_PROJECT, PRODUCTION_TYPE.ENGINEERING_PROJECTS, PRODUCTION_TYPE.ORDNANCE_PROJECTS, PRODUCTION_TYPE.GROUND_UNIT_PROJECTS]

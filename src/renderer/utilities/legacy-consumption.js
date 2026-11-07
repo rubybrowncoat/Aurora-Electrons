@@ -7,7 +7,7 @@ import { capacityKind } from './production-types'
 import { combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, weakestStatus } from './provenance'
 
 const VERSIONS = ['3.2.x']
-// The shipbuilding forecast follows the source's task and yard activity rates.
+// The shipbuilding forecast follows the game's task and yard activity rates.
 const SHIPBUILDING_VERSIONS = ['3.2.x']
 
 // The uses a ledger-less save can switch on and off, in the order the page lists them. `groups` are the ledger's flow groups (FLOW_GROUPS of minerals.js) that the category stands for when a ledger observes it, and `rule` the rule of its modelled results.

@@ -7,7 +7,7 @@ export const KM_PER_AU = 149600000
 
 const hasPosition = (point) => Number.isFinite(point.Xcor) && Number.isFinite(point.Ycor)
 
-// A fleet's Lagrange mode is `FCT_Fleet.LagrangeStatus`, the game's `LagrangeStatusEnum` (LagrangeStatusEnum.cs: ManualLP 0, PlottedLP 1, DynamicLP 2) and never the legacy `FCT_Fleet.AutoLP` text, which the game does not read. An order placed for a fleet inserts the intra-system Lagrange jumps when the fleet is Plotted, or Dynamic with no move order queued, and the destination is no Lagrange point (Fleet.cs 10862, method_267); a Dynamic fleet with orders has its route recalculated by the movement update (Game.cs 6958-6960). Source members of the 3.1.0 decompile, the line's formula.
+// A fleet's Lagrange mode is `FCT_Fleet.LagrangeStatus` (Manual 0, Plotted 1, Dynamic 2) and never the legacy `FCT_Fleet.AutoLP` text, which the game does not read. An order placed for a fleet inserts the intra-system Lagrange jumps when the fleet is Plotted, or Dynamic with no move order queued, and the destination is no Lagrange point; a Dynamic fleet with orders has its route recalculated by the movement update.
 export const LAGRANGE_MODES = Object.freeze({ 0: 'manual', 1: 'plotted', 2: 'dynamic' })
 
 // The mode a `LagrangeStatus` value names ('manual', 'plotted' or 'dynamic'), null for a value that is not read or that the game does not define.
