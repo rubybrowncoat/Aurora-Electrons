@@ -1,6 +1,6 @@
 // The race's ship classes and the parts the propulsion planner starts from: the classes with the engines, fuel tanks and jump drives they mount, the stock fuel tanks the race may fit, and the race's own engine designs; then the shared component contract every planner builds on (a component record with its quantities, flags and provenance, the loaders that read the race's own components, and additive totals that refuse to mix saves or races). Sizes are in hull spaces (HS), power in engine power (EP), fuel in litres, as in design-rules.js.
 
-import { MIN_SENSOR_MSP, MISSILE_STORED_MINERALS, MSP_PER_HS, TONS_PER_HS, agrees, missileLaserStrength, missileReactorMsp, missileReactorOutput, missileSensorStrength, missileWarheadStrength } from './design-rules'
+import { MIN_SENSOR_MSP, MISSILE_STORED_MINERALS, MSP_PER_HS, TONS_PER_HS, agrees, missileLaserStrength, missileReactorMsp, missileReactorOutput, missileSensorStrength, missileWarheadStrength, roundHalfEven } from './design-rules'
 import { STATUS, combine, envelope, fieldList, getRule, inputWords, registerRule, ruleSupports, satisfies, unavailable } from './provenance'
 import { loadFormulaVersion } from './capabilities'
 
@@ -962,7 +962,7 @@ export const missileStageOf = (fixture, row) => {
     return { missing: true }
   }
 
-  return { size: stage.row.Size, cost: stage.row.Cost, fuelRequired: stage.row.FuelRequired, totalFlightTime: stage.row.TotalFlightTime, minerals: { ...Object.fromEntries(MISSILE_STORED_MINERALS.map((name) => [name, stage.row[name]])), Corundium: stage.row.Cost - stored, Vendarite: 0 } }
+  return { size: stage.row.Size, cost: stage.row.Cost, fuelRequired: stage.row.FuelRequired, totalFlightTime: stage.row.TotalFlightTime, minerals: { ...Object.fromEntries(MISSILE_STORED_MINERALS.map((name) => [name, stage.row[name]])), Corundium: Math.max(0, roundHalfEven(stage.row.Cost - stored, 4)), Vendarite: 0 } }
 }
 
 // A stored design as a candidate: its sizes, options and counts from the row, the engine, the stage and the levels' figures given (`missileEngineOf`, `missileStageOf`, the `tech` of `resolveMissileLevels`), and `sizeLimit` the size the design was capped at (0 for none: the save does not store it). Whether an engine or a stage is mounted is read from the row, not from the record given: a row that shows one mounted gets its count, and a missing marker where the record is absent (unknown, never none); a row that shows none is counted 0 (the engine-less designs store 1). A record given for a part the row does not mount, or a count of 0 for one it does, is a contradiction and throws. A ground pod and an enhanced radiation warhead are marked, as the rules do not cover them.
