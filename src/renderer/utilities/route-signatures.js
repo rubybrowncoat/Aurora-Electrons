@@ -6,6 +6,7 @@
 
 import { place } from './deep-links'
 import { ITEM_LOADS, ITEM_UNLOADS, QUANTITY_UNLOADS } from './cargo-actions'
+import { CYCLE_START_ASSUMPTION, ORDER_OFFSET_ASSUMPTION } from './hauling'
 import { orderPlaceKey } from './places'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { LOADS, UNLOADS } from './transport'
@@ -24,12 +25,12 @@ registerRule({
 
 registerRule({
   id: 'hauling.groupCapacity',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['hauling.freightMoved', 'hauling.colonistsMoved'],
   note: 'The yearly moves of each capable fleet of the group, each fleet counted once. A fleet that cannot be timed (not traced, cannot load, cannot move) adds nothing and is named, not guessed.',
-  assumptions: ['every cycle delivers the same load'],
+  assumptions: ['every cycle delivers the same load', ORDER_OFFSET_ASSUMPTION, CYCLE_START_ASSUMPTION],
 })
 
 // Move actions that make a fleet wait at a stock: "Load All Minerals Until Full" and "Load Mineral when X available".
@@ -54,6 +55,7 @@ export const PROBLEMS = Object.freeze({
   'one-order': 'a cycle of one order does not repeat',
   chain: 'an order starts in another system than the one before it ends in',
   'start-unknown': 'an order does not say which system it starts in',
+  'offset-unknown': 'the minimum distance of an order is not in the save',
 })
 
 // What a fleet of a group can do about the group's route.
@@ -196,15 +198,18 @@ export const orderParts = (order, actions, raceId) => {
   const item = action.item > 0 && !isLagrangeJump(order) ? `:i${present(order.DestinationItemType)}.${present(order.DestinationItemID)}` : ''
   const quantity = action.quantity ? `:q${integer(order.MaxItems)}` : ''
   const minimum = action.minimum ? `:m${halfEven(integer(order.MinQuantity))}` : ''
+  const offset = order.MinDistance > 0 ? `:d${order.MinDistance}` : ''
   const typed = ITEM_LOADS.has(order.MoveActionID) || ITEM_UNLOADS.has(order.MoveActionID)
 
-  return { path, service: `${present(order.MoveActionID)}${item}${quantity}${minimum}`, pacing: integer(order.OrderDelay), stop, action: order.MoveActionID, itemId: typed ? present(order.DestinationItemID) : null, amount: integer(order.MaxItems), limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0, movable: MOVABLE_TYPES.has(order.DestinationType) }
+  return { path, service: Number.isFinite(order.MinDistance) ? `${present(order.MoveActionID)}${item}${quantity}${minimum}${offset}` : null, pacing: integer(order.OrderDelay), stop, action: order.MoveActionID, itemId: typed ? present(order.DestinationItemID) : null, amount: integer(order.MaxItems), limited: QUANTITY_UNLOADS.has(order.MoveActionID) && action.quantity && integer(order.MaxItems) > 0, movable: MOVABLE_TYPES.has(order.DestinationType) }
 }
 
 // Why a queue does not close, or null when it does: each order starts in the system the one before it ends in, the first after the last.
 export const chainProblem = (queue, actions) => {
   if (queue.some((order) => !(order.StartSystemID > 0))) {
     return 'start-unknown'
+  } else if (queue.some((order) => !Number.isFinite(order.MinDistance))) {
+    return 'offset-unknown'
   }
 
   const broken = queue.some((order, index) => {
@@ -271,11 +276,11 @@ const hashText = (text) => {
   return hash.toString(16).padStart(8, '0')
 }
 
-// The key of a queue of order parts: `key` (the least rotation of path and service over its period), `pathKey` (the path alone, the same way), `pacingKey` (the delays aligned to the key), `period`, `length`, `repeats` (the times the block repeats), `headPosition` (where the order in progress sits in the key). A queue with no order has none.
+// The key of a queue of order parts: `key` (the least rotation of path and service over its period), `pathKey` (the path alone, the same way), `pacingKey` (the delays aligned to the key), `period`, `length`, `repeats` (the times the block repeats), `headPosition` (where the order in progress sits in the key). A queue with no order or an unread service setting has none.
 export const signatureOf = (parts) => {
   const length = parts.length
 
-  if (!length) {
+  if (!length || parts.some((part) => part.service === null)) {
     return null
   }
 

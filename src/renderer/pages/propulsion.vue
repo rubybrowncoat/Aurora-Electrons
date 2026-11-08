@@ -462,7 +462,7 @@ import { loadClassParts, loadClasses, loadRaceEngines, loadStockTanks, splitClas
 import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TONS_PER_HS, burnPerHour, classSpeed, enduranceHours, fullPowerRangeKm, selfJumpDrive, tankPackageResult, thermalSignature } from '../utilities/design-rules'
 import { engineFields, engineSweep, normaliseEngineOptions, propulsionRun } from '../utilities/design-search'
 import { tracked } from '../utilities/load-tracking'
-import { roundToDecimal } from '../utilities/math'
+import { rangeFigure, rangeText, roundToDecimal } from '../utilities/math'
 import { NO_CLASS_FIGURES, PRESETS, PRESET_KEYS, additionsOf, applyPreview, deleteBrief, emptyBrief, evaluateBrief, loadClassFigures, moveBrief, normaliseBrief, previewPreset, problemsOf, propulsionAlternative, readBriefs, registerBriefs, sameBrief, saveBrief, withAxes, withField } from '../utilities/mission-briefs'
 import { PARETO_AXES, axesOf, describeEmpty, describeFront, normaliseChoice } from '../utilities/pareto'
 import { STATUS, STATUSES, STATUS_MARKS, combine, describeResult, envelope, exportFields, isAvailable, ofRule, unavailable, valueOrNull, weakestStatus } from '../utilities/provenance'
@@ -999,7 +999,7 @@ export default {
       const add = (key, label, noun, domain, unit, wrap) => {
         const described = describeSweep(domain, { unit, format })
 
-        lines.push({ key, label, detail: described.text, notes: described.notes, count: described.count, summary: `${this.count(described.count)} ${noun} (${wrap(format(described.first))} to ${wrap(format(described.last))}${described.unit ? ` ${described.unit}` : ''})` })
+        lines.push({ key, label, detail: described.text, notes: described.notes, count: described.count, summary: `${this.count(described.count)} ${noun} (${wrap(rangeText(described.first, described.last, { format: (value) => rangeFigure(format(value), { unit: described.unit ? ` ${described.unit}` : '' }) }))})` })
       }
 
       if (sweep.sizes) {
@@ -1124,7 +1124,7 @@ export default {
         cost: valueOrNull(provenance.cost),
         crew: sumBy(shipClass.engines, (engine) => engine.crew * engine.count) + sumBy(shipClass.tanks, (tank) => tank.crew * tank.count),
         type: !shipClass.engines.length ? '—' : commercial === shipClass.engines.length ? 'Commercial' : commercial ? 'Mixed' : 'Military',
-        thermal: thermalSignature({ enginePower: heat, stealthRating: 1, fraction: this.fraction, sizeHS: shipClass.sizeHS }),
+        thermal: thermalSignature({ enginePower: heat, stealthRating: 1, fraction: this.fraction, hasMoveOrders: this.fraction > 0, hasEngine: shipClass.engines.length > 0, mountedPower: power, sizeHS: shipClass.sizeHS }),
         cards: shipClass.engines.map((engine) => engineCard(engine, engine.name, engine.count)),
         tanks: shipClass.tanks,
         tankHS: shipClass.tankHS,

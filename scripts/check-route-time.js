@@ -86,7 +86,7 @@ const SCALE = 300
 const WIDE = GRAPH.map((point) => ({ ...point, Xcor: point.Xcor * SCALE, Ycor: point.Ycor * SCALE }))
 
 const crewed = (extra = {}) => ({ speed: SPEED, speedIn: null, shock: SHOCK, shockMissing: [], startDelay: 0, ...extra })
-const ship = (extra = {}) => ({ ShipID: 1, ShipName: 'Hauler', ClassName: 'Freighter', FleetID: 5, GradePoints: 100, CrewMorale: 1, OverhaulFactor: 1, SensorDelay: 0, ArmourThickness: 5, ...extra })
+const ship = (extra = {}) => ({ ShipID: 1, ShipName: 'Hauler', ClassName: 'Freighter', FleetID: 5, RaceNPR: 0, GradePoints: 100, CrewMorale: 1, OverhaulFactor: 1, SensorDelay: 0, ArmourThickness: 5, ...extra })
 const participant = (extra = {}, role = 'independent') => ({ ship: ship(extra), name: extra.ShipName || 'Hauler', role })
 
 // The clock of a journey worked step by step. Every jump sets a timer of `shock` seconds, flights and stops run it down, and a jump waits for it. `rounds` repeats the journey (a cycle) and gives the seconds of the last round.
@@ -416,6 +416,11 @@ const fixtures = (world) => {
     assert.ok(lacking.missing.some((entry) => entry.includes('Baker')) && !lacking.missing.some((entry) => entry.includes('Able')), 'the missing crew names its ship')
     assert.equal(time.fleetTimingOf([participant({ ShipName: 'Baker', GradePoints: null })]).shock, null)
     assert.deepEqual(time.fleetTimingOf([participant({ ShipName: 'Able' })]).shock, { lo: 121, hi: 180 })
+    assert.deepEqual([delays({ RaceNPR: 1 }).lo, delays({ RaceNPR: 1 }).hi], [60, 90], 'standard NPR halves the truncated integer, including odd 121 to 60')
+    assert.deepEqual([time.shipShock(ship({ RaceNPR: 1 }), 'squadron').lo, time.shipShock(ship({ RaceNPR: 1 }), 'squadron').hi], [11, 30], 'squadron NPR is not halved')
+    assert.equal(delays({ RaceNPR: null }), null, 'unread race state is not a player')
+    assert.equal(delays({ RaceNPR: undefined }), null)
+    assert.deepEqual(time.fleetTimingOf([participant({ RaceNPR: true })]).shock, { lo: 60, hi: 90 }, 'the raw flag reaches fleet timing')
   })
 
   add('offset: a delay the fleet still carries from a jump just made starts the route as a stated offset, and the next leg of a plan carries what the first leaves', () => {
@@ -520,6 +525,82 @@ const fixtures = (world) => {
       near(trip.tripSecondsLow, simulate(events, SHOCK.lo, { rounds: 3 }).total)
       assert.equal(trip.cycle.jumps, 2 * route.jumps)
     })
+  })
+
+  add('order-offset: a minimum-distance arrival changes the next leg and every yearly hauling consumer', () => {
+    const orders = [[0, 0, 0], [10, 0, 2], [10, 10, 0]].map(([X, Y, MinDistance], index) => ({ X, Y, ExitX: X, ExitY: Y, SystemID: 1, ExitSystemID: 1, MinDistance, label: String(index) }))
+    const route = hauling.walkRoute(orders)
+    const handling = { seconds: 10, stops: orders.map(() => ({ seconds: 10 / 3 })), blocked: [], unknown: [], versionSupported: true }
+    const fleet = { Speed: 2, FuelPerHour: 3600 }
+    const walk = hauling.cycleWalk(orders, fleet, route, handling, { shock: SHOCK, dust: {}, armour: 5 })
+    const year = hauling.routeYear(fleet, route, { perTrip: { minerals: 3, installations: 2, colonists: 7 } }, handling, 0, walk)
+
+    assert.equal(route.problem, null)
+    ;[8, 10.198039027185569, 14.142135623730951].forEach((km, index) => near(route.legs[index].km, km))
+    near(route.km, 32.34017465091652)
+    near(walk.km, 32.34017465091652)
+    near(year.cycleDays, 0.000302894529229841)
+    near(year.trips, 1205039.9224049123)
+    near(year.minerals + year.installations, 6025199.6120245615)
+    near(year.colonists, 8435279.456834387)
+    near(year.fuel, 19485600.77595088)
+    const results = hauling.routeResults(route, year, handling, walk)
+
+    near(results.cycle.value, year.cycleDays)
+    near(results.freight.value, 6025199.6120245615)
+    near(results.colonists.value, 8435279.456834387)
+    near(results.fuel.value, 19485600.77595088)
+    ;['routeDistance', 'cycleTime', 'freightMoved', 'colonistsMoved', 'fleetFuelPerYear', 'deliveries'].forEach((name) => assert.deepEqual(m.provenance.getRule(`hauling.${name}`).versions, ['3.2.x']))
+  })
+
+  add('order-offset-edges: coincident destinations, offsets larger than the gap, the closing order and transit exits keep their position semantics', () => {
+    const at = (X, Y, MinDistance = 0, extra = {}) => ({ X, Y, ExitX: X, ExitY: Y, SystemID: 1, ExitSystemID: 1, MinDistance, label: `${X},${Y}`, ...extra })
+    const legs = (orders) => hauling.walkRoute(orders).legs.map((leg) => leg.km)
+    const coincident = hauling.walkRoute([at(0, 0), at(0, 0, 100)])
+
+    near(coincident.km, 82.842712474619)
+    coincident.legs.forEach((leg) => near(leg.km, 41.4213562373095))
+    assert.deepEqual(legs([at(0, 0), at(10, 0, 15)]), [5, 5], 'an offset beyond the departure is not zero or a negative distance')
+    assert.deepEqual(legs([at(10, 0, 2), at(0, 0)]), [8, 8], 'a closing order with an offset also sets the first departure')
+    assert.deepEqual(legs([at(0, 0), at(10, 0, 2)]), [8, 8], 'rotating that queue changes no flight')
+    assert.deepEqual(legs([at(0, 0), at(10, 0, 2, { Jumps: 1, ExitX: 20 })]), [8, 20], 'a transit leaves from its far exit, not the offset entry')
+    assert.deepEqual(legs([at(0, 0), at(10, 0, -2)]), [10, 10], 'only positive offsets apply')
+    assert.deepEqual(legs([at(0, 0, 2), at(10, 0, 2)]), [8, 6], 'an all-offset traversal is seeded once at the first saved exit, without a hidden convergence pass')
+  })
+
+  add('order-offset-unknown: an unread minimum distance is not a zero offset or a yearly capacity', () => {
+    const at = (X, extra = {}) => ({ X, Y: 1000, ExitX: X, ExitY: 1000, SystemID: 1, ExitSystemID: 1, MinDistance: 0, ...extra })
+    const handling = { seconds: 10, stops: [{ seconds: 5 }, { seconds: 5 }], blocked: [], unknown: [], versionSupported: true }
+    const fleet = { Speed: 2, FuelPerHour: 3600 }
+    const cargo = { perTrip: { minerals: 3, installations: 2, colonists: 7 } }
+    const from = { Xcor: 1000, Ycor: 1000 }
+    const target = { Xcor: 1010, Ycor: 1000 }
+
+    for (const value of [undefined, null]) {
+      const orders = [at(1000), at(1010, { MinDistance: value })]
+      const route = hauling.walkRoute(orders)
+
+      assert.equal(route.km, null, 'a missing setting cannot establish a distance')
+      assert.deepEqual(route.legs, [])
+      assert.ok(route.problem.includes('minimum distance'))
+      assert.ok(route.missing.some((input) => input.includes('minimum distance')))
+      assert.equal(m.plan.offsetOrderPosition(from, target, value), null, 'the geometry helper does not interpret unknown as nonpositive')
+      assert.equal(hauling.cycleWalk(orders, fleet, route, handling, { shock: SHOCK, dust: {}, armour: 5 }), null)
+      assert.equal(hauling.routeYear(fleet, route, cargo, handling), null)
+      const results = hauling.routeResults(route, null, handling)
+
+      Object.values(results).forEach((result) => {
+        assert.equal(result.status, 'unavailable')
+        assert.equal(result.value, null)
+        assert.deepEqual(result.inputs.missing, route.missing)
+      })
+    }
+
+    const route = hauling.walkRoute([at(1000), at(1010)])
+
+    assert.equal(route.km, 20, 'known zero still measures the full flight')
+    assert.ok(hauling.routeYear(fleet, route, cargo, handling))
+    assert.deepEqual(m.plan.offsetOrderPosition(from, target, 0), target)
   })
 
   add('dust: a nebula caps a fleet\'s speed by its thinnest armour, a system with no known armour has no known speed and the loader reads only the race\'s surveyed systems', async () => {
@@ -778,6 +859,10 @@ const fixtures = (world) => {
 
   add('page: the Routes page offers the time order, ranks by it for a crewed fleet and lists each leg\'s flight, transit and wait so that they reconcile', () => {
     const vm = pageOver()
+    const npr = pageOver({ data: { routeFleetShips: [ship({ RaceNPR: 1 })] } })
+
+    assert.deepEqual(npr.crewTiming.shock, { lo: 60, hi: 90 }, 'Routes carries the raw NPR flag of its loaded ships')
+    assert.deepEqual(npr.timing.shock, { lo: 60, hi: 90 })
 
     assert.equal(vm.planOrder, 'time')
     assert.equal(vm.timeNotice, '')
@@ -909,7 +994,7 @@ const fixtures = (world) => {
     near(walked.total.hi, simulate(highs, SHOCK.hi + time.RETRY_SLACK).total)
     near(rows.reduce((sum, row) => sum + row.flight, 0), walked.flight)
     near(rows.reduce((sum, row) => sum + row.flightHi, 0), walked.flightHi)
-    rows.forEach((row) => assert.equal(vm.flightText(row.flight, row.flightHi).includes(' to '), row.flight !== row.flightHi, 'a flight is a range exactly when its two cases differ'))
+    rows.forEach((row) => assert.equal(/ to |–/.test(vm.flightText(row.flight, row.flightHi)), row.flight !== row.flightHi, 'a flight is a range exactly when its two cases differ'))
     assert.ok(rows.some((row) => row.flight !== row.flightHi))
 
     const last = vm.detailRows[vm.detailRows.length - 1]
@@ -917,6 +1002,16 @@ const fixtures = (world) => {
     assert.deepEqual(last.elapsed, { lo: walked.total.lo, hi: walked.total.hi }, 'the clock of the table ends where the walk does')
     assert.equal(vm.flightText(undefined, undefined), '—')
     assert.equal(vm.flightText(null, null), '—')
+  })
+
+  add('page: a range of spans written by the page\'s own formatter shows its unit once when both ends carry the same single unit, and keeps each end\'s own text when an end carries two parts', () => {
+    const vm = pageOver()
+
+    assert.equal(vm.spanRange(5, 9), '5–9 s')
+    assert.equal(vm.spanRange(120, 180), '2–3 min')
+    assert.equal(vm.spanRange(7200, 10800), '2–3 h')
+    assert.equal(vm.spanRange(200, 250), '3 min 20 s to 4 min 10 s')
+    assert.equal(vm.spanRange(8, 8), '8 s')
   })
 
   const haulFixture = (actions = [1, 1]) => ({
@@ -1502,6 +1597,15 @@ const fixtures = (world) => {
 
 // Each planted fault names the source to change, the text to find (`find`/`replace`, or `at` and `to`) and the checks, by key, that must fail. Anchors are code, never wording.
 const MUTATIONS = [
+  { name: 'an unknown order minimum silently defaults to zero', target: 'hauling', find: 'const unread = orders.findIndex((order) => !Number.isFinite(order.MinDistance))', replace: 'orders = orders.map((order) => ({ ...order, MinDistance: order.MinDistance ?? 0 }))\n  const unread = orders.findIndex((order) => !Number.isFinite(order.MinDistance))', fails: ['order-offset-unknown'] },
+  { name: 'the offset geometry silently defaults an unknown minimum to zero', target: 'route-plan', find: 'if (!Number.isFinite(minimum)) {\n    return null\n  }', replace: 'minimum = minimum ?? 0', fails: ['order-offset-unknown'] },
+  { name: 'minimum-distance orders ignore the offset', target: 'route-plan', find: 'if (!(minimum > 0)) {', replace: 'if (true) {', fails: ['order-offset', 'order-offset-edges'] },
+  { name: 'coincident offset destinations are not separated first', target: 'route-plan', find: 'from.Xcor === target.Xcor && from.Ycor === target.Ycor', replace: 'false', fails: ['order-offset-edges'] },
+  { name: 'the coincident offset separates only the horizontal coordinate', target: 'route-plan', find: 'const Ycor = target.Ycor + (coincident ? 100 : 0)', replace: 'const Ycor = target.Ycor', fails: ['order-offset-edges'] },
+  { name: 'an offset is clamped to the gap', target: 'route-plan', find: 'minimum / Math.hypot(Xcor - from.Xcor, Ycor - from.Ycor)', replace: 'Math.min(1, minimum / Math.hypot(Xcor - from.Xcor, Ycor - from.Ycor))', fails: ['order-offset-edges'] },
+  { name: 'the next order leaves from the destination centre', target: 'hauling', find: '{ ...target, system: order.SystemID, label: order.label }', replace: '{ Xcor: order.X, Ycor: order.Y, system: order.SystemID, label: order.label }', fails: ['order-offset'] },
+  { name: 'a transit leaves from its offset entry', target: 'hauling', find: 'position = exits(order) ?', replace: 'position = false ?', fails: ['order-offset-edges'] },
+  { name: 'the first saved order is always the cycle anchor', target: 'hauling', find: 'Math.max(0, orders.findIndex((order) => !(order.MinDistance > 0) || exits(order)))', replace: '0', fails: ['order-offset-edges'] },
   { name: 'the search takes the flight alone as the time of a jump point', target: 'jump-graph', find: 'const waited = Math.max(0, delay - flight.seconds)', replace: 'const waited = 0', fails: ['longer', 'table'] },
   { name: 'the search adds the delay to the flight instead of overlapping them', target: 'jump-graph', find: 'const waited = Math.max(0, delay - flight.seconds)', replace: 'const waited = delay', fails: ['longer', 'table'] },
   { name: 'the search prices an unknown shock as none', target: 'jump-graph', find: 'if (delay === null || flight.seconds === Infinity) {', replace: 'if (flight.seconds === Infinity) {', fails: ['unknown'] },
@@ -1513,7 +1617,7 @@ const MUTATIONS = [
   { name: 'the crew grade rounds half away from zero', target: 'route-time', find: 'roundHalfEven(Math.sqrt(grade) - 10)', replace: 'Math.round(Math.sqrt(grade) - 10)', fails: ['shock'] },
   { name: 'a hangared ship holds the fleet back', target: 'route-time', at: /const holders = participants\.filter\(\(participant\) => participant\.role !== 'hangared'\)\n {2}const ships/, to: () => 'const holders = participants\n  const ships', fails: ['shock'] },
   { name: 'the fleet draws the smallest delay of its ships', target: 'route-time', find: 'entry.window[key] > best.window[key]', replace: 'entry.window[key] < best.window[key]', fails: ['shock'] },
-  { name: 'a ship with no crew in the save draws no delay', target: 'route-time', at: /if \(performance === null\) \{\n {4}return null\n {2}\}/, to: () => 'if (performance === null) {\n    return { performance: 1, multiplier: 1, lo: 0, hi: 0 }\n  }', fails: ['shock'] },
+  { name: 'a ship with no crew in the save draws no delay', target: 'route-time', at: /if \(performance === null \|\| [^\n]+\) \{\n {4}return null\n {2}\}/, to: () => 'if (performance === null) {\n    return { performance: 1, multiplier: 1, lo: 0, hi: 0 }\n  }', fails: ['shock'] },
   { name: 'a cycle starts with no shock running', target: 'route-time', at: /if \(cyclic\) \{\n {4}events\.forEach\(step\)\n {2}\}/, to: () => 'if (false) {\n    events.forEach(step)\n  }', fails: ['hauling'] },
   { name: 'the loader reads systems the race has no survey of', target: 'route-time', find: 'inner join FCT_RaceSysSurvey', replace: 'left join FCT_RaceSysSurvey', fails: ['dust'] },
   { name: 'the cap multiplies the density instead of dividing by it', target: 'route-time', find: '(armour * DUST_FACTOR) / density', replace: '(armour * DUST_FACTOR) * density', fails: ['dust'] },
@@ -1576,7 +1680,7 @@ const MUTATIONS = [
   { name: 'a cycle of Hauling leaves the speed mode out of the clock of its flights', target: 'hauling', find: '{ speed: fleet.Speed, holdsSpeed: timing.holdsSpeed, speedIn:', replace: '{ speed: fleet.Speed, speedIn:', fails: ['held'] },
   { name: 'the year of Hauling counts the moving time at its lowest case', target: 'hauling', find: 'const movingSeconds = walk ? walk.flightHi :', replace: 'const movingSeconds = walk ? walk.flight :', fails: ['held'] },
   { name: 'the cycle of Transport counts the flying at its lowest case', target: 'transport', find: 'const travelSeconds = timed ? timed.flightHi :', replace: 'const travelSeconds = timed ? timed.flight :', fails: ['fuel'] },
-  { name: 'the flight of a leg is shown at its lowest case only', target: 'routes', find: 'flight === flightHi ? this.span(flight) :', replace: 'true ? this.span(flight) :', fails: ['page'] },
+  { name: 'the flight of a leg is shown at its lowest case only', target: 'routes', find: 'this.spanRange(flight, flightHi)', replace: 'this.spanRange(flight, flight)', fails: ['page'] },
   { name: 'the clock of a leg table takes each flight at its lowest case', target: 'routes', find: '{ lo: timing.flight, hi: timing.flightHi }', replace: '{ lo: timing.flight, hi: timing.flight }', fails: ['page'] },
   { name: 'a transit keeps only the cap of the system it leaves', target: 'route-time', find: '[...slow.filter((held) => held.speed < cap), { speed: cap, budget: SUBPULSE_MAX }]', replace: '[{ speed: cap, budget: SUBPULSE_MAX }]', fails: ['carry', 'ready'] },
   { name: 'the search keeps one state at a jump point', target: 'jump-graph', find: '.some((kept) => firstOnly || covers(kept, state))', replace: '.some(() => true)', fails: ['caps'] },
@@ -1591,6 +1695,9 @@ const MUTATIONS = [
   { name: 'a nebula of no known cap leaves no cap state', target: 'route-time', find: 'return { maxSpeed: timing.speed, capSpeed: cap === null ? 0 : cap < timing.speed ? cap : null }', replace: 'return cap === null ? {} : { maxSpeed: timing.speed, capSpeed: cap < timing.speed ? cap : null }', fails: ['unweighed'] },
   { name: 'a cap of no known speed held is flown at no speed for its whole budget', target: 'route-time', find: 'if (held.some((cap) => cap.speed === 0)) {', replace: 'if (false) {', fails: ['unweighed'] },
   { name: 'a plan names the nebula only where the flight at its lowest case is not known', target: 'route-plan', find: 'missing: flightHi === null ? [NEBULA_GAP] : timingGaps(timing)', replace: 'missing: summed((walk) => walk.flight) === null ? [NEBULA_GAP] : timingGaps(timing)', fails: ['unweighed'] },
+  { name: 'standard NPR shock is not halved', target: 'route-time', find: 'Math.trunc(integer / 2)', replace: 'integer', fails: ['shock'] },
+  { name: 'NPR squadron shock is halved too', target: 'route-time', find: "mode === 'standard' && (ship.RaceNPR === 1 || ship.RaceNPR === true) ?", replace: '(ship.RaceNPR === 1 || ship.RaceNPR === true) ?', fails: ['shock'] },
+  { name: 'odd NPR shock retains a fraction', target: 'route-time', find: 'Math.trunc(integer / 2)', replace: 'integer / 2', fails: ['shock'] },
 ]
 
 // Edits that change nothing the checks may pin: a wording, the form of a binding, the order of a qualifier, a parenthesised condition, a comment. Each is located by its structure.

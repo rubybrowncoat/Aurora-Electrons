@@ -25,26 +25,24 @@ registerRule({
   note: 'What a number of one installation type takes: its build cost times the number, its cargo points times the number (an installation weighs its cargo points in tonnes of cargo), the workers it needs and the minerals of its recipe. A type with Workers above 0 is manned, one with 0 is automated and needs no workers.',
 })
 
-// Worker arithmetic. Fresh bare-result wrappers still erase the retained Ark membership (B11, family 13) and capacity geometry (B06, family 12), so this registration is not released by the arithmetic repair.
 registerRule({
   id: 'mineBootstrap.localBuild',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Population.Efficiency, the colony\'s construction capacity and its running projects', 'DIM_PlanetaryInstallation.Cost, Workers'],
   note: 'The days the colony\'s own construction takes: the build cost over the share of its yearly construction capacity that running projects leave idle. The capacity already carries the saved efficiency, so a colony short of workers builds slower. Manned mines add workers to the colony\'s requirement and can push its efficiency down once built.',
-  assumptions: ['the idle share stays as it is', 'the whole idle share goes to the mines', 'the mineral stock covers the recipe'],
+  assumptions: ['the idle share stays as it is', 'the whole idle share goes to the mines', 'the mineral stock covers the recipe', 'orbital workers use the per-colony saved-position census, held fixed over the forecast'],
 })
 
-// The repaired labour split still erases B11/B06 inputs, and route timing also retains B12. Keep the registration retained until those families release every erased primitive.
 registerRule({
   id: 'mineBootstrap.import',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Population (builder colony capacity and stock)', 'FCT_ShipClass.CargoCapacity, MaxSpeed, Size, MilitaryEngines and the jump drives of the class', 'FCT_Ship (ships of each class)', 'jump points'],
   note: 'The days to build the mines at another colony of the race (the same capacity rule as the local build) and to carry them in by one freighter class (holds times the round trip of the Hauling Planner). A class whose jump drives cover its size crosses unstabilised jump points itself; any other class takes a route over stabilised jump points, or needs a jump-capable tender. The freight deficit is the tonnage beyond one lift of the whole class, the labour deficit the workers the mines need beyond the colony\'s free workers (a shortage the colony already has is not the mines\').',
-  assumptions: ['the freighters are free and fully crewed', 'full holds', 'the stock at the builder covers the recipe', 'mines already installed elsewhere are not counted'],
+  assumptions: ['the freighters are free and fully crewed', 'full holds', 'the stock at the builder covers the recipe', 'mines already installed elsewhere are not counted', 'orbital workers use the per-colony saved-position census, held fixed over the forecast'],
 })
 
 // The formula: the game adds the construction production times the ground formations' construction modifier times their construction rating to the colony's construction capacity, and nothing in the game changes the modifier from its initial 1: the engineer term is the race's construction rate times the rating and nothing scales it by the economic or radiation modifier. The rating is the formations' construction rating (its elements' units times the class's construction rating, times the commander's effective Production multiplier, which the game works over a whole-number command capacity modifier), and the chain of parents passes on a share of 0.25. The per-turn refresh calls the rating with the fortification engineers included and the load-time one with them excluded.

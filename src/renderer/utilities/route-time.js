@@ -32,17 +32,17 @@ export const RETRY_ASSUMPTION = 'a blocked transit is retried at the start of ea
 
 registerRule({
   id: 'route.jumpShock',
-  versions: ['2.7.x'],
+  versions: TIME_VERSIONS,
   units: 's',
   verification: 'estimated',
-  structure: ['FCT_Ship.GradePoints, CrewMorale, OverhaulFactor, SensorDelay, MothershipID'],
-  note: 'The delay a fleet carries after a transit, as the range of what its ships can draw: every ship draws its own delay, (120 + a roll of 1 to 60) seconds for a standard transit, or (10 + a roll of 1 to 20) seconds for a squadron transit, times 2 less its crew performance (one plus the grade bonus, the square root of its grade points less 10 rounded to a whole percent, over 100, times its morale and its overhaul factor), cut to a whole number, and any ship that is not in a hangar holds the fleet back. The fleet\'s range runs from the largest lower bound to the largest upper bound of its ships. Ships in a hangar are given a delay but do not hold the fleet back. A Lagrange transfer gives none. Other transit orders (by sub-fleet, with a division of the fleet) are not timed.',
+  structure: ['FCT_Ship.GradePoints, CrewMorale, OverhaulFactor, SensorDelay, MothershipID', 'FCT_Race.NPR'],
+  note: 'The delay a fleet carries after a transit, as the range of what its ships can draw: every ship draws its own delay, (120 + a roll of 1 to 60) seconds for a standard transit, or (10 + a roll of 1 to 20) seconds for a squadron transit, times 2 less its crew performance, cut to a whole number. For a computer-run race, standard transit halves that integer, again discarding the fraction; squadron transit does not. Crew performance is one plus the grade bonus (the square root of grade points less 10, rounded to a whole percent, over 100), times morale and overhaul factor. Any ship outside a hangar holds the fleet back, so the fleet takes the largest lower and upper bounds. A Lagrange transfer gives none. Other transit orders are not timed.',
   assumptions: ['no commander or rank changes the delay', 'a delay under 0 holds nothing'],
 })
 
 registerRule({
   id: 'route.jumpWait',
-  versions: ['2.7.x'],
+  versions: TIME_VERSIONS,
   units: 's',
   verification: 'estimated',
   structure: ['route.jumpShock', 'the flight to the next jump point', 'the handling between two jumps'],
@@ -61,7 +61,7 @@ registerRule({
 
 registerRule({
   id: 'route.elapsedTime',
-  versions: ['2.7.x'],
+  versions: TIME_VERSIONS,
   units: 'days',
   verification: 'estimated',
   structure: ['route.jumpWait', 'transport.fleetSpeed', 'the explored jump points'],
@@ -97,17 +97,21 @@ export const crewPerformance = (ship) => {
   return (1 + roundHalfEven(Math.sqrt(grade) - 10) / 100) * ship.CrewMorale * ship.OverhaulFactor
 }
 
-// The delay one ship can draw at a transit of `mode` ('standard' or 'squadron') as { performance, multiplier, lo, hi } in whole seconds, or null while its crew is not in the save. A multiplier of 0 or less leaves no delay.
+// The delay one ship can draw at a transit of `mode` ('standard' or 'squadron') in whole seconds. Standard transit requires the raw race flag as RaceNPR: unread is not a player default. NPR halves the crew-multiplied integer, not the draw or the multiplier.
 export const shipShock = (ship, mode = 'standard') => {
   const performance = crewPerformance(ship)
 
-  if (performance === null) {
+  if (performance === null || (mode === 'standard' && ![0, 1, false, true].includes(ship.RaceNPR))) {
     return null
   }
 
   const multiplier = 2 - performance
   const [base, roll] = SHOCK_WINDOWS[mode]
-  const delay = (draw) => Math.max(0, Math.trunc((base + draw) * multiplier))
+  const delay = (draw) => {
+    const integer = Math.trunc((base + draw) * multiplier)
+
+    return Math.max(0, mode === 'standard' && (ship.RaceNPR === 1 || ship.RaceNPR === true) ? Math.trunc(integer / 2) : integer)
+  }
 
   return { performance, multiplier, lo: delay(1), hi: delay(roll) }
 }
@@ -121,7 +125,7 @@ export const fleetShock = (participants, mode = 'standard') => {
     return { status: 'none', lo: null, hi: null, ships, limiting: null, missing: ['a ship of the fleet that is not in a hangar'] }
   }
 
-  const missing = ships.filter((entry) => !entry.window).map((entry) => `the grade points, morale or overhaul factor of ${entry.name}`)
+  const missing = ships.filter((entry) => !entry.window).map((entry) => `the grade points, morale, overhaul factor or race transit flag of ${entry.name}`)
 
   if (missing.length) {
     return { status: 'unknown', lo: null, hi: null, ships, limiting: null, missing }

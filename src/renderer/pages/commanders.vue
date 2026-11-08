@@ -218,7 +218,7 @@
           <div v-if="unassignedOnly && counts.noPost" class="panel-body caption text--secondary">{{ count(counts.noPost) }} commanders with no stored post are not shown: whether they are unassigned is not known.<provenance-mark :result="counts.idleResult" /></div>
           <div v-if="rosterNotRated" class="panel-body caption text--secondary" data-roster-not-rated>{{ rosterNotRated }}</div>
           <div class="panel-foot caption text--secondary">
-            Use it to read the Age and Health risk columns and to set the Age from and Age to range. Age is the species' graduation age plus the years since the commander's career began, to one decimal; the age range is inclusive. Health risk is the game's own figure (1 is the healthiest); its scale isn't documented.
+            Use it to read the Age and Health risk columns and to set the Age from and Age to range. Age is the species' graduation age plus elapsed career years rounded down to a whole year; the age range is inclusive. Health risk is the game's own figure (1 is the healthiest); its scale isn't documented.
           </div>
         </v-card>
 

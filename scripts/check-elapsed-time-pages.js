@@ -473,6 +473,13 @@ const fail = (plain) => {
   throw new Error(`A span with a second part reads in min and s, or h and min: ${plain}`)
 }
 
+// The seconds of each end of a displayed range: the unit may be written once, after the second figure ("5–9 s"), and each end otherwise carries its own ("3 min 20 s to 4 min 10 s", "5 h to 2 d"). A single span reads as one end.
+const spanEnds = (text) => String(text).split(/ to |–/).map((end, index, ends) => {
+  const unit = /([a-z]+)$/.exec(ends[ends.length - 1].trim())
+
+  return /[a-z]/.test(end) || index === ends.length - 1 ? spanInterval(end) : spanInterval(`${end.trim()} ${unit ? unit[1] : ''}`)
+})
+
 const within = (interval, seconds) => seconds >= interval[0] - 1e-6 && seconds <= interval[1] + 1e-6
 
 // What a wait cell shows: missing when no element draws it, a dash for no jump, one span or `lo to hi` as a pair of intervals, words when it gives no figure at all (the wait of a fleet whose crew is not known), and malformed when it is none of these: a cell with a digit in it that reads as no span (a bare `0`) states a figure, so it is never taken for the words.
@@ -485,11 +492,13 @@ const waitCell = (text) => {
     return { kind: 'none' }
   }
 
-  const parts = String(text).split(' to ')
+  const parts = String(text).split(/ to |–/)
 
   try {
     if (parts.length <= 2) {
-      return { kind: 'range', lo: spanInterval(parts[0]), hi: spanInterval(parts[parts.length - 1]) }
+      const ends = spanEnds(text)
+
+      return { kind: 'range', lo: ends[0], hi: ends[ends.length - 1] }
     }
   } catch (error) {}
 
@@ -994,11 +1003,11 @@ const CHECKS = [
   ['cycle-total', 'the Round trip row is the flights, the handling and the wait added up, the lower case beside the upper', (o, x) => cycleChecks(o, x, ({ rows, cycle, stops }) => {
     const wait = walkCycle(cycle.cycle, stops[0][0], stops[1][0]).wait
     const handling = stops.reduce((total, stop) => plus(total, stop), [0, 0])
-    const parts = rows.total.split(' to ')
-    const lo = spanInterval(parts[0])
-    const hi = spanInterval(parts[parts.length - 1])
+    const ends = spanEnds(rows.total)
+    const lo = ends[0]
+    const hi = ends[ends.length - 1]
 
-    return verdict(parts.length <= 2 && overlap(lo, plus(handling, [cycle.flight + wait.lo, cycle.flight + wait.lo])) && overlap(hi, plus(handling, [cycle.flight + wait.hi, cycle.flight + wait.hi])), { total: rows.total, expected: { flight: cycle.flight, handling, wait } })
+    return verdict(ends.length <= 2 && overlap(lo, plus(handling, [cycle.flight + wait.lo, cycle.flight + wait.lo])) && overlap(hi, plus(handling, [cycle.flight + wait.hi, cycle.flight + wait.hi])), { total: rows.total, expected: { flight: cycle.flight, handling, wait } })
   })],
   ['cycle-year', 'the round trips a year are a year over the round trip at its upper case', (o, x) => cycleChecks(o, x, ({ rows, cycle, stops, grouping }) => {
     const wait = walkCycle(cycle.cycle, stops[0][0], stops[1][0]).wait
@@ -1122,7 +1131,8 @@ const haulChecks = (o, x, test) => {
 
       const cell = (role) => only(rows[0].entries, role)
       const read = partsOf(screen.sentences[0])
-      const wait = /^(\S+?)(?: to (\S+?))?$/.exec(read.wait ? read.wait.text : '')
+      const waitText = read.wait ? read.wait.text : ''
+      const wait = /^(\S+?)(?: to |–)(\S+?)$/.exec(waitText) || /^(\S+)$/.exec(waitText)
 
       if (!read.moving || !read.handling || wait === null || !cell('cycle') || !cell('trips') || !cell('moved') || !cell('round-trip')) {
         return short({ parts: read, cells: rows[0].entries })
@@ -1230,7 +1240,7 @@ const EXPANDED = '            <template #expanded-item="{ headers, item }">\n   
 
 /* eslint-disable no-template-curly-in-string */
 const FAULTS = [
-  { name: 'the wait cell states the shortest wait', file: ROUTES_FILE, scope: 'routes', change: swap('wait.lo === wait.hi ? this.span(wait.hi) : `${this.span(wait.lo)} to ${this.span(wait.hi)}`', 'this.span(wait.lo)'), fails: ['wait', 'reconcile', 'tile'] },
+  { name: 'the wait cell states the shortest wait', file: ROUTES_FILE, scope: 'routes', change: swap('this.spanRange(wait.lo, wait.hi)', 'this.span(wait.lo)'), fails: ['wait', 'reconcile', 'tile'] },
   { name: 'the elapsed cell states the lower case', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.elapsed ? span(item.elapsed.hi) : '—' }}", "{{ item.elapsed ? span(item.elapsed.lo) : '—' }}"), fails: ['elapsed'] },
   { name: 'the flight cell counts the flight twice', file: ROUTES_FILE, scope: 'routes', change: swap('{{ flightText(item.flight, item.flightHi) }}', '{{ flightText(item.flight && item.flight * 2, item.flightHi && item.flightHi * 2) }}'), fails: ['flight', 'reconcile'] },
   { name: 'the transit cell states a second for each jump', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.transit === undefined ? '—' : span(item.transit) }}", "{{ item.transit === undefined ? '—' : span(item.transit + 1) }}"), fails: ['flight'] },
@@ -1250,7 +1260,7 @@ const FAULTS = [
   { name: 'the slot of the opened row is one nothing consumes', file: INFORMATION_FILE, scope: 'transport', change: swap(EXPANDED, EXPANDED.replace('#expanded-item=', '#expanded-items=')), fails: ['cycle-rows'] },
   { name: 'the cycle cell states the lower case', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.year.cycleDays, 1) }} d</span>', '{{ fixed(item.year.cycleLowDays, 1) }} d</span>'), fails: ['haul-cycle'] },
   { name: 'the lower case beside the cycle states the upper', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-haul="cycle-low">{{ fixed(item.year.cycleLowDays, 1) }} d</span>', '<span data-haul="cycle-low">{{ fixed(item.year.cycleDays, 1) }} d</span>'), fails: ['haul-cycle'] },
-  { name: 'the wait of the cycle states the shortest wait alone', file: HAULING_FILE, scope: 'hauling', change: swap('`${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} hours`', '`${this.fixed(year.waitLowDays * 24, 1)} hours`'), fails: ['haul-parts', 'haul-reconcile'] },
+  { name: 'the wait of the cycle states the shortest wait alone', file: HAULING_FILE, scope: 'hauling', change: swap('rangeText(year.waitLowDays * 24, year.waitDays * 24, { format: (value) => rangeFigure(this.fixed(value, 1), { unit: \' hours\' }) })', '`${this.fixed(year.waitLowDays * 24, 1)} hours`'), fails: ['haul-parts', 'haul-reconcile'] },
   { name: 'the handling of the cycle counts the hours twice', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading', '{{ fixed(item.handlingHours * 2, 1) }}</span> hours loading and unloading'), fails: ['haul-parts', 'haul-reconcile'] },
   { name: 'the trips a year follow the lower case', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-haul="trips">{{ fixed(item.year.trips, 1) }}</span>', '<span data-haul="trips">{{ fixed(item.year.trips * item.year.cycleDays / item.year.cycleLowDays, 1) }}</span>'), fails: ['haul-year'] },
   { name: 'the sentence of the cycle is not displayed (v-show)', file: HAULING_FILE, scope: 'hauling', change: swap('class="caption text--secondary mt-2" data-cycle-parts>', 'class="caption text--secondary mt-2" v-show="false" data-cycle-parts>'), fails: ['haul-parts'] },
@@ -1266,7 +1276,7 @@ const FAULTS = [
   { name: 'the days flown are named in hours', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.year.movingDays, 2) }}</span> days moving', '{{ fixed(item.year.movingDays, 2) }}</span> hours moving'), fails: ['haul-units'] },
   { name: 'the hours of handling are named in days', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading', '{{ fixed(item.handlingHours, 1) }}</span> days loading and unloading'), fails: ['haul-units'] },
   { name: 'the hours of order delays are named in days', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hours of order delays', '<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> days of order delays'), fails: ['haul-units'] },
-  { name: 'the hours of the wait are named in days', file: HAULING_FILE, scope: 'hauling', change: swap('`${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} hours`', '`${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} days`'), fails: ['haul-units'] },
+  { name: 'the hours of the wait are named in days', file: HAULING_FILE, scope: 'hauling', change: swap('{ unit: \' hours\' }', '{ unit: \' days\' }'), fails: ['haul-units'] },
   { name: 'a fleet at a speed of its own is restored to its maximum in each system', file: HAULING_FILE, scope: 'hauling', world: 'held', change: swap('{ holdsSpeed: profile.useMaximumSpeed === false }', '{ holdsSpeed: false }'), fails: ['haul-year'] },
   { name: 'the wait of a fleet with no crew states a bare zero', file: ROUTES_FILE, scope: 'routes', change: swap("wait === null ? 'Not known' :", "wait === null ? '0' :"), fails: ['wait'] },
   { name: 'the note of the travel time states the flight at its lowest case', file: ROUTES_FILE, scope: 'routes', world: 'capped', change: swap("{ text: this.flightText(flight, flightHi), part: 'flight' }", "{ text: this.span(flight), part: 'flight' }"), fails: ['tile'] },
@@ -1319,13 +1329,13 @@ const routeGroupOutcome = (seen, x, members) => {
 // Every rewrite runs once in a compatible stack of its world (`stacksOf`). The original `alone` metadata identifies the five retained family representatives; it adds no duplicate execution. An explicitly selected singleton still runs.
 const BENIGN = [
   { name: 'the order toggle bound by an explicit value and event', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap('<v-btn-toggle v-model="order" mandatory dense>', '<v-btn-toggle :value="order" mandatory dense @change="order = $event">') },
-  { name: 'the wait text with its condition in brackets', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap("wait === null ? 'Not known' : wait.lo === wait.hi ?", "wait === null ? 'Not known' : (wait.lo === wait.hi) ?") },
+  { name: 'the wait text with its condition in brackets', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap("wait === null ? 'Not known' : this.spanRange(wait.lo, wait.hi)", "(wait === null) ? 'Not known' : this.spanRange(wait.lo, wait.hi)") },
   { name: 'the elapsed cell with its condition turned round', file: ROUTES_FILE, scope: 'routes', change: swap("{{ item.elapsed ? span(item.elapsed.hi) : '—' }}", "{{ !item.elapsed ? '—' : span(item.elapsed.hi) }}") },
   { name: 'the start offset note with its condition in brackets', file: ROUTES_FILE, scope: 'routes', change: swap('v-if="plan.time && plan.time.startDelay > 0"', 'v-if="plan.time && (plan.time.startDelay > 0)"') },
   { name: 'the leg table shown by v-show', file: ROUTES_FILE, scope: 'routes', change: swap(LEG_PANEL, 'data-leg-detail v-show="true" elevation="1">') },
   { name: 'the start offset sentence worded another way', file: ROUTES_FILE, scope: 'routes', alone: true, change: swap('The fleet starts with <span data-part="offset">', 'The fleet sets out with <span data-part="offset">') },
   { name: 'the Wait column header reworded', file: ROUTES_FILE, scope: 'routes', change: swap("{ text: 'Wait', value: 'wait'", "{ text: 'Waiting', value: 'wait'") },
-  { name: 'the range of a round trip with its condition turned round', file: INFORMATION_FILE, scope: 'transport', change: swap('(low === high ? this.span(low) : `${this.span(low)} to ${this.span(high)}`)', '(low !== high ? `${this.span(low)} to ${this.span(high)}` : this.span(low))') },
+  { name: 'the range of a round trip with its condition turned round', file: INFORMATION_FILE, scope: 'transport', change: swap('const range = (low, high) => this.spanRange(low, high)', 'const range = (low, high) => (low > high ? this.spanRange(high, low) : this.spanRange(low, high))') },
   { name: 'the flying row written as a template', file: INFORMATION_FILE, scope: 'transport', change: swap("{ key: 'flight', label: 'Flying', text: known ? this.span(trip.travelSeconds) : 'Not known' }", "{ key: 'flight', label: 'Flying', text: known ? `${this.span(trip.travelSeconds)}` : 'Not known' }") },
   { name: 'the hook of a round trip row bound by the longhand', file: INFORMATION_FILE, scope: 'transport', alone: true, change: swap(':data-cycle-row="row.key"', 'v-bind:data-cycle-row="row.key"') },
   { name: 'the lower case of the cycle shown by a condition turned round', file: HAULING_FILE, scope: 'hauling', change: swap('v-if="item.year.cycleLowDays !== item.year.cycleDays"', 'v-if="item.year.cycleDays !== item.year.cycleLowDays"') },
@@ -1343,7 +1353,7 @@ const BENIGN = [
   { name: 'the hours of handling named by the letter', file: HAULING_FILE, scope: 'hauling', change: swap('{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading', '{{ fixed(item.handlingHours, 1) }}</span> h loading and unloading') },
   { name: 'the hours of order delays named by their short word', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hours of order delays', '<span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hrs of order delays') },
   { name: 'the unit of the days flown inside the figure\'s own text', file: HAULING_FILE, scope: 'hauling', change: swap('<span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving', '<span data-part="moving">{{ fixed(item.year.movingDays, 2) }} days</span> moving') },
-  { name: 'the hours of the wait named by the short word', file: HAULING_FILE, scope: 'hauling', change: swap('`${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} hours`', '`${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} hrs`') },
+  { name: 'the hours of the wait named by the short word', file: HAULING_FILE, scope: 'hauling', change: swap('{ unit: \' hours\' }', '{ unit: \' hrs\' }') },
   { name: 'the Trips column header reworded', file: HAULING_FILE, scope: 'hauling', change: swap("{ text: 'Trips / yr', value: 'tripsSort'", "{ text: 'Trips a year', value: 'tripsSort'") },
   { name: 'the speed of a fleet written with its comparison turned round', file: HAULING_FILE, scope: 'hauling', world: 'held', change: swap('{ holdsSpeed: profile.useMaximumSpeed === false }', '{ holdsSpeed: false === profile.useMaximumSpeed }') },
   { name: 'the unknown wait reworded', file: ROUTES_FILE, scope: 'routes', change: swap("wait === null ? 'Not known' :", "wait === null ? 'Unknown' :") },

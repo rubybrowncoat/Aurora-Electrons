@@ -555,7 +555,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Check where a bought output is shipped by mass driver and what holds the transfer back. A row is listed for each colony of the race whose civilian mining complexes produce, in every system whatever the view<span v-if="policyAudit.idle">; {{ counted(policyAudit.idle, 'colony', 'colonies') }} with complexes that produce nothing {{ policyAudit.idle === 1 ? 'is' : 'are' }} left out, as the game neither charges nor pays for them</span>. A bought output goes to the colony's stockpile, or by mass driver to its destination when that destination is valid. A taxed output reaches no stockpile, and a computer-run empire keeps its output at no charge. {{ policyRatesNote }} The bought output leaves in a packet of its own whatever the source's drivers can send. The output is set against the drivers' capacity, which limits the stock above the reserve, only where both are known. A destination the game never offers is invalid, and a missing mass driver at either end is listed apart. If switched is hypothetical, the choice is made in the game and nothing here changes the save. Acknowledging a taxed colony as intended is kept for the race and colony, can be withdrawn and leaves the row listed. A dash is a figure the save does not record, never 0. Hover its mark for what is missing.
+            Check where a bought output is shipped by mass driver and what holds the transfer back. A row is listed for each colony of the race whose civilian mining complexes produce, in every system whatever the view<span v-if="policyAudit.idle">; {{ counted(policyAudit.idle, 'colony', 'colonies') }} with complexes that produce nothing {{ policyAudit.idle === 1 ? 'is' : 'are' }} left out, as the game neither charges nor pays for them</span>. A bought output goes to the colony's stockpile, or by mass driver to its destination when that destination is valid. A taxed output reaches no stockpile, and a computer-run empire keeps its output at no charge. {{ policyRatesNote }} After other mining enters local stock, bought output first fills each mineral reserve; only the remainder leaves in a packet of its own whatever the source's drivers can send. A one-year remainder at held mining rates is set against the drivers' capacity, which limits the stock above the reserve, only where both are known. A destination the game never offers is invalid, and a missing mass driver at either end is listed apart. If switched is hypothetical, the choice is made in the game and nothing here changes the save. Acknowledging a taxed colony as intended is kept for the race and colony, can be withdrawn and leaves the row listed. A dash is a figure the save does not record, never 0. Hover its mark for what is missing.
           </div>
         </v-card>
       </template>
@@ -585,10 +585,11 @@ import { cmcSummary } from '../utilities/cmc-summary'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadCmcBlocks, loadCmcReach, loadRoutes } from '../utilities/colonization-data'
 import { linkTo, queryBodies, queryId, queryIds } from '../utilities/deep-links'
-import { PRESSING, STOCK_COLUMNS, STOCK_STATES, colonyMineralResults, loadPacketsInFlight, loadQueueNeeds, worstState } from '../utilities/colony-minerals'
+import { PRESSING, STOCK_COLUMNS, STOCK_STATES, colonyMineralResults, loadPacketsInFlight, loadQueueNeeds, stockExporting, worstState } from '../utilities/colony-minerals'
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
+import { capacitySum, capacityTerms } from '../utilities/mining-data'
 import { ACCESSIBILITY_FLOOR, CMC_MINERAL_IDS, MASS_DRIVER_TONS, MINERALS, bestSiteResult, betterSite, bodyPotentialResult, compact, compactYears, depositPotential, depositPotentialResult, depositReadable, massDriverRateResult, miningDistanceResult, pastHalf, perMineResult, qualifiesForCmc, withinOrbitalReach } from '../utilities/minerals'
 import { describeResult, isAvailable, ruleSupports, sumResults, unavailable, valueOrNull } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
@@ -987,7 +988,7 @@ export default {
     colonyStocks() {
       const { needs, packets } = this
       return this.colonies.map((colony) => {
-        const exporting = colony.MassDrivers > 0 && colony.MassDriverDest > 0
+        const exporting = stockExporting(colony)
 
         return { colony, exporting, minerals: colonyMineralResults(colony, needs, packets, exporting) }
       })
@@ -1243,7 +1244,7 @@ export default {
           stateNote: this.focus ? '' : [noteOf(state === 'unknown' ? unknownNames : flaggedNames), state !== 'unknown' && unknownNames.length ? `${unknownNames.length} unknown` : null].filter(Boolean).join(' · '),
           stateTitle: (state === 'unknown' ? unknownNames : flaggedNames).join(', '),
           destination,
-          driverResult: massDriverRateResult(colony.MassDrivers, colony.InstallationGaps),
+          driverResult: massDriverRateResult(colony.MassDrivers, colony.InstallationGaps, colony.MassDriverTerms),
           driverSort: colony.MassDrivers,
         }
       }).filter(Boolean)
@@ -1747,14 +1748,14 @@ export default {
         return 'Not known'
       }
 
-      return `${compact(result.value.output)} a year ${state === 'within' ? 'within' : 'over'} the drivers' ${compact(result.value.capacity)}`
+      return `${compact(result.value.shipped)} a year ${state === 'within' ? 'within' : 'over'} the drivers' ${compact(result.value.capacity)}`
     },
 
     throughputNote(row) {
       const { state } = row.throughput
 
       if (state === 'over') {
-        return 'Ships in full in a packet of its own; the drivers\' capacity limits the stock above the reserve.'
+        return 'The remainder ships in its own packet after local reserves; the drivers\' capacity limits other stock.'
       } else if (state === 'stays') {
         return isAvailable(row.held) ? `${compact(row.held.value)} held here` : 'Stock here not known'
       } else if (state === 'unbought' && row.target === 'valid' && isAvailable(row.capacity)) {
@@ -1844,7 +1845,7 @@ export default {
           return []
         }
 
-        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_Population.Capital, FCT_Population.MassDriverDest, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_RaceSysSurvey.Name as SystemName, coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.Automines, 0) as Automines, coalesce(VIR_Installations.Complexes, 0) as Complexes, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers, coalesce(VIR_Installations.Gaps, 0) as InstallationGaps, coalesce(VIR_Installations.ComplexGaps, 0) as ComplexGaps from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join (select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Mines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Automines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers, sum(case when FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.CivilianInstallation is null or DIM_PlanetaryInstallation.Workers is null or DIM_PlanetaryInstallation.MiningProductionValue is null or DIM_PlanetaryInstallation.MassDriverValue is null then 1 else 0 end) as Gaps, sum(case when DIM_PlanetaryInstallation.CivilianInstallation is null or (DIM_PlanetaryInstallation.CivilianInstallation = 1 and (FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MiningProductionValue is null)) then 1 else 0 end) as ComplexGaps from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_Population.Capital, FCT_Population.MassDriverDest, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.ComponentNumber, FCT_RaceSysSurvey.Name as SystemName, case when VIR_Installations.PopID is null then 0 else VIR_Installations.Mines end as Mines, case when VIR_Installations.PopID is null then 0 else VIR_Installations.Automines end as Automines, case when VIR_Installations.PopID is null then 0 else VIR_Installations.Complexes end as Complexes, VIR_Installations.ComplexesTerms, case when VIR_Installations.PopID is null then 0 else VIR_Installations.MassDrivers end as MassDrivers, VIR_Installations.MassDriverTerms, coalesce(VIR_Installations.Gaps, 0) as InstallationGaps, coalesce(VIR_Installations.ComplexGaps, 0) as ComplexGaps from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join (select FCT_PopulationInstallations.PopID, ${capacitySum('DIM_PlanetaryInstallation.MiningProductionValue', 'DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0')} as Mines, ${capacitySum('DIM_PlanetaryInstallation.MiningProductionValue', 'DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0')} as Automines, ${capacitySum('1', 'DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0')} as Complexes, ${capacityTerms('1', 'DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0')} as ComplexesTerms, ${capacityTerms('DIM_PlanetaryInstallation.MassDriverValue', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as MassDriverTerms, ${capacitySum('DIM_PlanetaryInstallation.MassDriverValue', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as MassDrivers, sum(case when FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.CivilianInstallation is null or DIM_PlanetaryInstallation.Workers is null or DIM_PlanetaryInstallation.MiningProductionValue is null or DIM_PlanetaryInstallation.MassDriverValue is null then 1 else 0 end) as Gaps, sum(case when FCT_PopulationInstallations.Amount is not 0 and (DIM_PlanetaryInstallation.MiningProductionValue > 0) is not 0 and (DIM_PlanetaryInstallation.CivilianInstallation is null or (DIM_PlanetaryInstallation.CivilianInstallation = 1 and (FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MiningProductionValue is null))) then 1 else 0 end) as ComplexGaps from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return Object.freeze(colonies)
       }),
@@ -1930,13 +1931,13 @@ export default {
     // The race's civilian mining complex colonies and their output, for the policy panel.
     policy: {
       get: tracked('policy', async function () {
-        const blocked = this.blockedBonuses
-
         if (!this.database || !this.GameID || !this.RaceID) {
           return NO_CMC_POLICY
         }
 
-        return await loadCmcPolicy(this.database, { GameID: this.GameID, RaceID: this.RaceID, blocked })
+        const gates = await this.capabilityGates('/minerals')
+
+        return await loadCmcPolicy(this.database, { GameID: this.GameID, RaceID: this.RaceID, ...gates })
       }),
       default: NO_CMC_POLICY,
     },

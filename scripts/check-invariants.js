@@ -595,9 +595,9 @@ const defineCases = (modules) => {
   })
 
   // ---- Industry queue demand ----------------------------------------------------------------------------------
-  // One queued project at a colony: 10 units of 100 BP each costing 5 t Duranium a unit, the whole of the colony's capacity.
-  const queued = (extra = {}) => ({ PopulationID: 1, ProductionType: 0, Percentage: 100, Queue: 1, Amount: 10, ProdPerUnit: 100, Duranium: 5, Neutronium: 0, Corbomite: 0, Tritanium: 0, Boronide: 0, Mercassium: 0, Vendarite: 0, Sorium: 0, Uridium: 0, Corundium: 0, Gallicite: 0, ...extra })
-  const demandOf = (project, capacity) => mineralOutlook.queueDemandResult(minerals.annualQueueDemand([project], () => capacity), 'Duranium')
+  // One running project at a colony: 10 units of 100 BP each costing 5 t Duranium a unit, the whole of the colony's capacity.
+  const queued = (extra = {}) => ({ ProjectID: 1, Pause: 0, PopulationID: 1, ProductionType: 0, Percentage: 100, Queue: 0, Amount: 10, ProdPerUnit: 100, Duranium: 5, Neutronium: 0, Corbomite: 0, Tritanium: 0, Boronide: 0, Mercassium: 0, Vendarite: 0, Sorium: 0, Uridium: 0, Corundium: 0, Gallicite: 0, ...extra })
+  const demandOf = (project, capacity) => mineralOutlook.queueDemandResult(minerals.annualQueueDemand([project], () => capacity, () => 31536000), 'Duranium')
 
   invariant('queue demand', 'a complete project at a known capacity gives its tonnes (control)', () => {
     const result = demandOf(queued(), 1000)
@@ -636,7 +636,7 @@ const defineCases = (modules) => {
 
   invariant('queue demand', 'a project with no production type is never taken as construction: its demand and that of the colony\'s other projects are unknown, naming the type', () => {
     const projects = [queued({ ProductionType: null }), queued({ Queue: 2 })]
-    const result = mineralOutlook.queueDemandResult(minerals.annualQueueDemand(projects, () => 1000), 'Duranium')
+    const result = mineralOutlook.queueDemandResult(minerals.annualQueueDemand(projects, () => 1000, () => 31536000), 'Duranium')
 
     assert.equal(result.status, 'unavailable')
     assert.ok(result.inputs.missing.some((name) => name.includes('production type')), `missing: ${result.inputs.missing}`)
@@ -644,7 +644,7 @@ const defineCases = (modules) => {
 
   invariant('queue demand', 'a project with no production type at another colony leaves this colony\'s demand known (control)', () => {
     const projects = [queued({ ProductionType: null, PopulationID: 2, Duranium: 0 }), queued()]
-    const queue = minerals.annualQueueDemand(projects, () => 1000)
+    const queue = minerals.annualQueueDemand(projects, () => 1000, () => 31536000)
 
     assert.equal(queue.demand.Duranium, 50)
     assert.equal(mineralOutlook.queueDemandResult(queue, 'Duranium').status, 'estimated')
@@ -1774,7 +1774,7 @@ const defineCases = (modules) => {
     assert.equal(logistics.refineryOutput({ ...colony, FuelProdStatus: 0 }, null).value, 0)
     assert.equal(logistics.refineryOutput({ ...colony, Refineries: 0 }, null).value, 0)
     assert.equal(logistics.refineryOutput({ ...colony, FuelProdStatus: null }, 1.5).status, 'unavailable')
-    assert.equal(logistics.refineryYield({ ...colony, Sorium: 0.5 }, null).value, 0)
+    assert.equal(logistics.refineryYield({ ...colony, Sorium: 0.5 }, null).status, 'unavailable')
     assert.equal(logistics.refineryYield({ ...colony, Sorium: 100 }, 1.5).value, 6000)
     assert.equal(logistics.refineryYield({ ...colony, Sorium: null }, 1.5).status, 'unavailable')
     assert.equal(logistics.mspProduction(colony, 2).value, 400)
@@ -2011,14 +2011,25 @@ const defineCases = (modules) => {
     assert.equal(rows[1].cells.morale.result.status, 'unavailable')
   })
 
-  invariant('warnings', 'a damaged component with no stored cost gives a dash and an unavailable result for the ship\'s repair, never a cost of 0, and a stored cost of 0 stays 0', async () => {
-    const item = (ComponentCost) => ({ ShipID: 1, FleetID: 1, ShipName: 'Ship', ShippingLineID: 0, Verdict: 1, FleetName: 'Fleet', ComponentName: 'Gun', ComponentCost })
-    const [unknown] = await readCheck('damaged-ships', [item(null), item(5)])
+  invariant('warnings', 'a damaged component with no stored cost or count gives a dash and an unavailable result for the ship\'s repair, never a cost of 0, and a stored cost of 0 stays 0', async () => {
+    const item = (ComponentCost, ComponentNumber = 1) => ({ ShipID: 1, FleetID: 1, ShipName: 'Ship', ShippingLineID: 0, Verdict: 1, FleetName: 'Fleet', ComponentName: 'Gun', ComponentCost, ComponentNumber })
+    const [unknown] = await readCheck('damaged-ships', [item(null, null), item(5)])
+    const [uncounted] = await readCheck('damaged-ships', [item(5, null)])
     const [zero] = await readCheck('damaged-ships', [item(0)])
 
     assert.equal(unknown.cells.cost.text, '—')
     assert.equal(unknown.cells.cost.result.status, 'unavailable')
+    assert.deepEqual(unknown.cells.cost.result.inputs.missing, ['the cost of a damaged component', 'the number of damaged instances of a component'])
+    assert.deepEqual(uncounted.cells.cost.result.inputs.missing, ['the number of damaged instances of a component'])
     assert.equal(zero.cells.cost, '0 MSP')
+  })
+
+  invariant('warnings', 'the repair cost of a damaged ship counts every damaged instance of a component: three at 10 MSP repair for 60 and one at 4 for 8, a total of 68', async () => {
+    const item = (ComponentID, ComponentName, ComponentCost, ComponentNumber) => ({ ShipID: 1, FleetID: 1, ShipName: 'Ship', ShippingLineID: 0, Verdict: 1, FleetName: 'Fleet', ComponentID, ComponentName, ComponentCost, ComponentNumber })
+    const [ship] = await readCheck('damaged-ships', [item(10, 'Gun', 10, 3), item(11, 'Engine', 4, 1)])
+
+    assert.equal(ship.cells.components, 'Gun (60 MSP), Engine (8 MSP)')
+    assert.equal(ship.cells.cost, '68 MSP')
   })
 
   invariant('warnings', 'a lifepod keeps its crew of 0, and without a game time or a creation time its time remaining is a dash with an unavailable result and not an expiry', async () => {

@@ -237,7 +237,7 @@
             </v-simple-table>
           </div>
           <div class="panel-foot caption text--secondary">
-            Use it to see where orbital population sits and how much room is left for more. People aboard an Ark ship count as orbital population only while its fleet sits at its colony's body with no move orders and is not a civilian fleet. Empty berths are room in the standard berths, not people, and stay apart from the population in orbit; people beyond the berths of a damaged ship are not counted. Orbital people count toward services and manufacturing workers but not surface growth or agriculture. Their number stays fixed over the colony horizon: orbital growth and transfer to the surface are not forecast. The orbital census retains its coordinate-membership limitations. A dash is a figure the save cannot support, and the mark beside it names what is missing.
+            Use it to see where orbital population sits and how much room is left for more. Membership is evaluated separately from the saved fleet coordinates, strictly within 1 unit on each axis, with no move orders and no civilian function. Systems do not restrict the match: coincident bodies can each count the same ship. An assignment to another colony on the same body holds the fleet there; no assignment, a proven absent target or one on another body permits reassignment. Several possible receiving colonies on one body retain attribution alternatives, without guessing an order. A figure remains available when every alternative gives the same contribution, including zero people aboard an empty ship. Body rows and the headline count each applicable ship once, even when its colony attribution is unresolved; the headline keeps the same fleet assignment across bodies rather than treating their alternatives independently. Body censuses at coincident coordinates are not additive ship inventories. Empty standard berths are room, not people, and people beyond the berths are not counted. Orbital people count toward services and manufacturing workers but not surface growth or agriculture. Saved positions, assignments and orbital numbers stay fixed over the horizon; orbital growth and surface transfers are not forecast. An unknown cargo category or other relevant input leaves dependent figures unavailable rather than empty. The mark beside a dash names what is missing.
           </div>
         </v-card>
 
@@ -323,7 +323,7 @@ import { WORKER_TOLERANCE, attentionResult, outlookColonies, people as peopleOf,
 import { loadColonyEnvironments, orbitalPopulationResult, withColonyEnvironment } from '../utilities/colony-environment'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { industryUsage, prepareForecast } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
@@ -1007,7 +1007,9 @@ export default {
         return `Unknown, ${this.missingText(ship.results.orbit)}`
       }
 
-      return ship.orbit.counted ? (ship.orbit.PopulationID ? 'At its colony' : 'At a colony, assigned by the game') : ORBIT_REASONS[ship.orbit.reason]
+      if (!ship.orbit.counted) return ORBIT_REASONS[ship.orbit.reason]
+      if (!ship.orbit.bodies.length) return 'At a colony body; body attribution unresolved'
+      return `At ${ship.orbit.bodies.length} colony ${ship.orbit.bodies.length === 1 ? 'body' : 'bodies'}${ship.orbit.uncertain ? '; colony attribution unresolved' : ''}`
     },
     // A column of null-last values: an unavailable figure sorts after every number, in either direction, never as 0.
     sortRows(items, sortBy, sortDesc) {
@@ -1153,7 +1155,7 @@ export default {
       const earliest = Math.round(event.earliest)
       const latest = Math.round(event.latest)
 
-      return `${event.approximate ? 'About day' : 'Day'} ${earliest === latest ? earliest : `${earliest} to ${latest}`}`
+      return `${event.approximate ? 'About day' : 'Day'} ${rangeText(earliest, latest)}`
     },
     eventEffect(event) {
       const workers = event.delta * event.units
@@ -1270,12 +1272,12 @@ export default {
     arks: {
       get: tracked('arks', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return { ships: [], cargo: [], colonies: [] }
+          return { ships: [], cargo: [], colonies: [], assignments: [] }
         }
 
         return await loadArks(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
-      default: () => ({ ships: [], cargo: [], colonies: [] }),
+      default: () => ({ ships: [], cargo: [], colonies: [], assignments: [] }),
     },
     // The industrial projects with what each is made of, as the queue forecast takes them; read only with the queue counted.
     industry: {

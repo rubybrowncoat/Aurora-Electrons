@@ -3,6 +3,8 @@ import { linkTo, place } from '../deep-links'
 import { roundHalfEven } from '../design-rules'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { loadFormulaVersion } from '../capabilities'
+import { compare, fromString, toNumber } from '../decimal'
+import { loadOrbitalCensus } from '../orbital-census'
 import { QUARTER, TRAINING_COMMAND, TRAINING_JOINS, allOf, amount, anyOf, bandOf, bandWords, categoriesOf, checksOf, classText, colonyText, COLONY_COLUMNS, COLONY_JOINS, countWords, figure, lacking, levelTone, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'ships', title: 'Ships', summary: 'Review ships and ship classes with crew, damage, maintenance, training or design problems.' }
@@ -40,19 +42,18 @@ const pairCell = (ctx, { left, right, join, stack = false, leftName, rightName, 
   return names.length ? { text, ...unknown } : text
 }
 
-// The colonies where a fleet can take on replacement crew: the race's own with more than a million people, the fleet's own system first and then the largest. Up to three are named.
+// Replacement crew needs strictly more than one million surface and orbital residents. Unknown census bounds never become a claim that no destination exists.
 const REPLACEMENT_LIMIT = 3
 
-const replacementText = (ship, colonies) => {
-  if (!colonies.length) {
-    return 'No colony of the race has over a million people'
-  }
-
+const replacementText = (ctx, ship, colonies) => {
+  const eligible = colonies.filter((colony) => colony.Eligible === true)
+  const uncertain = colonies.filter((colony) => colony.Eligible === null)
   const inFleetSystem = (colony) => Number(colony.SystemID === ship.SystemID)
-  const ordered = [...colonies].sort((alpha, beta) => inFleetSystem(beta) - inFleetSystem(alpha) || beta.Population - alpha.Population)
+  const ordered = [...eligible].sort((alpha, beta) => inFleetSystem(beta) - inFleetSystem(alpha) || beta.TotalPopulation - alpha.TotalPopulation)
   const named = ordered.slice(0, REPLACEMENT_LIMIT).map((colony) => colonyText(colony)).join('; ')
+  const text = ordered.length > REPLACEMENT_LIMIT ? `${named}; ${ordered.length - REPLACEMENT_LIMIT} more` : named || (uncertain.length ? 'Replacement destinations not known' : 'No colony of the race has over a million people')
 
-  return ordered.length > REPLACEMENT_LIMIT ? `${named}; ${ordered.length - REPLACEMENT_LIMIT} more` : named
+  return uncertain.length ? { text: `${text}${named ? '; other destinations not known' : ''}`, result: ctx.unknown([...new Set(uncertain.flatMap((colony) => colony.CensusMissing))]) } : text
 }
 
 // The crew grade the game turns into a performance modifier, in percent: the root of the grade points less 10. It and the crew morale are separate from the share of the crew aboard.
@@ -103,11 +104,11 @@ export const checks = checksOf([
     material: 'the crew aboard crossing 75% of what the class needs',
     captured: [bandWords('crew under 75% of what the class needs', 'crew at 75% or more of what the class needs')],
     title: (count) => `${amount(count, 'ship')} short of crew`,
-    rule: 'A ship has fewer crew aboard than its class needs, so its holds and its survey, harvester, orbital mining, maintenance, salvage, terraforming and stabilisation modules work at the share aboard (estimates read from the game\'s rules; over-crewing adds nothing). Morale and crew grade are separate, and a class with no morale check still loses this throughput; replacement crew joins at a colony of over a million people.',
+    rule: 'A ship has fewer crew aboard than its class needs, so its holds and its survey, harvester, orbital mining, maintenance, salvage, terraforming and stabilisation modules work at the share aboard (estimates read from the game\'s rules; over-crewing adds nothing). Morale and crew grade are separate, and a class with no morale check still loses this throughput; replacement crew joins at a colony of strictly over a million surface and orbital residents.',
     evidence: {
       verification: 'estimated',
-      versions: ['2.7.x'],
-      structure: ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_ClassComponent', 'FCT_DamagedComponent'],
+      versions: ['3.2.x'],
+      structure: ['FCT_Ship.CurrentCrew', 'FCT_ShipClass.Crew', 'FCT_ClassComponent', 'FCT_DamagedComponent', 'population.orbitalCensus total population bounds'],
       note: 'The crew aboard and the class crew are stored values; what a shortfall slows is read from the game\'s rules, with no saved game showing a short-crewed ship doing it, so the effects are not checked against stored data. A ship whose crew aboard or class crew is not stored is listed apart, as not evaluated.',
       assumptions: ['A shortfall slows a ship\'s holds and modules at the share of the class crew aboard.'],
     },
@@ -129,13 +130,22 @@ export const checks = checksOf([
         return []
       }
 
-      const [lines, colonies, version] = await Promise.all([
+      const [lines, colonies, version, census] = await Promise.all([
         rowsOf(ctx, `select FCT_Ship.ShipID, FCT_ShipDesignComponents.ComponentTypeID as TypeID, sum(FCT_ClassComponent.NumComponent) as Designed, sum(max(FCT_ClassComponent.NumComponent - coalesce((select FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID), 0), 0)) as Working from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID in (${CREW_MODULE_TYPES.join(', ')}) where ${short} group by FCT_Ship.ShipID, FCT_ShipDesignComponents.ComponentTypeID`),
-        rowsOf(ctx, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.Population, ${COLONY_COLUMNS} from FCT_Population ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_Population.Population > 1`),
+        rowsOf(ctx, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, ${COLONY_COLUMNS} from FCT_Population ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
         loadFormulaVersion(ctx.database),
+        loadOrbitalCensus(ctx.database, { GameID, RaceID }),
       ])
 
       const linesByShip = lines.reduce((byShip, line) => ({ ...byShip, [line.ShipID]: [...(byShip[line.ShipID] || []), line] }), {})
+      const replacements = colonies.map((colony) => {
+        const population = census.get(colony.PopulationID)
+        const total = population && population.totalPopulation
+        const million = fromString('1')
+        const eligible = total ? compare(total.lo, million) > 0 ? true : compare(total.hi, million) <= 0 ? false : null : null
+
+        return { ...colony, Eligible: eligible, TotalPopulation: total ? toNumber(total.lo) : null, CensusMissing: total ? total.missing : ['the colony\'s surface and orbital population'] }
+      })
 
       return verdictRows(ctx, ships, {
         missing: (ship) => lacking(ship, { CurrentCrew: CREW_ABOARD, ClassCrew: CLASS_CREW }),
@@ -149,7 +159,7 @@ export const checks = checksOf([
             aboard: pairCell(ctx, { left: ship.CurrentCrew, right: ship.ClassCrew, join: ' of ', leftName: CREW_ABOARD, rightName: CLASS_CREW }),
             slowed: effects.length ? { text: effects.map((effect) => effect.text).join(' · '), tone: stopped ? 'error' : 'warning' } : 'No hold or module the crew share scales',
             morale: moraleText(ship),
-            replace: replacementText(ship, colonies),
+            replace: replacementText(ctx, ship, replacements),
           }, { caption: `${ship.FleetName || 'An unnamed fleet'} · ${classText(ship)}`, signature: signatureOf(bandOf(level, [1 - QUARTER])) })
         },
       })
@@ -162,12 +172,12 @@ export const checks = checksOf([
     material: 'another kind of component being damaged',
     captured: [countWords('damaged component kind', 'damaged component kinds')],
     title: (count) => amount(count, 'damaged ship'),
-    rule: 'A ship has one or more damaged components; the cost is the maintenance supplies a repair takes.',
+    rule: 'A ship has one or more damaged components; the cost is the maintenance supplies repairing all of them takes.',
     evidence: {
       verification: 'confirmed',
-      versions: ['2.7.x'],
-      structure: ['FCT_DamagedComponent', 'FCT_ShipDesignComponents.Cost', 'FCT_Ship.ShippingLineID'],
-      note: 'A presence check on stored rows: a ship with a damaged component row. The repair cost is twice the stored component cost; a cost not stored shows a dash. A ship whose shipping line is not stored is listed apart, as not evaluated.',
+      versions: ['3.2.x'],
+      structure: ['FCT_DamagedComponent.Number', 'FCT_ShipDesignComponents.Cost', 'FCT_Ship.ShippingLineID'],
+      note: 'A presence check on stored rows: a ship with a damaged component row. The repair cost is twice the stored component cost for every damaged instance of the type (the stored count); a count or a cost not stored shows a dash. A ship whose shipping line is not stored is listed apart, as not evaluated.',
     },
     columns: [
       { key: 'ship', text: 'Ship' },
@@ -177,31 +187,39 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
       const COST = 'the cost of a damaged component'
+      const COUNT = 'the number of damaged instances of a component'
 
-      const items = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.ShippingLineID, ${SHIP_LINE} as Verdict, FCT_Fleet.FleetName, FCT_DamagedComponent.ComponentID as ComponentID, FCT_ShipDesignComponents.Name as ComponentName, FCT_ShipDesignComponents.Cost as ComponentCost from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_DamagedComponent on FCT_Ship.ShipID = FCT_DamagedComponent.ShipID left join FCT_ShipDesignComponents on FCT_DamagedComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${SHIP_LINE} is not 0`)
+      const items = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.ShippingLineID, ${SHIP_LINE} as Verdict, FCT_Fleet.FleetName, FCT_DamagedComponent.ComponentID as ComponentID, FCT_DamagedComponent.Number as ComponentNumber, FCT_ShipDesignComponents.Name as ComponentName, FCT_ShipDesignComponents.Cost as ComponentCost from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_DamagedComponent on FCT_Ship.ShipID = FCT_DamagedComponent.ShipID left join FCT_ShipDesignComponents on FCT_DamagedComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${SHIP_LINE} is not 0`)
 
       const ships = Object.values(items.reduce((aggregate, item) => {
         if (!aggregate[item.ShipID]) {
-          aggregate[item.ShipID] = { ShipID: item.ShipID, FleetID: item.FleetID, ShipName: item.ShipName, FleetName: item.FleetName, ShippingLineID: item.ShippingLineID, Verdict: item.Verdict, Components: [], ComponentIDs: [], TotalCost: 0, CostGaps: 0 }
+          aggregate[item.ShipID] = { ShipID: item.ShipID, FleetID: item.FleetID, ShipName: item.ShipName, FleetName: item.FleetName, ShippingLineID: item.ShippingLineID, Verdict: item.Verdict, Components: [], ComponentIDs: [], TotalCost: 0, CostGaps: [] }
         }
 
         const ship = aggregate[item.ShipID]
+        const known = isKnownNumber(item.ComponentCost) && isKnownNumber(item.ComponentNumber)
 
         ship.ComponentIDs.push(item.ComponentID)
-        ship.Components.push(`${item.ComponentName || 'An unknown component'} (${ctx.count(isKnownNumber(item.ComponentCost) ? item.ComponentCost * 2 : null)} MSP)`)
+        ship.Components.push(`${item.ComponentName || 'An unknown component'} (${ctx.count(known ? item.ComponentCost * 2 * item.ComponentNumber : null)} MSP)`)
 
-        if (isKnownNumber(item.ComponentCost)) {
-          ship.TotalCost += item.ComponentCost
+        if (known) {
+          ship.TotalCost += item.ComponentCost * item.ComponentNumber
         } else {
-          ship.CostGaps += 1
+          if (!isKnownNumber(item.ComponentCost)) {
+            ship.CostGaps.push(COST)
+          }
+
+          if (!isKnownNumber(item.ComponentNumber)) {
+            ship.CostGaps.push(COUNT)
+          }
         }
 
         return aggregate
       }, {}))
 
-      return verdictRows(ctx, ships.sort((alpha, beta) => (alpha.CostGaps > 0) - (beta.CostGaps > 0) || beta.TotalCost - alpha.TotalCost), {
+      return verdictRows(ctx, ships.sort((alpha, beta) => (alpha.CostGaps.length > 0) - (beta.CostGaps.length > 0) || beta.TotalCost - alpha.TotalCost), {
         missing: (ship) => lacking(ship, LINE_INPUTS),
-        build: (ship) => shipRow(ship, { components: ship.Components.join(', '), cost: figure(ctx, ship.CostGaps > 0 ? null : ship.TotalCost, COST, (known) => `${ctx.count(known * 2)} MSP`) }, { signature: ship.ComponentIDs.some((id) => id === null || id === undefined) ? null : signatureOf(categoriesOf(ship.ComponentIDs)) }),
+        build: (ship) => shipRow(ship, { components: ship.Components.join(', '), cost: figure(ctx, ship.CostGaps.length ? null : ship.TotalCost, ship.CostGaps.length ? [...new Set(ship.CostGaps)] : COST, (known) => `${ctx.count(known * 2)} MSP`) }, { signature: ship.ComponentIDs.some((id) => id === null || id === undefined) ? null : signatureOf(categoriesOf(ship.ComponentIDs)) }),
       })
     },
   },

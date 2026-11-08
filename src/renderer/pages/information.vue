@@ -321,6 +321,7 @@ import { loadHandlingSupport } from '../utilities/handling-support'
 import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, pathKey, reverseSteps, routeLegs, searchRoutes } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { rangeFigure, rangeText } from '../utilities/math'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
 import { isAvailable } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
@@ -799,14 +800,14 @@ export default {
           return `${category.label}: no published rate`
         }
 
-        const low = this.amountText(row.receipt.value)
-        const high = this.amountText(far[index].receipt.value)
+        const low = row.receipt.value
+        const high = far[index].receipt.value
 
-        return `${category.label} ${this.amountText(rate.value)} a unit per billion km, ${low === high ? low : `${low} to ${high}`} a unit over the route`
+        return `${category.label} ${this.amountText(rate.value)} a unit per billion km, ${this.amountRange(low, high)} a unit over the route`
       })
       const tax = taxRate > 0 ? `, with the race's shipping-line tax of ${this.amountText(taxRate * 100)} % taken out of the fare` : ', with no shipping-line tax set'
 
-      return { text: `${describeTariffVersion(version)}${tax}${npr ? ' and a computer-run empire\'s line paid half of what is left' : ''}, over the measured route of ${shortest === longest ? this.distance(shortest) : `${this.distance(shortest)} to ${this.distance(longest)}`} one way: ${parts.join('; ')}. A payout goes to the shipping line as ${taxRate > 0 ? 'the fare less that tax' : 'the whole fare'}${npr ? ', halved' : ''}, and no stored link ties the receipt to a treasury use, so no cost to the race is claimed.`, result: near[0].receipt }
+      return { text: `${describeTariffVersion(version)}${tax}${npr ? ' and a computer-run empire\'s line paid half of what is left' : ''}, over the measured route of ${this.distanceRange(shortest, longest)} one way: ${parts.join('; ')}. A payout goes to the shipping line as ${taxRate > 0 ? 'the fare less that tax' : 'the whole fare'}${npr ? ', halved' : ''}, and no stored link ties the receipt to a treasury use, so no cost to the race is claimed.`, result: near[0].receipt }
     },
 
     // What keeps fleets from the destination, said once for the fleets it stops: the military fleets and, while shipping lines are on, the shipping line fleets too.
@@ -867,7 +868,7 @@ export default {
           label: 'Trips a year',
           value: working.length ? this.count(trips, 1) : '—',
           result: yearOf(working, 'transport.freightPerYear', trips, 'trips/yr'),
-          note: !working.length ? none : shortest === longest ? `${first.jumps} ${first.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(first.km)} one way` : `${this.distance(shortest)} to ${this.distance(longest)} one way`,
+          note: !working.length ? none : shortest === longest ? `${first.jumps} ${first.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(first.km)} one way` : `${this.distanceRange(shortest, longest)} one way`,
         },
         {
           label: 'Civilian freight a year',
@@ -1328,7 +1329,7 @@ export default {
 
     // The parts of a fleet's round trip that add up to its time, for the expanded row: flying (not known where the run is not), loading and unloading, the refuelling at each end where one is drawn, the transits (which take none), the wait for the jump shock as a range, the total at the upper case of that wait with the lower case beside it, and the round trips a year that total gives.
     cycleRows(trip, ledger = null, known = true) {
-      const range = (low, high) => (low === high ? this.span(low) : `${this.span(low)} to ${this.span(high)}`)
+      const range = (low, high) => this.spanRange(low, high)
       const refuelling = (ledger ? ledger.stops.slice(0, 3) : []).filter((stop) => stop.service && stop.service.permission === 'allowed' && stop.hours > 0).map((stop) => ({ key: ['refuel-origin', 'refuel-destination', 'refuel-closing'][stop.index], label: `Refuelling at ${stop.stop.name}${stop.index === 2 ? ' on return' : ''}`, text: `${stop.bound === 'at-least' ? `${SERVICE_BOUNDS['at-least'].before} ` : ''}${this.span(stop.hours * 3600)}` }))
 
       return [
@@ -1412,14 +1413,36 @@ export default {
       return amountText(value, this.separator)
     },
 
-    distance(km) {
+    // A range of amounts with the value once, a dash when either end is not known.
+    amountRange(low, high) {
+      return rangeText(low, high, { format: (value) => rangeFigure(this.amountText(value), { negative: value < 0 }) })
+    },
+
+    // A distance as its figure: the number, the magnitude it is written in and the unit.
+    distanceFigure(km) {
       if (km >= 1e9) {
-        return `${this.count(km / 1e9, 2)} bn km`
+        return rangeFigure(this.count(km / 1e9, 2), { magnitude: 'bn', unit: ' km' })
       } else if (km >= 1e6) {
-        return `${this.count(km / 1e6, 1)} M km`
+        return rangeFigure(this.count(km / 1e6, 1), { magnitude: 'M', unit: ' km' })
       }
 
-      return `${this.count(km)} km`
+      return rangeFigure(this.count(km), { unit: ' km' })
+    },
+
+    distance(km) {
+      const figure = this.distanceFigure(km)
+
+      return figure.magnitude ? `${figure.number} ${figure.magnitude}${figure.unit}` : `${figure.number}${figure.unit}`
+    },
+
+    // A range of distances with the unit once, after the second figure.
+    distanceRange(low, high) {
+      return rangeText(low, high, { format: (km) => this.distanceFigure(km) })
+    },
+
+    // A range of spans: the unit once when both ends name the same single unit, each end's own text when one names two parts or the ends name different units.
+    spanRange(low, high) {
+      return rangeText(low, high, { format: (seconds) => this.spanFigure(seconds) })
     },
   },
   asyncComputed: {

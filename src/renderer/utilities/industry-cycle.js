@@ -1,6 +1,6 @@
 // The production cycle of one colony's industrial projects, run forward cycle by cycle as the game runs it, for the Production page's forecast. Pure functions on plain numbers in and out (no provenance, no page state), so the results are keyed by project ID for anything that wants them (the staffing demand of AE-060, the maintenance outlook of AE-088); inside, every conserved quantity is an exact decimal of the game's own type (utilities/decimal.js).
 //
-// Each cycle every project that is out of the queue and not paused takes its share of the colony's capacity for its kind times the years the cycle covers, builds that many units (no more than it has left), is cut to what the colony's stock covers (each mineral from the stock the projects ahead of it left, in the game's order), has the build rounded to 4 decimals (a tie to the even digit), is cut again to the fuel and, for a conversion, to the whole source installations the colony holds, debits the stock and adds the build to its partial unit; a whole unit is delivered when the partial unit passes 1, and the project finishes when what it built is exactly what it had left. When one finishes, the queued projects of its kind start in queue order, each that fits in the share the running and paused ones leave, skipping any that do not; they build from the next cycle on. A paused project keeps its share and builds nothing.
+// Each cycle a running, unpaused project builds its share of capacity, capped by its remaining amount and then by each mineral's stock. That request is floored to four decimals before separate fuel and whole source-installation limits. Stock is debited and whole completed units delivered. A finished project releases its share; queued projects whose entire share fits start in queue order and build from the next cycle. A paused project retains its share.
 //
 // The figures of the save are read the way the platform converts a double into the game's decimal type (15 significant digits, a tie to the even digit on the double's exact value), the length of a cycle as the years of an increment of that many seconds. A project whose amount has more than 4 decimals (a fuel or installation limit left a part of a unit finer than a build) can never build exactly what it has left, since a build has 4: its project is stuck, which no save shows, so what the game does with it is taken as not known: it frees no share, starts no queued project, and the projects queued behind it have no start.
 //
@@ -8,7 +8,7 @@
 //
 // Arrivals are hypothetical stock the caller adds ({ resource, day, quantity, source }): an arrival is in the stock of the first cycle that ends on or after its day. Nothing here reads a save, ships anything or assumes any income.
 import { UNPACED } from './search-run'
-import { ZERO, add, addMultiple, additions, sumsExactly, subtract, multiply, divide, equal, less, greater, positive, negative, floor, round, minimum, negate, fromDouble, fromString, toDouble, toNumber, toInteger, ceilRatio, floorRatio } from './decimal'
+import { ZERO, add, addMultiple, additions, sumsExactly, subtract, multiply, divide, equal, less, greater, positive, negative, floor, minimum, negate, fromDouble, fromString, toDouble, toNumber, toInteger, ceilRatio, floorRatio } from './decimal'
 
 export const FUEL = 'fuel'
 export const BUILD_DECIMALS = 4
@@ -16,7 +16,7 @@ export const BUILD_DECIMALS = 4
 export const MAX_EXHAUSTIVE = 5
 // How far ahead a run looks, in days.
 export const HORIZON_DAYS = 36500
-// A cycle's build under this many units is rounded to a fraction of itself too coarse to date a project by: a small error in the capacity or the cycle length moves the date by a large share of itself.
+// Below this cycle build, losing less than one four-decimal step can still move the date by a large share of itself.
 export const UNBOUNDED_BELOW = 0.0005
 
 const SCALE = 10 ** BUILD_DECIMALS
@@ -28,8 +28,10 @@ const SECONDS_PER_YEAR = fromDouble(31536000)
 const MAX_RUNS = 1000
 const HUNDRED = fromDouble(100)
 const ONE = fromDouble(1)
-// A build under this is rounded to nothing (a tie goes to the even digit, 0).
-const HALF_STEP = fromString('0.00005')
+// One four-decimal build step; a mineral must cover at least this much for any progress.
+const BUILD_STEP = fromString('0.0001')
+const BUILD_SCALE = fromDouble(SCALE)
+const floorBuild = (value) => divide(floor(multiply(value, BUILD_SCALE)), BUILD_SCALE)
 // The stock of a run that has all it needs: more than any build of the horizon takes.
 const PLENTY = fromString('1e22')
 
@@ -77,7 +79,7 @@ const permutations = (items) => (items.length <= 1 ? [items] : items.flatMap((it
 // The years an increment of `cycleDays` days covers, as the game makes them: the seconds over the seconds of a year as a decimal, taken through a double by the platform's own conversion (`toDouble`) and read back to 15 digits.
 export const yearsOf = (cycleDays) => fromDouble(toDouble(divide(fromDouble(cycleDays * SECONDS_PER_DAY), SECONDS_PER_YEAR)))
 
-// A project's figures as the decimals a cycle works on: what its share of the capacity buys in a cycle (`units`, the capacity times the years times the share, over the points a unit takes), the build that rounds to (`step`), what it needs of each mineral in the game's order and of the fuel.
+// A project's exact decimal request and its four-decimal floored step, with mineral, fuel and source-installation requirements kept separate.
 const prepare = (project, capacities, years) => {
   const needs = Object.entries(project.needs || {}).filter(([, need]) => need > 0).map(([resource, need]) => [resource, fromDouble(need)])
   const share = fromDouble(project.Percentage)
@@ -91,7 +93,7 @@ const prepare = (project, capacities, years) => {
     share,
     costed: project.ProdPerUnit > 0,
     units,
-    step: round(units, BUILD_DECIMALS),
+    step: floorBuild(units),
     amount: fromDouble(project.Amount),
     partial: fromDouble(project.PartialCompletion || 0),
     needs,
@@ -125,7 +127,7 @@ const stateOf = (prepared) => ({
 // Whether an amount has no digit finer than a build's.
 const fourDecimals = (value) => value.s <= BUILD_DECIMALS
 
-// One project's cycle, the game's own steps: the build is what its share buys, no more than it has left, cut to each mineral's stock in turn, rounded to 4 decimals, cut to the fuel (not rounded) and to the whole source installations; the stock is debited by what is built. Returns { built, cut, stall, finishing }.
+// Limit the request by minerals, floor it to four decimals, then apply separate unrounded fuel and whole source-installation limits and debit the resulting build.
 const buildCycle = (state, left, unlimited) => {
   const finishing = !less(state.units, state.amount)
   let requested = greater(state.units, state.amount) ? state.amount : state.units
@@ -144,7 +146,7 @@ const buildCycle = (state, left, unlimited) => {
     })
   }
 
-  requested = round(requested, BUILD_DECIMALS)
+  requested = floorBuild(requested)
 
   if (!unlimited && state.fuel && positive(requested)) {
     const stock = left[FUEL] || ZERO
@@ -172,7 +174,7 @@ const buildCycle = (state, left, unlimited) => {
     return { built: ZERO, cut, stall: reason, finishing }
   }
 
-  // The game floors every mineral balance at 0 after the debit, so a build rounded up past what a mineral's stock covers leaves 0. The fuel is no mineral: a build is cut to it exactly.
+  // Mineral balances are floored at zero after debit; fuel is limited exactly.
   state.needs.forEach(([resource, need]) => {
     const after = subtract(left[resource] || ZERO, multiply(need, requested))
 
@@ -182,7 +184,7 @@ const buildCycle = (state, left, unlimited) => {
   return { built: requested, cut, stall: null, finishing }
 }
 
-// Adds the projects in contention this cycle to `contested`: any resource two or more of the projects want, in all more than the colony holds while it holds enough for some build, puts those projects in contention. What a project wants is the build it would make with no stock short, rounded as the game rounds it (a stock that covers the unrounded builds can still fall short of the rounded ones).
+// Contention requires more total floored build than the stock covers and enough stock for at least one build step (any positive fuel or one whole conversion source).
 function* contend(building, left, contested, pace) {
   const wants = {}
 
@@ -191,13 +193,13 @@ function* contend(building, left, contested, pace) {
       yield
     }
 
-    const want = round(minimum(state.units, state.amount), BUILD_DECIMALS)
+    const want = floorBuild(minimum(state.units, state.amount))
 
     if (positive(want)) {
-      state.needs.forEach(([resource, need]) => (wants[resource] = wants[resource] || []).push({ state, quantity: multiply(need, want), least: resource === FUEL ? ZERO : multiply(need, HALF_STEP), whole: false }))
+      state.needs.forEach(([resource, need]) => (wants[resource] = wants[resource] || []).push({ state, quantity: multiply(need, want), least: resource === FUEL ? ZERO : multiply(need, BUILD_STEP), inclusive: resource !== FUEL }))
 
       if (state.source) {
-        ;(wants[state.source] = wants[state.source] || []).push({ state, quantity: want, least: ONE, whole: true })
+        ;(wants[state.source] = wants[state.source] || []).push({ state, quantity: want, least: ONE, inclusive: true })
       }
     }
   }
@@ -214,7 +216,7 @@ function* contend(building, left, contested, pace) {
       asked = add(asked, entry.quantity)
     }
 
-    if (list.length >= 2 && greater(asked, stock) && list.some((entry) => (entry.whole ? !less(stock, entry.least) : greater(stock, entry.least)))) {
+    if (list.length >= 2 && greater(asked, stock) && list.some((entry) => (entry.inclusive ? !less(stock, entry.least) : greater(stock, entry.least)))) {
       list.forEach((entry) => contested.add(entry.state.id))
     }
   }
@@ -496,7 +498,6 @@ function* simulate({ prepared, stock, arrivals, cycleDays, maxCycles, order, pac
       // The game finishes a project when the amount it built is exactly the amount it had left.
       if (equal(built, state.amount)) {
         state.finished = true
-        state.fineRemainder = false
         state.finishCycle = next
         state.amount = ZERO
         events.push({ cycle: next, day: next * cycleDays, id: state.id, type: 'finish' })
@@ -774,7 +775,7 @@ export function* forecastColonySteps({ projects, capacities, stock, arrivals = [
       partial: toNumber(state.partial),
       amountLeft: toNumber(state.amount),
       unitsPerCycle: units,
-      roundingError: units > 0 ? 1 / SCALE / 2 / units : null,
+      roundingError: units > 0 ? 1 / SCALE / units : null,
       sensitive: units > 0 && units < UNBOUNDED_BELOW,
       firstBuild: state.firstBuild === null ? null : toNumber(state.firstBuild),
       suppliedFinish: suppliedState ? dayOf(suppliedState.finishCycle, cycleDays) : null,

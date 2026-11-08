@@ -93,6 +93,7 @@ const ship = (extra = {}) => ({
   GradePoints: 100,
   CrewMorale: 1,
   SensorDelay: 0,
+  RaceNPR: 0,
   FuelEfficiency: 0.5,
   FuelCapacity: 1e9,
   Fuel: 1e9,
@@ -716,10 +717,41 @@ check('loader', 'the loader reads the engines, links and towed mass from the tab
   const [oldShip] = oldRows
 
   ;['MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'OverhaulFactor', 'Fuel', 'MaintenanceState', 'FleetSpeed', 'UseMaximumSpeed', 'LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies', 'PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip', 'CarrierCommercialHangar'].forEach((key) => assert.equal(oldShip[key], null, key))
+  assert.equal(oldShip.RaceNPR, null, 'an absent race flag stays unread')
   near(oldShip.UndamagedEnginePower, 20)
   assert.equal(fp.fleetProfile(oldRows).status, 'unknown')
   assert.ok(codesOf(fp.fleetProfile(oldRows)).includes('links'))
   old.close()
+})
+
+check('loader-npr', 'the raw race flag reaches standard and squadron timing and the fleet transport cycle, without a player default', async (w) => {
+  const { 'fleet-profile': fp, transport } = await w.modules()
+  const { 'route-time': time } = await loadUtilities(['route-time'])
+  const database = await databaseOf(SCHEMA, `${ROWS}alter table FCT_Race add column NPR integer; alter table FCT_Ship add column GradePoints real; alter table FCT_Ship add column CrewMorale real; alter table FCT_Ship add column SensorDelay integer; update FCT_Ship set GradePoints = 100, CrewMorale = 1, OverhaulFactor = 1, SensorDelay = 0;`)
+
+  try {
+    for (const [flag, expected] of [[0, { lo: 121, hi: 180 }], [1, { lo: 60, hi: 90 }], [null, null]]) {
+      await database.query(`update FCT_Race set NPR = ${flag === null ? 'null' : flag}`)
+      const rows = await fp.loadFleetShips(database, { GameID: 1, RaceID: 2, fleetWhere: 'FCT_Fleet.FleetID = 7' })
+      const profile = fp.fleetProfile(rows)
+      const timing = { ...time.fleetTimingOf(profile.participants), retry: 0, steps: [{ kind: 'jump' }, { kind: 'jump' }] }
+
+      assert.equal(rows[0].RaceNPR, flag)
+      assert.deepEqual(timing.shock, expected)
+      assert.deepEqual(timing.squadronShock, { lo: 11, hi: 30 })
+      const endpoint = transport.colonyEndpoint(colony())
+      const trip = fp.fleetTrip(profile, 0, { origin: endpoint, destination: endpoint }, { version: VERSION, colonists: false, timing })
+
+      if (flag === null) {
+        assert.equal(trip.tripSeconds, null)
+      } else {
+        assert.ok(trip.cycle && trip.waitSeconds)
+        assert.equal(trip.waitSeconds.hi, expected.hi * 2, 'the two adjacent transit pairs wait for the raw race timing; the loading stops absorb the other two delays')
+      }
+    }
+  } finally {
+    database.close()
+  }
 })
 
 const FLEET_EIGHT = { GameID: 1, RaceID: 2, fleetWhere: 'FCT_Fleet.FleetID = 8' }
@@ -960,10 +992,87 @@ const NO_SITES = { gameTime: 1, rates: { MaxRefuellingRate: 80000, UnderwayReple
 const NO_RESERVES = { ready: true, reader: { colony: () => null, ship: () => null } }
 const transportVmOf = (page, state, data = {}) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(state), handlingSupport: FULL_OFFICERS, formulaVersion: VERSION, origin: PLACE, destination: TARGET, reachOf: () => REACH, fuelSites: NO_SITES, fuelReserveRead: NO_RESERVES, fleetShips: [ship({ FleetSpeed: 300, UseMaximumSpeed: 0 }), slowShip({ FleetSpeed: 300, UseMaximumSpeed: 0 }), craft({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
 
+check('order-offset', 'the Hauling page keeps minimum-distance cycles on saved positions and passes their corrected year to deliveries and the route audit', async (w) => {
+  const page = await w.hauling()
+  const order = { FleetID: 5, OrderDelay: 0, Jumps: 0, MinDistance: 0, X: 0, Y: 0, ExitX: 0, ExitY: 0, ExitSystemID: 3, SystemID: 3, StartSystemID: 3, DestinationType: 2, PopulationRaceID: 2 }
+  const orders = [{ ...order, MoveActionID: 62, ActionName: 'Load', DestinationID: 1, PopName: 'Mars', PopulationID: 7, ShuttleCapacity: 1 }, { ...order, MoveActionID: 63, ActionName: 'Unload', DestinationID: 2, PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 1, X: 1000000, ExitX: 1000000, MinDistance: 200000 }]
+  const fleet = { FleetID: 5, FleetName: 'Offset', CycleMoves: 1, Ships: 1, CargoCapacity: 1000, ColonistCapacity: 200, ShuttleTechnology: TECH, Speed: 1000 }
+  const facts = { clock: { gameTime: 1000, orbitalMotion: 0 }, bodies: {}, fleets: {}, bodyOf: {}, points: {}, waypoints: {} }
+  const vm = instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: new Proxy({}, { get: () => null, has: () => true }), positionRead: facts, handlingSupport: FULL_OFFICERS, fleets: [fleet], orders, fleetShips: [ship()], formulaVersion: VERSION } })
+  const [row] = vm.routeRows
+
+  near(row.route.km, 1600000, 'both flights leave or reach the offset arrival, not the body centre')
+  assert.ok(row.year)
+  assert.equal(row.propagationText, vm.routeNote({ annual: { compared: true, status: 'static', reasons: ['order-offset'] } }, null, null), 'the row states why the positions were kept')
+  assert.ok(row.positions.conditions.some(({ code }) => code === 'order-offset'), 'the position strip carries the same reason')
+  assert.equal(vm.simulateRoute(vm.ordersByFleet[5], { Speed: 1000 }, { stops: [{ seconds: 1 }, { seconds: 1 }] }, { trips: 1 }, null), null, 'the centre-arrival simulator cannot replace an offset cycle')
+  assert.equal(vm.deliveryRows.length, 1)
+  near(vm.deliveryRows[0].amount, row.year.trips * 500, 'the destination receives the corrected cycles per year')
+  near(vm.deliveryRows[0].result.value, row.year.minerals)
+  const { 'route-audit': audit, 'route-signatures': signatures } = await loadUtilities(['route-audit', 'route-signatures', 'provenance'])
+  const queues = { supported: true, fleets: [fleet], orders: orders.map((one, index) => ({ ...one, MoveOrder: index + 1, MoveOrderID: index + 1 })), actions: { 62: { item: 0 }, 63: { item: 0 } }, conditionals: [], standing: {}, templates: [] }
+  const group = audit.auditOf({ queues, raceId: 2, rows: { 5: row }, ships: { 5: [ship()] } }).groups[0]
+
+  near(group.capacity.minerals, row.year.minerals, 'the group consumes the corrected page year')
+  near(signatures.capacityResult(group).value, row.year.minerals)
+})
+
+check('order-offset-status', 'all-offset fixed-endpoint distances and every leg are estimated, as is the offset-free control', async (w) => {
+  const page = await w.hauling()
+  const order = { FleetID: 5, OrderDelay: 0, Jumps: 0, MoveActionID: 2, ActionName: 'Move', PopulationID: 0, DestinationType: 1, SystemID: 3, ExitSystemID: 3, StartSystemID: 3, Y: 1000, ExitY: 1000 }
+  const fleet = { FleetID: 5, FleetName: 'Fixed endpoints', CycleMoves: 1, Speed: 1000 }
+  const rowOf = (MinDistance) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), handlingSupport: FULL_OFFICERS, fleets: [fleet], orders: [{ ...order, DestinationID: 1, X: 1000, ExitX: 1000, MinDistance }, { ...order, DestinationID: 2, X: 1010, ExitX: 1010, MinDistance }], fleetShips: [ship()], formulaVersion: VERSION } }).routeRows[0]
+  const { hauling, provenance } = await loadUtilities(['hauling', 'provenance'])
+  const rule = provenance.getRule('hauling.routeDistance')
+
+  assert.equal(rule.verification, 'estimated')
+  assert.deepEqual(rule.versions, ['3.2.x'])
+  assert.deepEqual(rule.assumptions, [hauling.ORDER_OFFSET_ASSUMPTION, hauling.CYCLE_START_ASSUMPTION])
+  for (const [minimum, expected, legs] of [[2, 14, [8, 6]], [0, 20, [10, 10]]]) {
+    const row = rowOf(minimum)
+
+    assert.equal(row.savedPositions.caveat, false, 'fixed non-transiting jump points add no positional caveat')
+    near(row.route.km, expected)
+    assert.ok(row.distanceResult, 'the total forecast always exposes its status')
+    assert.equal(row.distanceResult.status, 'estimated', 'the total exposes the composite forecast status even at fixed endpoints')
+    assert.equal(row.distanceResult.value, expected)
+    assert.deepEqual(row.legResults.map((result) => [result.status, result.value]), legs.map((km) => ['estimated', km]), 'every leg uses the same honest registered status')
+  }
+})
+
+check('order-offset-unknown', 'an unread order minimum declines page figures, annual deliveries and the centre-arrival simulation', async (w) => {
+  const page = await w.hauling()
+  const order = { FleetID: 5, OrderDelay: 0, Jumps: 0, MinDistance: 0, X: 1000, Y: 1000, ExitX: 1000, ExitY: 1000, ExitSystemID: 3, SystemID: 3, StartSystemID: 3, DestinationType: 2, PopulationRaceID: 2, ShuttleCapacity: 1 }
+  const orders = [{ ...order, MoveActionID: 62, ActionName: 'Load', DestinationID: 1, PopulationID: 7 }, { ...order, MoveActionID: 63, ActionName: 'Unload', DestinationID: 2, PopulationID: 8, X: 2000, ExitX: 2000 }]
+  const vmOf = (rows) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(null), positionRead: { clock: { gameTime: 1000, orbitalMotion: 0 }, bodies: {}, fleets: {}, bodyOf: {}, points: {}, waypoints: {} }, handlingSupport: FULL_OFFICERS, fleets: [{ FleetID: 5, FleetName: 'Unknown offset', CycleMoves: 1, Speed: 1000, ShuttleTechnology: TECH }], orders: rows, fleetShips: [ship()], formulaVersion: VERSION } })
+
+  for (const value of [undefined, null]) {
+    const vm = vmOf(orders.map((one, index) => index === 1 ? { ...one, MinDistance: value } : one))
+    const [row] = vm.routeRows
+
+    assert.equal(row.route.km, null)
+    assert.equal(row.year, null)
+    assert.deepEqual(row.legResults, [])
+    assert.equal(row.distanceResult.status, 'unavailable')
+    assert.ok(row.distanceResult.inputs.missing.some((input) => input.includes('minimum distance')))
+    Object.values(row.results).forEach((result) => {
+      assert.equal(result.status, 'unavailable')
+      assert.deepEqual(result.inputs.missing, row.route.missing)
+    })
+    assert.deepEqual(vm.deliveryRows, [])
+    assert.equal(vm.simulateRoute(vm.ordersByFleet[5], { Speed: 1000 }, { stops: [{ seconds: 1 }, { seconds: 1 }] }, { trips: 1 }, null), null, 'unknown minimum cannot enter the offset-free simulator even with a supplied year')
+  }
+
+  const [known] = vmOf(orders).routeRows
+
+  assert.equal(known.route.km, 2000)
+  assert.ok(known.year, 'known zero permits a yearly figure')
+})
+
 check('pages', 'the pages take speed, burn and counted cargo from the profile, say why a fleet is left out and track the optional read under the key they label it with', async (w) => {
   const hauling = await w.hauling()
   const transportPage = await w.transport()
-  const PLACE_ORDER = { FleetID: 5, OrderDelay: 0, ActionName: 'Load', Jumps: 0, X: 0, Y: 0, ExitX: 0, ExitY: 0, ExitSystemID: 3, SystemID: 3, DestinationType: 0 }
+  const PLACE_ORDER = { FleetID: 5, OrderDelay: 0, ActionName: 'Load', Jumps: 0, MinDistance: 0, X: 0, Y: 0, ExitX: 0, ExitY: 0, ExitSystemID: 3, SystemID: 3, DestinationType: 0 }
   const orders = [{ ...PLACE_ORDER, MoveActionID: 62, Description: 'Mars: Load', PopName: 'Mars', PopulationID: 7, ShuttleCapacity: 1, ServiceNames: 'Spaceport' }, { ...PLACE_ORDER, MoveActionID: 63, ActionName: 'Unload', Description: 'Venus: Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: 3000000, ExitX: 3000000 }]
 
   // Hauling: a cycle of the tug and its barge between two colonies.
@@ -1745,7 +1854,14 @@ const FAULTS = [
   ['a hand-set speed above the maximum is kept', 'profile', 'saved > effectiveMax ? [effectiveMax, \'saved-capped\'] : [saved, \'saved\']', '[saved, \'saved\']', ['manual-speed']],
   ['the snapshot cuts each class size to whole hull spaces before the sum', 'history', 'sum(FCT_ShipClass.Size) end as Size', 'sum(cast(FCT_ShipClass.Size as integer)) end as Size', ['tonnage']],
   ['the snapshot rounds each class size before the sum', 'history', 'sum(FCT_ShipClass.Size) end as Size', 'sum(round(FCT_ShipClass.Size)) end as Size', ['tonnage']],
+  ['order-offset: a minimum-distance cycle enters the centre-arrival simulator', 'haulingPage', ' || orders.some((order) => !Number.isFinite(order.MinDistance) || order.MinDistance > 0)', '', ['order-offset']],
+  ['order-offset: the position strip loses the offset reason', 'haulingPage', "conditions: [...record.conditions, 'order-offset']", 'conditions: record.conditions', ['order-offset']],
+  ['order-offset: destination totals omit the corrected trip count', 'haulingPage', 'total.amount += row.year.trips * delivery.amount', 'total.amount += delivery.amount', ['order-offset']],
+  ['order-offset: an unread minimum enters the centre-arrival simulator', 'haulingPage', '!Number.isFinite(order.MinDistance) || order.MinDistance > 0', 'order.MinDistance > 0', ['order-offset-unknown']],
+  ['order-offset: the composite distance claims confirmation', 'haulingRules', "id: 'hauling.routeDistance',\n  versions: HAULING_VERSIONS,\n  units: 'km',\n  verification: 'estimated'", "id: 'hauling.routeDistance',\n  versions: HAULING_VERSIONS,\n  units: 'km',\n  verification: 'confirmed'", ['order-offset-status']],
+  ['order-offset: fixed endpoints hide the total forecast status', 'haulingPage', ': route.km !== null ? withPositions', ': route.km !== null && savedPositions.caveat ? withPositions', ['order-offset-status']],
   ...REARMING_READS,
+  ['the fleet loader replaces raw NPR with a player default', 'profile', /\$\{raceNPR\} as RaceNPR/, () => '0 as RaceNPR', ['loader-npr']],
 ]
 
 // ---- Benign edits ----------------------------------------------------------------------------------------------------

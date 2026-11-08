@@ -4,11 +4,11 @@ import { colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from './colony-mi
 import { haulByClass, planHauls } from './haul-plan'
 import { loadJumpPoints } from './jump-graph'
 import { MSP_MINERALS, mspActiveProduction, mspProduction, mspStockGaps } from './logistics'
-import { MASS_DRIVER_TONS, MINERALS, SECONDS_PER_DAY } from './minerals'
+import { MASS_DRIVER_TONS, MINERALS, SECONDS_PER_DAY, wholeCapacity } from './minerals'
 import { KNOWN_SERVICE_COLUMNS, columnsOf, gaps, hasAll, knownServiceJoin, loadBootstrapFreight, loadShuttleTechnology, selectedColumns } from './mine-bootstrap-data'
 import { miningSum, orbitalRateResult, surfaceRateResult } from './mineral-outlook'
 import { routeResult, siteSupply } from './mineral-supply'
-import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
+import { capacityTerms, gateMiningRows, loadOrbitalMining, loadSurfaceMining } from './mining-data'
 import { combine, failureWords, isAvailable, ofRule, registerRule, unavailable } from './provenance'
 
 export const DAYS_PER_YEAR = 365
@@ -39,10 +39,9 @@ registerRule({
   assumptions: ['No mining, packet or haul supplies the input minerals', 'The production rate and surface and orbital population stay what they are now'],
 })
 
-// Retained because class-only haul timing omits jump-shock waits.
 registerRule({
   id: 'mspSupply.supplied',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 'MSP/yr',
   verification: 'estimated',
   structure: ['FCT_Population stockpiles, reserves and mass driver destination', 'FCT_MineralDeposit.Amount', 'FCT_MassDriverPackets', 'FCT_IndustrialProjects and shipyard tasks', 'the freighter classes and charted jump points'],
@@ -50,10 +49,9 @@ registerRule({
   assumptions: ['Mining continues at today\'s rate until its deposit is spent', 'A packet arrives when its speed has covered its distance to the destination', 'A haul arrives whole once its freighter class has made every trip', 'Jump shock waits are not counted for a class timed alone, so a haul may land after the selected period', 'A daily step stands for the game\'s production ticks', 'Each queue phase draws its remaining mineral needs as soon as stock allows, without modelling project rates or promotion', 'Packets the colonies launch during the period are not counted'],
 })
 
-// C F2: transport.roundTrip remains retained and timeHauls reads its bare tripDays; retain this descendant until the timing envelope is carried end to end.
 registerRule({
   id: 'mspSupply.delivery',
-  versions: ['2.7.x'],
+  versions: VERSIONS,
   units: 't',
   verification: 'estimated',
   structure: ['FCT_MassDriverPackets.<mineral>, Speed, Xcor, Ycor, DestID', 'FCT_SystemBody.Xcor, Ycor', 'the Hauling Planner\'s plan and freighter classes'],
@@ -269,8 +267,8 @@ const SOURCE_NAMES = {
 
 const MINERAL_COLUMNS = MINERALS.flatMap((mineral) => [mineral.name, `Reserve${mineral.name}`])
 
-// The game's count of a colony's mass drivers: the installations of a mass driver type, each amount floored to a whole one (a fractional amount, left by a cargo transfer, is not a driver yet), and how many installation rows have an amount or a driver value not recorded. One row per PopID.
-const DRIVER_COUNT = (GameID) => `select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.MassDriverValue > 0 then cast(FCT_PopulationInstallations.Amount + 1e-9 as integer) else 0 end) as Drivers, sum(case when FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MassDriverValue is null then 1 else 0 end) as Gaps from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID`
+// Preserve the amounts of mass driver installations for the shared decimal whole-count primitive; fractional inventory is not productive capacity. One row per PopID, with gaps for an unread amount or driver value.
+const DRIVER_COUNT = (GameID) => `select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.MassDriverValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Drivers, ${capacityTerms('1', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as DriverTerms, sum(case when FCT_PopulationInstallations.Amount is not 0 and DIM_PlanetaryInstallation.MassDriverValue is not 0 and (FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MassDriverValue is null) then 1 else 0 end) as Gaps from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID`
 
 // The race's colonies with place, stock and reserve of every mineral, the mass driver destination (with that colony's race and system) and the drivers, and what serves their cargo handling. A figure the save does not hold reads as null.
 export const loadMspColonies = async (database, { GameID, RaceID }) => {
@@ -283,9 +281,9 @@ export const loadMspColonies = async (database, { GameID, RaceID }) => {
 
   const served = hasAll(installation, ['PlanetaryInstallationID', 'Name', 'CargoShuttleValue']) && hasAll(built, ['GameID', 'PopID', 'PlanetaryInstallationID', 'Amount'])
   const driven = hasAll(installation, ['PlanetaryInstallationID', 'MassDriverValue']) && hasAll(built, ['GameID', 'PopID', 'PlanetaryInstallationID', 'Amount'])
-  const [rows] = await database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, ${population.has('MassDriverDest') ? 'FCT_Population.MassDriverDest' : 'null as MassDriverDest'}, ${selectedColumns('FCT_Population', population, MINERAL_COLUMNS)}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${served ? KNOWN_SERVICE_COLUMNS : 'null as ShuttleCapacity, null as ServiceNames'}, ${driven ? 'VIR_Drivers.Drivers as Drivers, VIR_Drivers.Gaps as DriverGaps' : 'null as Drivers, 1 as DriverGaps'}, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID ${served ? knownServiceJoin(GameID, 'FCT_Population.PopulationID') : ''} ${driven ? `left join (${DRIVER_COUNT(GameID)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID` : ''} left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = ${population.has('MassDriverDest') ? 'FCT_Population.MassDriverDest' : '0'} and VIR_Destination.GameID = FCT_Population.GameID and ${population.has('MassDriverDest') ? 'FCT_Population.MassDriverDest' : '0'} > 0 where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`)
+  const [rows] = await database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, ${population.has('MassDriverDest') ? 'FCT_Population.MassDriverDest' : 'null as MassDriverDest'}, ${selectedColumns('FCT_Population', population, MINERAL_COLUMNS)}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${served ? KNOWN_SERVICE_COLUMNS : 'null as ShuttleCapacity, null as ServiceNames'}, ${driven ? 'VIR_Drivers.Drivers as Drivers, VIR_Drivers.DriverTerms, VIR_Drivers.Gaps as DriverGaps' : 'null as Drivers, 1 as DriverGaps'}, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID ${served ? knownServiceJoin(GameID, 'FCT_Population.PopulationID') : ''} ${driven ? `left join (${DRIVER_COUNT(GameID)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID` : ''} left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = ${population.has('MassDriverDest') ? 'FCT_Population.MassDriverDest' : '0'} and VIR_Destination.GameID = FCT_Population.GameID and ${population.has('MassDriverDest') ? 'FCT_Population.MassDriverDest' : '0'} > 0 where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`)
 
-  return Object.freeze(rows.map((row) => Object.freeze({ ...row, Drivers: driven ? row.Drivers ?? 0 : null, DriverGaps: driven ? row.DriverGaps ?? 0 : 1 })))
+  return Object.freeze(rows.map((row) => Object.freeze({ ...row, Drivers: driven ? wholeCapacity(row.Drivers ?? 0, row.DriverTerms) : null, DriverGaps: driven ? row.DriverGaps ?? 0 : 1 })))
 }
 
 // The packets bound for the race's colonies in flight: the input minerals each carries (null where the save does not hold the column), its speed and position, and the position of the colony it is bound for (null when that colony is not there). A packet keeps the race that launched it when its destination changes hands, and still lands there, so a packet is the race's when its destination is the race's colony, or the race launched it.
@@ -331,8 +329,8 @@ export const loadMspSupply = async (database, { GameID, RaceID, blocked = new Se
     attempt('needs', () => loadQueueNeeds(database, { GameID, RaceID, byPhase: true })),
     attempt('packets', () => loadPacketsInFlight(database, { GameID, RaceID })),
     attempt('packetRows', () => loadPacketRows(database, { GameID, RaceID })),
-    attempt('mining', async () => (await database.query(surfaceMiningQuery({ GameID, RaceID })))[0]),
-    attempt('mining', async () => (await database.query(orbitalMiningQuery({ GameID, RaceID })))[0]),
+    attempt('mining', () => loadSurfaceMining(database, { GameID, RaceID })),
+    attempt('mining', () => loadOrbitalMining(database, { GameID, RaceID })),
     attempt('jumps', () => loadJumpPoints(database, { GameID, RaceID })),
     attempt('freight', () => loadBootstrapFreight(database, { GameID, RaceID })),
     attempt('handling', () => loadShuttleTechnology(database, { RaceID })),

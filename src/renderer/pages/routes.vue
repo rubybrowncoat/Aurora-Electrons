@@ -182,6 +182,7 @@ import { systemBodyName } from '../utilities/aurora'
 import { linkTo, queryId, queryPlace, queryPlaceKeys } from '../utilities/deep-links'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, routeResults, searchRoutes } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { rangeText } from '../utilities/math'
 import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, loadSurveyPlaces } from '../utilities/place-data'
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
 import { describeResult, describeRule, failureWords, valueOrNull } from '../utilities/provenance'
@@ -1179,7 +1180,7 @@ export default {
         return '—'
       }
 
-      return flight === flightHi ? this.span(flight) : `${this.span(flight)} to ${this.span(flightHi)}`
+      return this.spanRange(flight, flightHi)
     },
 
     // A wait as a range from the lowest to the highest draw of the jump shock: one figure when they agree, a dash for no jump.
@@ -1188,7 +1189,12 @@ export default {
         return '—'
       }
 
-      return wait === null ? 'Not known' : wait.lo === wait.hi ? this.span(wait.hi) : `${this.span(wait.lo)} to ${this.span(wait.hi)}`
+      return wait === null ? 'Not known' : this.spanRange(wait.lo, wait.hi)
+    },
+
+    // A range of spans: the unit once when both ends name the same single unit, each end's own text when one names two parts or the ends name different units.
+    spanRange(low, high) {
+      return rangeText(low, high, { format: (seconds) => this.spanFigure(seconds) })
     },
 
     // Flying time in the unit that reads best; a real 0 is 0 h and an unknown time a dash.

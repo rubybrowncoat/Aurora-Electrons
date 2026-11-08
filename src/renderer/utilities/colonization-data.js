@@ -5,7 +5,7 @@ import { CMC_BLOCKING_INSTALLATIONS, cmcBlocks, cmcStarInReach } from './coloniz
 import { climateBaseTemp } from './habitability'
 import { loadJumpPoints } from './jump-graph'
 import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook, unloggedMining } from './minerals'
-import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
+import { gateMiningRows, loadOrbitalMining, loadSurfaceMining } from './mining-data'
 import { loadNavalAdmins } from './naval-admins'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { WORKING_MODULES } from './warnings/common'
@@ -243,8 +243,8 @@ export const loadMineralOutlook = async (database, ids) => {
     rows(database, `select FCT_ShipCargo.CargoID as MaterialID, ${completeSum('FCT_ShipCargo.Amount')} as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`),
     rows(database, `select ${sumOf('FCT_MassDriverPackets')} from FCT_MassDriverPackets where GameID = ${GameID} and RaceID = ${RaceID}`),
     loadLedger(database, ids),
-    rows(database, surfaceMiningQuery(ids)).then((items) => gateMiningRows(items, blocked)),
-    rows(database, orbitalMiningQuery(ids)).then((items) => gateMiningRows(items, blocked)),
+    loadSurfaceMining(database, ids).then((items) => gateMiningRows(items, blocked)),
+    loadOrbitalMining(database, ids).then((items) => gateMiningRows(items, blocked)),
     loadNavalAdmins(database, { GameID, RaceID, bonusId: 6, share: 'Industrial', ranks, blocked }),
   ])
   const carried = (mineral) => {

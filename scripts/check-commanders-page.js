@@ -111,7 +111,7 @@ const truthOf = async (file) => {
   const raw = await openRaw(file)
 
   try {
-    const serving = await all(raw, `select c.CommanderID as id, c.Name as name, c.CommandType as post, s.GraduationAge + (g.GameTime - c.CareerStart) / ${YEAR}.0 as age from FCT_Commander c inner join FCT_Game g on g.GameID = c.GameID left join FCT_Species s on s.SpeciesID = c.SpeciesID where c.GameID = ${IDS.GameID} and c.RaceID = ${IDS.RaceID} and c.CommanderType = 0 and c.RetireStatus = 0 and c.Prisoner = 0`)
+    const serving = await all(raw, `select c.CommanderID as id, c.Name as name, c.CommandType as post, s.GraduationAge + floor((g.GameTime - c.CareerStart) / ${YEAR}.0) as age from FCT_Commander c inner join FCT_Game g on g.GameID = c.GameID left join FCT_Species s on s.SpeciesID = c.SpeciesID where c.GameID = ${IDS.GameID} and c.RaceID = ${IDS.RaceID} and c.CommanderType = 0 and c.RetireStatus = 0 and c.Prisoner = 0`)
     const everyone = await all(raw, `select Name as name from FCT_Commander where GameID = ${IDS.GameID} and RaceID = ${IDS.RaceID}`)
 
     return { serving, names: new Set(everyone.map((row) => row.name)) }

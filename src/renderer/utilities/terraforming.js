@@ -2,6 +2,7 @@
 //
 // The plan itself is the page's long-standing heuristic (a target atmosphere found by iterating the greenhouse balance). It first aims at the species' ideal temperature, then searches the species' range for a mean whose complete, phase-aware orbital swing fits. It is checked against the game's formulas, not against a played-out terraform.
 
+import { PI_APPROX } from './colonies'
 import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, costPoints, dangerColumnsOf, gasDanger, hydrosphereAtTemperature, hydrosphereTypeAt, infrastructurePerMillion, isDangerousGas, orbitOf, surfaceTemperature, temperaturePoints, withAtmosphereShares } from './habitability'
 
 export const EARTH_SURFACE_AREA = 511187128
@@ -419,7 +420,8 @@ const hydrosphereSettling = (body, solution, drained) => {
 
 // The plan for one target mean, with the existing pressure, gas-multiplier and breathing limits. `hold` keeps the climate the air gives (the greenhouse and anti-greenhouse gases are left as they are) and `drain` takes the water off the surface, which the game's terraformer does by removing water vapour until the surface is dry. Each trial solves its own atmosphere and albedo before pricing its swing; no ratio extrapolates an extreme from another trial.
 const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEVER) => {
-  const area = 4 * Math.PI * body.Radius ** 2
+  // The body's surface in the game's unit of work: four times its pi (3.1416), the same figure the capacity rule spreads pressure over, so a plan's work and that spread are inverses.
+  const area = 4 * PI_APPROX * body.Radius ** 2
   const areaRatio = area / EARTH_SURFACE_AREA
 
   if (!(area > 0)) {

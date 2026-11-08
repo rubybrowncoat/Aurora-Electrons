@@ -27,16 +27,10 @@ export const withColonyEnvironment = (colony, environments) => {
   return { ...colony, EnvironmentCost: environment, CurrentColonyCost: value ? (value.colonisable ? value.current : -1) : null, MaximumColonyCost: value ? (value.colonisable ? value.worst : -1) : null }
 }
 
-// Keep membership decisions, but require occupied berths only for ships actually counted here. The retained Ark coordinate-membership rule is not certified by the workforce arithmetic.
+// The colony's scalar census already retains zero when attribution cannot change its contribution.
 export const orbitalPopulationResult = (ark, colony) => {
-  const ambiguous = ark.ships.filter((ship) => !ship.orbit || (ship.orbit.counted && ship.orbit.SystemBodyID === colony.SystemBodyID && ship.orbit.PopulationID === null))
+  const occupied = ark.byPopulation[colony.PopulationID]?.occupied
+  const parts = ark.ships.length ? { occupied: occupied || unavailable({ rule: 'colonies.workers', missing: ['the colony assignment of orbital population'] }) } : {}
 
-  if (ambiguous.length) {
-    return unavailable({ rule: 'colonies.workers', missing: ['the colony assignment of orbital population'] })
-  }
-
-  const countedHere = (ship) => ship.orbit.counted && ship.orbit.PopulationID === colony.PopulationID
-  const parts = Object.fromEntries(ark.ships.flatMap((ship) => [[`orbit ${ship.ShipID}`, ship.results.orbit], ...(countedHere(ship) ? [[`occupied ${ship.ShipID}`, ship.results.occupied]] : [])]))
-
-  return combine({ rule: 'colonies.workers', parts, compute: (values) => ark.ships.reduce((sum, ship) => sum + (countedHere(ship) ? values[`occupied ${ship.ShipID}`] : 0), 0), units: 'M people' })
+  return combine({ rule: 'colonies.workers', parts, compute: (values) => values.occupied ?? 0, units: 'M people' })
 }

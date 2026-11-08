@@ -3,7 +3,7 @@
 // Available and blocked follow the founding rule the Minerals page and the Colonization Planner share (colonization.js `cmcBlocks`), not the tab's own body test: a colony with people, an automated mine, a civilian or ex-civilian mining complex, a mass driver or orbital miners at work keeps the complex off its body, and a body the race has banned is kept off too. The tab's own test reads the race's population records alone, counts a record with no orbital mining modules as blocking, and names neither a mass driver nor a complex; the two disagree on a body holding only an empty colony or orbital miners, and where they do this summary follows the founding rule. The check (scripts/check-cmc-summary.js) ports the tab beside it and reports every such body.
 
 import { CMC_PURCHASE_COST, CMC_TAX_INCOME } from './cmc-policy'
-import { CMC_MINERAL_IDS, depositReadable, qualifiesForCmc } from './minerals'
+import { CMC_MINERAL_IDS, depositReadable, qualifiesForCmc, wholeCapacity } from './minerals'
 import { ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 
 const SUMMARY_VERSIONS = ['3.2.x']
@@ -45,7 +45,7 @@ registerRule({
 })
 
 const known = (value) => typeof value === 'number' && Number.isFinite(value)
-const whole = (value) => Math.floor(value + 1e-9)
+const whole = wholeCapacity
 
 // A Duranium or Gallicite deposit that does not meet the rule for certain but could: its amount or accessibility is not recorded, and what is recorded does not rule it out. The recorded part is tested at the best the unrecorded one allows.
 const couldQualify = (deposit) => !depositReadable(deposit) && qualifiesForCmc({ Amount: known(deposit.Amount) ? deposit.Amount : Infinity, Accessibility: known(deposit.Accessibility) ? deposit.Accessibility : 1 })
@@ -71,7 +71,7 @@ const partOf = (body) => {
 }
 
 // A colony's complexes as the game counts them: the whole number of civilian mining complexes it holds, or null while an installation of the colony's is not fully recorded.
-const complexesOf = (colony) => (known(colony.Complexes) && !(colony.ComplexGaps > 0) ? whole(Math.max(0, colony.Complexes)) : null)
+const complexesOf = (colony) => (known(colony.Complexes) && !(colony.ComplexGaps > 0) ? whole(Math.max(0, colony.Complexes), colony.ComplexesTerms) : null)
 
 // The wealth a year of one colony's complexes, by the choice of its output; null while their number is not recorded.
 const wealthOf = (colony) => {

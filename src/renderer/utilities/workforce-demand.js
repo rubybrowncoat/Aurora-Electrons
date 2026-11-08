@@ -15,10 +15,10 @@ const EPSILON = 1e-9
 const BUILD_ROUNDING = 0.00005
 const NPR_GAP = 'the stock of the capital, which a spied empire\'s colony builds from'
 
-// The workforce breakdown. The split is repaired; queued completion dates still erase the retained B13 industrial-cycle primitive (family 8).
+// The workforce breakdown combines the repaired workforce split with industrial completion dates under their stated forecast assumptions.
 registerRule({
   id: RULE,
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'M workers',
   verification: 'estimated',
   structure: ['FCT_IndustrialProjects.ProductionID, ProductionType, Amount, PartialCompletion', 'DIM_PlanetaryInstallation.Workers, ConversionFrom', 'FCT_Shipyard.TaskType, SYType, Capacity, Slipways, CapacityTarget, RequiredBP, CompletedBP, PauseActivity, ParentShipID', 'FCT_Population.Duranium, Neutronium', 'the production cycle forecast rules', 'the worker and population projection rules'],

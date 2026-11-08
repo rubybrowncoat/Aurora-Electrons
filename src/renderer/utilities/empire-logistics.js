@@ -2,6 +2,7 @@
 
 import { MAINTENANCE_MODULE, ORDINARY_SHARE, undamagedCount, withinUnits } from './maintenance-pools'
 import { registerRule, unavailable } from './provenance'
+import { wholeCapacity } from './minerals'
 
 const SUMMARY_VERSIONS = ['3.2.x']
 export const SUMMARY_RULE = 'logistics.empireSummary'
@@ -164,7 +165,7 @@ export const summaryRows = ({ colonies, sources, modifierOf, order = 'capacity' 
       stock: figure('stock', isNumber(colony.MaintenanceStockpile) ? colony.MaintenanceStockpile : null, ['the maintenance supplies in stock']),
       production: figure('production', product(colony.MSPProduction, modifier, whole(colony.MaintenanceFacilities), PRODUCTION_PERIODS), ['the colony\'s production modifier and the racial maintenance supply production']),
       fuel: figure('fuel', isNumber(colony.FuelStockpile) ? colony.FuelStockpile : null, ['the fuel in stock']),
-      fuelProduction: figure('fuelProduction', product(colony.FuelProduction, modifier, whole(colony.Refineries)), ['the colony\'s production modifier and the racial fuel production']),
+      fuelProduction: figure('fuelProduction', product(colony.FuelProduction, modifier, (isNumber(colony.Refineries) ? wholeCapacity(colony.Refineries, colony.RefineriesTerms) : null)), ['the colony\'s production modifier and the racial fuel production']),
       refuel: whole(service.RefuelPoints) > 0,
       resupply: whole(colony.MaintenanceFacilities) > 0 || moduleCount > 0 || whole(service.ShuttlePoints) > 0,
       ordnance: whole(service.OrdnancePoints) > 0,

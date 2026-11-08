@@ -1,7 +1,7 @@
 // What each colony holds of every mineral, against the reserve the race keeps there and what the colony's build queue still needs: the reads and the rules the Mineral Breakdown and the Hauling Planner share.
 
-import { MINERALS } from './minerals'
-import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
+import { MINERALS, wholeCapacity } from './minerals'
+import { combine, isAvailable, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
 const COLONY_VERSIONS = ['3.2.x']
 
@@ -20,8 +20,8 @@ registerRule({
   versions: COLONY_VERSIONS,
   units: 'state',
   verification: 'confirmed',
-  structure: ['FCT_Population.<mineral>', 'FCT_Population.Reserve<mineral>', 'the colony\'s queue needs', 'FCT_Population.MassDriverDest'],
-  note: 'The state of a colony\'s mineral, most pressing first: short when the queue needs a tonne or more than the stock, then stock the mass driver would ship that the queue needs, below the reserve, free to move above it, all reserved, and nothing held. Thresholds of 1 t on stored values, as differences under a tonne are rounding. The state needs the stock, the reserve and the queue needs: with any unknown, it is unknown. It is as certain as the queue needs it reads.',
+  structure: ['FCT_Population.<mineral>', 'FCT_Population.Reserve<mineral>', 'the colony\'s queue needs', 'FCT_Population.MassDriverDest', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
+  note: 'The state of a colony\'s mineral, most pressing first: short when the queue needs a tonne or more than the stock, then stock the mass driver would ship that the queue needs, below the reserve, free to move above it, all reserved, and nothing held. Thresholds of 1 t on stored values, as differences under a tonne are rounding. The state needs the stock, the reserve and the queue needs: with any unknown, it is unknown. An unread driver or destination leaves the state unknown only when export could change it; a known shortage, no whole driver or no destination remains decisive. It is as certain as the queue needs it reads.',
 })
 
 registerRule({
@@ -66,11 +66,21 @@ export const STOCK_STATES = {
 }
 export const PRESSING = ['short', 'exported', 'below']
 
+// Stock export is undecided only while a driver or destination input could change it; either known absence settles it.
+export const stockExporting = (colony) => {
+  const drivers = wholeCapacity(colony.MassDrivers, colony.MassDriverTerms)
+  const destination = colony.MassDriverDest
+  if (drivers === 0 || destination === 0) return false
+  // A known whole driver is sufficient even when another non-negative installation amount is unread.
+  if (destination > 0 && !Number.isFinite(drivers) && colony.MassDriverTerms && wholeCapacity(0, JSON.stringify(JSON.parse(colony.MassDriverTerms).filter((term) => term && !term.includes(null)))) > 0) return true
+  return Number.isFinite(drivers) && Number.isFinite(destination) ? drivers > 0 && destination > 0 : null
+}
+
 export const stockState = ({ stock, reserve, needs }, exporting) => {
   if (needs - stock >= 1) {
     return 'short'
-  } else if (exporting && needs - reserve >= 1 && stock - reserve >= 1) {
-    return 'exported'
+  } else if (needs - reserve >= 1 && stock - reserve >= 1 && exporting !== false) {
+    return exporting === true ? 'exported' : 'unknown'
   } else if (reserve - stock >= 1) {
     return 'below'
   } else if (stock - reserve >= 1) {
@@ -123,6 +133,11 @@ const inboundOf = (packets, populationId, name) => {
 // A colony's stock of one mineral and what is on its way to it by mass driver, as results: the part of `colonyMineralResults` that needs neither the reserve nor the queue.
 export const stockAndInbound = (colony, packets, mineral) => ({ stock: stored('minerals.colonyStock', colony[mineral.name], `the ${mineral.name} stockpiled at the colony`), inbound: inboundOf(packets, colony.PopulationID, mineral.name) })
 
+const stateResult = (stock, reserve, needs, exporting) => {
+  const result = combine({ rule: 'minerals.stockState', parts: { stock, reserve, needs }, compute: (values) => stockState(values, exporting) })
+  return isAvailable(result) && result.value === 'unknown' ? unavailable({ rule: 'minerals.stockState', missing: ['the colony\'s mass drivers or their destination'] }) : result
+}
+
 // `colonyMinerals` with the unknown kept apart from 0: each of a mineral's stock, reserve, free, needs, inbound and state is a provenance result in `results`, and the same name holds its value, or null when unknown. A colony whose stock or reserve is not recorded has no free stock and no state; one whose queue needs are unknown has no state. `needs` and `packets` are the whole reads (`loadQueueNeeds`, `loadPacketsInFlight`), or null when one was not made; `exporting` is whether the colony's mass driver ships somewhere.
 export const colonyMineralResults = (colony, needs, packets, exporting = false) => MINERALS.map((mineral) => {
   const { stock, inbound } = stockAndInbound(colony, packets, mineral)
@@ -134,7 +149,7 @@ export const colonyMineralResults = (colony, needs, packets, exporting = false) 
     free: combine({ rule: 'minerals.colonyStock', parts: { stock, reserve }, compute: (values) => Math.max(0, values.stock - values.reserve) }),
     needs: needsResult,
     inbound,
-    state: combine({ rule: 'minerals.stockState', parts: { stock, reserve, needs: needsResult }, compute: (values) => stockState(values, exporting) }),
+    state: stateResult(stock, reserve, needsResult, exporting),
   }
 
   return { ...mineral, stock: valueOrNull(stock), reserve: valueOrNull(reserve), free: valueOrNull(results.free), needs: valueOrNull(needsResult), inbound: valueOrNull(results.inbound), state: valueOrNull(results.state), results }

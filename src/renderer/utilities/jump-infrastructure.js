@@ -12,6 +12,9 @@ export const JUMP_POINT_DESTINATION = 1
 // An object sits at a jump point when it is in the same system within this many km of it on each axis (the stored coordinates are kilometres).
 export const NEAR_KM = 1
 
+// The arrival flag of an order as the save records it: true or false for 0, 1, false or true, and null where the flag is none of them, so a state that rests on it is unknown.
+export const arrivalOf = (flag) => ([0, 1, true, false].includes(flag) ? Boolean(flag) : null)
+
 const STRUCTURE_POINT = ['FCT_JumpPoint.JumpGateStrength', 'FCT_JumpPoint.JumpGateRaceID', 'FCT_RaceJumpPointSurvey.Charted', 'FCT_RaceSysSurvey.SystemID']
 
 registerRule({
@@ -101,10 +104,10 @@ const groupBySystem = (rows) => {
   return groups
 }
 
-// The race's own stabilisation orders, the stationary salvos it owns, the contacts it holds of stationary salvos and the game time (`gameTime`), read once for a page: { orders, salvos, contacts, gameTime }. The rows stay as the save has them (a salvo or contact more than once, a design the save lacks as a null `SecondStageID`); `infrastructureRows` counts each object once.
+// The race's own stabilisation orders, the stationary salvos it owns, the contacts it holds of stationary salvos and the game time (`gameTime`), read once for a page: { orders, salvos, contacts, gameTime }. The rows stay as the save has them (a salvo or contact more than once, a design the save lacks as a null `SecondStageID`); `infrastructureRows` counts each object once. An order row holds its place in its fleet's queue (`MoveOrder`), which is the order the fleet reaches first where the save records it; a row may hold none.
 export const loadJumpInfrastructure = async (database, { GameID, RaceID }) => {
   const [[orders], [salvos], [contacts], [games]] = await Promise.all([
-    database.query(`select FCT_MoveOrders.MoveOrderID, FCT_MoveOrders.DestinationID as WarpPointID, FCT_MoveOrders.FleetID, FCT_Fleet.FleetName, FCT_MoveOrders.Arrived, FCT_MoveOrders.TimeRequired
+    database.query(`select FCT_MoveOrders.MoveOrderID, FCT_MoveOrders.DestinationID as WarpPointID, FCT_MoveOrders.FleetID, FCT_Fleet.FleetName, FCT_MoveOrders.Arrived, FCT_MoveOrders.TimeRequired, FCT_MoveOrders.MoveOrder
 from FCT_MoveOrders
 left join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID
 where FCT_MoveOrders.GameID = ${GameID} and FCT_MoveOrders.RaceID = ${RaceID} and FCT_MoveOrders.MoveActionID = ${STABILISE_JUMP_POINT} and FCT_MoveOrders.DestinationType = ${JUMP_POINT_DESTINATION}`),
@@ -141,10 +144,9 @@ const ordersByPoint = (orders) => {
 
     seen.add(order.MoveOrderID)
 
-    const arrivedKnown = [0, 1, true, false].includes(order.Arrived)
-    const arrived = Boolean(order.Arrived)
+    const arrived = arrivalOf(order.Arrived)
 
-    if (!arrivedKnown || (arrived && !Number.isFinite(order.TimeRequired))) {
+    if (arrived === null || (arrived && !Number.isFinite(order.TimeRequired))) {
       unknown.add(order.WarpPointID)
 
       return

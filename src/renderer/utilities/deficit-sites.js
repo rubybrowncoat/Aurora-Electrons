@@ -322,7 +322,7 @@ const newExtraction = ({ site, type, count, race }) => {
 
   const equivalents = type.Mining * count
   const manned = type.Workers > 0
-  const row = { ManualMineCount: manned ? equivalents : 0, AutomatedMineCount: manned ? 0 : equivalents, CivilianMineCount: 0, MineProduction: race.MineProduction, Accessibility: site.Accessibility, GovernorBonus: 1, SectorBonus: 1, Efficiency: 1, StabilityModifier: 1, PoliticalModifier: 1, RadiationModifier: isNumber(site.RadiationLevel) ? 1 - site.RadiationLevel / 10000 : null }
+  const row = { ManualMineCount: manned ? equivalents : 0, ManualMineTerms: manned ? JSON.stringify([[count, type.Mining]]) : null, AutomatedMineCount: manned ? 0 : equivalents, AutomatedMineTerms: manned ? null : JSON.stringify([[count, type.Mining]]), CivilianMineCount: 0, MineProduction: race.MineProduction, Accessibility: site.Accessibility, GovernorBonus: 1, SectorBonus: 1, Efficiency: 1, StabilityModifier: 1, PoliticalModifier: 1, RadiationModifier: isNumber(site.RadiationLevel) ? 1 - site.RadiationLevel / 10000 : null }
 
   return combine({ rule: 'deficitSites.extraction', parts: { rate: surfaceRateResult(row, false) }, compute: ({ rate }) => rate, units: 't/yr' })
 }

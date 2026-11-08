@@ -1,7 +1,9 @@
 /*
   Checks the Sorium harvester rule against a save: for every harvester ship of one race it recomputes the annual potential and the fuel one harvesting step can add from the save's own rows, compares the stored inputs it can (the racial rate, the class module and tank totals, the deposit accessibility, the tank level) and compares the Fuel & Maintenance page's own figures (utilities/logistics.js harvesterReport, harvesterBasis, harvesterObtainable and harvesterAdminBonus, fed by the page's own query) with the rule.
 
-  node scripts/check-harvesters.js [<save.db> --race <RaceID>] [--years <n>] [--since <earlier.db>] [--list]
+  node scripts/check-harvesters.js [<save> --race <RaceID>] [--years <n>] [--since <earlier save>] [--list]
+
+  A save may be named by its path or by the letter of the played saves of the registry (scripts/lib/fixtures.js: A, B, C1 or C2), whose race the letter gives too, so the gate reads the campaigns the same way it reads the orbit pair (--since takes a letter as well).
 
   Two kinds of result stay apart. Rule verification: the rule below is the game's per-step harvesting rule, the one the earlier line worked out (docs/plans/backlog/evidence/AE-079-01.md § 2); the worked cases at the end run it on in-memory rows and the stored-input checks compare it with what the game wrote. Observed reconciliation: --since reads an earlier save of the same campaign and replays the construction cycles between the two from the increment ledger, to see whether a ship's fuel gain is what the rule predicts; a ship that moved, or whose tank is full, or that cannot be told from a transfer, gives no clean observation, and when none is clean the check says so.
 
@@ -14,7 +16,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { fuelServiceTruth } = require('./lib/fuel-service-oracle')
-const { FIXTURE, fixturePath } = require('./lib/fixtures')
+const { FIXTURE, PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2, fixturePath } = require('./lib/fixtures')
 
 // Game constants of the rule: component type ids (harvester, fuel storage), the Sorium material id, the commander's Mining bonus id, the ship command type, body types that can be harvested, the race type of the Ancients, litres per tonne of Sorium and seconds per year, and the racial rate a race has before it researches a better one.
 const HARVESTER_TYPE = 32
@@ -31,6 +33,10 @@ const SECONDS_PER_YEAR = 31536000
 const RELATIVE_TOLERANCE = 1e-9
 const ABSOLUTE_TOLERANCE = 1e-6
 const APP_RULES = ['logistics.harvesterOutput', 'logistics.harvesterObtainable']
+
+// The played saves of the registry, lettered as docs/WORKFLOW.md and scripts/check-orbit-two-saves.js name them: the gate reads A, B and the pair B to C1. A letter gives the file and the race, since a named save needs its race named as well.
+const NAMED_SAVES = { A: PLAYED, B: PLAYED_NEXT, C1: PLAYED_C1, C2: PLAYED_C2 }
+const namedPath = (name) => path.resolve(__dirname, '..', NAMED_SAVES[name].file)
 
 const fail = (message) => {
   console.error(message)
@@ -58,6 +64,16 @@ const parseArguments = (argv) => {
     }
   }
 
+  // A letter of the registry names the played save and its race; any other value is the path of a save.
+  if (options.save && NAMED_SAVES[options.save]) {
+    options.race = Number.isInteger(options.race) ? options.race : NAMED_SAVES[options.save].raceId
+    options.save = namedPath(options.save)
+  }
+
+  if (options.since && NAMED_SAVES[options.since]) {
+    options.since = namedPath(options.since)
+  }
+
   // No save named: the fixture of scripts/lib/fixtures.js and its player race (a named save needs its race named as well).
   if (!options.save) {
     options.save = fixturePath()
@@ -65,7 +81,7 @@ const parseArguments = (argv) => {
   }
 
   if (!options.save || !Number.isInteger(options.race) || !(options.years > 0)) {
-    fail('Usage: node scripts/check-harvesters.js [<save.db> --race <RaceID>] [--years <n>] [--since <earlier.db>] [--list]')
+    fail('Usage: node scripts/check-harvesters.js [<save> --race <RaceID>] [--years <n>] [--since <earlier save>] [--list]')
   }
 
   return options

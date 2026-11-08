@@ -91,12 +91,12 @@ registerRule({
 
 registerRule({
   id: SUPPLY_DRAW,
-  versions: ['2.7.x'],
+  versions: RUNTIME_VERSIONS,
   units: 'MSP a year',
   verification: 'estimated',
   structure: ['design.averageRepairCost', 'shipRuntime.failureChanceNow'],
   note: 'The maintenance supplies the ship\'s failures draw in a year at its present clock: the class\'s average repair cost times the failure rate at that clock over 100, the arithmetic of the class\'s life series taken at the ship\'s own age.',
-  assumptions: ['the damage of a failure is spread over the class\'s components as its damage allocation table spreads it', 'the clock keeps its present age for the year'],
+  assumptions: ['the damage of a failure is spread over the class\'s eligible components as their damage allocation slices spread it, excluding repair-immune components', 'the clock keeps its present age for the year'],
 })
 
 registerRule({
@@ -172,7 +172,7 @@ const lacks = (rule, missing, units) => unavailable({ rule, missing: Array.isArr
 
 // ---- The class's planning estimate -------------------------------------------------------------------------------------
 
-// What the class gives every ship of it, shared by them: its stored supplies, failure rate and planned deployment, and the class's own planning estimate of its maintenance life (a fresh clock, full cover and the class's supplies: `life`, the series of design.maintenanceLifeSeries) with the average repair cost it rests on. `components` is the class's damage allocation rows as { chanceToHit, cost }, null when the class is not read for the race.
+// What the class gives every ship of it, shared by them: its stored supplies, failure rate and planned deployment, and the class's own planning estimate of its maintenance life (a fresh clock, full cover and the class's supplies: `life`, the series of design.maintenanceLifeSeries) with the average repair cost it rests on. `components` is the class's damage allocation rows as { chanceToHit, cost, noMaintFailure }, null when the class is not read for the race.
 const classOf = (row, components) => {
   const commercial = flag(row.Commercial)
   const repairCost = components === null ? lacks('design.averageRepairCost', 'the class\'s own components (the class is not one of the race\'s)', 'MSP') : averageRepairCost({ components, maxDacRoll: row.MaxDACRoll })
@@ -287,7 +287,7 @@ const maintenanceOf = (ship, support, crew, context, scenario) => {
   const failureRate = !known(classRate) ? lacks(FAILURE_RATE, 'the class\'s annual failure rate') : !known(damaged) ? lacks(FAILURE_RATE, 'the ship\'s damaged engineering') : damaged > 0 ? lacks(FAILURE_RATE, 'undamaged engineering: the ship has engineering damaged, which raises its own failure rate above the class\'s') : ofRule({ rule: FAILURE_RATE, value: classRate, inputs: { present: ['the class\'s annual failure rate', 'the ship\'s engineering damage'] } })
   const failureNow = failureRate.value === null || age.value === null ? lacks(FAILURE_NOW, [failureRate.value === null ? 'the annual failure rate' : null, age.value === null ? 'the maintenance age' : null].filter(Boolean)) : ofRule({ rule: FAILURE_NOW, value: failureRate.value * age.value, inputs: { present: ['the annual failure rate', 'the maintenance age'] } })
   const repairCost = ship.class.repairCost
-  const supplyDraw = failureNow.value === null || repairCost.value === null ? lacks(SUPPLY_DRAW, [failureNow.value === null ? 'the failure rate at the ship\'s clock' : null, repairCost.value === null ? 'the class\'s average repair cost' : null].filter(Boolean)) : ofRule({ rule: SUPPLY_DRAW, value: repairCost.value * failureNow.value / 100, inputs: { present: ['the average repair cost', 'the failure rate at the ship\'s clock'] } })
+  const supplyDraw = combine({ rule: SUPPLY_DRAW, parts: { repairCost, failureNow }, compute: (values) => values.repairCost * values.failureNow / 100 })
   const tested = support.case === 'normal' || support.case === 'overhaul' || support.case === 'hangared'
   const incrementChance = !tested ? lacks('design.incrementFailureChance', support.case === 'unknown' ? support.reason : clock.reason) : clock.mode !== 'support' ? lacks('design.incrementFailureChance', clock.mode === 'advanced' ? 'a ship carried in a military hangar: the hangar moves its clock and the maintenance pass does not test it for failure' : clock.reason) : incrementFailureChance({ baseFailureChance: failureRate.value, clockYears: age.value, elapsedYears: scenario.elapsedYears, uncoveredFraction: scenario.uncoveredFraction, crewPerformance: crew.performance.value, engineeringBonus: scenario.engineeringBonus, training: scenario.training })
 
@@ -345,7 +345,7 @@ const deploymentOf = (ship, support, crew, context) => {
 
 // ---- The records ---------------------------------------------------------------------------------------------------------
 
-// The frozen per-ship records of `rows` (the ships `loadFleetShips` gives), by ShipID, from `context`: { revision, gameTime (null when unread), npr, noOverhauls (true, false or null when the save does not say), yardTasks (a Map of ShipID to 'active', 'paused' or 'unknown' for the ships the shipyard tasks name, or null when the save does not show the tasks: a ship in an active task is out of maintenance and failure testing, and with no tasks shown no ship's clock mode is known), classes ({ [ShipClassID]: the class's damage allocation components as { chanceToHit, cost }, for the race's own classes }), scenario: { elapsedYears, uncoveredFraction, engineeringBonus, training } (what the caller assumes for the failure chance of one increment, null where it assumes nothing) }. Each record has the ship's identity, `revision`, `class`, `support`, the clocks and stocks the save stores (`clocks`, `stocks`), `crew`, `maintenance` and `deployment`. The same rows and context give the same records.
+// The frozen per-ship records of `rows` (the ships `loadFleetShips` gives), by ShipID, from `context`: { revision, gameTime (null when unread), npr, noOverhauls (true, false or null when the save does not say), yardTasks (a Map of ShipID to 'active', 'paused' or 'unknown' for the ships the shipyard tasks name, or null when the save does not show the tasks: a ship in an active task is out of maintenance and failure testing, and with no tasks shown no ship's clock mode is known), classes ({ [ShipClassID]: the class's damage allocation components as { chanceToHit, cost, noMaintFailure }, for the race's own classes }), scenario: { elapsedYears, uncoveredFraction, engineeringBonus, training } (what the caller assumes for the failure chance of one increment, null where it assumes nothing) }. Each record has the ship's identity, `revision`, `class`, `support`, the clocks and stocks the save stores (`clocks`, `stocks`), `crew`, `maintenance` and `deployment`. The same rows and context give the same records.
 export const buildShipRuntime = (rows, context) => {
   const classes = new Map()
   const classOfRow = (row) => {
@@ -404,14 +404,16 @@ const classComponents = async (database, { GameID, RaceID, ids }) => {
 
   const components = await columnsOf(database, 'FCT_ClassComponent')
   const hit = components.size === 0 || components.has('ChanceToHit') ? 'FCT_ClassComponent.ChanceToHit' : 'null'
-  const [rows] = await database.query(`select FCT_ShipClass.ShipClassID, FCT_ClassComponent.ComponentID, ${hit} as ChanceToHit, FCT_ShipDesignComponents.Cost from FCT_ShipClass left join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ShipClass.GameID = ${GameID} and FCT_ShipClass.RaceID = ${RaceID}${ids ? ` and FCT_ShipClass.ShipClassID in (${ids.join(', ')})` : ''} order by ShipClassID, ChanceToHit, ComponentID`)
+  const designs = await columnsOf(database, 'FCT_ShipDesignComponents')
+  const immunity = designs.has('NoMaintFailure') ? 'FCT_ShipDesignComponents.NoMaintFailure' : 'null'
+  const [rows] = await database.query(`select FCT_ShipClass.ShipClassID, FCT_ClassComponent.ComponentID, ${hit} as ChanceToHit, FCT_ShipDesignComponents.Cost, ${immunity} as NoMaintFailure from FCT_ShipClass left join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ShipClass.GameID = ${GameID} and FCT_ShipClass.RaceID = ${RaceID}${ids ? ` and FCT_ShipClass.ShipClassID in (${ids.join(', ')})` : ''} order by ShipClassID, ChanceToHit, ComponentID`)
   const byClass = {}
 
   rows.forEach((row) => {
     byClass[row.ShipClassID] = byClass[row.ShipClassID] || []
 
     if (row.ComponentID !== null && row.ComponentID !== undefined) {
-      byClass[row.ShipClassID].push({ chanceToHit: row.ChanceToHit, cost: row.Cost })
+      byClass[row.ShipClassID].push({ chanceToHit: row.ChanceToHit, cost: row.Cost, noMaintFailure: row.NoMaintFailure })
     }
   })
 

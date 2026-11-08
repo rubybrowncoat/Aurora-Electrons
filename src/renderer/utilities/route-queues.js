@@ -2,7 +2,7 @@
 
 import { columnsOf } from './mine-bootstrap-data'
 
-const ORDER_COLUMNS = ['MoveOrderID', 'FleetID', 'MoveOrder', 'MoveActionID', 'StartSystemID', 'DestinationType', 'DestinationID', 'PopulationID', 'DestinationItemType', 'DestinationItemID', 'MaxItems', 'MinQuantity', 'OrderDelay', 'OrderDelayRemaining', 'Arrived', 'NewSystemID', 'NewWarpPointID', 'Description']
+const ORDER_COLUMNS = ['MoveOrderID', 'FleetID', 'MoveOrder', 'MoveActionID', 'StartSystemID', 'DestinationType', 'DestinationID', 'PopulationID', 'DestinationItemType', 'DestinationItemID', 'MaxItems', 'MinDistance', 'MinQuantity', 'OrderDelay', 'OrderDelayRemaining', 'Arrived', 'NewSystemID', 'NewWarpPointID', 'Description']
 const REQUIRED_ORDER_COLUMNS = ['MoveOrderID', 'FleetID', 'MoveOrder', 'MoveActionID', 'StartSystemID', 'DestinationType', 'DestinationID']
 
 const NOTHING = Object.freeze({ supported: false, reason: '', fleets: [], orders: [], actions: {}, conditionals: [], standing: {}, templates: [] })
@@ -25,7 +25,7 @@ const loadTemplates = async (database, { GameID, RaceID }) => {
 
   const own = (name) => (order.has(name) ? `FCT_MoveOrderTemplate.${name}` : `null as ${name}`)
   const [heads] = await database.query('select FCT_OrderTemplate.OrderTemplateID, FCT_OrderTemplate.TemplateName from FCT_OrderTemplate where FCT_OrderTemplate.GameID = :GameID and FCT_OrderTemplate.RaceID = :RaceID', { replacements: { GameID, RaceID } })
-  const [rows] = await database.query(`select FCT_MoveOrderTemplate.OrderTemplateID, FCT_MoveOrderTemplate.MoveIndex, FCT_MoveOrderTemplate.MoveActionID, FCT_MoveOrderTemplate.StartSystemID, FCT_MoveOrderTemplate.DestinationType, FCT_MoveOrderTemplate.DestinationID, ${own('PopulationID')}, ${own('DestinationItemType')}, ${own('DestinationItemID')}, ${own('MaxItems')}, ${own('MinQuantity')}, ${own('OrderDelay')}, ${own('NewSystemID')}, ${own('NewJumpPointID')} from FCT_MoveOrderTemplate where FCT_MoveOrderTemplate.GameID = :GameID and FCT_MoveOrderTemplate.OrderTemplateID in (select FCT_OrderTemplate.OrderTemplateID from FCT_OrderTemplate where FCT_OrderTemplate.GameID = :GameID and FCT_OrderTemplate.RaceID = :RaceID)`, { replacements: { GameID, RaceID } })
+  const [rows] = await database.query(`select FCT_MoveOrderTemplate.OrderTemplateID, FCT_MoveOrderTemplate.MoveIndex, FCT_MoveOrderTemplate.MoveActionID, FCT_MoveOrderTemplate.StartSystemID, FCT_MoveOrderTemplate.DestinationType, FCT_MoveOrderTemplate.DestinationID, ${own('PopulationID')}, ${own('DestinationItemType')}, ${own('DestinationItemID')}, ${own('MaxItems')}, ${own('MinDistance')}, ${own('MinQuantity')}, ${own('OrderDelay')}, ${own('NewSystemID')}, ${own('NewJumpPointID')} from FCT_MoveOrderTemplate where FCT_MoveOrderTemplate.GameID = :GameID and FCT_MoveOrderTemplate.OrderTemplateID in (select FCT_OrderTemplate.OrderTemplateID from FCT_OrderTemplate where FCT_OrderTemplate.GameID = :GameID and FCT_OrderTemplate.RaceID = :RaceID)`, { replacements: { GameID, RaceID } })
   const byTemplate = new Map(heads.map((head) => [head.OrderTemplateID, { ...head, orders: [] }]))
 
   rows.forEach((row) => byTemplate.has(row.OrderTemplateID) && byTemplate.get(row.OrderTemplateID).orders.push(row))
@@ -45,7 +45,7 @@ export const loadRouteQueues = async (database, { GameID, RaceID }) => {
 
   const replacements = { GameID, RaceID }
   const fleetColumn = (name) => (fleet.has(name) ? `FCT_Fleet.${name}` : `0 as ${name}`)
-  const orderColumns = ORDER_COLUMNS.filter((name) => order.has(name)).map((name) => `FCT_MoveOrders.${name}`).join(', ')
+  const orderColumns = ORDER_COLUMNS.filter((name) => order.has(name) || name === 'MinDistance').map((name) => order.has(name) ? `FCT_MoveOrders.${name}` : `null as ${name}`).join(', ')
   const shipping = fleet.has('ShippingLine') ? 'and FCT_Fleet.ShippingLine = 0' : ''
   const wanted = `FCT_Fleet.GameID = :GameID and FCT_Fleet.RaceID = :RaceID ${shipping} and (FCT_Fleet.CycleMoves = 1 or (select count(*) from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) >= 2)`
   const [fleets] = await database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.CycleMoves, ${fleetColumn('Speed')}, ${fleetColumn('IgnoreConditional')}, ${fleetColumn('IgnoreStanding')} from FCT_Fleet where ${wanted} order by FCT_Fleet.FleetID`, { replacements })

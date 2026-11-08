@@ -172,21 +172,21 @@ const syntheticCases = (apps, capacities) => {
   const figure = (extra) => ({ outcome: 'finishes', delivered: 4, earliest: 40, latest: 40, startEarliest: 0, builtRange: [4, 4], unitsPerCycle: 0.1, cut: null, stall: null, ...extra })
   const factory = (extra = {}) => projectRow({ ID: 9, ...extra })
 
-  // The factory of four that the engine finishes on day 40 (a unit every 10 days).
-  holds('dated', 'a factory of four, which the engine finishes on day 40, raises the workers needed by 4 x 0.05 M from the second month on (day 40 falls in it) and not before in the lower demand; the higher one agrees from then on (the units built sooner may count before), and the horizon figure is the colony\'s workers needed then', () => {
+  // The request just under 0.1 floors to 0.0999 per day, so four units take 41 cycles.
+  holds('dated', 'a factory of four, which the engine finishes on day 41, raises the workers needed by 4 x 0.05 M from the second month on (day 41 falls in it) and not before in the lower demand; the higher one agrees from then on (the units built sooner may count before), and the horizon figure is the colony\'s workers needed then', () => {
     const { value, events, entry } = scene({ projects: [factory()] })
     const [event] = events
 
-    return events.length === 1 && event.status === 'dated' && event.kind === 'installation' && event.earliest === 40 && event.latest === 40 && near(value.required.low[1], 20) && near(value.required.low[2], 20.2) && near(value.required.low[MONTHS], 20.2) && value.required.low.every((workers, month) => workers <= value.required.high[month] + TOLERANCE && (month < 2 || near(workers, value.required.high[month]))) && near(value.later.best.required, 20.2) && near(value.later.best.free, entry.results.workersLater.value.available - 20.2) && near(value.later.worst.free, value.later.best.free)
+    return events.length === 1 && event.status === 'dated' && event.kind === 'installation' && event.earliest === 41 && event.latest === 41 && near(value.required.low[1], 20) && near(value.required.low[2], 20.2) && near(value.required.low[MONTHS], 20.2) && value.required.low.every((workers, month) => workers <= value.required.high[month] + TOLERANCE && (month < 2 || near(workers, value.required.high[month]))) && near(value.later.best.required, 20.2) && near(value.later.best.free, entry.results.workersLater.value.available - 20.2) && near(value.later.worst.free, value.later.best.free)
   })
 
-  holds('monthEdge', 'a completion on day 30 counts in month 1 (which ends on day 30.4), one on day 31 in month 2, and one on day 365 in month 12 and not month 11', () => {
+  holds('monthEdge', 'at the floored 0.9999 units per day, 29 units finish on day 30 (month 1), 30 on day 31 (month 2), and 364 on day 365 (month 12)', () => {
     const on = (amount, id) => scene({ projects: [factory({ Amount: amount, ProdPerUnit: 100, ProductionID: id })] }).value.required.low
-    const thirty = on(30, 4)
-    const thirtyOne = on(31, 4)
-    const year = on(365, 1)
+    const thirty = on(29, 4)
+    const thirtyOne = on(30, 4)
+    const year = on(364, 1)
 
-    return near(thirty[0], 20) && near(thirty[1], 23) && near(thirtyOne[1], 20) && near(thirtyOne[2], 23.1) && near(year[11], 20) && near(year[12], 38.25)
+    return near(thirty[0], 20) && near(thirty[1], 22.9) && near(thirtyOne[1], 20) && near(thirtyOne[2], 23) && near(year[11], 20) && near(year[12], 38.2)
   })
 
   holds('paused', 'a paused project adds nothing in either demand, and a project queued behind it that never starts adds nothing either: no installation appears from a job that is not building', () => {
@@ -197,11 +197,11 @@ const syntheticCases = (apps, capacities) => {
     return paused.events.length === 2 && byId('project-8').status === 'paused' && none(byId('project-8')) && byId('project-9').status === 'queued' && none(byId('project-9')) && near(paused.value.later.best.required, 20) && near(paused.value.later.worst.required, 20)
   })
 
-  holds('queuedStarts', 'a project queued behind one that finishes starts when it ends and is dated by the engine (day 80 here), counted from the month it falls in', () => {
+  holds('queuedStarts', 'a project queued behind one that finishes starts when it ends and is dated by the engine (day 82 here), counted from the month it falls in', () => {
     const { events, value } = scene({ projects: [factory({ ID: 8 }), factory({ Queue: 1 })] })
     const second = events.find((event) => event.id === 'project-9')
 
-    return second.status === 'dated' && second.earliest === 80 && near(value.required.low[2], 20.2) && near(value.required.low[3], 20.4) && near(value.required.low[MONTHS], 20.4)
+    return second.status === 'dated' && second.earliest === 82 && near(value.required.low[2], 20.2) && near(value.required.low[3], 20.4) && near(value.required.low[MONTHS], 20.4)
   })
 
   holds('stalled', 'a project that stalls on its minerals is never in the lower demand and in the higher at most what the stock builds (2 of 4), and one with no stock at all adds nothing to either', () => {
@@ -429,7 +429,7 @@ const pageCases = async (pageOptions, store) => {
     return vm
   }
 
-  const orbital = await open({ InstallationWorkers: 40 }, [], { arks: { ships: [{ ShipID: 1, AssignedPopulationID: 7, OrbitBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, CivilianFunction: 0, MoveOrders: 0, Berths: 100000000 }], cargo: [{ ShipID: 1, Amount: 100000000, Rows: 1, Amounts: 1, SpeciesID: 1, SpeciesName: 'Source case' }], colonies: [{ PopulationID: 7, SystemBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, Population: 100 }] } })
+  const orbital = await open({ InstallationWorkers: 40 }, [], { arks: { ships: [{ ShipID: 1, AssignedPopulationID: 7, OrbitBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, CivilianFunction: 0, MoveOrders: 0, Berths: 100000000 }], cargo: [{ ShipID: 1, CargoTypeID: 1, Amount: 100000000, Rows: 1, Amounts: 1, SpeciesID: 1, SpeciesName: 'Source case' }], colonies: [{ PopulationID: 7, SystemBodyID: 70, SystemID: 1, Xcor: 0, Ycor: 0, Population: 100 }], assignments: [{ PopulationID: 7, SystemBodyID: 70 }] } })
   holds('orbitalPage', 'PAGE 100 M orbital people join 100 M surface people for 61.251939 M manufacturing workers and no shortage against 40 M demand, while surface population remains 100 M', () => {
     const row = orbital.rows[0]
 

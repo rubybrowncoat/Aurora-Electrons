@@ -6,6 +6,8 @@ import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
 import { combine, isAvailable, ofRule, registerRule, satisfies, unavailable } from './provenance'
 
 const EARTH_SURFACE_AREA = 511187128
+// The pi of the game's geometry is 3.1416, not Math.PI: the body areas of the capacity rule and of a terraforming plan's work are worked with this one figure.
+export const PI_APPROX = 3.1416
 // Millions of people an Earth-sized body holds (docs `colonies`, Population Capacity).
 const EARTH_CAPACITY = 12000
 // Every non-gas-giant body holds at least 50,000 people.
@@ -20,14 +22,13 @@ const GROWTH_VERSIONS = ['3.2.x']
 const COST_VERSIONS = ['3.2.x']
 const TOTALS = 'colonies.totals'
 
-// Math.PI remains retained for family 12.
 registerRule({
   id: 'colonies.capacity',
-  versions: ['2.7.x'],
+  versions: COLONY_VERSIONS,
   units: 'M people',
   verification: 'estimated',
   structure: ['FCT_SystemBody.Radius, HydroExt, TidalLock, BodyClass', 'FCT_Species.PopulationDensityModifier', 'the current colony cost'],
-  note: 'A non-colonisable body holds no surface population; otherwise capacity is surface area over Earth times the baseline density and species density, reduced above three quarters water and on tide-locked planets, with a minimum of 50,000 people.',
+  note: 'A non-colonisable body holds no surface population; otherwise capacity is four pi (3.1416) times the radius squared over the Earth\'s surface (511187128), times the baseline density of 12,000 and the species density, reduced above three quarters water and on tide-locked planets, with a minimum of 50,000 people.',
   assumptions: ['the geometric area is an approximation'],
 })
 
@@ -159,13 +160,13 @@ const derive = ({ rule, source = {}, required = [], parts = {}, compute, units }
   return unavailable({ rule, missing: unique([...missing, ...lacking]), present, units })
 }
 
-// Millions of people the body holds before growth stops: surface area, the species' density, less above 75% water (1% at 100%) and a fifth on a tide-locked planet. Moons are exempt from the tidal rule, as in habitability.vue.
+// Millions of people the body holds before growth stops: surface area (four times the game's pi of 3.1416 times the radius squared), the species' density, less above 75% water (1% at 100%) and a fifth on a tide-locked planet. Moons are exempt from the tidal rule, as in habitability.vue.
 export const bodyCapacity = ({ Radius, HydroExt, TidalLock, BodyClass, PopulationDensityModifier, CurrentColonyCost }) => {
   if (CurrentColonyCost === -1) {
     return 0
   }
 
-  const area = 4 * Math.PI * Radius ** 2
+  const area = 4 * PI_APPROX * Radius ** 2
   const water = HydroExt > 75 ? Math.max((100 - HydroExt) / 25, 0.01) : 1
   const tidal = TidalLock && BodyClass !== 2 ? 5 : 1
 

@@ -7,7 +7,8 @@
   - module: the rows of every charted point of the race hold the figures SQL gives (the number of the point, its gate, its orders, each count once for each observed object id), a point the race has not charted has no row, a figure the save cannot support is unknown and never 0, and the probe count is never given; the same on a small save written here for the cases of duplicate rows, a salvo of no known design, a point with no position, a missing game time and an order with no time;
   - page: the table of /lagrange?system=<id> draws a row for each charted point of the system and for no other, each row's number, system, far side, gate, stabilisation with its fleets, minefield and buoy counts, probe figure and detected objects as the oracle says (words read back through the module's own tables), gate and stabilisation apart, and the whole list once the system is cleared; a row's link opens the map with the system and the point in the route, the side panel naming that point, and the System view opened from it is told that point;
   - a save lacking a column the infrastructure reads (the speed of the salvos, or the builder of the gates) still draws every point, a gate whose builder is not read as built by none recorded, and every figure that rests on the missing column reads as unknown, never 0;
-  - a point a link names that its system does not have is dropped from the route once the map has settled, and is not selected when its own system is picked afterwards.
+  - a point a link names that its system does not have is dropped from the route once the map has settled, and is not selected when its own system is picked afterwards;
+  - ships: the Stabilisation ships panel's Doing cell, on the page's own script over rows written here, names a fleet's jump point stabilisation order at its point and system with no time left, its Lagrange point order with its time left, and an order whose arrival the save does not record without a state; it names one order alone only when every order of the fleet has a recorded place and the lowest of them is held once, and otherwise names together every order that could be first, those with no recorded place and those at the lowest recorded place, the same however the rows arrive; a fleet with neither reads no order, and where the save cannot give the jump point orders every fleet reads Unknown, never no order.
   Every planted fault is served in place of the module's or the page's file (or run on the module's text) and each must fail the checks it names by a value; the rewrites must leave every check passing and the screen as it was. Table wording is human-reviewed prose: the check reads the words back through the modules' own labels (GATE_TEXT, STABILISATION_TEXT, UNKNOWN_TEXT, DETECTED_ZERO_TEXT and the jump point label of places.js), each matched exactly and in the order the page can tell them apart, and reads the number of the earlier contacts from the element the page gives it, never from its place in a caption.
 
   Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. It needs Playwright's Chromium (`bunx playwright install chromium` once). Every head and variant runs through scripts/lib/suite-runner.js in a worker that copies the save, starts one page server and one browser and warms them first.
@@ -22,6 +23,7 @@ const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { FIXTURE, fixturePath, fixtureRows } = require('./lib/fixtures')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
+const { loadPage, instantiate } = require('./lib/page-loader')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -211,13 +213,13 @@ const SMALL = [
   'insert into FCT_JumpPoint values (1, 1, 2), (2, 1, 0), (3, 1, 0), (4, 1, NULL), (5, 1, 3), (6, 1, 0), (7, 1, 0), (8, 1, 0)',
   'create table FCT_Game (GameID integer, GameTime real)',
   'create table FCT_Fleet (FleetID integer, FleetName text)',
-  'create table FCT_MoveOrders (MoveOrderID integer, GameID integer, RaceID integer, FleetID integer, MoveActionID integer, DestinationType integer, DestinationID integer, Arrived integer, TimeRequired real)',
+  'create table FCT_MoveOrders (MoveOrderID integer, GameID integer, RaceID integer, FleetID integer, MoveActionID integer, DestinationType integer, DestinationID integer, Arrived integer, TimeRequired real, MoveOrder integer)',
   'create table FCT_MissileType (MissileID integer, GameID integer, SecondStageID integer)',
   'create table FCT_MissileSalvo (MissileSalvoID integer, GameID integer, RaceID integer, MissileID integer, MissileSpeed real, SystemID integer, Xcor real, Ycor real, LurkerMode integer default 0, OrbitLagrangeID integer default 0)',
   'create table FCT_Contacts (ContactID integer, GameID integer, DetectRaceID integer, ContactType integer, Speed real, SystemID integer, Xcor real, Ycor real, LastUpdate real)',
   'insert into FCT_Game values (1, 1000)',
   "insert into FCT_Fleet values (10, 'Alpha'), (11, 'Bravo')",
-  'insert into FCT_MoveOrders values (1, 1, 2, 10, 64, 1, 1, 1, 500), (1, 1, 2, 10, 64, 1, 1, 1, 500), (2, 1, 2, 10, 64, 1, 1, 0, 0), (3, 1, 2, 11, 64, 1, 2, 0, 0), (4, 1, 2, 11, 64, 1, 2, 1, 0), (5, 1, 3, 10, 64, 1, 1, 1, 500), (6, 1, 2, 10, 217, 1, 1, 1, 500), (7, 1, 2, 10, 64, 2, 1, 1, 500), (8, 1, 2, 11, 64, 1, 4, 1, NULL), (9, 1, 2, 11, 64, 1, 6, NULL, 500)',
+  'insert into FCT_MoveOrders values (1, 1, 2, 10, 64, 1, 1, 1, 500, 1), (1, 1, 2, 10, 64, 1, 1, 1, 500, 1), (2, 1, 2, 10, 64, 1, 1, 0, 0, 2), (3, 1, 2, 11, 64, 1, 2, 0, 0, 1), (4, 1, 2, 11, 64, 1, 2, 1, 0, 2), (5, 1, 3, 10, 64, 1, 1, 1, 500, 1), (6, 1, 2, 10, 217, 1, 1, 1, 500, 3), (7, 1, 2, 10, 64, 2, 1, 1, 500, 4), (8, 1, 2, 11, 64, 1, 4, 1, NULL, 3), (9, 1, 2, 11, 64, 1, 6, NULL, 500, 4)',
   'insert into FCT_MissileType values (70, 1, 7), (71, 1, 0)',
   'insert into FCT_MissileSalvo (MissileSalvoID, GameID, RaceID, MissileID, MissileSpeed, SystemID, Xcor, Ycor) values (501, 1, 2, 70, 0, 10, 100.5, 100), (501, 1, 2, 70, 0, 10, 100.5, 100), (502, 1, 2, 70, 0, 10, 100, 100.9), (503, 1, 2, 71, 0, 10, 99.2, 100), (504, 1, 2, 71, 0, 10, 101, 100), (505, 1, 2, 70, 5, 10, 100, 100), (506, 1, 3, 70, 0, 10, 100, 100), (507, 1, 2, 70, 0, 11, 100, 100), (508, 1, 2, 70, 0, 10, 5000, 5000), (509, 1, 2, 99, 0, 10, 5000.2, 5000), (510, 1, 2, 70, 0, 13, NULL, 200)',
   'insert into FCT_MissileSalvo (MissileSalvoID, GameID, RaceID, MissileID, MissileSpeed, SystemID, Xcor, Ycor, LurkerMode) values (511, 1, 2, 71, 5, 10, 100.2, 100.2, 1), (511, 1, 2, 71, 5, 10, 100.2, 100.2, 1), (513, 1, 3, 71, 5, 10, 100, 100.1, 1), (514, 1, 2, 70, 5, 10, 100.1, 99.9, 1), (515, 1, 2, 71, 5, 10, 100.1, 99.9, 0)',
@@ -732,7 +734,7 @@ const MODULE_FAULTS = [
   { name: 'a gate whose builders are not read is the race\'s own', file: MODULE, change: swap('const builder = builders ? builders[point.WarpPointID] : null', 'const builder = builders ? builders[point.WarpPointID] : RaceID'), fails: ['m-small-gates'] },
   { name: 'a salvo with no position is taken as elsewhere', file: MODULE, change: swap('const unplacedOwn = ownHere.filter((salvo) => !hasPosition(salvo)).length', 'const unplacedOwn = 0'), fails: ['m-small-positions'] },
   { name: 'a detected salvo with no position is taken as elsewhere', file: MODULE, change: swap('const unplacedSeen = inSystem.filter((contact) => !hasPosition(contact)).length', 'const unplacedSeen = 0'), fails: ['m-small-positions'] },
-  { name: 'an order with no arrival flag is a queued one', file: MODULE, change: swap('const arrivedKnown = [0, 1, true, false].includes(order.Arrived)', 'const arrivedKnown = true'), fails: ['m-small-arrival'] },
+  { name: 'an order with no arrival flag is a queued one', file: MODULE, change: swap('export const arrivalOf = (flag) => ([0, 1, true, false].includes(flag) ? Boolean(flag) : null)', 'export const arrivalOf = (flag) => Boolean(flag)'), fails: ['m-small-arrival'] },
   { name: 'the probes are counted as 0', file: MODULE, change: swap("probes: unavailable({ rule: 'jumpInfrastructure.probes', missing: ['a probe type in the save'] })", "probes: ofRule({ rule: 'jumpInfrastructure.probes', value: 0, inputs: { present: ['the race\\'s ships'] } })"), fails: ['m-probes'] },
   { name: 'the order that is further along gives way to the earlier', file: MODULE, change: swap('STATE_RANK[state] > STATE_RANK[kept.state]', 'STATE_RANK[state] < STATE_RANK[kept.state]'), fails: ['m-orders', 'm-small-orders'] },
   { name: 'a save that cannot be read gives 0 for its counts', file: MODULE, change: swap("facts ? [] : missing.length ? missing : ['the infrastructure of the save']", '[]'), fails: ['m-small-unknown'] },
@@ -814,7 +816,7 @@ const PAGE_COMPOSITE_A = { key: 'benign:composite-a', name: 'the composed page r
 const MODULE_BENIGN = [
   { name: 'the time condition of the module parenthesised', file: MODULE, change: swap('const timeKnown = Boolean(facts) && Number.isFinite(facts.gameTime)', 'const timeKnown = (Boolean(facts) && Number.isFinite(facts.gameTime))') },
   { name: 'the builder test of the gate in two conditions', file: MODULE, change: swap("return builder > 0 ? (builder === RaceID ? 'own' : 'other') : 'unrecorded'", "return builder > 0 && builder === RaceID ? 'own' : builder > 0 ? 'other' : 'unrecorded'") },
-  { name: 'the arrival flag of an order spelled out', file: MODULE, change: swap('const arrivedKnown = [0, 1, true, false].includes(order.Arrived)', 'const arrivedKnown = order.Arrived === 0 || order.Arrived === 1 || order.Arrived === true || order.Arrived === false') },
+  { name: 'the arrival flag of an order spelled out', file: MODULE, change: swap('export const arrivalOf = (flag) => ([0, 1, true, false].includes(flag) ? Boolean(flag) : null)', 'export const arrivalOf = (flag) => ((flag === 0 || flag === 1 || flag === true || flag === false) ? Boolean(flag) : null)') },
   { name: 'the reasons of the unknown figures in other words', file: MODULE, change: (text) => swap('the position of ${unplacedSeen} detected', 'the location of ${unplacedSeen} detected')(swap('the position of ${unplacedOwn} stationary', 'the location of ${unplacedOwn} stationary')(swap('whether an order has arrived, or the time required of one that has', 'whether an order reached its target, or the time required of one that did')(text))) },
 ]
 
@@ -974,6 +976,108 @@ const checkControls = (o) => {
   report('control: the reader of the fleets under a stabilisation takes each expected name the number of times it is expected, whatever the separators, and no other text', JSON.stringify(fleets) === JSON.stringify([['Alpha', 'Bravo'], ['Alpha', 'Bravo'], ['Alpha, Alpha'], ['Bravo, Bravo'], ['Alpha'], ['Alpha', 'Alpha 2'], ['Alpha', 'Alpha']]) ? true : `read ${JSON.stringify(fleets)}`)
 }
 
+// ---------- the stabilisation ships panel ----------
+
+// The ships the Doing cell is read on, planted beside the points and the orders that name them: a jump point order that has arrived, one on its way and one whose arrival the save does not record; a Lagrange point order, one whose arrival the save does not record, and a fleet with neither; two fleets with both kinds, the Lagrange point order first and the jump point order first, and one whose two orders hold the same place; two jump point orders with different places, two with one place missing, and a jump point order beside a Lagrange point order with the jump point's place missing; and three fleets with two Lagrange point orders — one order with no recorded place beside one at the lowest place and a jump point order behind both, two orders at the same lowest place, and two orders at different places beside a jump point order the lowest of them precedes.
+const SHIP_POOL = 'ships'
+const SHIP_SYSTEMS = [{ SystemID: 1, Name: 'Sol' }]
+const SHIP_POINTS = [
+  { WarpPointID: 100, SystemID: 1, Explored: 0, WPLink: 0, Distance: 10, Xcor: 0, Ycor: 0, JumpGateStrength: 0 },
+  { WarpPointID: 101, SystemID: 1, Explored: 0, WPLink: 0, Distance: 20, Xcor: 0, Ycor: 0, JumpGateStrength: 0 },
+  { WarpPointID: 102, SystemID: 1, Explored: 0, WPLink: 0, Distance: 30, Xcor: 0, Ycor: 0, JumpGateStrength: 0 },
+]
+const SHIP_BODIES = [{ SystemBodyID: 500, SystemID: 1, SystemBodyName: 'Earth', BodyClass: 1, PlanetNumber: 4, OrbitNumber: 1, Mass: 1 }, { SystemBodyID: 501, SystemID: 1, SystemBodyName: 'Mars', BodyClass: 1, PlanetNumber: 5, OrbitNumber: 1, Mass: 0.11 }]
+const shipOf = (id, name, fleetId) => ({ ShipID: id, ShipName: name, ClassName: 'Seychelles', FleetID: fleetId, FleetName: `Fleet ${fleetId}`, SystemName: 'Sol', CurrentCrew: 100, ClassCrew: 100, ProductionBonus: 1, CaptainName: null, Damaged: 0 })
+const SHIP_ROWS = [shipOf(1, 'Jump arrived', 10), shipOf(2, 'Jump on the way', 11), shipOf(3, 'Lagrange point order', 12), shipOf(4, 'No order', 13), shipOf(5, 'Lagrange first', 14), shipOf(6, 'Jump first', 15), shipOf(7, 'Both unordered', 16), shipOf(8, 'Jump arrival unrecorded', 17), shipOf(9, 'Two jumps ordered', 18), shipOf(10, 'Jump places open', 19), shipOf(11, 'Jump and Lagrange open', 20), shipOf(12, 'Lagrange arrival unrecorded', 21), shipOf(13, 'Two Lagrange open', 22), shipOf(14, 'Two Lagrange tied', 23), shipOf(15, 'Two Lagrange ordered', 24)]
+const lagrangeOrder = (fleet, place, arrived = 1, body = 500, time = 8000) => ({ FleetID: fleet, FleetName: `Fleet ${fleet}`, SystemBodyID: body, Arrived: arrived, TimeRequired: time, MoveOrder: place })
+const jumpOrder = (id, point, fleet, arrived, time, place) => ({ MoveOrderID: id, WarpPointID: point, FleetID: fleet, FleetName: `Fleet ${fleet}`, Arrived: arrived, TimeRequired: time, MoveOrder: place })
+const SHIP_LAGRANGE_ORDERS = [lagrangeOrder(12, 1), lagrangeOrder(14, 1), lagrangeOrder(15, 2), lagrangeOrder(16, 1), lagrangeOrder(20, 1), lagrangeOrder(21, 1, null), lagrangeOrder(22, null, 0, 501), lagrangeOrder(22, 1, 1, 500), lagrangeOrder(23, 1, 1, 500), lagrangeOrder(23, 1, 1, 501, 16000), lagrangeOrder(24, 1, 1, 500), lagrangeOrder(24, 3, 1, 501)]
+const SHIP_JUMP_ORDERS = { orders: [jumpOrder(1, 100, 10, 1, 5000, 1), jumpOrder(2, 102, 11, 0, 0, 1), jumpOrder(3, 101, 15, 0, 0, 1), jumpOrder(4, 102, 16, 0, 0, 1), jumpOrder(5, 101, 14, 0, 0, 2), jumpOrder(6, 100, 17, null, 0, 1), jumpOrder(7, 100, 18, 1, 5000, 1), jumpOrder(8, 101, 18, 0, 0, 2), jumpOrder(9, 100, 19, 0, 0, null), jumpOrder(10, 102, 19, 1, 5000, 1), jumpOrder(11, 101, 20, 1, 5000, null), jumpOrder(12, 100, 22, 0, 0, 2), jumpOrder(13, 101, 24, 0, 0, 2)], salvos: [], contacts: [], gameTime: 1000 }
+// The column's words as the page writes them: the jump point as the table above names it (JP1, JP2 and JP3 of Sol), its system, no time left and so no mark, the Lagrange point order with the time the save stores and its mark, an order whose arrival the save does not record with no state and no mark, the one order that could be first when it is the only one, and every order that could be first otherwise, the Lagrange point orders first and then the jump point orders, each by the places the save gives, the same whatever order the rows arrive in.
+const SHIP_EXPECTED = [
+  ['Jump arrived', 'Stabilising the jump point JP1 in Sol', false],
+  ['Jump on the way', 'On the way to stabilise the jump point JP3 in Sol', false],
+  ['Lagrange point order', 'Stabilising Earth, 2 h left', true],
+  ['No order', 'No stabilisation order', false],
+  ['Lagrange first', 'Stabilising Earth, 2 h left', true],
+  ['Jump first', 'On the way to stabilise the jump point JP2 in Sol', false],
+  ['Both unordered', 'Stabilising Earth, 2 h left; on the way to stabilise the jump point JP3 in Sol', false],
+  ['Jump arrival unrecorded', 'Stabilisation order for the jump point JP1 in Sol', false],
+  ['Two jumps ordered', 'Stabilising the jump point JP1 in Sol', false],
+  ['Jump places open', 'Stabilising the jump point JP3 in Sol; on the way to stabilise the jump point JP1 in Sol', false],
+  ['Jump and Lagrange open', 'Stabilising Earth, 2 h left; stabilising the jump point JP2 in Sol', false],
+  ['Lagrange arrival unrecorded', 'Stabilisation order for Earth', false],
+  ['Two Lagrange open', 'Stabilising Earth, 2 h left; on the way to stabilise Mars', false],
+  ['Two Lagrange tied', 'Stabilising Earth, 2 h left; stabilising Mars, 4 h left', false],
+  ['Two Lagrange ordered', 'Stabilising Earth, 2 h left', true],
+]
+// The same rows where the save cannot give the jump point orders: no fleet can be told it has no order, nor that one order comes before an unread one, so every fleet reads Unknown whatever Lagrange point order the save records.
+const SHIP_EXPECTED_BLIND = [
+  ['Jump arrived', 'Unknown', false],
+  ['Jump on the way', 'Unknown', false],
+  ['Lagrange point order', 'Unknown', false],
+  ['No order', 'Unknown', false],
+  ['Lagrange first', 'Unknown', false],
+  ['Jump first', 'Unknown', false],
+  ['Both unordered', 'Unknown', false],
+  ['Jump arrival unrecorded', 'Unknown', false],
+  ['Two jumps ordered', 'Unknown', false],
+  ['Jump places open', 'Unknown', false],
+  ['Jump and Lagrange open', 'Unknown', false],
+  ['Lagrange arrival unrecorded', 'Unknown', false],
+  ['Two Lagrange open', 'Unknown', false],
+  ['Two Lagrange tied', 'Unknown', false],
+  ['Two Lagrange ordered', 'Unknown', false],
+]
+
+// The page's own script on the planted rows, as the page's read of the jump point infrastructure either gives its orders or cannot (`missing` names the columns the save lacks): { available, blind, reversed }, the last with the jump point orders and the Lagrange point orders in the opposite row order.
+const shipWorld = async (mutate = null) => {
+  const page = await loadPage('pages/lagrange', mutate ? { mutate } : {})
+  const make = (missing, jumpOrders = SHIP_JUMP_ORDERS, lagrangeOrders = SHIP_LAGRANGE_ORDERS) => instantiate(page, {
+    $store: {
+      getters: {
+        'capabilities/gates': () => ({ bonuses: { 5: { status: 'confirmed' } }, components: { 29: { status: 'confirmed' } } }),
+        'capabilities/report': (route) => ({ degraded: route === '/lagrange' && missing.length ? [{ key: 'jumpInfrastructure', label: 'the jump point infrastructure', affects: [], fields: missing }] : [] }),
+      },
+    },
+    data: { ships: SHIP_ROWS, orders: lagrangeOrders, jumpInfrastructure: missing.length ? null : jumpOrders, jumpPoints: SHIP_POINTS, systems: SHIP_SYSTEMS, bodies: SHIP_BODIES, formulaVersion: null },
+  })
+
+  return { available: make([]), blind: make(['FCT_Contacts.Speed']), reversed: make([], { ...SHIP_JUMP_ORDERS, orders: [...SHIP_JUMP_ORDERS.orders].reverse() }, [...SHIP_LAGRANGE_ORDERS].reverse()) }
+}
+
+const doingOf = (world) => world.shipRows.map((row) => [row.ShipName, row.doingText, Boolean(row.timeLeft)])
+
+const SHIP_CHECKS = [
+  ['ships', 'the Doing cell names a fleet\'s jump point stabilisation order at its point and system with no time left, its Lagrange point order with its time left, an order whose arrival the save does not record without a state, one order alone only when every order of the fleet has a recorded place and the lowest of them is held once, every order that could be first together otherwise (those with no recorded place and those at the lowest recorded place), the same whatever order the rows arrive in, and no order only when the fleet has neither; where the jump point orders cannot be read it reads Unknown for every fleet, never no order', (world) => {
+    const read = doingOf(world.available)
+    const reversed = doingOf(world.reversed)
+    const blind = doingOf(world.blind)
+
+    return JSON.stringify(read) === JSON.stringify(SHIP_EXPECTED) && JSON.stringify(reversed) === JSON.stringify(SHIP_EXPECTED) && JSON.stringify(blind) === JSON.stringify(SHIP_EXPECTED_BLIND) ? true : short({ read, reversed, blind })
+  }],
+]
+
+const SHIP_FAULTS = [
+  { name: 'the Doing cell matches only the Lagrange point orders', file: PAGE, change: swap('const jumps = jumpOrdersByFleet === null ? [] : jumpOrdersByFleet[ship.FleetID] || []', 'const jumps = []'), fails: ['ships'] },
+  { name: 'the Doing cell takes an arrival flag the save does not record as a false one', file: PAGE, change: swap('arrived: arrivalOf(order.Arrived)', 'arrived: Boolean(order.Arrived)'), fails: ['ships'] },
+  { name: 'the Doing cell compares a place the save does not record as a number', file: PAGE, change: swap('      const known = work.map((item) => item.place).filter((place) => Number.isFinite(place))\n      const lowest = known.length ? Math.min(...known) : null\n\n      return work.filter((item) => !Number.isFinite(item.place) || item.place === lowest)', '      return [work.reduce((kept, item) => (item.place < kept.place ? item : kept))]'), fails: ['ships'] },
+  { name: 'the Doing cell keeps only the first Lagrange point order', file: PAGE, change: swap('const fleetOrders = orders.filter((candidate) => candidate.FleetID === ship.FleetID)', 'const fleetOrders = orders.filter((candidate) => candidate.FleetID === ship.FleetID).slice(0, 1)'), fails: ['ships'] },
+  { name: 'the Doing cell ignores an unread jump point order beside a Lagrange point order', file: PAGE, change: swap('      if (jumpUnknown) {\n        return { text: null, timeLeft: null, unknown: true }\n      }', '      if (jumpUnknown && !lagrangeOrders.length && !jumps.length) {\n        return { text: null, timeLeft: null, unknown: true }\n      }'), fails: ['ships'] },
+]
+
+const checkShips = async () => {
+  judge(await shipWorld(), null, SHIP_CHECKS).forEach(({ name, result }) => report(name, result))
+}
+
+const checkShipFault = async (fault) => {
+  refusePlanting(fault.name)
+
+  const results = judge(await shipWorld(fault.change), null, SHIP_CHECKS, fault.fails)
+
+  report(`fault caught: ${fault.name} (on the planted ships)`, caughtAll(results, { name: fault.name }) ? true : notCaught(results), `fails ${fault.fails.join(', ')}`)
+}
+
 // What the fixture cannot exercise, printed as skipped: each case the save does not hold with the checks left without it, and the planted faults that need a case it does not hold.
 const printSkips = (dataset, where) => {
   for (const lack of dataset.missing) {
@@ -994,6 +1098,7 @@ const checkHead = async () => {
 
   judge(o, ENV.truth, MODULE_CHECKS).forEach(({ name, result }) => report(`${name} (${where})`, result))
   checkControls(o)
+  await checkShips()
 
   const seen = await view(null)
 
@@ -1256,6 +1361,7 @@ const variantsOf = (doMutations, lacking, explicitSelection) => {
     ...(doMutations ? there(MODULE_FAULTS).map(({ fault, index, fails }) => on('fixture', { key: `fixture-module-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: '\nplanted faults of the module, on the fixture', deadline: DEADLINES.module, run: () => checkModuleFault({ ...fault, fails }) })) : []),
     ...moduleBenign.map((rewrite, index) => on('fixture', { key: `fixture-module-benign:${index}`, name: `variant passes: ${rewrite.name} (on the fixture)`, heading: '\nrewrites of the module that say the same thing, on the fixture', deadline: DEADLINES.module, run: () => checkModuleBenign(rewrite) })),
     ...(doMutations ? there(PAGE_FAULTS).map(({ fault, index, fails }) => on('fixture', { key: `fixture-fault:${index}`, name: `fault caught: ${fault.name} (on the fixture)`, heading: '\nplanted faults of the page, on the fixture', deadline: DEADLINES.view, run: () => checkFault({ ...fault, fails }) })) : []),
+    ...(doMutations ? SHIP_FAULTS.map((fault, index) => ({ key: `ships-fault:${index}`, name: `fault caught: ${fault.name} (on the planted ships)`, heading: '\nplanted faults of the stabilisation ships panel', deadline: DEADLINES.module, pool: SHIP_POOL, run: () => checkShipFault(fault) })) : []),
     ...(doMutations ? [on('fixture', { key: `fixture-${PAGE_COMPOSITE_A.key}`, name: `variant passes: ${PAGE_COMPOSITE_A.name} (on the fixture)`, heading: '\ncomposed variants that say the same thing, on the fixture', deadline: DEADLINES.view, baseline: true, run: checkPageComposite })] : []),
     ...pageBenign,
     ...(lacking ? Object.entries(LACKS).map(([kind, lack]) => on('fixture', { key: `fixture-${lack.key}`, name: `the head on the fixture: a save lacking ${lack.label}`, head: true, heading: `\nA save lacking ${lack.label}, on the fixture`, deadline: DEADLINES.view, run: () => checkLackingHead(kind) })) : []),
@@ -1273,6 +1379,10 @@ const main = async () => {
     variants: variantsOf(doMutations, !process.argv.includes('--no-lacking'), explicitSelection),
     counts: () => ({ checks, failures }),
     prepare: async (queue) => {
+      if (queue.every((variant) => variant.pool === SHIP_POOL)) {
+        return
+      }
+
       ENV = await setUp(fixtureDataset())
 
       if (queue.some((variant) => variant.baseline)) {

@@ -4,8 +4,8 @@ import { crewFraction } from './crew'
 import { ZERO, add, fitsDouble, floorRatio, fromDouble, fromString, multiply, toNumber } from './decimal'
 import { loadOrbitalCensus } from './orbital-census'
 import { maintenanceClusters, shipFigures } from './maintenance-pools'
-import { roundToDecimal } from './math'
-import { fleetCommandChain } from './minerals'
+import { rangeFigure, roundToDecimal } from './math'
+import { fleetCommandChain, wholeCapacity } from './minerals'
 import { MINING_BONUS, MINING_WITHHELD } from './mining-data'
 import { UNVERIFIED_SAVE, combine, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 import { totalOf } from './production'
@@ -56,27 +56,28 @@ export const loadMspFacilities = async (database, { GameID, RaceID, colonies }) 
   })
 }
 
-// L/yr while production is on: refineries x racial rate x the colony's production modifier, as a 'logistics.refineryOutput' result. A colony with no refineries or with production off makes 0 whatever else is missing; one whose switch, refineries, rate or modifier is not in the save has no figure. Matches the game's mineral ledger (Sorium for fuel refining) on the saves it was checked on.
+// Current L/yr while production is on: whole refinery capacity x racial rate x the colony's production modifier, not a promise of a year's stock-limited output.
 export const refineryOutput = (colony, modifier) => {
   const rule = 'logistics.refineryOutput'
+  const refineries = isNumber(colony.Refineries) ? wholeCapacity(colony.Refineries, colony.RefineriesTerms) : null
 
   if (!isNumber(colony.FuelProdStatus)) {
     return unavailable({ rule, missing: ['whether fuel production is on'] })
-  } else if (!colony.FuelProdStatus || colony.Refineries === 0) {
+  } else if (!colony.FuelProdStatus || refineries === 0) {
     return ofRule({ rule, value: 0, inputs: { present: [colony.FuelProdStatus ? 'the colony has no refineries' : 'fuel production is off'] } })
   }
 
-  const missing = productionGaps(modifier, [[colony.Refineries, 'the colony\'s refineries'], [colony.FuelProduction, 'the race\'s fuel production rate']])
+  const missing = productionGaps(modifier, [[refineries, 'the colony\'s refineries'], [colony.FuelProduction, 'the race\'s fuel production rate']])
 
-  return missing.length ? unavailable({ rule, missing }) : ofRule({ rule, value: colony.Refineries * colony.FuelProduction * modifier, inputs: { present: [MODIFIER_TEXT, 'the colony\'s refineries', 'the race\'s fuel production rate'] } })
+  return missing.length ? unavailable({ rule, missing }) : ofRule({ rule, value: refineries * colony.FuelProduction * modifier, inputs: { present: [MODIFIER_TEXT, 'the colony\'s refineries', 'the race\'s fuel production rate'] } })
 }
 
-// What a colony's refineries make now, as a 'logistics.refineryOutput' result: `refineryOutput`, held to 0 while the colony has under 1 t of Sorium. Unavailable while the Sorium stock is not in the save and the refineries would otherwise make something.
+// Current annualised refining rate while Sorium remains, including positive sub-tonne stocks. An increment's actual output can be stock-limited; its duration is not inferred here.
 export const refineryYield = (colony, modifier) => {
   const output = refineryOutput(colony, modifier)
 
   if (isNumber(colony.Sorium)) {
-    return colony.Sorium >= 1 ? output : ofRule({ rule: 'logistics.refineryOutput', value: 0, inputs: { present: ['the colony has under 1 t of Sorium'] } })
+    return colony.Sorium > 0 ? output : ofRule({ rule: 'logistics.refineryOutput', value: 0, inputs: { present: ['the colony has no Sorium'] } })
   }
 
   return isAvailable(output) && output.value === 0 ? output : unavailable({ rule: 'logistics.refineryOutput', missing: [...(isAvailable(output) ? [] : output.inputs.missing), 'the colony\'s Sorium stock'] })
@@ -537,19 +538,27 @@ export const harvesterReport = (ships, { admins, horizon, version = null }) => {
   }
 }
 
-// Litres or items at a readable precision: 2.5 bn, 1.2 M, 3.4 k.
-export const compact = (value) => {
+// Litres or items at a readable precision, the number and its magnitude suffix apart for a range (`unit` is written beside it, its spacing included): { number: '5.3', magnitude: 'M', unit: ' L' }, so that `rangeText` writes the unit once.
+export const compactFigure = (value, unit = '') => {
   const size = Math.abs(value)
+  const negative = value < 0
 
   if (size >= 1e9) {
-    return `${roundToDecimal(value / 1e9, 2)} bn`
+    return rangeFigure(roundToDecimal(value / 1e9, 2), { magnitude: 'bn', unit, negative })
   } else if (size >= 1e6) {
-    return `${roundToDecimal(value / 1e6, 1)} M`
+    return rangeFigure(roundToDecimal(value / 1e6, 1), { magnitude: 'M', unit, negative })
   } else if (size >= 1e3) {
-    return `${roundToDecimal(value / 1e3, 1)} k`
+    return rangeFigure(roundToDecimal(value / 1e3, 1), { magnitude: 'k', unit, negative })
   }
 
-  return `${roundToDecimal(value, 0)}`
+  return rangeFigure(roundToDecimal(value, 0), { unit, negative })
+}
+
+// Litres or items at a readable precision: 2.5 bn, 1.2 M, 3.4 k.
+export const compact = (value) => {
+  const figure = compactFigure(value)
+
+  return figure.magnitude ? `${figure.number} ${figure.magnitude}` : figure.number
 }
 
 // The rule registry for the Logistics page's figures, with the evidence in docs/plans/aurcalcs/build-2.md § Logistics.
@@ -560,11 +569,11 @@ const LEDGER = 'matches the game\'s own mineral ledger on the saves it was check
 
 registerRule({
   id: 'logistics.refineryOutput',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'L/yr',
   verification: 'confirmed',
   structure: ['FCT_Population.Refineries, FuelProduction, FuelProdStatus', 'the colony\'s production modifier'],
-  note: `Refineries times the racial rate times the colony's production modifier, while production is on; ${LEDGER}.`,
+  note: `Whole refinery capacity times the racial rate times the colony's production modifier, while production is on and Sorium remains; ${LEDGER}. Positive stocks below one tonne still support refining. The annualised rate is not the fuel made over a stock-limited increment.`,
 })
 
 registerRule({

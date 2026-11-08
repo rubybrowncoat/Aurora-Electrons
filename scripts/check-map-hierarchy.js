@@ -186,7 +186,7 @@ SYSTEMS.forEach((system, index) => {
   })
 })
 
-const NONE = { ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: 0, military: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] }
+const NONE = { ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: { m: 0n, s: 0 }, military: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] }
 const FEATURES = Object.fromEntries(SYSTEMS.map((system, index) => [String(system.SystemID), { ...NONE, contacts: index % 6 === 2 ? [{ status: 'hostile' }] : [], rifts: index % 10 === 4 ? 1 : 0, ships: index % 8 === 1 ? 2 : 0, military: index % 8 === 1 ? 1 : 0 }]))
 
 const sceneData = (level, extra = {}) => ({ systems: SYSTEMS, jumpPoints: JUMP_POINTS, sectors: [], aliens: [], features: FEATURES, habitability: null, formulaVersion: null, marks: ['contacts', 'rifts', 'danger', 'ships', 'flags'], hierarchy: level, layer: 'geological', borders: 'none', activateSnackbar: () => {}, ...extra })
@@ -1203,11 +1203,51 @@ const TAG_FADE = ' || (this.tagFilterValue !== ALL_TAGS && !this.tagSystems[row.
 check('U2', 'unchanged: the overlay controls, the dimming, the wheel and the right-click menu are the source of the commit before', (ctx) => {
   const names = ['toggleMark', 'toggleDim', 'fades', 'shiftWheel', 'createMenu', 'glyphsOf', 'markText']
   const before = atBase(FILES.map)
-  const current = (name) => methodSource(ctx.texts.map, name).replace(REMOTE_GLYPH, '').replace(TAG_GLYPH, '').replace(TAG_FADE, '')
+  // The danger line writes the stored protection as the game's decimal instead of its rounded whole units; that one correction is admitted here, the rest of markText stays as at the commit before.
+  const DANGER_COMMENT = '        // The game reds its danger line where the protection of the ships there falls short of the danger. A protection that is not stored shows a dash and no ⚠.'
+  const DANGER_EXACT = '        // The game reds its danger line where the protection of the ships there falls short of the danger, and prints the protection as the decimal it adds. A protection that is not stored shows a dash and no ⚠.'
+  // eslint-disable-next-line no-template-curly-in-string
+  const DANGER_ROUNDED = "return row.danger > 0 ? `${flag.value ? '⚠ ' : ''}${this.count(row.danger)} / ${Number.isFinite(protection) ? this.count(Math.round(protection)) : '—'}` : ''"
+  // eslint-disable-next-line no-template-curly-in-string
+  const DANGER_WRITTEN = "return row.danger > 0 ? `${flag.value ? '⚠ ' : ''}${this.count(row.danger)} / ${protectionText(protection, this.separator)}` : ''"
+  const current = (name) => methodSource(ctx.texts.map, name).replace(REMOTE_GLYPH, '').replace(TAG_GLYPH, '').replace(TAG_FADE, '').replace(DANGER_EXACT, DANGER_COMMENT).replace(DANGER_WRITTEN, DANGER_ROUNDED)
   const different = names.filter((name) => current(name) !== methodSource(before, name) || !methodSource(before, name))
   const wanted = [...(methodSource(ctx.texts.map, 'glyphsOf').includes(REMOTE_GLYPH) ? [] : ['glyphsOf has no remote ground formations branch']), ...(methodSource(ctx.texts.map, 'glyphsOf').includes(TAG_GLYPH) ? [] : ['glyphsOf has no body tags branch']), ...(methodSource(ctx.texts.map, 'fades').includes(TAG_FADE) ? [] : ['fades has no body tags filter'])]
 
   return different.length || wanted.length ? [...different.map((name) => `changed: ${name}`), ...wanted].join('; ') : true
+})
+
+// The danger line and the details write the protection the game adds as its decimal, not rounded to whole units: at danger 5 a protection of 4.6 reads as less and is flagged, 5 reads equal and is not, and a protection just under 5 keeps the digits that tell it apart.
+check('C2', 'the danger line and the details write the protection as the game\'s decimal, never rounded to whole units: 4.6 against 5 reads as less and is flagged, 5 against 5 reads equal and is not, and a protection just under 5 keeps the digits that tell it apart', (ctx) => {
+  const problems = []
+  const cases = [
+    { danger: 5, protection: { m: 46n, s: 1 }, line: '⚠ 5 / 4.6', details: '5, protection 4.6 ⚠' },
+    { danger: 5, protection: { m: 5n, s: 0 }, line: '5 / 5', details: '5, protection 5' },
+    { danger: 5, protection: { m: 4999999999n, s: 9 }, line: '⚠ 5 / 4.999999999', details: '5, protection 4.999999999 ⚠' },
+  ]
+  const systems = cases.map((scene, index) => ({ ...SYSTEMS[0], SystemID: index + 1, Name: `System ${index + 1}`, DangerRating: scene.danger, Colonies: 0 }))
+  const features = Object.fromEntries(cases.map((scene, index) => [String(index + 1), { ...NONE, protection: scene.protection }]))
+
+  globalThis.__appearance = ctx.appearances.light
+
+  const vm = instantiate(ctx.options, { $store: storeOf(), GameID: 1, RaceID: 7, data: sceneData('emphasised', { systems, features, loadErrors: {} }) })
+  const rows = vm.systemRows
+
+  rows.forEach((row, index) => {
+    const scene = cases[index]
+
+    vm.panelSystem = row
+    vm.hops = {}
+    vm.groupOf = {}
+
+    const line = vm.markText('danger', row)
+    const fact = vm.panelFacts.find((entry) => entry.label === 'Danger')
+
+    if (line !== scene.line) problems.push(`the line at ${scene.protection.m}/${scene.protection.s} reads ${short(line)}`)
+    if (!fact || fact.value !== scene.details) problems.push(`the details at ${scene.protection.m}/${scene.protection.s} read ${short(fact && fact.value)}`)
+  })
+
+  return problems.length ? problems.join('; ') : true
 })
 
 check('U3', 'unchanged: the borders\' label placement and the overview are byte-identical to the commit before', () => {
@@ -1348,6 +1388,8 @@ const MUTANTS = [
   { name: 'the label collision priority of the system view changes', patches: [['system', 'return 1000 // stars highest', 'return 100 // stars highest']], fails: ['U1'] },
   { name: 'the name stays under a glyph in the last place', patches: [['map', 'LABEL_GAP + Math.ceil((GLYPH_RING + GLYPH_RADIUS) * unit) - 3 : LABEL_GAP)', 'LABEL_GAP : LABEL_GAP)']], fails: ['D1'] },
   { name: 'the overlay toggle changes', patches: [['map', 'this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]', 'this.marks = [value]']], fails: ['U2'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the danger line rounds the protection to whole units', patches: [['map', ' / ${protectionText(protection, this.separator)}', ' / ${this.count(Number(`${protection.m}e-${protection.s}`))}']], fails: ['C2'] },
   { name: 'the dimming changes with the level', patches: [['map', 'return (this.dimUnmarked && this.marks.length > 0 && !marked)', "return (this.hierarchy === 'restrained' && this.dimUnmarked && this.marks.length > 0 && !marked)"]], fails: ['U2'] },
   { name: 'the level changes a system\'s dimming', patches: [['map', 'dim: this.fades(row, marked),', "dim: this.fades(row, marked) || (this.hierarchy === 'restrained' && marked),"]], fails: ['U4', 'U5'] },
   { name: 'the level changes a system\'s glyphs', patches: [['map', 'marked,\n        dim: this.fades(row, marked),', "marked: marked && this.hierarchy !== 'restrained',\n        dim: this.fades(row, marked),"]], fails: ['U4'] },

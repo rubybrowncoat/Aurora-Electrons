@@ -7,7 +7,7 @@
 // Colony cost bands are the game's own: the Minerals window colours a body blue under 2, cyan under 3 and brown under 6 times the race's colonisation skill, so they are read on the cost before the skill (`raw`), and a race with the cost-cutting tech lands in the same band as one without. What a colony really pays is the infrastructure per million people, shown beside the band.
 
 import { RICH_DEPOSIT_VALUE } from './minerals'
-import { roundToDecimal } from './math'
+import { rangeText, roundToDecimal } from './math'
 import { MINIMUM_TIME_NOTE, TIME_BASIS, timeWords } from './terraforming'
 
 // Upper bounds (exclusive) of the cost bands, on the cost before the colonisation skill.
@@ -184,7 +184,7 @@ export const PLAN_STATES = [
     color: 'moderate',
     icon: 'mdi-home-plus',
     target: true,
-    rule: `Colony cost ${COST_BANDS.cheap} to ${COST_BANDS.moderate} before the race's colonisation tech (the game's cyan band). The usual price of a breathable-gas or dry world: settle it and build the infrastructure.`,
+    rule: `Colony cost ${rangeText(COST_BANDS.cheap, COST_BANDS.moderate)} before the race's colonisation tech (the game's cyan band). The usual price of a breathable-gas or dry world: settle it and build the infrastructure.`,
     when: ({ route }) => costBand(route.raw) === 'moderate',
     text: ({ route }) => settleNow(route),
     chip: ({ route }) => `Moderate · ${route.infrastructure}/M`,
@@ -196,7 +196,7 @@ export const PLAN_STATES = [
     color: 'costly',
     icon: 'mdi-home-alert',
     target: true,
-    rule: `Colony cost ${COST_BANDS.moderate} to ${COST_BANDS.costly} before the race's colonisation tech (the game's brown band). Possible, but each million people needs a lot of infrastructure.`,
+    rule: `Colony cost ${rangeText(COST_BANDS.moderate, COST_BANDS.costly)} before the race's colonisation tech (the game's brown band). Possible, but each million people needs a lot of infrastructure.`,
     when: ({ route }) => costBand(route.raw) === 'costly',
     text: ({ route }) => settleNow(route),
     chip: ({ route }) => `Costly · ${route.infrastructure}/M`,

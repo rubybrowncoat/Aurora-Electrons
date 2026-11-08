@@ -36,6 +36,8 @@ const MAINTENANCE_LEDGER_TYPE = 16
 const SHIPBUILDING_LEDGER_TYPE = 5
 const ACTIVITY_LEDGER_TYPE = 9
 const CONSTRUCTION_LEDGER_TYPE = 4
+// The ledger types of each use the page switches: construction and ordnance make the industry use, shipbuilding the tasks and the yard activities, fuel the refineries' Sorium and maintenance the facilities' supplies (utilities/minerals.js FLOW_GROUPS).
+const USE_LEDGER_TYPES = { industry: [2, 3, CONSTRUCTION_LEDGER_TYPE, 40, 45], fuel: [FUEL_LEDGER_TYPE], maintenance: [MAINTENANCE_LEDGER_TYPE], shipbuilding: [SHIPBUILDING_LEDGER_TYPE, ACTIVITY_LEDGER_TYPE] }
 const SORIUM = 8
 const CONTINUAL_TOLERANCE = 0.005
 const FUEL_TOLERANCE = 1e-3
@@ -598,8 +600,10 @@ const suite = (tree, saves, unsupported) => {
         const points = yards.reduce((total, yard) => {
           const rate = env.valueOrNull(production.shipyardUpgradeRate(env.modifiers[population], yard)) * (yard.TaskType === 7 ? yard.Slipways : 1)
           const built = rate * env.years
+          // The saved progress is after the tick: restore that tick's work before capping the historical interval. An unfinished activity's remaining work is not a cap on the preceding tick.
+          const leftBeforeTick = yard.RequiredBP - yard.CompletedBP + built
 
-          return total + (yard.TaskType === 8 ? built : Math.min(built, yard.RequiredBP - yard.CompletedBP))
+          return total + (yard.TaskType === 8 ? built : Math.min(built, leftBeforeTick))
         }, 0)
 
         for (const id of [duranium, neutronium]) {
@@ -703,6 +707,22 @@ const suite = (tree, saves, unsupported) => {
   // ---- A save without a ledger: modelled, switchable, never a silent 0 --------------------------------------------------------------------------------
   if (fallbackSource) {
     const fallbackLabel = `the ledger-less copy of ${fallbackSource.key}`
+    // A positive forecast has no saved case only when both its figure and its use's flow at the last production tick are absent. The other assertions still run, including the zero-use switch and the all-off state.
+    const flowing = memo(async () => {
+      const env = await environments[fallbackSource.key]()
+      const keys = Object.keys(USE_LEDGER_TYPES)
+      const counts = await Promise.all(keys.map((key) => Promise.all(USE_LEDGER_TYPES[key].map(async (type) => (await env.logged(type)).size))))
+
+      return Object.fromEntries(keys.map((key, index) => [key, counts[index].some((count) => count > 0)]))
+    })
+
+    // Return only absent uses without a recorded flow; an empty use with a ledger row must still fail, even alongside an unsupported use.
+    const uncased = async (empty) => {
+      const seen = empty.length ? await flowing() : {}
+
+      return empty.filter((key) => !seen[key])
+    }
+    const uncasedReason = (keys) => `${fallbackLabel}: the save's ledger logs no ${keys.join(' or ')} flow at the last production tick, so the page's ${keys.join(' or ')} forecast has no case here`
 
     add('fallback-modelled', `${fallbackLabel}: every use that can be switched is a modelled forecast and none is observed, ground unit training is missing with its reason`, async () => {
       const env = await fallback()
@@ -718,8 +738,10 @@ const suite = (tree, saves, unsupported) => {
         return `${switchable.length} switchable uses`
       }
 
+      const uncasedUses = await uncased(switchable.filter((row) => !(row.total > 0)).map((row) => row.key))
+
       for (const row of switchable) {
-        if (row.coverage !== 'modelled' || !row.forecast || vm.sourceLabel(row) !== 'Modelled forecast' || !(row.total > 0)) {
+        if (row.coverage !== 'modelled' || !row.forecast || vm.sourceLabel(row) !== 'Modelled forecast' || (!(row.total > 0) && !uncasedUses.includes(row.key))) {
           return `${row.key} is ${row.coverage}, label ${vm.sourceLabel(row)}, total ${row.total}`
         } else if (row.result.status === 'confirmed' && (row.key === 'industry' || row.key === 'shipbuilding')) {
           return `${row.key}, a queue or task forecast, is called confirmed`
@@ -732,6 +754,10 @@ const suite = (tree, saves, unsupported) => {
         return `ground unit training: ${JSON.stringify(ground && { coverage: ground.coverage, total: ground.total, reason: ground.reason })}`
       }
 
+      if (uncasedUses.length) {
+        noteUnsupported(`${uncasedReason(uncasedUses)} (positive forecast subcase only)`)
+      }
+
       return true
     })
 
@@ -742,14 +768,21 @@ const suite = (tree, saves, unsupported) => {
       const names = minerals.MINERALS.map((mineral) => mineral.name)
       const all = vm.mineralRows.map((row) => row.used)
 
+      if (!vm.legacyUse) {
+        return 'the page builds no model for a copy without a ledger'
+      }
+
+      const contribution = (key, name) => (vm.legacyUse[key].byMineral[name] ? valueOrNull(vm.legacyUse[key].byMineral[name]) : 0)
+      const uses = ['industry', 'fuel', 'maintenance', 'shipbuilding']
+
       if (all.includes(null)) {
         return `a mineral's use is not known on the real rows: ${names[all.indexOf(null)]}`
       }
 
-      const contribution = (key, name) => (vm.legacyUse[key].byMineral[name] ? valueOrNull(vm.legacyUse[key].byMineral[name]) : 0)
+      const uncasedUses = await uncased(uses.filter((key) => !names.some((name) => contribution(key, name) > 0)))
 
       try {
-        for (const key of ['industry', 'fuel', 'maintenance', 'shipbuilding']) {
+        for (const key of uses) {
           vm.toggleCategory(key, false)
 
           const without = vm.mineralRows.map((row) => row.used)
@@ -764,18 +797,26 @@ const suite = (tree, saves, unsupported) => {
             }
           }
 
-          if (!names.some((name) => contribution(key, name) > 0)) {
+          if (!names.some((name) => contribution(key, name) > 0) && !uncasedUses.includes(key)) {
             return `${key} takes no mineral in this save, so nothing is shown to change`
           }
 
           vm.toggleCategory(key, true)
         }
 
-        ;['industry', 'fuel', 'maintenance', 'shipbuilding'].forEach((key) => vm.toggleCategory(key, false))
+        uses.forEach((key) => vm.toggleCategory(key, false))
 
         const none = vm.mineralRows.map((row) => row.used)
 
-        return none.every((value) => value === 0) ? true : `uses remain with every use switched off: ${none.join(', ')}`
+        if (!none.every((value) => value === 0)) {
+          return `uses remain with every use switched off: ${none.join(', ')}`
+        }
+
+        if (uncasedUses.length) {
+          noteUnsupported(`${uncasedReason(uncasedUses)} (nonzero switch contribution subcase only)`)
+        }
+
+        return true
       } finally {
         vm.disabledCategories = []
       }
@@ -788,18 +829,37 @@ const suite = (tree, saves, unsupported) => {
       const surface = vm.surfaceMining
       const orbital = vm.orbitalMining
 
+      if (!vm.legacyUse) {
+        return 'the page builds no model for a copy without a ledger'
+      }
+
       vm.surfaceMining = []
       vm.orbitalMining = []
 
       try {
         const rowsOf = () => Object.fromEntries(vm.mineralRows.map((row) => [row.name, row]))
         const before = rowsOf()
+        const uses = ['industry', 'fuel', 'maintenance', 'shipbuilding']
+        const names = minerals.MINERALS.map((mineral) => mineral.name)
+        const positive = (key) => names.filter((name) => vm.legacyUse[key].byMineral[name] && valueOrNull(vm.legacyUse[key].byMineral[name]) > 0)
+        const uncasedUses = await uncased(uses.filter((key) => !positive(key).length))
 
-        for (const key of ['industry', 'fuel', 'maintenance', 'shipbuilding']) {
-          const taken = minerals.MINERALS.map((mineral) => mineral.name).filter((name) => vm.legacyUse[key].byMineral[name] && valueOrNull(vm.legacyUse[key].byMineral[name]) > 0 && before[name].stock > 0 && Number.isFinite(before[name].runwaySort))
+        for (const key of uses) {
+          const taken = positive(key).filter((name) => before[name].stock > 0)
 
           if (!taken.length) {
-            return `${key}: no mineral it takes has a stock and a finite runway in this fixture`
+            if (uncasedUses.includes(key)) {
+              continue
+            }
+
+            return `${key}: no mineral it takes has a stock in this save`
+          }
+
+          // Select the case from its inputs, never from the runway calculation being checked.
+          const invalid = taken.filter((name) => !(before[name].used > 0) || !Number.isFinite(before[name].runwaySort) || !(before[name].runwaySort > 0))
+
+          if (invalid.length) {
+            return `${key}: positive stock and use give no finite positive runway for ${invalid.join(', ')}`
           }
 
           vm.toggleCategory(key, false)
@@ -812,6 +872,10 @@ const suite = (tree, saves, unsupported) => {
           if (failed.length) {
             return `${key}: the runway of ${failed.join(', ')} does not lengthen`
           }
+        }
+
+        if (uncasedUses.length) {
+          noteUnsupported(`${uncasedReason(uncasedUses)} (runway-lengthening subcase only)`)
         }
 
         return true
@@ -828,40 +892,53 @@ const suite = (tree, saves, unsupported) => {
       const colonies = vm.legacyColonies
       const tasks = vm.shipyardTasks
       const refining = colonies.find((colony) => colony.Refineries > 0)
+      const running = tasks.findIndex((item) => !item.Paused && item.TaskTypeID !== 3)
       const sorium = () => vm.mineralRows.find((row) => row.name === 'Sorium')
       const row = (key) => vm.categoryTable.find((item) => item.key === key)
 
-      vm.legacyColonies = colonies.map((colony) => (colony === refining ? { ...colony, FuelProdStatus: null } : colony))
+      if (!refining && running < 0) {
+        return skip(`${fallbackLabel}: no colony with refineries and no running shipyard task, so neither missing-input subcase is available`)
+      }
 
       try {
-        const fuel = row('fuel')
+        if (refining) {
+          vm.legacyColonies = colonies.map((colony) => (colony === refining ? { ...colony, FuelProdStatus: null } : colony))
 
-        if (fuel.coverage !== 'missing' || fuel.total !== null || !/whether fuel production is on/.test(fuel.reason) || vm.sourceLabel(fuel) !== 'Missing') {
-          return `a refining colony without its switch gives ${fuel.coverage}, total ${fuel.total}, reason "${fuel.reason}"`
-        } else if (sorium().used !== null || sorium().runway !== null || sorium().status !== 'unknown') {
-          return `the Sorium use is ${sorium().used}, runway ${sorium().runway}, status ${sorium().status} with a use unknown`
-        } else if (row('maintenance').coverage !== 'modelled' || vm.mineralRows.find((item) => item.name === 'Duranium').used === null) {
-          return 'the missing fuel input leaves the maintenance supplies unknown'
+          const fuel = row('fuel')
+
+          if (fuel.coverage !== 'missing' || fuel.total !== null || !/whether fuel production is on/.test(fuel.reason) || vm.sourceLabel(fuel) !== 'Missing') {
+            return `a refining colony without its switch gives ${fuel.coverage}, total ${fuel.total}, reason "${fuel.reason}"`
+          } else if (sorium().used !== null || sorium().runway !== null || sorium().status !== 'unknown') {
+            return `the Sorium use is ${sorium().used}, runway ${sorium().runway}, status ${sorium().status} with a use unknown`
+          } else if (row('maintenance').coverage !== 'modelled' || vm.mineralRows.find((item) => item.name === 'Duranium').used === null) {
+            return 'the missing fuel input leaves the maintenance supplies unknown'
+          }
+
+          vm.toggleCategory('fuel', false)
+
+          if (sorium().used === null || row('fuel').enabled) {
+            return 'switching the unknown use off does not make the Sorium use known'
+          }
+
+          vm.toggleCategory('fuel', true)
+          vm.legacyColonies = colonies
+        } else {
+          noteUnsupported(`${fallbackLabel}: no colony with refineries, so the missing fuel input subcase is unavailable`)
         }
 
-        vm.toggleCategory('fuel', false)
+        if (running >= 0) {
+          // A task whose class is not in the save lacks the size: shipbuilding is missing, naming it, and the other uses are untouched.
+          vm.shipyardTasks = tasks.map((task, index) => (index === running ? { ...task, ClassSize: null } : task))
 
-        if (sorium().used === null || row('fuel').enabled) {
-          return 'switching the unknown use off does not make the Sorium use known'
-        }
+          const shipbuilding = row('shipbuilding')
 
-        vm.toggleCategory('fuel', true)
-        vm.legacyColonies = colonies
-
-        // A task whose class is not in the save lacks the size: shipbuilding is missing, naming it, and the other uses are untouched.
-        vm.shipyardTasks = tasks.map((task, index) => (index === tasks.findIndex((item) => !item.Paused && item.TaskTypeID !== 3) ? { ...task, ClassSize: null } : task))
-
-        const shipbuilding = row('shipbuilding')
-
-        if (shipbuilding.coverage !== 'missing' || shipbuilding.total !== null || !/size and type of the class/.test(shipbuilding.reason)) {
-          return `a task without its class gives ${shipbuilding.coverage}, total ${shipbuilding.total}, reason "${shipbuilding.reason}"`
-        } else if (row('fuel').coverage !== 'modelled') {
-          return 'a task without its class leaves the fuel use unknown'
+          if (shipbuilding.coverage !== 'missing' || shipbuilding.total !== null || !/size and type of the class/.test(shipbuilding.reason)) {
+            return `a task without its class gives ${shipbuilding.coverage}, total ${shipbuilding.total}, reason "${shipbuilding.reason}"`
+          } else if (row('fuel').coverage !== 'modelled') {
+            return 'a task without its class leaves the fuel use unknown'
+          }
+        } else {
+          noteUnsupported(`${fallbackLabel}: no running shipyard task, so the missing class input subcase is unavailable`)
         }
 
         return true
@@ -891,7 +968,7 @@ const suite = (tree, saves, unsupported) => {
   }
   const synthetic = (id, name, run) => add(id, `SYNTHETIC ${name}`, run)
 
-  synthetic('synthetic-fuel', 'refineries at a colony with production on: 20 x 10 x 1.5 / 2000 t of Sorium a year, confirmed; production off or no refineries: 0; under 1 t of Sorium: 0', async () => {
+  synthetic('synthetic-fuel', 'refineries at a colony with production on: 20 x 10 x 1.5 / 2000 t of Sorium a year, confirmed; production off or no refineries: 0; positive sub-tonne Sorium: the same current rate', async () => {
     const on = await model({ colonies: [colony()] })
     const { valueOrNull } = on.provenance
     const sorium = on.fuel.byMineral.Sorium
@@ -902,7 +979,7 @@ const suite = (tree, saves, unsupported) => {
 
     const results = await Promise.all([colony({ FuelProdStatus: 0 }), colony({ Refineries: 0 }), colony({ Sorium: 0.5 }), colony({ Refineries: 0, FuelProdStatus: null })].map(async (item) => valueOrNull((await model({ colonies: [item] })).fuel.byMineral.Sorium)))
 
-    return results.every((value) => value === 0) ? true : `status off, no refineries, little Sorium, no refineries and no switch: ${results.join(', ')}`
+    return results.every((value, index) => near(value, [0, 0, 0.15, 0][index])) ? true : `status off, no refineries, little Sorium, no refineries and no switch: ${results.join(', ')}`
   })
 
   synthetic('synthetic-maintenance', 'facilities with production on: 40 x 5 x 4 x 1.5 MSP a year at 0.1, 0.05 and 0.1 t of Duranium, Uridium and Gallicite; production off: 0', async () => {
@@ -1363,7 +1440,7 @@ const RESULT_PREFIX = 'LEGACY-RESULT '
 
 // The mutations: [label, file, from, to, fails]. `fails` are the ids of the checks the mutation must break; only those are run, in a process of their own on a copy of the sources.
 const MUTATIONS = [
-  ['facilities are no longer cut to whole numbers', path.join('utilities', 'legacy-consumption.js'), '{ count: Math.trunc(value), fractional: Math.trunc(value) !== value }', '{ count: value, fractional: false }', ['synthetic-whole-facilities']],
+  ['facilities are no longer cut to whole numbers', path.join('utilities', 'legacy-consumption.js'), 'const count = isNumber(value) ? wholeCapacity(value, terms) : value', 'const count = value', ['synthetic-whole-facilities']],
   ['a scrap task takes its (negative) minerals', path.join('utilities', 'legacy-consumption.js'), 'task.TaskTypeID === TASK_TYPE_SCRAP) {\n    return idle', 'task.TaskTypeID === -1) {\n    return idle', ['synthetic-scrap-paused']],
   ['a paused task is built', path.join('utilities', 'legacy-consumption.js'), '} else if (task.Paused) {', '} else if (false) {', ['synthetic-scrap-paused']],
   ['a task builds past its remaining build points', path.join('utilities', 'legacy-consumption.js'), 'Math.min(values[\'the task\\\'s build rate\'], Math.max(0, task.TotalBP - task.CompletedBP))', 'values[\'the task\\\'s build rate\']', ['synthetic-task-cap']],
@@ -1371,7 +1448,7 @@ const MUTATIONS = [
   ['a refit builds the class it leaves, not the one it becomes', path.join('utilities', 'legacy-consumption.js'), 'FCT_ShipyardTask.TaskTypeID in (2, 4)', 'FCT_ShipyardTask.TaskTypeID in (-1)', ['loader-refit:fixture']],
   ['a retool ignores its slipways', path.join('utilities', 'legacy-consumption.js'), '(retool ? yard.Slipways : 1)', '1', ['synthetic-activities']],
   ['a colony with no maintenance switch makes nothing', path.join('utilities', 'legacy-consumption.js'), 'result = unavailable({ rule: MAINTENANCE, missing: [\'whether maintenance production is on\'], units: \'MSP/yr\' })', 'result = zero(MAINTENANCE, \'maintenance production is off\', \'MSP/yr\')', ['synthetic-unknown-status']],
-  ['a refinery with its production off still refines', path.join('utilities', 'logistics.js'), '} else if (!colony.FuelProdStatus || colony.Refineries === 0) {', '} else if (colony.Refineries === 0) {', ['synthetic-fuel']],
+  ['a refinery with its production off still refines', path.join('utilities', 'logistics.js'), '} else if (!colony.FuelProdStatus || refineries === 0) {', '} else if (refineries === 0) {', ['synthetic-fuel']],
   ['a use that lacks an input is counted as 0', path.join('utilities', 'mineral-outlook.js'), 'uses.filter((use) => use.enabled && use.result)', 'uses.filter((use) => use.enabled && use.result && use.result.value !== null)', ['synthetic-flow-switches', 'fallback-unknown']],
   ['a switched-off use still counts without a ledger', path.join('utilities', 'mineral-outlook.js'), 'uses.filter((use) => use.enabled && use.result)', 'uses.filter((use) => use.result)', ['synthetic-flow-switches', 'fallback-switches']],
   ['a switched-off use leaves the ledger\'s use alone', path.join('utilities', 'mineral-outlook.js'), 'spendGroups.filter((key) => !left.includes(key))', 'spendGroups', ['synthetic-flow-switches', 'ledger-no-model:fixture']],

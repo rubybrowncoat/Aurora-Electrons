@@ -1,5 +1,5 @@
 /*
-  Measures the real orbital propagation against an ancestral pair of played saves of one campaign, matched by SystemBodyID only after validating the complete ledger prefix, without changing either save. --from and --to name A, B, C1 or C2 for the four calibrated orbit-pair saves of the registry (A and B, then the parallel branches C1 and C2 from B; the registry also holds D1 and its sibling, outside this pair witness), or the path of a save relative to the repository root, whose game is the one with the latest clock. Defaults remain A-B. The gate reads A-B, B-C1, A-C1, B-C2 and A-C2 at the fixture-calibrated forced-update level differences 1, 1, 2, 2 and 3; C1-C2 is not an ancestral pair. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
+  Measures the real orbital propagation against an ancestral pair of played saves of one campaign, matched by SystemBodyID only after validating the complete ledger prefix, without changing either save. --from and --to name A, B, C1 or C2 for the four calibrated orbit-pair saves of the registry (A and B, then the parallel branches C1 and C2 from B; the registry also holds C2's continuation D2-1 and the sibling D2-2 split from the same base, outside this pair witness), or the path of a save relative to the repository root, whose game is the one with the latest clock. Defaults remain A-B. The gate reads A-B, B-C1, A-C1, B-C2 and A-C2 at the fixture-calibrated forced-update level differences 1, 1, 2, 2 and 3; C1-C2 is not an ancestral pair. Missing saves print SKIP and exit 0. --no-mutations runs the head only; --json prints every body's residual as well as the summary. A finding exits 1, never becomes a wider tolerance.
 
   Snapshots reach the later save's GameTime from the earlier save's baseline: full elapsed circular/moon-own bearings, whole eccentric calls plus a local remainder, never movement-phase calls. The private stateAt and clockOf seams are exported only in the loaded source copy. horizon:false measures short-period bodies too, without changing the arithmetic or MAX_CALLS; out-of-horizon measurements and every other refusal remain disclosed. All campaign systems are read, not just the race's surveyed subset.
 
@@ -26,7 +26,7 @@ const IMMUTABLE = ['systemId', 'starId', 'bodyClass', 'trojan', 'distance', 'yea
 const MUTANTS = [
   { name: 'epoch from LastGrowthTime', anchor: 'return clock && isNumber(clock.gameTime) ? clock : null', replacement: 'return clock && isNumber(clock.gameTime) ? { ...clock, gameTime: clock.lastGrowthTime } : null', criterion: 'circular-bearing' },
   { name: 'ratio dropped (mean speed only)', anchor: 'const turn = (deltaSeconds / (body.year * 3600)) * (current / mean)', replacement: 'const turn = (deltaSeconds / (body.year * 3600)) * 1', criterion: 'eccentric-bound' },
-  { name: 'old 561600 s whole steps', anchor: 'const call = length', replacement: 'const call = 561600', criterion: 'eccentric-bound', wholeSteps: true },
+  { name: 'old 561600 s whole steps', anchor: 'const call = STEP_SECONDS', replacement: 'const call = 561600', criterion: 'eccentric-bound', wholeSteps: true },
 ]
 
 const point = (body) => ({ Xcor: body.xcor, Ycor: body.ycor })
@@ -36,7 +36,7 @@ const percentile = (values, p) => values.length ? [...values].sort((a, b) => a -
 const distribution = (values) => ({ count: values.length, max: values.length ? Math.max(...values) : null, p50: percentile(values, 0.5), p95: percentile(values, 0.95) })
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 
-// The four calibrated orbit-pair saves of the registry, lettered as docs/WORKFLOW.md and the played-save entries of scripts/check-capabilities.js name them (C1 and C2 the two branches from B; the registry also holds D1 and its sibling, outside this pair witness); any other --from or --to value is the path of a save, resolved against the repository root as a fixture's file is.
+// The four calibrated orbit-pair saves of the registry, lettered as docs/WORKFLOW.md and the played-save entries of scripts/check-capabilities.js name them (C1 and C2 the two branches from B; the registry also holds C2's continuation D2-1 and the sibling D2-2 split from the same base, outside this pair witness); any other --from or --to value is the path of a save, resolved against the repository root as a fixture's file is.
 const SAVES = { A: PLAYED, B: PLAYED_NEXT, C1: PLAYED_C1, C2: PLAYED_C2 }
 
 const readSave = (fixture) => {
@@ -136,7 +136,7 @@ const measure = async (pair, loadModel, mutation = null) => {
   }
 
   const orbit = (await loadUtilities(['orbit-propagation'], { sources: { 'orbit-propagation': `${source}\nexport { stateAt, clockOf };\n` } }))['orbit-propagation']
-  const length = orbit.callLength(a.clock)
+  const length = orbit.STEP_SECONDS
   const calls = Math.floor(elapsed / length)
   const remainder = elapsed - calls * length
   const maximumIncrement = Math.max(...ledger.map((row) => row.Length))

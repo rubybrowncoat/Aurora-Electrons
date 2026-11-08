@@ -111,7 +111,7 @@
               <span v-if="item.route.km !== null" class="text-no-wrap" data-haul="round-trip">{{ gkm(item.route.km) }}<provenance-mark v-if="item.distanceResult" :result="item.distanceResult" /></span>
               <v-tooltip v-else top>
                 <template #activator="{ on }">
-                  <span class="warning--text" v-on="on">Can't trace</span>
+                  <span class="warning--text" v-on="on">Can't trace<provenance-mark v-if="item.distanceResult" :result="item.distanceResult" /></span>
                 </template>
                 <span>{{ item.route.problem }}</span>
               </v-tooltip>
@@ -181,7 +181,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Use it to see what each route carries and costs. The fleets are those Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders, and the Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed, with loading and unloading timed as Transport times them: every ship works at once and the slowest sets the stop's time. A ship over 500 t with no undamaged cargo shuttle bays counts one bay, so it loads and unloads at a colony with no spaceport or cargo shuttle station at the technology alone; a route where it isn't known whether a ship can load or unload is named with the reason and left out of the totals. Ship components a route loads stay in the hold until an order unloads them, so a later load finds the space they leave, and they count in the stops' times but not in the freight. A bonus the save cannot settle counts as 1, so the time errs long, and refuelling and overhauls aren't counted. {{ versionNote }}
+            Use it to see what each route carries and costs. The fleets are those Aurora runs on repeat (cycle moves), walked order by order from each arrival or transit exit. A minimum-distance order offsets its destination towards the departure position, changing that flight and the next one; a minimum larger than the gap can carry the arrival beyond the departure. Coincident positions first separate by 100 km on both axes. The Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed, with loading and unloading timed as Transport times them: every ship works at once and the slowest sets the stop's time. A ship over 500 t with no undamaged cargo shuttle bays counts one bay, so it loads and unloads at a colony with no spaceport or cargo shuttle station at the technology alone; a route where it isn't known whether a ship can load or unload is named with the reason and left out of the totals. Ship components a route loads stay in the hold until an order unloads them, so a later load finds the space they leave, and they count in the stops' times but not in the freight. A bonus the save cannot settle counts as 1, so the time errs long, and refuelling and overhauls aren't counted. {{ versionNote }}
           </div>
           <div class="panel-foot caption text--secondary" data-fleet-basis>
             A fleet sails at its set speed, held to the effective maximum of its slowest ship under its own power (from the undamaged engines, the overhaul and the mass of a ship it tows), and at that maximum when the fleet is set to it. Each ship burns fuel at its own engine power scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted. A fleet that can't be profiled, or whose every hold is in a hangar or under tow, is left out of the totals with the reason.
@@ -190,7 +190,7 @@
             A transit takes no time. After each jump, every ship of the fleet that is not in a hangar draws a delay from its crew. The fleet waits at the next jump point only for what the flight and stops since the jump have not used. That wait is a range from the lowest to the highest draw, and the cycle is timed at the upper case with the lower case beside it. The cycle repeats, so the delay after the last jump carries into the first. The game retries a blocked transit at the start of each subpulse, and the length of the subpulses ahead is not known. The longest wait therefore runs up to two subpulses (12 hours) past the second the delay clears. A fleet whose crew is not in the save has no cycle time and is left out of the totals.
           </div>
           <div class="panel-foot caption text--secondary" data-propagation-basis>
-            A cycle is flown for a year with loading, unloading and order delays counted as waits, so the next leg leaves from where the fleet arrived. Independent asteroids, moons, trojans and eccentric bodies within one orbit of their last update are placed where they will be on each arrival. The cycle and the yearly figures are the propagated ones, with the cycle on the saved positions beside them. An order to anything else keeps the saved positions and says why. The legs listed under a route are the saved ones.
+            A cycle is flown for a year with loading, unloading and order delays counted as waits, so the next leg leaves from where the fleet arrived. A cycle with a minimum-distance order keeps the destinations at their saved positions: moving-body arrivals with an offset are not predicted. The saved traversal starts at a transit exit or an order without an offset; if every order has an offset and none transits, it starts at the first saved exit and the yearly figures assume that traversal repeats, not that the positions settle. Without an offset, independent asteroids, moons, trojans and eccentric bodies within one orbit of their last update are placed where they will be on each arrival. The cycle and the yearly figures are then the propagated ones, with the cycle on the saved positions beside them. An order to anything else keeps the saved positions and says why. The legs listed under a route are the saved ones.
           </div>
         </v-card>
 
@@ -255,7 +255,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route-position'
 import routeDesires, { DESIRE_INPUTS, DESIRE_LABELS } from '../mixins/route-desires'
-import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
+import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds, stockExporting } from '../utilities/colony-minerals'
 import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
 import { CARGO_POINTS, CARGO_UNSETTLED, classYear, cycleCargo, cycleHandling, cycleWalk, propagatedRoute, routeResults, routeYear, walkRoute } from '../utilities/hauling'
@@ -264,9 +264,10 @@ import { loadJumpPoints, pathKey, reverseSteps, routeLegs, routeResults as route
 import { loadHandlingSupport } from '../utilities/handling-support'
 import { timeHauls } from '../utilities/msp-supply'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, unreadResult } from '../utilities/safe-routes'
-import { ofRule } from '../utilities/provenance'
+import { ofRule, unavailable } from '../utilities/provenance'
 import { allLoaded, tracked } from '../utilities/load-tracking'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { rangeFigure, rangeText, roundToDecimal, separatedNumber } from '../utilities/math'
+import { capacitySum, capacityTerms } from '../utilities/mining-data'
 import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
@@ -446,6 +447,7 @@ export default {
     routeRows() {
       return this.fleets.map((fleet) => {
         const orders = this.ordersByFleet[fleet.FleetID] || []
+        const offset = orders.some((order) => order.MinDistance > 0)
         const route = walkRoute(orders)
         const ships = this.shipsByFleet[fleet.FleetID] || []
         const profile = fleetProfile(ships, fleet, { basis: 'saved' })
@@ -464,12 +466,12 @@ export default {
         const flown = simulation === first ? flownRoute : null
         const walk = flown ? flownWalk : heldWalk
         const year = flown ? routeYear(sailing, flown, cargo, handling, delay, walk) : held
-        const waitText = year && year.waitDays !== null ? (year.waitLowDays === year.waitDays ? `${this.fixed(year.waitDays * 24, 1)} hours` : `${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} hours`) : ''
+        const waitText = year && year.waitDays !== null ? (year.waitLowDays === year.waitDays ? `${this.fixed(year.waitDays * 24, 1)} hours` : rangeText(year.waitLowDays * 24, year.waitDays * 24, { format: (value) => rangeFigure(this.fixed(value, 1), { unit: ' hours' }) })) : ''
         const speedText = profile.status === 'ok' ? `${this.count(profile.cruise)} km/s` : 'no speed'
         const savedText = profile.status === 'ok' && Number.isFinite(profile.savedSpeed) && profile.savedSpeed !== profile.cruise ? `(saved ${this.count(profile.savedSpeed)})` : ''
         const capital = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
         const savedPositions = routePositions(orders.flatMap((order) => [orderEndpoint(order), orderExitEndpoint(order)]), { facts: this.positionRead })
-        const positions = simulation ? simulation.annual.positions : savedPositions
+        const positions = offset ? summarisePositions(savedPositions.records.map((record) => ({ ...record, conditions: [...record.conditions, 'order-offset'], unknown: true }))) : simulation ? simulation.annual.positions : savedPositions
         const legPositions = route.legs.map((_leg, index) => routePositions([orderExitEndpoint(orders[index]), orderEndpoint(orders[(index + 1) % orders.length])], { facts: this.positionRead }))
         const found = routeResults(route, year, handling, walk)
         const results = found && Object.fromEntries(Object.entries(found).map(([name, result]) => [name, withPositions(result, positions)]))
@@ -497,7 +499,7 @@ export default {
           year,
           waitText,
           delayHours: delay / 3600,
-          propagationText: simulation ? this.routeNote(simulation, year, held) : '',
+          propagationText: offset ? `Static: ${CONDITIONS['order-offset']}.` : simulation ? this.routeNote(simulation, year, held) : '',
           stopsText: stops.join(' → '),
           routesLink: routesLink.to,
           routesName: routesLink.name,
@@ -512,9 +514,9 @@ export default {
           results,
           positions,
           legPositions,
-          legResults: route.legs.map((leg, index) => withPositions(distanceResult(leg.km), legPositions[index])),
+          legResults: route.legs.map((leg, index) => withPositions(ofRule({ rule: 'hauling.routeDistance', value: leg.km }), legPositions[index])),
           savedPositions,
-          distanceResult: route.km !== null && savedPositions.caveat ? withPositions(distanceResult(route.km), savedPositions) : null,
+          distanceResult: route.missing && route.missing.length ? unavailable({ rule: 'hauling.routeDistance', missing: route.missing }) : route.km !== null ? withPositions(ofRule({ rule: 'hauling.routeDistance', value: route.km }), savedPositions) : null,
           freightText,
           colonistsText,
           componentsText,
@@ -556,7 +558,7 @@ export default {
     colonyStocks() {
       const { needs, packets } = this
 
-      return this.colonies.map((colony) => ({ colony, minerals: colonyMinerals(colony, needs[colony.PopulationID], packets[colony.PopulationID], colony.MassDrivers > 0 && colony.MassDriverDest > 0) }))
+      return this.colonies.map((colony) => ({ colony, minerals: colonyMinerals(colony, needs[colony.PopulationID], packets[colony.PopulationID], stockExporting(colony)) }))
     },
 
     // The hauls under the avoid settings; none while a setting is on and the systems it reads are not in, since a plan over a guess would be the baseline passing as the safe one.
@@ -816,7 +818,7 @@ export default {
     simulateRoute(orders, sailing, handling, held, walk) {
       const { positionRead } = this
 
-      if (!positionRead || !held || !(sailing.Speed > 0) || !orders.length) {
+      if (!positionRead || !held || !(sailing.Speed > 0) || !orders.length || orders.some((order) => !Number.isFinite(order.MinDistance) || order.MinDistance > 0)) {
         return null
       }
 
@@ -935,7 +937,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.DestinationItemID, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.WarpPointID when 12 then VIR_LagrangeOut.LagrangePointID else FCT_MoveOrders.DestinationID end as ExitDestinationID, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, case when FCT_Population.PopulationID is null then null else coalesce(VIR_Service.ShuttleCapacity, 0) end as ShuttleCapacity, VIR_Service.ServiceNames from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_RaceJumpPointSurvey as VIR_ExitSurvey on VIR_ExitSurvey.WarpPointID = VIR_Exit.WarpPointID and VIR_ExitSurvey.RaceID = FCT_MoveOrders.RaceID left join FCT_RaceJumpPointSurvey as VIR_ExitFar on VIR_ExitFar.WarpPointID = VIR_Exit.WPLink and VIR_ExitFar.RaceID = FCT_MoveOrders.RaceID and VIR_ExitFar.Charted = 1 left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else (case when VIR_ExitSurvey.Explored = 1 or VIR_ExitFar.Explored = 1 then VIR_Exit.WPLink else null end) end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 ${shuttleServiceJoin(this.GameID, 'FCT_MoveOrders.PopulationID')} where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.DestinationItemID, FCT_MoveOrders.OrderDelay, FCT_MoveOrders.MinDistance, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.WarpPointID when 12 then VIR_LagrangeOut.LagrangePointID else FCT_MoveOrders.DestinationID end as ExitDestinationID, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, case when FCT_Population.PopulationID is null then null else coalesce(VIR_Service.ShuttleCapacity, 0) end as ShuttleCapacity, VIR_Service.ServiceNames from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_RaceJumpPointSurvey as VIR_ExitSurvey on VIR_ExitSurvey.WarpPointID = VIR_Exit.WarpPointID and VIR_ExitSurvey.RaceID = FCT_MoveOrders.RaceID left join FCT_RaceJumpPointSurvey as VIR_ExitFar on VIR_ExitFar.WarpPointID = VIR_Exit.WPLink and VIR_ExitFar.RaceID = FCT_MoveOrders.RaceID and VIR_ExitFar.Charted = 1 left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else (case when VIR_ExitSurvey.Explored = 1 or VIR_ExitFar.Explored = 1 then VIR_Exit.WPLink else null end) end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 ${shuttleServiceJoin(this.GameID, 'FCT_MoveOrders.PopulationID')} where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
     },
@@ -946,7 +948,7 @@ export default {
           return []
         }
 
-        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${SHUTTLE_SERVICE_COLUMNS}, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join (select FCT_PopulationInstallations.PopID, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID ${shuttleServiceJoin(this.GameID, 'FCT_Population.PopulationID')} where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${SHUTTLE_SERVICE_COLUMNS}, case when VIR_Installations.PopID is null then 0 else VIR_Installations.MassDrivers end as MassDrivers, VIR_Installations.MassDriverTerms from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join (select FCT_PopulationInstallations.PopID, ${capacitySum('DIM_PlanetaryInstallation.MassDriverValue', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as MassDrivers, ${capacityTerms('DIM_PlanetaryInstallation.MassDriverValue', 'DIM_PlanetaryInstallation.MassDriverValue > 0')} as MassDriverTerms from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID ${shuttleServiceJoin(this.GameID, 'FCT_Population.PopulationID')} where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return Object.freeze(colonies)
       }),

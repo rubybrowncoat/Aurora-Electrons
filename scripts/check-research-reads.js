@@ -1352,7 +1352,7 @@ check('rules', 'the rules of the remaining RP and of the landing year are regist
     assert.ok(rule, `${id} is registered`)
     assert.deepEqual(rule.versions, ['3.2.x'], `${id} is registered for the line`)
   }
-  assert.deepEqual(provenance.getRule('production.timeline').versions, ['2.7.x'], 'the broad timeline remains held for the other formula families')
+  assert.deepEqual(provenance.getRule('production.timeline').versions, ['3.2.x'], 'the joint industrial and training repairs release the broad timeline')
 
   assert.ok(/saved points are read as stored, decimals included, and the cost is the stored one whatever its size/.test(provenance.getRule('research.remaining').note), 'the remaining RP rule says what it reads')
   assert.ok(/The game hands the part of a landing increment the project does not need to the next queued tech at that tech's own rate/.test(provenance.getRule('research.landing').note), 'the landing rule says how the game carries')

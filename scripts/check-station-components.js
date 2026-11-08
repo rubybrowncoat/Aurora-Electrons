@@ -19,7 +19,7 @@
   - `odd`: a stored cost above the class's, which no components give, is shown with both costs and no credit to tell, its box line saying the box cannot be told, and a class the save lacks is said so;
   - `box`: the box of a construction, refit and automatic refit task as stored (1 ticked, 0 not, a NULL or other value not stored) and no line for a repair or a scrap;
   - `render`: the name cell of the jobs draws each line in an element marked data-use-components and none for a job without one;
-  - `cycle`: the forecast leaves 0, never a negative balance, of a mineral whose stock a rounded build overran (and the next arrival lands on 0);
+  - `cycle`: the forecast floors a mineral-limited build to four decimals, carries its unused stock into the next arrival and leaves 0, never a negative mineral balance, when decimal division rounds a quotient up to a build step;
   - `floors`: the stock projection of the Minerals page, the free stock of a colony and the MSP run on a stock it exhausts never go below 0;
   - `registry`: the rules of the credit and the box are of the line and the finish of an industrial project is too;
   - `text`: the panel foot, the lines and the rule notes are in the impersonal voice with no release number.
@@ -406,14 +406,14 @@ const expectedLines = (vm, fact, rate) => {
   return lines
 }
 
-// The days the game takes to build `amount` units of `perUnit` BP at `perYear` BP a year with the colony's cycle of one day and no stock short: each cycle builds the units its share buys (`perYear` over the 365 days, over the cost of a unit) rounded to 4 decimals (the game keeps the build to 4 decimals), so a unit that costs much more than a cycle buys is built in a coarse step; Infinity where a cycle builds nothing.
+// The days the game takes to build `amount` units of `perUnit` BP at `perYear` BP a year with the colony's cycle of one day and no stock short: each cycle builds the units its share buys (`perYear` over the 365 days, over the cost of a unit) floored to 4 decimals before fuel and conversion limits; Infinity where a cycle builds nothing.
 const gameDays = (amount, perUnit, perYear) => {
-  const units = Math.round(perYear / DAYS_PER_YEAR / perUnit * 1e4) / 1e4
+  const units = Math.floor(perYear / DAYS_PER_YEAR / perUnit * 1e4) / 1e4
 
   return units > 0 ? Math.ceil(amount / units - 1e-9) : Infinity
 }
 
-// The planted projects of a copy against the page: every made project is a job named by its type that builds at its share of the capacity of its kind, with the lines the oracle's figures give, and the date the game's rounded build gives for its stored cost, no later than the class's own cost would give; a project the game refused is no job.
+// The planted projects of a copy against the page: every made project is a job named by its type that builds at its share of the capacity of its kind, with the lines the oracle's figures give, and the date the game's floored build gives for its stored cost, no later than the class's own cost would give; a project the game refused is no job.
 const checkPlanted = async (w, copy, { credited }) => {
   const vm = await w.pageOn(copy)
   const { planted } = copyOf(copy).facts
@@ -782,22 +782,41 @@ check('render', 'the name cell of the jobs draws each line of a credit or a box 
   assert.equal(linesOf(repair).length, 0, 'and draws no element')
 })
 
-check('cycle', 'the cycle forecast floors every mineral balance at 0 after a build is debited: a stock of 10.00008 t at 3 t a build point is cut to 3.3334 BP (3.33336 rounded to 4 decimals), which takes 10.0002 t, so the balance is 0 and not -0.00012, and an arrival of 3.00015 t then lands on 0.00015 t and not 0.00003', async (w) => {
+check('cycle', 'the cycle forecast floors a stock-limited build of 3.33336 to 3.3333 units, leaving 0.00018 t of 10.00008 t at 3 t a unit; an arrival of 3.00015 t then allows 1.0001 units and leaves 0.00003 t; a decimal quotient rounded up to an exact build step still leaves no negative mineral balance after debit', async (w) => {
   const { 'industry-cycle': engine } = await w.modules()
   const point = { ID: 1, Percentage: 100, Amount: 5, PartialCompletion: 0, ProdPerUnit: 1, Queue: 0, Paused: 0, category: 'construction', needs: { Boronide: 3 }, source: null }
   const run = (extra) => engine.forecastColony({ capacities: { construction: 3650 }, stock: { Boronide: 10.00008 }, cycleDays: 1, projects: [point], horizonDays: 30, ...extra })
   const plain = run({})
 
-  assert.equal(plain.projects[1].built, 3.3334, 'the build is cut to the stock, rounded to 4 decimals')
-  assert.ok(plain.left.Boronide === 0, `the balance is floored at 0, not ${plain.left.Boronide}`)
+  assert.equal(plain.projects[1].built, 3.3333, 'the build is cut to the stock, floored to 4 decimals')
+  assert.ok(near(plain.left.Boronide, 0.00018), `the floored build leaves 0.00018 t, not ${plain.left.Boronide}`)
 
   const arrival = run({ arrivals: [{ resource: 'Boronide', day: 2, quantity: 3.00015 }] })
 
-  assert.ok(near(arrival.left.Boronide, 0.00015), `the arrival lands on 0, so 0.00015 t are left, not ${arrival.left.Boronide}`)
+  assert.ok(near(arrival.left.Boronide, 0.00003), `the arrival adds to 0.00018 t, so 0.00003 t are left, not ${arrival.left.Boronide}`)
 
   const exact = run({ stock: { Boronide: 9.9999 } })
 
-  assert.ok(exact.left.Boronide === 0 && exact.projects[1].built === 3.3333, `a stock that the rounded build does not overrun is left exactly: ${exact.left.Boronide}, ${exact.projects[1].built}`)
+  assert.ok(exact.left.Boronide === 0 && exact.projects[1].built === 3.3333, `a stock that the floored build exhausts is left exactly: ${exact.left.Boronide}, ${exact.projects[1].built}`)
+
+  // The first project's fuel limit builds 1e-17 unit, leaving exactly 1e11 minus 1e-17 tonnes. Dividing that stock by 1e15 rounds up to 0.0001 in the decimal type before the four-place floor, so the next debit would leave -1e-17 tonnes without the balance floor.
+  const clamped = engine.forecastColony({
+    capacities: { construction: 365, ordnance: 365 },
+    stock: { Boronide: 1e11, fuel: 1e-17 },
+    cycleDays: 1,
+    projects: [
+      { ...point, ID: 2, Amount: 1, category: 'ordnance', needs: { Boronide: 1, fuel: 1 } },
+      { ...point, ID: 3, Amount: 0.0001, needs: { Boronide: 1e15 } },
+      { ...point, ID: 4, Amount: 0.0001, needs: { Boronide: 1 }, Queue: 1 },
+    ],
+    arrivals: [{ resource: 'Boronide', day: 2, quantity: 0.0001 }],
+    horizonDays: 3,
+  })
+
+  assert.equal(clamped.projects[3].finish, 1, 'the rounded decimal quotient reaches the four-place build step')
+  assert.equal(clamped.projects[4].finish, 2, 'the arrival lands on zero, so the queued project finishes on day 2')
+  assert.equal(clamped.projects[4].earliest, 2, 'no project order lets the queued project finish before the arrival')
+  assert.equal(clamped.left.Boronide, 0, 'the debit leaves no negative mineral balance')
 })
 
 check('floors', 'the stock projection of the Minerals page never goes below 0 (a drain of 100 t a year on 10 t leaves 0 from the first sample after the stock runs out), the free stock of a colony below its reserve is 0, never negative, and the MSP run on a stock it exhausts leaves no balance below 0', async (w) => {
@@ -907,6 +926,7 @@ const FAULTS = [
   { name: 'the rule of the box is not confirmed', target: 'production', from: 'id: \'production.useComponents\',\n  versions: LINE_VERSIONS,\n  units: \'flag\',\n  verification: \'confirmed\',', to: 'id: \'production.useComponents\',\n  versions: LINE_VERSIONS,\n  units: \'flag\',\n  verification: \'estimated\',', fails: ['registry'] },
   { name: 'the finish of an industrial project is of another line', target: 'production', from: 'id: \'production.industryFinish\',\n  versions: LINE_VERSIONS,', to: 'id: \'production.industryFinish\',\n  versions: [\'3.0.x\'],', fails: ['registry'] },
   { name: 'the cycle leaves a negative balance', target: 'cycle', from: FLOOR_LINE, to: 'left[resource] = after', fails: ['cycle'] },
+  { name: 'the mineral-limited request is rounded to nearest instead of floored', target: 'cycle', from: 'const floorBuild = (value) => divide(floor(multiply(value, BUILD_SCALE)), BUILD_SCALE)', to: 'const floorBuild = (value) => divide(floor(add(multiply(value, BUILD_SCALE), fromString(\'0.5\'))), BUILD_SCALE)', fails: ['cycle', 'plain'] },
   { name: 'the minerals projection leaves a negative level', target: 'minerals', from: 'stock: levels.map((level) => Math.max(0, level)), output, runOut', to: 'stock: levels, output, runOut', fails: ['floors'] },
   { name: 'the page shows no line for a credit', target: 'productionPage', from: COMPONENTS_LINE, to: 'components: [],', fails: ['stations', 'lights', 'plain', 'odd', 'render'] },
   { name: 'the page shows no line for a box', target: 'productionPage', from: BOX_LINE, to: 'components: [],', fails: ['box', 'render'] },

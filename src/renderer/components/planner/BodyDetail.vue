@@ -193,7 +193,7 @@ import { linkTo } from '../../utilities/deep-links'
 import { FACTORS, GRAVITY_CLASSES, infrastructurePerMillion, limitingFactors } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
 import { cmcNote, rowProvenance } from '../../utilities/colonization'
-import { roundToDecimal, separatedNumber } from '../../utilities/math'
+import { rangeFigure, rangeText, roundToDecimal, separatedNumber } from '../../utilities/math'
 import { compact } from '../../utilities/minerals'
 import { isAvailable, unavailable, valueOrNull } from '../../utilities/provenance'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, oneYearEstimate, terraformBreakdown } from '../../utilities/terraform-capacity'
@@ -208,6 +208,10 @@ const DRAIN_STAGE_NOTE = 'The stages after a drain show it complete. It complete
 const LEVER_WORDS = { [LEVER.WATER]: 'surface water', [LEVER.PRESSURE]: 'pressure' }
 // The temperature a stage shows, in the degrees Celsius the species' range is given in.
 const degrees = (kelvin) => roundToDecimal(kelvin - 273, 1)
+// A temperature as a range figure, the unit beside it and the sign it reads with, so that a range writes the unit once.
+const temperatureFigure = (kelvin) => rangeFigure(degrees(kelvin), { unit: ' °C', negative: kelvin - 273 < 0 })
+// A range of temperatures, the unit once after the second figure.
+const temperatureRange = (from, to) => rangeText(from, to, { format: (kelvin) => temperatureFigure(kelvin) })
 
 export default {
   name: 'BodyDetail',
@@ -346,14 +350,12 @@ export default {
     tiles() {
       const { target, from } = this.plan
       const { body } = this.item
-      const celsius = (kelvin) => `${roundToDecimal(kelvin - 273, 1)} °C`
-      const spread = (low, high) => (Math.abs(high - low) > 0.01 ? `${celsius(low)} to ${celsius(high)}` : celsius(low))
-      const now = this.shown.assessment.cost.colonisable ? spread(body.SurfaceTemp, body.SurfaceTemp) : '-'
+      const now = this.shown.assessment.cost.colonisable ? temperatureRange(body.SurfaceTemp, body.SurfaceTemp) : '-'
 
       return [
         { label: 'Pressure', from: `${roundToDecimal(from.pressure, 2)} atm`, to: `${roundToDecimal(target.pressure, 2)} atm` },
         { label: 'Breathable', from: `${roundToDecimal(from.breathable, 2)} atm`, to: `${roundToDecimal(target.breathable, 2)} atm` },
-        { label: 'Temperature', from: now, to: spread(target.temperatureLow, target.temperatureHigh) },
+        { label: 'Temperature', from: now, to: temperatureRange(target.temperatureLow, target.temperatureHigh) },
         { label: 'Water', from: `${roundToDecimal(body.HydroExt, 1)}%`, to: `${roundToDecimal(target.hydroExt, 1)}%` },
       ]
     },

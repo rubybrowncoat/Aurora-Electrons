@@ -34,6 +34,44 @@ export const countText = (value, decimals = 0, separator = '\'') => {
   return isKnownNumber(value) ? separatedNumber(roundToDecimal(Number(value), decimals), separator) : UNKNOWN_TEXT
 }
 
+// A figure of a measured range as `rangeText` reads it: the number it shows, the magnitude suffix it carries (K, M, B, bn and the like, empty when the number is written whole), the unit that follows it (its spacing included), whether it reads negative, and whether it is a duration of two parts (`3 min 20 s`), whose own text a range keeps rather than splitting the unit off.
+export const rangeFigure = (number, { magnitude = '', unit = '', negative = false, compound = false } = {}) => ({ number: `${number}`, magnitude, unit, negative, compound })
+
+// A figure's text as it stands on its own: the number, its magnitude suffix and its unit.
+export const figureText = (figure, unit = figure.unit) => `${figure.number}${figure.magnitude ? ` ${figure.magnitude}` : ''}${unit}`
+
+// A plain figure written whole and grouped, with a minus sign when it is negative: the default `rangeText` formatter.
+const wholeFigure = (value) => {
+  const rounded = roundToDecimal(value, 0)
+  const negative = rounded < 0
+
+  return rangeFigure(`${negative ? '−' : ''}${separatedNumber(Math.abs(rounded))}`, { negative })
+}
+
+// A range of measured values with the unit once, after the second figure: "5–9 L", "5.3 M to 9.2 M L", "−20 to 15 °C". The joiner is an en dash between plain figures and " to " when the first figure carries a magnitude suffix (K, M, B, bn and the like) or either figure reads negative, so a dash never sits beside a suffix or a minus sign; figures in different units are joined with " to " and keep their units. A duration range writes its unit once when both ends carry the same single unit ("5–9 s", "36–48 h"), and keeps each end's own text joined with " to " when an end carries two parts or the ends carry different units ("3 min 20 s to 4 min 10 s", "5 h to 6 d"). Equal ends as displayed show one figure; an end that is not known shows the caller's unknown wording. `format(value)` returns a `rangeFigure`.
+export const rangeText = (low, high, { format = wholeFigure, unknown = UNKNOWN_TEXT } = {}) => {
+  if (!isKnownNumber(low) || !isKnownNumber(high)) {
+    return unknown
+  }
+
+  const first = format(low)
+  const last = format(high)
+
+  if (figureText(first) === figureText(last)) {
+    return figureText(last)
+  }
+
+  if (first.compound || last.compound) {
+    return `${figureText(first)} to ${figureText(last)}`
+  }
+
+  if (first.unit !== last.unit) {
+    return `${figureText(first)} to ${figureText(last)}`
+  }
+
+  return `${figureText(first, '')}${first.magnitude || first.negative || last.negative ? ' to ' : '–'}${figureText(last)}`
+}
+
 // The character behind the "Thousands Separator" setting's name (`selectedSeparator`, default 'Tick').
 export const thousandsSeparator = (name = 'Tick') => {
   return name === 'Tick' ? '\'' : name === 'Comma' ? ',' : name === 'Dash' ? '-' : name === 'Space' ? ' ' : ''

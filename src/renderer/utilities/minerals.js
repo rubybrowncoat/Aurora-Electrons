@@ -1,9 +1,11 @@
 // Mineral maths shared by the Mineral Outlook page: deposit depletion, the game's mineral ledger and the industrial queue's demand. Validated against saved games; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
 import { crewFraction } from './crew'
+import { forecastColony } from './industry-cycle'
 import { roundToDecimal, separatedNumber } from './math'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { capacityKind } from './production-types'
+import { ZERO, add, floor, fromDouble, multiply, toNumber } from './decimal'
 
 const MINERALS_VERSIONS = ['3.2.x']
 const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
@@ -106,11 +108,11 @@ registerRule({
 
 registerRule({
   id: 'minerals.massDriverRate',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
-  note: 'What a colony\'s mass drivers can send a year: 5,000 t per driver. The constant is the game\'s rule as documented; it was not compared with saved packets. A colony with no driver sends nothing, and one with no destination sends nothing whatever its drivers.',
+  note: 'What a colony\'s mass drivers can send a year: the whole driver count times 5,000 t, after converting each saved amount to decimal and accumulating its weighted capacity. A colony with no whole driver sends nothing, and one with no destination sends nothing whatever its drivers. This is capacity, not a measurement of packets sent.',
 })
 
 export const MINERALS = [
@@ -256,21 +258,36 @@ export const miningDistanceResult = (route, { origins, placed }) => {
 export const MASS_DRIVER_TONS = 5000
 
 // What a colony's `drivers` can send a year, as a result; unavailable when the driver count is not recorded, or when `gaps` of the installations it sums over (an amount or a driver value not recorded) are.
-export const massDriverRateResult = (drivers, gaps = 0) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'minerals.massDriverRate', value: drivers * MASS_DRIVER_TONS, inputs: { present: ['FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] }))
+export const massDriverRateResult = (drivers, gaps = 0, terms = null) => {
+  const count = wholeCapacity(drivers, terms)
+  return known(count) && !(gaps > 0) ? ofRule({ rule: 'minerals.massDriverRate', value: count * MASS_DRIVER_TONS, inputs: { present: ['FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['the number of mass drivers', 'the driver value of a mass driver'] })
+}
+
+// Other mining enters local stock first; civilian output fills the remaining reserve shortfall before the remainder ships.
+export const civilianPacketShare = ({ civilian, extraction, stock, reserve }) => civilian - Math.min(civilian, Math.max(0, reserve - (stock + extraction - civilian)))
 
 export const SECONDS_PER_DAY = 86400
 
 // Accessibility never falls below this; the deposit is empty when it gets there.
 export const ACCESSIBILITY_FLOOR = 0.1
 
-// t/yr at the deposit's current accessibility, as the game works it out: each kind of capacity cut to a whole number; manned mines scale with the colony's efficiency, stability and political status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.
-const whole = (capacity) => Math.floor(capacity + 1e-9)
+// t/yr at the deposit's current accessibility, as the game works it out: each kind summed as decimal installation amounts times their weights, then cut to a whole number; manned mines scale with the colony's efficiency, stability and political status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.
+export const wholeCapacity = (capacity, terms = null) => {
+  if (terms === null || terms === undefined) return known(capacity) ? toNumber(floor(fromDouble(capacity))) : NaN
+  let total = ZERO
+  for (const term of JSON.parse(terms)) {
+    if (term === null) continue
+    if (term.includes(null)) return NaN
+    total = add(total, multiply(fromDouble(Number(term[0])), fromDouble(Number(term[1]))))
+  }
+  return toNumber(floor(total))
+}
 
 export const surfaceRate = (row, owned = true) => {
-  const manned = whole(row.ManualMineCount) * row.Efficiency * row.StabilityModifier * (row.PoliticalModifier ?? 1)
-  const civilian = owned && !row.PurchaseCivilianMinerals ? 0 : whole(row.CivilianMineCount)
+  const manned = wholeCapacity(row.ManualMineCount, row.ManualMineTerms) * row.Efficiency * row.StabilityModifier * (row.PoliticalModifier ?? 1)
+  const civilian = owned && !row.PurchaseCivilianMinerals ? 0 : wholeCapacity(row.CivilianMineCount, row.CivilianMineTerms)
 
-  return (manned + whole(row.AutomatedMineCount) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
+  return (manned + wholeCapacity(row.AutomatedMineCount, row.AutomatedMineTerms) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
 }
 
 // The workbook's orbital formula, plus the crew rule: the modules run at the crew share of utilities/crew.js. Null while the ship's crew or its class crew is not in the save, or the naval admin chain `adminBonus` is unknown (null). Compared with the saved ledger by scripts/check-orbital-mining.js: in the sampled saves it matches exactly at the last completed increment where the deposit's accessibility is not falling, while one later save has an unexplained discrepancy earlier in its window. On a deposit mined below half its original amount the ledger ran up to two 0.01 steps of accessibility above the estimate over those same increments, because the save holds the accessibility after the last mining step; that is an observation, not a bound on future error. A short crew, a damaged module and a ship with no commander or outside any naval admin command have no case in the saves; the modules counted are the class's, damage is not read.
@@ -284,7 +301,7 @@ export const orbitalRate = (row, adminBonus = 1) => {
 export const orbitalChainGap = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? navalAdminChain(navalAdmins, row.SystemID, row.NavalAdminCommandID).unknown : null)
 
 // t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine from orbit; null while the chain is unknown.
-export const orbitalMinerRate = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
+export const orbitalMinerRate = (row, navalAdmins) => (row.LocationUnknown ? null : row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
 
 // Mining the game's mineral ledger leaves out, t/yr by MaterialID: everything mined at a colony that buys its civilian complexes' output and ships it by mass driver (`MassDriverExport`, mining-data.js). The game records nothing for that colony, neither its own mines nor the complexes, and the shipment arrives as a mass-driver transfer, which isn't income. A mineral whose total includes a rate that is not known (a Mining bonus the save's lookup does not confirm, a naval admin chain the save does not settle) is null, never the smaller sum.
 export const unloggedMining = ({ surface, orbital, navalAdmins }) => {
@@ -293,8 +310,8 @@ export const unloggedMining = ({ surface, orbital, navalAdmins }) => {
     totals[row.MaterialID] = totals[row.MaterialID] === null || rate === null || !Number.isFinite(rate) ? null : (totals[row.MaterialID] || 0) + rate
   }
 
-  surface.filter((row) => row.MassDriverExport).forEach((row) => add(row, Number.isFinite(row.GovernorBonus) && Number.isFinite(row.SectorBonus) ? surfaceRate(row) : null))
-  orbital.filter((row) => row.MassDriverExport).forEach((row) => add(row, orbitalMinerRate(row, navalAdmins)))
+  surface.filter((row) => (row.MassDriverExport === 1 || row.MassDriverExport === null)).forEach((row) => add(row, row.MassDriverExport === null ? null : Number.isFinite(row.GovernorBonus) && Number.isFinite(row.SectorBonus) ? surfaceRate(row) : null))
+  orbital.filter((row) => (row.MassDriverExport === 1 || row.MassDriverExport === null)).forEach((row) => add(row, row.MassDriverExport === null ? null : orbitalMinerRate(row, navalAdmins)))
 
   return totals
 }
@@ -488,16 +505,16 @@ export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, s
   return { known: coverageDays > 0, minerals: outlook }
 }
 
-// Minerals the industrial queue will consume over the next year: each project's cost scaled to one year of work at its share of the colony's capacity; queued entries count only while the year has capacity left (as "mineral use.sql" does), and only for the capacity earlier entries leave.
-// `capacityOf(PopulationID, facility)`: BP/yr at 100% of the colony's 'construction', 'ordnance' or 'fighter' capacity, or null when it is not known. Returns `{ demand, unknown, incomplete }`: `demand` is t by mineral name, over the projects whose inputs are known; `unknown` lists by mineral name the colonies (PopulationID) whose queued projects use that mineral but have no known capacity; `incomplete` lists by mineral name the project inputs a queued project lacks: the mineral's own cost (also at a colony with unknown capacity), a production type, or at a colony with known capacity its place in the queue, units left, build points per unit or share, which set how much of the year each project gets. The demand of a mineral with either is not known. A real capacity of 0 means no work gets done and demands nothing, whatever the queue lacks.
-const SCHEDULE_INPUTS = [['Queue', 'place in the queue'], ['Amount', 'units left'], ['ProdPerUnit', 'build points per unit'], ['Percentage', 'share of the colony\'s capacity']]
+// Capacity-driven demand over the next year's complete minimum-construction increments. Reuse the shared cycle engine's floor and whole-share queue admission, without mineral, fuel or conversion-source shortages.
+// capacityOf(PopulationID, kind) gives annual BP; periodOf(PopulationID) gives the explicit minimum construction period in seconds. Missing scheduling inputs or period leave affected mineral demand unknown. Missing per-unit mineral costs affect that mineral only. A known zero capacity needs no other input to establish zero demand.
+const SCHEDULE_INPUTS = [['ProjectID', 'identity'], ['Pause', 'pause state'], ['Queue', 'place in the queue'], ['Amount', 'units left'], ['ProdPerUnit', 'build points per unit'], ['Percentage', 'share of the colony\'s capacity']]
 
 const recorded = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // The capacity a project draws on (`capacityKind` of utilities/production-types.js); null for a production type the save lacks, which is never taken as construction.
 const facilityOf = (productionType) => (!recorded(productionType) ? null : capacityKind(productionType))
 
-export const annualQueueDemand = (projects, capacityOf) => {
+export const annualQueueDemand = (projects, capacityOf, periodOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))
   const unknown = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, []]))
   const incomplete = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, []]))
@@ -550,7 +567,8 @@ export const annualQueueDemand = (projects, capacityOf) => {
     }
 
     // A project missing what sets its share of the year leaves the share of every later one open too, so every mineral the colony's queue may use is unknown.
-    const gaps = SCHEDULE_INPUTS.filter(([field]) => group.some((project) => !recorded(project[field])))
+    const period = typeof periodOf === 'function' ? periodOf(group[0].PopulationID) : null
+    const gaps = [...SCHEDULE_INPUTS.filter(([field]) => group.some((project) => !recorded(project[field]))), ...(recorded(period) && period > 0 ? [] : [[null, 'construction period']])]
 
     if (gaps.length) {
       MINERALS.forEach((mineral) => {
@@ -562,37 +580,29 @@ export const annualQueueDemand = (projects, capacityOf) => {
       return
     }
 
-    // The year's capacity spent so far, in percent of a full year at 100%.
-    let usedPercent = 0
+    const cycleDays = period / SECONDS_PER_DAY
+    const cycles = Math.floor(31536000 / period)
 
-    ;[...new Set(group.map((project) => project.Queue))].sort((a, b) => a - b).forEach((queue) => {
-      if (usedPercent >= 100) {
-        return
-      }
+    if (cycles === 0) {
+      return
+    }
 
-      group.filter((project) => project.Queue === queue).forEach((project) => {
-        const remainingBP = project.Amount * project.ProdPerUnit
+    const forecast = forecastColony({
+      projects: group.map((project) => ({ ID: project.ProjectID, Percentage: project.Percentage, Amount: project.Amount, PartialCompletion: 0, ProdPerUnit: project.ProdPerUnit, Queue: project.Queue, Paused: Boolean(project.Pause), category: facilityOf(project.ProductionType), needs: {} })),
+      capacities: { [facilityOf(group[0].ProductionType)]: capacity },
+      stock: {},
+      cycleDays,
+      // The engine rounds its horizon up to an ending cycle. Aim inside the last complete increment so float division cannot add an extra one.
+      horizonDays: (cycles - 0.5) * cycleDays,
+    })
 
-        if (!capacity || !project.Percentage || !remainingBP) {
-          return
+    group.forEach((project) => {
+      MINERALS.forEach((mineral) => {
+        if (!recorded(project[mineral.name])) {
+          lack(mineral, `a queued project's ${mineral.name} cost`)
+        } else {
+          demand[mineral.name] += forecast.projects[project.ProjectID].built * project[mineral.name]
         }
-
-        // A year at the project's own share, but no more than earlier projects left.
-        const availablePercent = Math.max(0, Math.min(project.Percentage, 100 - usedPercent))
-        const builtBP = Math.min(remainingBP, (capacity * availablePercent) / 100)
-        const oneYearFactor = builtBP / remainingBP
-
-        MINERALS.forEach((mineral) => {
-          if (!recorded(project[mineral.name])) {
-            lack(mineral, `a queued project's ${mineral.name} cost`)
-
-            return
-          }
-
-          demand[mineral.name] += project.Amount * project[mineral.name] * oneYearFactor
-        })
-
-        usedPercent += (100 * builtBP) / capacity
       })
     })
   })

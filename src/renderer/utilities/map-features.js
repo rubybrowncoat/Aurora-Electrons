@@ -4,8 +4,10 @@ import groupBy from 'lodash/groupBy'
 import { systemBodyName } from './aurora'
 import { loadSpecies } from './colonization-data'
 import { HELD_CONTACT } from './contacts'
+import { add, fromDouble, less, ZERO } from './decimal'
 import { BODY_CLASS, BODY_TYPE, costFactors, speciesLimits } from './habitability'
 import { versionAssumptions } from './map-figures'
+import { isKnownNumber, separatedNumber, UNKNOWN_TEXT } from './math'
 import { ofRule, registerRule, unavailable } from './provenance'
 
 const rows = (database, sql) => database.query(sql).then(([items]) => items)
@@ -41,11 +43,11 @@ registerRule({
 
 registerRule({
   id: 'map.dangerFlag',
-  versions: ['2.7.x'],
+  versions: FEATURE_VERSIONS,
   units: 'flag',
-  verification: 'assumed',
+  verification: 'confirmed',
   structure: ['FCT_RaceSysSurvey.DangerRating', 'FCT_ShipClass.ProtectionValue, MaxSpeed', 'FCT_Ship', 'FCT_Fleet.SystemID'],
-  note: 'Whether the protection of the race\'s ships in a system, rounded, falls short of its danger rating. The comparison is a planner rule that is not checked against the game. A system with no ships of the race has a protection of 0; a ship class with no stored protection or speed leaves the protection unknown.',
+  note: 'Whether the protection of the race\'s ships in a system falls short of its danger rating, the protection added as the game\'s decimal and compared without rounding. This is the danger the map shows, not the auto-route avoidance test. A system with no ships of the race has a protection of 0; a ship class with no stored protection or speed leaves the protection unknown.',
 })
 
 // A ruin's state as a result of 'map.ruinState' (value 'used', 'identified' or 'found'), unavailable when its installations left are not stored. A ruin with ground forces to study it is identified once its builders are known; construction brigades recover its installations until none are left.
@@ -54,11 +56,43 @@ export const ruinState = (ruin) => (Number.isFinite(ruin.factories) ? ofRule({ r
 // An active construct's research bonus as a result of 'map.constructBonus', in percent; unavailable when no bonus is stored.
 export const constructBonus = (construct) => (Number.isFinite(construct.bonus) ? ofRule({ rule: 'map.constructBonus', value: Math.round((construct.bonus - 1) * 100), inputs: { present: ['the construct\'s research bonus'] } }) : unavailable({ rule: 'map.constructBonus', missing: ['the construct\'s research bonus'] }))
 
-// Whether the race's ships in a system fall short of its danger, a result of 'map.dangerFlag' (value true or false): `protection` is null when a ship class there has no stored protection or speed, and 0 where the race has no ships there.
+// Whether the race's ships in a system fall short of its danger, a result of 'map.dangerFlag' (value true or false): `protection` is the decimal the ships there add up to, null when a ship class there has no stored protection or speed, and the zero decimal where the race has no ships there. The stored protection values are added as the game's own decimal (protectionOf), so ten ships at 0.1 protect exactly 1 and never a float just under it.
 export const dangerFlag = (danger, protection) => {
-  const missing = [!Number.isFinite(danger) && 'the system\'s danger rating', !Number.isFinite(protection) && 'the protection of the ships there'].filter(Boolean)
+  const missing = [!Number.isFinite(danger) && 'the system\'s danger rating', (protection === null || protection === undefined) && 'the protection of the ships there'].filter(Boolean)
 
-  return missing.length ? unavailable({ rule: 'map.dangerFlag', missing }) : ofRule({ rule: 'map.dangerFlag', value: Math.round(protection) < danger, inputs: { present: ['the danger rating', 'the protection of the ships there'] } })
+  return missing.length ? unavailable({ rule: 'map.dangerFlag', missing }) : ofRule({ rule: 'map.dangerFlag', value: less(protection, fromDouble(danger)), inputs: { present: ['the danger rating', 'the protection of the ships there'] } })
+}
+
+// The protection the ships of one system add up to, as the game adds it: the stored protection of every ship that is above 0 and can move, added as the game's own decimal rather than a floating-point number, so ten ships at 0.1 protect exactly 1. `unknown` counts the ships whose class stores no protection value, or protection above 0 and no speed; when any ship is unknown the protection is null, because the system's protection cannot be told.
+export const protectionOf = (ships) => {
+  let total = ZERO
+  let unknown = 0
+
+  ships.forEach((ship) => {
+    const protection = isKnownNumber(ship.ProtectionValue) ? Number(ship.ProtectionValue) : null
+    const speed = isKnownNumber(ship.MaxSpeed) ? Number(ship.MaxSpeed) : null
+
+    if (protection === null || (protection > 0 && speed === null)) {
+      unknown += 1
+    } else if (protection > 0 && speed > 0) {
+      total = add(total, fromDouble(protection))
+    }
+  })
+
+  return { protection: unknown ? null : total, unknown }
+}
+
+// A protection as the map writes it: the exact decimal the game adds, at every digit it holds, so a protection of 4.6 under a danger of 5 reads as the shortfall it is and never as the whole unit it would round to. The whole part carries the separator; a protection that is not stored reads as a dash.
+export const protectionText = (protection, separator = '\'') => {
+  if (!protection) {
+    return UNKNOWN_TEXT
+  }
+
+  const digits = String(protection.m < 0n ? -protection.m : protection.m)
+  const whole = protection.s === 0 ? digits : digits.length > protection.s ? digits.slice(0, -protection.s) : '0'
+  const fraction = protection.s === 0 ? '' : digits.slice(-protection.s).padStart(protection.s, '0')
+
+  return `${protection.m < 0n ? '-' : ''}${separatedNumber(whole, separator)}${fraction ? `.${fraction}` : ''}`
 }
 
 // Alien races as the race regards them, by FCT_AlienRace.ContactStatus, and the order a system with contacts of several shows them in: the most threatening first. A race not yet identified comes after the hostile.
@@ -66,7 +100,22 @@ const CONTACT_STATUSES = ['hostile', 'neutral', 'friendly', 'allied', 'civilian'
 
 export const CONTACT_ORDER = ['hostile', 'unknown', 'neutral', 'friendly', 'allied', 'civilian']
 
-export const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, ownWrecks: 0, protection: 0, military: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] })
+export const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, ownWrecks: 0, protection: ZERO, military: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] })
+
+// The protection, military ship count and ship count of every system that holds ships of the race, from the stored ships and their classes. Military ships are those of a class not marked commercial, survey ships included; a ship of a civilian shipping line is no ship of the race's own fleets.
+export const loadShipProtection = async (database, { GameID, RaceID }) => {
+  const ships = await rows(database, `select FCT_Fleet.SystemID, FCT_Ship.ShippingLineID, FCT_ShipClass.ProtectionValue, FCT_ShipClass.MaxSpeed, FCT_ShipClass.Commercial
+from FCT_Ship
+inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID
+inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID
+where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.Destroyed = 0`)
+
+  return Object.values(groupBy(ships, 'SystemID')).map((systemShips) => {
+    const { protection, unknown } = protectionOf(systemShips)
+
+    return { SystemID: systemShips[0].SystemID, protection: unknown ? null : protection, military: systemShips.filter((ship) => ship.ShippingLineID === 0 && ship.Commercial === 0).length, ships: systemShips.filter((ship) => ship.ShippingLineID === 0).length }
+  })
+}
 
 export const loadMapFeatures = async (database, { GameID, RaceID }) => {
   const [ruins, constructs, rifts, wrecks, ships, shipyards, waypoints, contacts] = await Promise.all([
@@ -93,14 +142,8 @@ from FCT_Wrecks
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Wrecks.SystemID and FCT_RaceSysSurvey.GameID = FCT_Wrecks.GameID and FCT_RaceSysSurvey.RaceID = ${RaceID}
 where FCT_Wrecks.GameID = ${GameID}
 group by FCT_Wrecks.SystemID`),
-    // The game's protection for a system adds up the protection value of each ship there that has one and can move. Military ships are those of a class not marked commercial, survey ships included. `UnknownClasses` counts the ships whose class has no stored protection value (or no speed, where it has a value).
-    // A ship of a civilian shipping line is no ship of the race's own fleets.
-    rows(database, `select FCT_Fleet.SystemID, sum(case when FCT_ShipClass.ProtectionValue > 0 and FCT_ShipClass.MaxSpeed > 0 then FCT_ShipClass.ProtectionValue else 0 end) as Protection, sum(FCT_ShipClass.ProtectionValue is null or (FCT_ShipClass.ProtectionValue > 0 and FCT_ShipClass.MaxSpeed is null)) as UnknownClasses, sum(FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.Commercial = 0) as Military, sum(FCT_Ship.ShippingLineID = 0) as Ships
-from FCT_Ship
-inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID
-inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID
-where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.Destroyed = 0
-group by FCT_Fleet.SystemID`),
+    // The game's protection for a system adds up the protection value of each ship there that has one and can move; the stored values are added as the game's decimal (loadShipProtection), not by SQLite's floating-point sum.
+    loadShipProtection(database, { GameID, RaceID }),
     rows(database, `select FCT_Population.SystemID, count(*) as Shipyards
 from FCT_Shipyard
 inner join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID
@@ -131,7 +174,7 @@ group by FCT_Contacts.SystemID, FCT_AlienRace.ContactStatus`),
     of(row.SystemID).rifts = row.Rifts
   })
   wrecks.forEach((row) => Object.assign(of(row.SystemID), { wrecks: row.Wrecks, ownWrecks: row.Own || 0 }))
-  ships.forEach((row) => Object.assign(of(row.SystemID), { protection: row.UnknownClasses > 0 ? null : row.Protection || 0, military: row.Military || 0, ships: row.Ships || 0 }))
+  ships.forEach((row) => Object.assign(of(row.SystemID), { protection: row.protection, military: row.military, ships: row.ships }))
   shipyards.forEach((row) => {
     of(row.SystemID).shipyards = row.Shipyards
   })

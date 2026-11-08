@@ -158,6 +158,32 @@ const rowsOfFixture = () => {
   return tables
 }
 
+// A body of each of two radii, alike in everything else and liveable as it is for the race's oxygen breathers, so that the only figure that differs between them is the area the game's capacity rule works from: it holds the limit, and the people share behind a score. A third body holds the race's colony, which is where the save's species comes from.
+const CAPACITY_BODIES = [{ id: 400, radius: 6400 }, { id: 401, radius: 4000 }, { id: 402, radius: 6400 }]
+
+const rowsOfCapacity = () => {
+  const tables = []
+
+  tables.push(['FCT_Game', { GameID: GAME, TerraformingSpeed: 100 }])
+  tables.push(['FCT_Race', { GameID: GAME, RaceID: RACE, ColonizationSkill: 1, TerraformingRate: 0.1 }])
+  tables.push(['FCT_RaceSysSurvey', { SystemID: 1, RaceID: RACE, GameID: GAME, Name: 'Test', ControlRaceID: 0, MilitaryRestrictedSystem: 0 }])
+  tables.push(['FCT_Star', { StarID: 1, SystemID: 1, GameID: GAME, ComponentNumber: 1, Luminosity: 1, OrbitingComponent: 0, OrbitalDistance: 0, Eccentricity: 0 }])
+  GASES.forEach((gas) => tables.push(['DIM_Gases', gas]))
+  tables.push(['FCT_Species', SPECIES[0]])
+  tables.push(['FCT_Population', { PopulationID: 1, GameID: GAME, RaceID: RACE, SystemBodyID: 400, SpeciesID: SPECIES[0].SpeciesID, Population: 100, PopName: 'Capacity home' }])
+  CAPACITY_BODIES.forEach(({ id, radius }, index) => {
+    const { name, ...body } = { ...earth, SystemBodyID: id, PlanetNumber: index + 1, OrbitNumber: 0, Radius: radius, SurfaceTemp: 288, name: `Capacity ${index + 1}` }
+
+    tables.push(['FCT_SystemBody', body])
+    tables.push(['FCT_SystemBodyName', { SystemBodyID: id, RaceID: RACE, Name: name }])
+    tables.push(['FCT_SystemBodySurveys', { SystemBodyID: id, RaceID: RACE }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: id, AtmosGasID: 10, AtmosGasPercentage: 21, GasAtm: 0.21, FrozenOut: 0 }])
+    tables.push(['FCT_AtmosphericGas', { GameID: GAME, SystemBodyID: id, AtmosGasID: 2, AtmosGasPercentage: 79, GasAtm: 0.79, FrozenOut: 0 }])
+  })
+
+  return tables
+}
+
 // Two small saves for the time of a terraforming plan, each with the race's own colony on a body (Home, which gives the race its species) and one body to plan: the reviewer's probe, an ammonia breather's body of 50 % liquid water at 280.5 K under 1 atm of 0.2 ammonia and 0.8 nitrogen, whose plan drains the water; and an oxygen breather's cold body of ice, whose plan drains nothing. The race's terraformers move 1 atm a year each.
 const TIME_GASES = [
   { GasID: 4, Name: 'Ammonia', FreezingPoint: 195, GHGas: 0, AntiGHGas: 0, ...NO_DANGER },
@@ -494,6 +520,8 @@ const FIRST_OR_SECOND_PERSON = /\b(I|me|my|mine|you|your|yours|we|our|ours)\b/i
 
 // Whether a shown figure is the number, to the two decimals the panel writes.
 const closeTo = (text, value) => Math.abs(Number(text) - value) <= 0.005 + 1e-9
+// A hand-worked figure, to the precision the double arithmetic of a check works at.
+const close = (actual, expected, name) => assert.ok(Math.abs(actual - expected) < 1e-9, `${name}: ${actual} != ${expected}`)
 
 const statements = (ctx) => {
   const list = []
@@ -538,6 +566,33 @@ const statements = (ctx) => {
       assert.deepEqual(bodies.filter((body) => body.StarID === 1).map((body) => body.SystemBodyID).sort(), [101, 102, 103, 104, 105])
       assert.deepEqual(bodies.filter((body) => body.CmcStarInReach).map((body) => body.SystemBodyID).sort(), [101, 102, 103, 104, 105])
       assert.equal(bodies.find((body) => body.SystemBodyID === 106).CmcStarInReach, false)
+    } finally {
+      await new Promise((resolve) => db.close(resolve))
+    }
+
+    return true
+  }))
+
+  // The game's geometry for the two planted bodies: four times its pi (3.1416) times the radius squared over its Earth surface (511187128), times the baseline density (12,000) and the species density. The people share of the score is that capacity over capacity plus 1,000 M, and the two bodies are alike in cost, years and distance, so their scores are the ratio of those shares. Math.PI would give 12082.89909124985 on the larger body instead of 12082.927346323946.
+  add('capacity: the game\'s 3.1416 geometry gives the planner\'s body capacity, and the people share behind a score follows it', settle(async () => {
+    const { db, database } = await buildDatabase(ctx.m, rowsOfCapacity())
+
+    try {
+      const { rows } = await pipeline(ctx.m, database)
+      const small = rowById(rows, 401)
+      const large = rowById(rows, 402)
+      const capacityOf = (radius) => (4 * 3.1416 * radius ** 2 * 12000) / 511187128
+      const people = (capacity) => capacity / (capacity + 1000)
+
+      assert.deepEqual(rows.map((row) => row.body.SystemBodyID).sort(), [400, 401, 402])
+      assert.equal(small.best.strategy, 'now', 'a body the species can live on as it is settles now')
+      assert.equal(large.best.strategy, 'now', 'and so does the other')
+      close(small.best.capacity, capacityOf(4000), 'the small body holds the game\'s capacity')
+      close(large.best.capacity, capacityOf(6400), 'the large body holds the game\'s capacity')
+      close(small.best.parts.people, people(capacityOf(4000)), 'the people share of the small body is that capacity\'s share of 1,000 M')
+      close(large.best.parts.people, people(capacityOf(6400)), 'and the large body\'s')
+      close(large.score, 100, 'the larger body is the best target')
+      close(small.score, (100 * people(capacityOf(4000))) / people(capacityOf(6400)), 'the score follows the people share')
     } finally {
       await new Promise((resolve) => db.close(resolve))
     }
@@ -1298,7 +1353,7 @@ const statements = (ctx) => {
       assert.equal(row.best.species.SpeciesID, 3, 'the ammonia breather is the body\'s species')
       assert.equal(row.best.strategy, 'terraform', 'the plan is the best route')
       assert.ok(Math.abs(drain.capacity - 100) < 1e-9, 'the race moves 100 Earth atm a year')
-      assert.ok(Math.abs(row.best.years - 1.2472547819851116 / 100) < 1e-9, 'the years are the capacity bound, 4.55 days')
+      assert.ok(Math.abs(row.best.years - 1.2472576986093435 / 100) < 1e-9, 'the years are the capacity bound, 4.55 days')
       assert.equal(row.best.yearsBasis, 'minimum', 'the ranking labels the years a minimum')
 
       const rendered = renderedDetail(ctx, drain.fixture, row, drain.speciesId, drain.capacity)

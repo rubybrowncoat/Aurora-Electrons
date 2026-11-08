@@ -1,6 +1,7 @@
 // The game's design rules, for the planners: what a component or a class built from the race's tech comes out at, as the game's design windows work it out. Pure functions with the units in their argument names: sizes in hull spaces (HS), power in engine power (EP), fuel in litres, speed in km/s, distance in km, cost in BP. docs/DATABASE.md § Design rules states each rule in prose.
 
 import { combine, envelope, getRule, isAvailable, ofRule, registerRule, STATUS, unavailable } from './provenance'
+import { divide, fitsDouble, floor, fromDouble, fromString, greater, less, multiply, negate, negative } from './decimal'
 import { HIT_RULES, hitScenario } from './missile-hit'
 import { PACKAGE_STATUS, REQUEST_TOLERANCE, packerFor } from './tank-packing'
 
@@ -83,8 +84,76 @@ export const enduranceHours = ({ fuel, enginePower, fuelPerEph, fraction = 1 }) 
   return burn > 0 ? fuel / burn : 0
 }
 
-// A moving ship's thermal signature: the engines' power times their thermal rating (`stealthRating`, the engine design's thermal share) times the share of top speed it moves at, never under a twentieth of its size. A ship that isn't moving shows that floor.
-export const thermalSignature = ({ enginePower, stealthRating, fraction = 1, sizeHS }) => {
+// The exact decimals the top-speed cut needs: the scale from power per size to speed, the ±1 a whole top speed starts at, and the two ends of the signed 32-bit integer the game casts the top speed to. The division and the multiplication at the cut are exact decimals (utilities/decimal.js), as the game's own decimal type works them out, so the boundary is the game's and not the float tolerance of the top-speed rule.
+const SPEED_ONE = fromString('1')
+const SPEED_MINUS_ONE = fromString('-1')
+const SPEED_SCALE = fromString('1000')
+const SPEED_INTEGER_MAX = fromString('2147483647')
+const SPEED_INTEGER_MIN = fromString('-2147483648')
+
+// The whole number a cast cuts a decimal to, towards zero.
+const truncate = (value) => (negative(value) ? negate(floor(negate(value))) : floor(value))
+
+// The class's top speed as the game's exact decimal, or null where the game's own arithmetic overflows its decimal type: a speed that large is far past the integer the cast holds, and the game's catch returns 0 for it as it does for the cast.
+const exactTopSpeed = (mountedPower, sizeHS) => {
+  try {
+    return multiply(divide(fromDouble(mountedPower), fromDouble(sizeHS)), SPEED_SCALE)
+  } catch (error) {
+    if (!(error instanceof RangeError)) {
+      throw error
+    }
+
+    return null
+  }
+}
+
+// Whether the class's top speed leaves no signature: a ratio a hair under a thousandth of the size cuts to 0, where the top-speed rule's float tolerance would round it up to a whole number, and the game's division by that top speed fails; a top speed beyond the signed 32-bit integer the game casts it to overflows the cast. Either reaches the game's catch and returns 0 before the floor, so both leave no signature. A figure beyond the range of the game's decimal type is no figure the game can hold, and the top-speed rule decides it; a size that is no positive number has no top speed.
+const topSpeedLeavesNoSignature = (mountedPower, sizeHS) => {
+  if (!(sizeHS > 0)) {
+    return true
+  }
+
+  if (!fitsDouble(mountedPower) || !fitsDouble(sizeHS)) {
+    return classSpeed({ enginePower: mountedPower, sizeHS }) === 0
+  }
+
+  const speed = exactTopSpeed(mountedPower, sizeHS)
+
+  if (speed === null) {
+    return true
+  }
+
+  if (less(speed, SPEED_ONE) && greater(speed, SPEED_MINUS_ONE)) {
+    return true
+  }
+
+  const whole = truncate(speed)
+
+  return less(whole, SPEED_INTEGER_MIN) || greater(whole, SPEED_INTEGER_MAX)
+}
+
+// A ship's thermal signature: a twentieth of its size with no move orders; with move orders and no engine, nothing; with an engine, the engines' power times their thermal rating (`stealthRating`, the engine design's thermal share) times the share of top speed it moves at, never under that floor. The top speed is the engines' mounted power (`mountedPower`, before their thermal rating) over the size times 1,000, cut to a signed integer, and a top speed of 0, or one past that integer's range, leaves no signature at all rather than the floor. `hasMoveOrders`, `hasEngine` and `mountedPower` are required and have no default, as a ship with move orders and no engine shows nothing rather than the floor.
+export const thermalSignature = ({ enginePower, stealthRating, fraction, hasMoveOrders, hasEngine, mountedPower, sizeHS }) => {
+  if (typeof hasMoveOrders !== 'boolean' || typeof hasEngine !== 'boolean') {
+    throw new TypeError('The thermal signature takes whether the ship has move orders and whether it has an engine')
+  }
+
+  if (!hasMoveOrders) {
+    return sizeHS / 20
+  }
+
+  if (!hasEngine) {
+    return 0
+  }
+
+  if (!Number.isFinite(mountedPower)) {
+    throw new TypeError('The thermal signature takes the engines\' mounted power, which sets the class\'s top speed')
+  }
+
+  if (topSpeedLeavesNoSignature(mountedPower, sizeHS)) {
+    return 0
+  }
+
   return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)
 }
 
@@ -286,14 +355,15 @@ export const damageAllocation = ({ components }) => {
   return ofRule({ rule, value: { chanceToHit, maxDacRoll: total }, inputs: { present } })
 }
 
-// The average MSP a failure costs a class: each component's cost weighted by the share of the damage roll it covers, which is the difference between its chance-to-hit threshold and the one before it (components in threshold order, armour at 0 first) over `maxDacRoll`. `components` as { chanceToHit, cost }. The weights are those slices of the roll, not the components' counts or sizes: a component's slice is its size times its count rounded up. A class with no roll, thresholds past the roll, or only free components gives no figure, never 0.
+// The average MSP a failure costs a class: advance through every damage allocation threshold, but weight only components that can suffer maintenance failures, dividing their weighted costs by their total eligible slice width. `components` as { chanceToHit, cost, noMaintFailure }, with an explicit immunity flag on every row. The weights are threshold differences, not component counts or sizes. A class with no eligible slices or only free eligible parts has an average cost of 0; an unread flag or invalid damage allocation gives no figure.
 export const averageRepairCost = ({ components, maxDacRoll }) => {
   const rule = 'design.averageRepairCost'
   const rows = Array.isArray(components) ? components : []
   const { present, missing } = gather([
     ['components', rows.length > 0, 'components'],
     ['component thresholds', rows.length > 0 && rows.every((row) => nonNegative(row.chanceToHit)), 'a chance-to-hit threshold of zero or more for every component'],
-    ['component costs', rows.length > 0 && rows.every((row) => nonNegative(row.cost)), 'a cost of zero or more for every component'],
+    ['component maintenance immunity', rows.length > 0 && rows.every((row) => KIND_FLAGS.includes(row.noMaintFailure)), 'whether every component is immune to maintenance failures'],
+    ['component costs', rows.length > 0 && rows.every((row) => row.noMaintFailure === true || row.noMaintFailure === 1 || nonNegative(row.cost)), 'a cost of zero or more for every component eligible for maintenance failures'],
     ['damage roll', nonNegative(maxDacRoll), 'the class\'s damage roll'],
   ])
 
@@ -311,17 +381,20 @@ export const averageRepairCost = ({ components, maxDacRoll }) => {
 
   let previous = 0
   let weighted = 0
+  let eligible = 0
 
   for (const row of [...rows].sort((a, b) => a.chanceToHit - b.chanceToHit)) {
-    weighted += Number(row.cost) * ((Number(row.chanceToHit) - previous) / Number(maxDacRoll))
+    if (row.noMaintFailure === false || row.noMaintFailure === 0) {
+      const width = Number(row.chanceToHit) - previous
+
+      eligible += width
+      weighted += Number(row.cost) * width
+    }
+
     previous = Number(row.chanceToHit)
   }
 
-  if (!(weighted > 0)) {
-    return unavailable({ rule, present, missing: ['a component cost above zero: a failure of a class whose parts are free draws no supplies'] })
-  }
-
-  return ofRule({ rule, value: weighted, inputs: { present } })
+  return ofRule({ rule, value: eligible > 0 ? weighted / eligible : 0, inputs: { present } })
 }
 
 // A class's expected maintenance life as the class window works it out, one row a year of an unmaintained clock that is never reset: in year n the failure rate is `baseFailureChance` x n / 100 and the supplies spent that year are `averageRepairCost` times it, so the draw grows by the same step every year; the loop stops in the year the running total passes `maintSupplies`. Returns { life, firstYear, fiveYear, years: [{ year, failureRate, supplyUse, cumulative, remaining, fundedFraction }] } where `life` is the whole years before that year plus the part of it the remainder pays for, to 2 decimals (the game's rounding), `firstYear` the first year's spend and `fiveYear` the game's 5-year figure (15 times it, the sum of years 1 to 5). The last row is the year the supplies run out: `fundedFraction` below 1, `cumulative` the supplies spent. `commercial` is true or false (or 1 or 0 as the save stores it) and has no default; a commercial class has no life. A missing input, no failure (a zero rate or repair cost), or supplies that outlast the 200 years give no figure. This is the class's expected series on a fresh clock: it knows nothing of a ship's actual clock, crew, commanders, location coverage or the supplies it holds now (see `incrementFailureChance`).
@@ -1429,12 +1502,12 @@ registerRule({
 
 registerRule({
   id: 'design.thermalSignature',
-  versions: ['2.7.x'],
+  versions: DESIGN_VERSIONS,
   units: 'thermal signature',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.StealthRating, ComponentValue', 'FCT_ClassComponent.NumComponent', 'FCT_ShipClass.ClassThermal, EnginePower, Size'],
-  note: 'The signature of a ship under way is the engines\' power times their thermal rating times the share of top speed it moves at, never under a twentieth of its size, and a ship with no move orders shows that floor. The saves store the sum at full power (the class thermal signature) and no live signature, so the speed-share rule is not compared with a saved outcome.',
-  assumptions: ['The share of top speed the ship moves at is chosen by the player', 'The engines are all at their nominal count: damage is ignored', 'No ship is under tow, which would raise the mass that sets the speed', 'The ship is one of a fleet with move orders: with none the signature is the floor of a twentieth of the size'],
+  note: 'A ship with no move orders shows a twentieth of its size. A ship with move orders and no engine shows nothing. With an engine it shows the engines\' power times their thermal rating times the share of top speed it moves at, never under that floor, and a top speed of 0, or one past the signed 32-bit integer it is cut to, shows nothing at all rather than the floor: the top speed is the mounted engine power over the size, times 1,000, cut to that integer. The saves store the sum at full power (the class thermal signature) and no live signature, so the speed-share rule is not compared with a saved outcome.',
+  assumptions: ['The share of top speed the ship moves at is chosen by the player', 'The engines are all at their nominal count: damage is ignored', 'No ship is under tow, which would raise the mass that sets the speed', 'With several engine designs the game takes the top speed from the first engine design alone; the planner sums the class\'s engines', 'Move orders, an engine aboard and the mounted power that sets the top speed are planner inputs and not live observations: a share of 0 stands for no move orders and a share above it for hypothetical orders, and a class\'s engines for its having an engine'],
 })
 
 registerRule({
@@ -1591,19 +1664,19 @@ registerRule({
 
 registerRule({
   id: 'design.averageRepairCost',
-  versions: ['2.7.x'],
+  versions: DESIGN_VERSIONS,
   units: 'MSP',
   verification: 'estimated',
-  structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost'],
-  note: 'Each component\'s cost weighted by the difference of its damage allocation threshold and the one before it over damage allocation roll. The thresholds and the roll it weighs by are reproduced by the damage allocation rule, but the save stores no repair cost to compare the figure with.',
+  structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost, NoMaintFailure'],
+  note: 'Every damage allocation threshold advances the roll. Only components eligible for maintenance failures contribute their cost times their threshold slice, divided by the total eligible slice width. No eligible slices or only free eligible components gives an average cost of zero.',
 })
 
 registerRule({
   id: 'design.maintenanceLifeSeries',
-  versions: ['2.7.x'],
+  versions: DESIGN_VERSIONS,
   units: 'years, MSP',
   verification: 'estimated',
-  structure: ['FCT_ShipClass.BaseFailureChance, MaintSupplies, Commercial'],
+  structure: ['design.averageRepairCost', 'FCT_ShipClass.BaseFailureChance, MaintSupplies, Commercial'],
   note: 'The class window\'s yearly supply series on a fresh, never-overhauled clock: the spend in year n is the average repair cost times the failure rate times n, summed until the supplies run out, over at most 200 years. The save stores no maintenance life to compare it with, and the series is an expectation, not a promise of when a ship fails.',
   assumptions: ['The ship\'s maintenance clock starts at zero and is never reset', 'Failures draw the average repair cost, not a particular component\'s'],
 })

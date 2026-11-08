@@ -1095,7 +1095,7 @@ check('drain stages', 'the completed drain and every later gas row carry the rem
   assert.ok(dryRows >= 2, 'the drain and at least one later gas row are priced dry')
 })
 
-// The reviewer's liquid-ammonia probe at 100 Earth atm a year of terraformers (100 installations of rate 1): the drain's work is 1.2472547819851116 Earth atm, so the capacity bound is 4.55 days. The surface evaporates and the terraformer removes only the vapour in the air, so the drain can take longer: the body detail must call the figure a minimum wherever it words a time of the drain, and must not date the stages.
+// The reviewer's liquid-ammonia probe at 100 Earth atm a year of terraformers (100 installations of rate 1): the drain's work is 1.2472576986093435 Earth atm, so the capacity bound is 4.55 days. The surface evaporates and the terraformer removes only the vapour in the air, so the drain can take longer: the body detail must call the figure a minimum wherever it words a time of the drain, and must not date the stages.
 check('drain time', 'the body detail words the time of a drain as a minimum that evaporation can exceed, in the step, the plan\'s total, the installation counts and the colony\'s years, and says no stage is dated; the wording of a plan that drains nothing is as it was', async (w) => {
   const { habitability, terraforming } = await w.modules()
   const species = habitability.speciesLimits({ ...SPECIES_ROW, BreatheID: 4, BreatheName: 'Ammonia' })
@@ -1108,8 +1108,8 @@ check('drain time', 'the body detail words the time of a drain as a minimum that
   const [water] = assessment.plan.steps
 
   assert.equal(assessment.timeBasis, terraforming.TIME_BASIS.MINIMUM, 'the probe\'s plan has a minimum')
-  assert.ok(Math.abs(terraforming.planYears(assessment.work, 100) * 365 - 4.5524799542456575) < 1e-9, 'the capacity bound is the reviewer\'s 4.55 days')
-  assert.equal(vm.stepTime(water), 'at least 4.5 days, and longer where the surface water evaporates slowly', 'the step that drains is a least number of days that evaporation can exceed, floored: the 4.5524-day bound reads 4.5, never 4.6')
+  assert.ok(Math.abs(terraforming.planYears(assessment.work, 100) * 365 - 4.552490599924104) < 1e-9, 'the capacity bound is the reviewer\'s 4.55 days')
+  assert.equal(vm.stepTime(water), 'at least 4.5 days, and longer where the surface water evaporates slowly', 'the step that drains is a least number of days that evaporation can exceed, floored: the 4.55-day bound reads 4.5, never 4.6')
   assert.equal(vm.planSummary, 'at least 4.5 days with the terraformers set by the race, 1.247 atm of Earth-equivalent work', 'the plan\'s total is a minimum')
   assert.equal(vm.minimumTime, true, 'the detail knows the time is a minimum')
   assert.equal(vm.minimumTimeNote, terraforming.MINIMUM_TIME_NOTE, 'and says why, once, under the plan\'s heading')
@@ -1184,7 +1184,7 @@ const verifiedStages = (habitability, found, label) => {
   const { body, assessment, result } = found
   const { plan } = assessment
   const { stages } = result
-  const area = 4 * Math.PI * body.Radius ** 2 / 511187128
+  const area = 4 * 3.1416 * body.Radius ** 2 / 511187128
 
   assert.equal(stages[0].effect, null, `${label}: the start has nothing before it`)
   assert.equal(stages[0].lever, null, `${label}: the start pulls no lever`)
@@ -1337,7 +1337,9 @@ check('leverComponent', 'the body detail words the lever of a stage and of a ste
   const { stages } = found.result
   const percent = (value) => Number((value * 100).toFixed(1))
   const degrees = (kelvin) => Number((kelvin - 273).toFixed(1))
-  const effectText = (stage, lever) => `Raises the dampening by ${lever}: from ${percent(stage.effect.dampening.from)}% to ${percent(stage.effect.dampening.to)}%, periapsis from ${degrees(stage.effect.periapsis.from)} to ${degrees(stage.effect.periapsis.to)} °C, apoapsis from ${degrees(stage.effect.apoapsis.from)} to ${degrees(stage.effect.apoapsis.to)} °C.`
+  // The page words a directional change from one temperature to another as "from A to B", the unit once at the end, whether or not the two read the same.
+  const swing = (from, to) => `${degrees(from)} to ${degrees(to)} °C`
+  const effectText = (stage, lever) => `Raises the dampening by ${lever}: from ${percent(stage.effect.dampening.from)}% to ${percent(stage.effect.dampening.to)}%, periapsis from ${swing(stage.effect.periapsis.from, stage.effect.periapsis.to)}, apoapsis from ${swing(stage.effect.apoapsis.from, stage.effect.apoapsis.to)}.`
   const air = stages.find(({ lever, step }) => lever === 'pressure' && step)
   const water = stages.find(({ lever, step }) => lever === 'water' && step)
   const settle = stages[stages.length - 1]

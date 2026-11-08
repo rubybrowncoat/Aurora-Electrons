@@ -1,4 +1,4 @@
-import { isKnownNumber, UNKNOWN_TEXT } from './math'
+import { isKnownNumber, rangeFigure, rangeText, UNKNOWN_TEXT } from './math'
 import { MINERALS } from './minerals'
 import { ORDNANCE_FACTORY_MODULE } from './ordnance-modules'
 import { STATUS, envelope, getRule, isAvailable, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
@@ -201,11 +201,11 @@ registerRule({
 
 registerRule({
   id: 'designedTech.reload',
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'min or h',
-  verification: 'estimated',
+  verification: 'confirmed',
   structure: ['FCT_ShipDesignComponents.RateOfFire'],
-  note: 'A reload given in seconds shown in minutes (a hangar deck reloads at 60 seconds to the minute) or in hours (a maintenance facility reloads six times as fast). The two divisors are the page\'s reading of the rules and are not compared with a stored figure.',
+  note: 'Reload seconds divided by 60 for hangar minutes or by 360 for maintenance-facility hours, with integer division before display. Reload comparisons use those same whole units.',
 })
 
 registerRule({
@@ -219,7 +219,7 @@ registerRule({
 
 registerRule({
   id: COMPARE_VERDICT,
-  versions: ['2.7.x'],
+  versions: ['3.2.x'],
   units: 'designs ranked',
   verification: 'confirmed',
   structure: ['the figures of the designs picked'],
@@ -432,7 +432,7 @@ const measureColumns = (heading, { showUnit = true } = {}) => [
 const optional = (value, decimals = 2) => column('', value, (item, f) => f.count(item[value], decimals), { none: positive(value) })
 const missileValue = (text, value, extra = {}) => ({ ...optional(value), text, better: HIGH, ...extra })
 
-const speciesRange = (item, f, value, deviation, decimals, offset = 0) => `${f.count(item[value] - item[deviation] - offset, decimals)} – ${f.count(item[value] + item[deviation] - offset, decimals)}`
+const speciesRange = (item, f, value, deviation, decimals, offset = 0) => rangeText(item[value] - item[deviation] - offset, item[value] + item[deviation] - offset, { format: (number) => rangeFigure(f.count(number, decimals), { negative: number < 0 }) })
 
 const nameColumn = { text: 'Name', value: 'Name', numeric: false }
 
@@ -504,6 +504,7 @@ export const categoryColumnsMap = {
     column('Reload', 'RateOfFire', (item, f) => (item.HangarReloadOnly ? `${f.count(item.HangarReload, 1)} min` : timeText(item.RateOfFire, f)), {
       better: LOW,
       rule: 'designedTech.reload',
+      compareValue: (item) => (item.HangarReloadOnly ? item.HangarReload * 60 : item.RateOfFire),
       needs: ['HangarReloadOnly'],
       note: (item, f) => (item.HangarReloadOnly ? 'Hangar only' : item.RateOfFire >= 60 ? `${f.count(item.RateOfFire)} s` : ''),
       hint: 'A launcher marked hangar only reloads in a hangar deck.',
@@ -643,8 +644,8 @@ export const augmentComponent = (component) => {
   }
 
   if (categoryId === 51 || categoryId === 3) {
-    derive(item, 'HangarReload', () => item.RateOfFire / 60)
-    derive(item, 'MFReload', () => item.RateOfFire / 360)
+    derive(item, 'HangarReload', () => Math.trunc(item.RateOfFire / 60))
+    derive(item, 'MFReload', () => Math.trunc(item.RateOfFire / 360))
   }
 
   return item
@@ -933,7 +934,7 @@ export const compareMarks = (column, rows, cells, differs) => {
 
   const unknownAt = cells.map((cell) => cell.unknown)
   const values = rows.map((row, index) => {
-    const raw = row[column.value]
+    const raw = column.compareValue ? column.compareValue(row) : row[column.value]
     const value = unknownAt[index] || raw == null ? NaN : Number(raw)
 
     return Number.isFinite(value) && !(column.skipZero && value === 0) ? value : null

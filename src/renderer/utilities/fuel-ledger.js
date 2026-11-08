@@ -4,6 +4,7 @@
 
 import { LOW_RATE_RECIPIENT_HS, REASONS as DONOR_REASONS, fuelDonor, isLowRate, loadFuelDonors } from './fuel-donors'
 import { columnsOf } from './mine-bootstrap-data'
+import { capacitySum } from './mining-data'
 import { UNVERIFIED_SAVE, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const LEDGER_VERSIONS = ['3.2.x']
@@ -218,7 +219,7 @@ export const colonyService = (site, recipients, { rate = null, reserve = null, s
     limiting: largest && largest[1] > 0 ? recipients.find((recipient) => recipient.id === largest[0]) : null,
     exhausted,
     rate,
-    conditional: site && site.Refineries > 0 && site.FuelProdStatus ? [`Its ${site.Refineries === 1 ? 'refinery makes' : 'refineries make'} fuel, which is not counted`] : [],
+    conditional: site && site.Refineries === null && site.FuelProdStatus !== 0 ? ['Unknown refinery production, which is not counted'] : site && site.Refineries > 0 && site.FuelProdStatus ? [`Its ${site.Refineries === 1 ? 'refinery makes' : 'refineries make'} fuel, which is not counted`] : [],
     drawn: new Map(serves && key && isNumber(now) ? [[key, received]] : []),
     after: new Map(serves && key && isNumber(now) ? [[key, left]] : []),
     keys,
@@ -761,7 +762,7 @@ export const loadFuelSites = async (database, { GameID, RaceID }) => {
   const fleetColumn = (name) => (has(fleetColumns, name) ? `FCT_Fleet.${name}` : 'null')
   const race = (name) => (has(raceColumns, name) ? `FCT_Race.${name}` : 'null')
   const points = 'select coalesce(sum(DIM_PlanetaryInstallation.MassRefuelling * FCT_PopulationInstallations.Amount), 0) from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.GameID = FCT_Population.GameID'
-  const refineries = 'select coalesce(sum(case when DIM_PlanetaryInstallation.RefineryProductionValue > 0 then FCT_PopulationInstallations.Amount else 0 end), 0) from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.GameID = FCT_Population.GameID'
+  const refineries = `select ${capacitySum('1', 'DIM_PlanetaryInstallation.RefineryProductionValue > 0')} from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.GameID = FCT_Population.GameID`
   const [[games], [races], [colonies], donors] = await Promise.all([
     database.query(`select GameTime from FCT_Game where GameID = ${Number(GameID)}`),
     database.query(`select ${race('MaxRefuellingRate')} as MaxRefuellingRate, ${race('UnderwayReplenishmentRate')} as UnderwayReplenishmentRate from FCT_Race where GameID = ${Number(GameID)} and RaceID = ${Number(RaceID)}`),
