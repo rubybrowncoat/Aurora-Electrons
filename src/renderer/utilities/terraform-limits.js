@@ -20,7 +20,7 @@ export const STAGE_ASSUMPTIONS = Object.freeze([
   'a water drain completes inside its gas operation; later operations inherit the remaining water, while other condensation or evaporation settles at the end',
   'a drain is shown complete, not dated: it takes at least the terraformers\' time for its work, and the evaporation of the surface water, which is not modelled, can make it longer',
   'the shares of the gases are recomputed from their pressures after each operation',
-  'the climate counts every gas as the plan does, frozen out or not',
+  'only non-frozen gases supply active pressure, greenhouse warming and anti-greenhouse cooling; frozen stored breathing gas still counts for breathing',
   'each stage recomputes its own dampening, and the plan reads its target\'s swing, from that body\'s pressure and water extent, using the parent orbit and year for a moon',
   'a dampening lever raises the pressure or the surface water in whole rungs of a bounded ladder and is taken only where the aims of the greenhouse and anti-greenhouse gases leave an extreme outside the species\' range and the lever lowers the cost the plan leaves; the surface water follows the added vapour when it condenses',
 ])

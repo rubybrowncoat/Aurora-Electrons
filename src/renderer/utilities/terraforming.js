@@ -11,9 +11,13 @@ export const CONDENSATION_RATE = 0.1
 export const EVAPORATION_RATE = 4
 export const HYDRO_PER_ATM = 40
 const HUMIDITY = 0.01
+// Absolute allowance for numerical residue in the final water balance, in atm; independent of the search tolerance.
+const WATER_STATIONARITY_ALLOWANCE = 1e-8
 
 const TOLERANCE = 1e-4
 const TARGET_TEMPERATURE_STEP = 0.25
+// If no whole-orbit target fits, sample the full capped cooling-to-warming multiplier span in this many equal rungs. Means outside the species' range can reduce the worst seasonal cost.
+const PARTIAL_TEMPERATURE_RUNGS = 32
 // The fraction a share of water vapour stays under its limit by, so that the rounding of the shares never tips it over.
 const WATER_SHARE_MARGIN = 1e-6
 const GAS_AESTUSIUM = 20
@@ -164,6 +168,38 @@ export const albedoForHydrosphere = (baseAlbedo, was, now, extent) => {
   return Number.isFinite(adjusted) && adjusted > 0 ? adjusted : baseAlbedo
 }
 
+// One stationary gas-phase refresh for operations and settled endpoints. An all-frozen atmosphere has a decaying residual pressure, not a stationary zero-pressure state, so it is not priced.
+const refreshAtmosphere = (previous, atmosphere, extent, albedo, temperature = previous.SurfaceTemp) => {
+  const rows = withAtmosphereShares(atmosphere.map((gas) => ({ ...gas })))
+
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    let pressure = 0
+    let greenhouse = 0
+    let anti = 0
+
+    rows.forEach((gas) => {
+      gas.FrozenOut = temperature < gas.FreezingPoint
+      pressure += gas.FrozenOut ? 0 : gas.GasAtm
+      greenhouse += !gas.FrozenOut && gas.GHGas ? gas.GasAtm : 0
+      anti += !gas.FrozenOut && gas.AntiGHGas ? gas.GasAtm : 0
+    })
+
+    if (rows.length && pressure === 0) {
+      return null
+    }
+
+    const surface = surfaceTemperature({ ...previous, AtmosPress: pressure, HydroExt: extent }, Math.min(3, 1 + pressure / 10 + greenhouse), Math.min(3, 1 + previous.DustLevel / 20000 + anti), albedo)
+
+    if (rows.every((gas) => gas.FrozenOut === (surface < gas.FreezingPoint))) {
+      return { ...previous, SurfaceTemp: surface, Albedo: albedo, AtmosPress: pressure, HydroExt: extent, HydroID: hydrosphereState(surface, pressure), Atmosphere: rows }
+    }
+
+    temperature = surface
+  }
+
+  return null
+}
+
 // One completed gas operation, shared by the execution-order search and the stage table. Recompute the climate on the state the preceding operation left; a drain removes surface water inside its own operation, so all later operations use its dry dampening and phase/albedo history.
 export const bodyAfterTerraformStep = (body, step, gasInfo) => {
   const atmosphere = new Map(body.Atmosphere.map((gas) => [gas.AtmosGasID, gas]))
@@ -176,39 +212,31 @@ export const bodyAfterTerraformStep = (body, step, gasInfo) => {
     atmosphere.delete(step.gasId)
   }
 
-  const rows = withAtmosphereShares([...atmosphere.values()])
-  const pressure = rows.reduce((sum, gas) => sum + gas.GasAtm, 0)
-  const greenhouse = Math.min(3, 1 + pressure / 10 + rows.reduce((sum, gas) => sum + (gas.GHGas ? gas.GasAtm : 0), 0))
-  const anti = Math.min(3, 1 + body.DustLevel / 20000 + rows.reduce((sum, gas) => sum + (!gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0), 0))
   const climate = (previous, extent) => {
-    const temperatureAt = (albedo) => surfaceTemperature({ ...previous, AtmosPress: pressure, HydroExt: extent }, greenhouse, anti, albedo)
-    let albedo = previous.Albedo
-    let temperature = temperatureAt(albedo)
-    let hydrosphere = hydrosphereState(temperature, pressure)
+    const initial = refreshAtmosphere(previous, [...atmosphere.values()], extent, previous.Albedo)
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const adjusted = albedoForHydrosphere(previous.Albedo, previous.HydroID, hydrosphere, extent)
-
-      if (Math.abs(adjusted - albedo) < 1e-3) {
-        break
-      }
-
-      albedo = adjusted
-      temperature = temperatureAt(albedo)
-      hydrosphere = hydrosphereState(temperature, pressure)
+    if (!initial) {
+      return null
     }
 
-    return { ...previous, SurfaceTemp: temperature, Albedo: albedo, AtmosPress: pressure, HydroExt: extent, HydroID: hydrosphere, Atmosphere: rows }
+    const albedo = albedoForHydrosphere(previous.Albedo, previous.HydroID, initial.HydroID, extent)
+    const refreshed = albedo === previous.Albedo ? initial : refreshAtmosphere(initial, initial.Atmosphere, extent, albedo)
+
+    return refreshed && refreshed.HydroID === initial.HydroID ? refreshed : null
   }
   const wet = climate(body, body.HydroExt)
 
-  return step.drained > 0 ? climate(wet, Math.max(0, body.HydroExt - step.drained)) : wet
+  return wet && step.drained > 0 ? climate(wet, Math.max(0, body.HydroExt - step.drained)) : wet
 }
 
 // The water-removal order must be able to finish: at a common priced point the surface must evaporate both before removal and at its dry endpoint. This also covers seasonal thaws without pretending that an all-orbit ice sheet evaporates.
 const drainCanComplete = (body, water, gasInfo) => {
   const wet = bodyAfterTerraformStep(body, { ...water, drained: 0 }, gasInfo)
   const dry = bodyAfterTerraformStep(body, water, gasInfo)
+  if (!wet || !dry) {
+    return false
+  }
+
   const before = temperaturePoints(wet)
   const after = temperaturePoints(dry)
   const evaporates = (state, temperature) => [HYDROSPHERE.LIQUID, HYDROSPHERE.VAPOUR].includes(hydrosphereTypeAt(state, temperature))
@@ -235,6 +263,10 @@ const sequenceDrain = (body, steps, gasInfo) => {
 
     if (index < gases.length) {
       state = bodyAfterTerraformStep(state, gases[index], gasInfo)
+
+      if (!state) {
+        return null
+      }
     }
   }
 
@@ -493,7 +525,7 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEV
   const raisedPressure = lever.pressure > 0 && solution.total <= lever.pressure + TOLERANCE
 
   // Water that is to gain extent condenses from vapour in the air: where that vapour does not fit, the plan cannot raise the surface and is no plan.
-  if (raisedWater && !solution.supplied) {
+  if (!solution.supplied) {
     return null
   }
 
@@ -510,6 +542,13 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEV
   const steps = sequenceDrain(body, operations, gasInfo)
 
   if (!steps) {
+    return null
+  }
+
+  // Every displayed operation must also have a consistent climate; invalid stages cannot establish that a drain thaws.
+  const operated = steps.reduce((state, candidate) => state && bodyAfterTerraformStep(state, candidate, gasInfo), body)
+
+  if (!operated) {
     return null
   }
 
@@ -533,7 +572,7 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEV
       hydroExt: solution.extent,
       albedo: solution.albedo,
     },
-    from: { pressure: summary.total, breathable: summary.breathable, albedo: body.OriginalAlbedo ?? body.Albedo },
+    from: { pressure: body.AtmosPress, breathable: summary.breathable, albedo: body.OriginalAlbedo ?? body.Albedo },
     gases: { greenhouse: greenhouseGas, anti: antiGas, neutral: neutralGas, greenhouseSide: summary.greenhouseSide, antiSide: summary.antiSide, neutralSide: summary.neutralSide, breathable: summary.breathableGas, waterVapour: summary.waterVapourGas },
     partial: false,
     // The levers that raise the dampening this plan pulls, null when it pulls none.
@@ -543,7 +582,7 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEV
   }
 
   if (drained > 0) {
-    const end = steps.reduce((state, candidate) => bodyAfterTerraformStep(state, candidate, gasInfo), body)
+    const end = operated
 
     plan.target.pressure = end.AtmosPress
     plan.target.temperature = end.SurfaceTemp
@@ -552,8 +591,18 @@ const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEV
     plan.target.albedo = end.Albedo
   }
 
+  // Refresh the settled gas phases once for every consumer of this endpoint; a phase cycle has no stationary atmosphere to price.
+  const endpoint = terraformedBody(body, species, plan, gasInfo)
+
+  if (!endpoint) {
+    return null
+  }
+
+  plan.target.pressure = endpoint.AtmosPress
+  plan.target.temperature = endpoint.SurfaceTemp
+  plan.target.hydrosphere = endpoint.HydroID
   // The same three temperatures the ending stage prices, including phase changes. No temperature tolerance can turn a nonzero priced temperature cost into a complete plan.
-  const ends = temperaturePoints(terraformedBody(body, species, plan, gasInfo))
+  const ends = temperaturePoints(endpoint)
   const low = Math.min(ends.current, ends.periapsis, ends.apoapsis)
   const high = Math.max(ends.current, ends.periapsis, ends.apoapsis)
 
@@ -575,12 +624,13 @@ const leavesDrainableWater = (body, species, plan, gasInfo) => {
   return Object.values(costPoints(end, species, true)).some(({ factors }) => factors.hydrosphere > 0)
 }
 
-// One trial of the target search: the plan for a target mean and, where it leaves a breather other than oxygen paying for water a drain can take off, the plan that drains it, unless that one leaves the species' range and the first does not. A plan that raises the surface water (`lever.hydroExt`) drains nothing.
+// One trial of the target search: retain a complete drain in preference to a wet target, and a complete wet target in preference to a partial drain. When both alternatives are partial, price both settled endpoints by whole-orbit cost, with less work breaking ties. A plan that raises the surface water (`lever.hydroExt`) drains nothing.
 const planAtTemperature = (body, species, gasInfo, targetMean, hold = false, lever = NO_LEVER) => {
   const plan = planFor(body, species, gasInfo, targetMean, hold, false, lever)
 
   if (!plan || !leavesDrainableWater(body, species, plan, gasInfo)) {
-    return plan
+    // A refused wet endpoint is not a prerequisite for a stationary dry one. Keep the existing drain alternative and its operation-order feasibility checks.
+    return !plan && species.BreatheID !== GAS.OXYGEN && body.HydroExt > 0 && lever.hydroExt === 0 ? planFor(body, species, gasInfo, targetMean, hold, true, lever) : plan
   }
 
   // A plan that raises the surface water holds the water the lever sets: it drains none of it.
@@ -590,18 +640,28 @@ const planAtTemperature = (body, species, gasInfo, targetMean, hold = false, lev
 
   const draining = planFor(body, species, gasInfo, targetMean, hold, true, lever)
 
-  return draining && (!draining.partial || plan.partial) ? draining : plan
+  if (!draining || (!plan.partial && draining.partial)) {
+    return plan
+  }
+
+  if (!draining.partial) {
+    return draining
+  }
+
+  const wetCost = leftCost(body, species, plan, gasInfo)
+  const dryCost = leftCost(body, species, draining, gasInfo)
+
+  return dryCost < wetCost || (dryCost === wetCost && draining.work < plan.work) ? draining : plan
 }
 
 // The plan for one body and species with `reached` whether the atmosphere solver attained the mean of some aim, or null as `plan` only when no candidate solves an atmosphere. Try the clamped ideal, then the 0.25 K lattice from the minimum plus the exact maximum, nearest to the ideal first (lower on ties), without duplicates or response-based pruning. At most ceil((maximum - minimum) / 0.25) + 2 trials, with the existing bounded inner solver.
-// Every sampled feasible witness and every feasible aim interval strictly wider than 0.25 K inside the species' range is found. Narrower islands can be missed; this is neither a continuum nor an alternative-atmosphere guarantee. Each trial prices its own three temperatures without slack. The first full plan that clears the non-oxygen water cost wins; otherwise the first full wet plan, then the solved ideal or first solved partial plan, is retained. Drainage searches insertion points among that trial's gas operations, not extra temporary atmospheres outside the sampled aims.
+// Every sampled feasible witness and every feasible aim interval strictly wider than 0.25 K inside the species' range is found. Narrower islands can be missed; this is neither a continuum nor an alternative-atmosphere guarantee. The first full plan that clears the non-oxygen water cost wins. Otherwise the fallback is the lowest final whole-orbit colony cost, with less work breaking ties, including 33 extra aims across the capped cooling-to-warming span. Drainage searches insertion points among that trial's gas operations, not extra temporary atmospheres outside the sampled aims.
 const searchAims = (body, species, gasInfo, lever) => {
   const minimum = species.MinimumTemperature
   const maximum = species.MaximumTemperature
   const ideal = clamp(species.IdealTemperature, minimum, maximum)
   const initial = planAtTemperature(body, species, gasInfo, ideal, false, lever)
   let fallback = initial
-  let full = initial && !initial.partial ? initial : null
   // A mean is attained where the solver reaches it: with the greenhouse or anti-greenhouse gas at its limit it falls short, and no more dampening of the swing around it can bring that body into the range.
   const attains = (plan) => !!plan && plan.attained
   let reached = attains(initial)
@@ -609,6 +669,20 @@ const searchAims = (body, species, gasInfo, lever) => {
 
   if (initial && !initial.partial && clearsWater(initial)) {
     return { plan: initial, reached }
+  }
+
+  let fallbackCost = initial ? leftCost(body, species, initial, gasInfo) : Infinity
+  const consider = (trial) => {
+    if (!trial) {
+      return
+    }
+
+    const cost = leftCost(body, species, trial, gasInfo)
+
+    if (!fallback || cost < fallbackCost || (cost === fallbackCost && trial.work < fallback.work)) {
+      fallback = trial
+      fallbackCost = cost
+    }
   }
 
   // Integer indices generate L + k*h for k*h < W, followed by exact U. The two pointers merge the lower and upper candidates by distance without allocating or sorting a candidate list.
@@ -632,11 +706,21 @@ const searchAims = (body, species, gasInfo, lever) => {
     }
 
     reached = reached || attains(trial)
-    fallback = fallback || trial
-    full = full || (trial && !trial.partial ? trial : null)
+    consider(trial)
   }
 
-  return { plan: full || fallback, reached }
+  // A hot periapsis can need a mean below the species' minimum, even with a cold present position. Both gas multipliers cap at 3; sample that physical span rather than forcing the mean into the comfort range.
+  const reference = body.BaseTemp * body.Albedo
+
+  for (let index = 0; index <= PARTIAL_TEMPERATURE_RUNGS; index += 1) {
+    const aim = reference * (1 / 3 + (3 - 1 / 3) * index / PARTIAL_TEMPERATURE_RUNGS)
+
+    if (aim < minimum || aim > maximum) {
+      consider(planAtTemperature(body, species, gasInfo, aim, false, lever))
+    }
+  }
+
+  return { plan: fallback, reached }
 }
 
 // The rungs of each lever ladder: the surface water from what the body holds to the whole surface, the pressure from what it holds to what the species bears (the dampening's pressure term stops at 5 atm), and both together; each ladder in `LEVER_RUNGS` equal steps, weakest first. Empty for a body whose orbit is circular (no seasons to damp) and for a lever that has no room left.
@@ -745,12 +829,45 @@ export const planGasGaps = (species, plan, gasInfo) => {
   return [...new Set(ids)].map((id) => `the properties of gas ${id}`)
 }
 
-// The atmosphere a plan ends with, as a body would hold it, for pricing the colony after terraforming.
+// At the refreshed held-position climate neither water process may move more than the numerical allowance. Hot vapour is one-sided: condensation is disabled, so an excess may remain.
+const waterIsStationary = (body) => {
+  const extent = body.HydroExt
+  const phase = body.HydroID
+  const vapour = body.Atmosphere.filter((gas) => gas.AtmosGasID === GAS.WATER_VAPOUR).reduce((sum, gas) => sum + gas.GasAtm, 0)
+  const liquidTarget = body.AtmosPress * (extent / 100) * HUMIDITY
+
+  if (phase === HYDROSPHERE.NONE && extent > 0) {
+    return false
+  }
+
+  if (body.SurfaceTemp <= 369 && vapour - (phase === HYDROSPHERE.LIQUID ? liquidTarget : 0) > WATER_STATIONARITY_ALLOWANCE) {
+    return false
+  }
+
+  return !(extent > 0 && [HYDROSPHERE.LIQUID, HYDROSPHERE.VAPOUR].includes(phase) && (phase === HYDROSPHERE.LIQUID ? liquidTarget : extent / HYDRO_PER_ATM) - vapour > WATER_STATIONARITY_ALLOWANCE)
+}
+
+// The settled atmosphere a plan ends with. Water moves between the supplied vapour and surface without changing their combined inventory. Trials whose refreshed climate contradicts the proposed water transfer or ice albedo are discarded, not ranked.
 export const terraformedBody = (body, species, plan, gasInfo) => {
   const { target } = plan
+  const drained = (plan.steps || []).reduce((sum, step) => sum + (step.drained || 0), 0)
+  const transferred = (target.hydroExt - body.HydroExt + drained) / HYDRO_PER_ATM
+  const waterStep = plan.steps?.find((step) => step.gasId === GAS.WATER_VAPOUR)
+  const suppliedWater = plan.steps ? waterStep?.set ?? body.Atmosphere.filter((gas) => gas.AtmosGasID === GAS.WATER_VAPOUR).reduce((sum, gas) => sum + gas.GasAtm, 0) : target.water
+
+  // A smaller surface without a completed drain needs a water-balance solution, not an arbitrary extent target. This bounded search does not promise that evaporation.
+  if (transferred < 0) {
+    return null
+  }
+
+  if (suppliedWater - transferred < -1e-10) {
+    return null
+  }
+
   const atmosphere = []
 
-  planAdditions(species, plan).forEach(([id, amount, existing]) => {
+  planAdditions(species, plan).forEach(([id, supplied, existing]) => {
+    const amount = id === GAS.WATER_VAPOUR ? Math.max(0, suppliedWater - transferred) : supplied
     if (!addedGas(id, amount)) {
       return
     }
@@ -760,18 +877,20 @@ export const terraformedBody = (body, species, plan, gasInfo) => {
     atmosphere.push({ AtmosGasID: id, AtmosGasName: info.AtmosGasName || info.Name || 'Unknown', GasAtm: amount, FreezingPoint: info.FreezingPoint || 0, GHGas: info.GHGas || 0, AntiGHGas: info.AntiGHGas || 0, ...dangerColumnsOf(info), FrozenOut: false })
   })
 
-  const rows = withAtmosphereShares(atmosphere)
-  let greenhouse = 0
-  let anti = 0
+  const endpoint = refreshAtmosphere(body, atmosphere, target.hydroExt, target.albedo, target.temperature)
 
-  rows.forEach((gas) => {
-    greenhouse += gas.GHGas ? gas.GasAtm : 0
-    anti += !gas.GHGas && gas.AntiGHGas ? gas.GasAtm : 0
-  })
+  if (!endpoint || (transferred > 0 && endpoint.SurfaceTemp > 369)) {
+    return null
+  }
 
-  const surface = surfaceTemperature({ ...body, AtmosPress: target.pressure, HydroExt: target.hydroExt }, Math.min(3, 1 + target.pressure / 10 + greenhouse), Math.min(3, 1 + body.DustLevel / 20000 + anti), target.albedo)
+  // A phase change after solving would require another albedo/climate solution. Keep this bounded model conservative instead of retaining the old phase's albedo.
+  const expectedAlbedo = albedoForHydrosphere(body.Albedo, body.HydroID, endpoint.HydroID, body.HydroExt)
 
-  return { ...body, SurfaceTemp: surface, Albedo: target.albedo, AtmosPress: target.pressure, HydroExt: target.hydroExt, HydroID: target.hydrosphere, Atmosphere: rows }
+  if (!(Math.abs(endpoint.Albedo - expectedAlbedo) < 1e-10)) {
+    return null
+  }
+
+  return waterIsStationary(endpoint) ? endpoint : null
 }
 
 // Whether the body suits the species as it is, its surface water apart: gravity, the temperature at each point the colony cost prices, the breathing gas, the pressure and no toxic gas, which for each gas means the breather's own test (a rating, a share over its limit, not frozen out), water vapour included. The temperatures are `temperaturePoints`, the same phase-aware prediction the stage costs read, so an ice-albedo or gas-phase change at an extreme counts against liveability.
@@ -793,8 +912,6 @@ const planHolding = (body, species, gasInfo) => {
 
   return plan && !plan.partial && !leavesDrainableWater(body, species, plan, gasInfo) ? plan : null
 }
-
-const equalCosts = (a, b) => Math.abs(a.current - b.current) < 0.01 && Math.abs(a.periapsis - b.periapsis) < 0.01 && Math.abs(a.apoapsis - b.apoapsis) < 0.01
 
 // Everything to know about terraforming one body for one species, whatever the colony's capacity: the plan, its work, what its years are (`timeBasis`, see `TIME_BASIS`: a plan that drains the surface water has only a minimum), the cost after it and the outcome. `gasInfo(id)` is the DIM_Gases row of a gas. When the plan introduces a gas the table holds no figures of, the result has `missing` (the rows, by name) and no outcome of the plan: the plan cannot be priced, so it is not known to be worse or better.
 export const assessTerraforming = (body, species, skill, gasInfo) => {
@@ -819,7 +936,7 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
   const plan = (suited && planHolding(body, species, gasInfo)) || planTerraforming(body, species, gasInfo)
 
   if (!plan) {
-    return { ...base, reason: 'No atmosphere was found in the bounded search' }
+    return { ...base, reason: 'No change of atmosphere in the bounded search lowers the colony cost', outcome: outcomeFromCosts(cost, lowGravity) }
   }
 
   const missing = planGasGaps(species, plan, gasInfo)
@@ -831,25 +948,13 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
 
   const target = terraformedBody(body, species, plan, gasInfo)
   const planned = colonyCost(target, species, skill, true)
-  const before = cost.raws
-  const after = planned.raws
+  const improvesCost = planned.raw < cost.raw
+  const meetsOtherGoal = body.Atmosphere.some((gas) => isDangerousGas(gas, species, body.SurfaceTemp, false) && plan.steps.some((step) => step.gasId === gas.AtmosGasID && step.set < gas.GasAtm) && !target.Atmosphere.some((after) => after.AtmosGasID === gas.AtmosGasID && isDangerousGas(after, species, target.SurfaceTemp, true)))
   const reason = leavesDrainableWater(body, species, plan, gasInfo) ? 'Surface water remains: the bounded search found no drain that completes after a thaw and leaves the whole orbit within the species temperature range' : null
-  const worse = after.current > before.current && after.periapsis > before.periapsis && after.apoapsis > before.apoapsis
 
-  // A plan that makes things worse is no plan: the body stays as it is.
-  if (worse) {
-    return { ...base, reason: reason || 'The found plan would make it worse', outcome: outcomeFromCosts(cost, lowGravity) }
-  }
-
-  // A plan that doesn't improve the cost is only worth its toxic-gas removal.
-  if (equalCosts(after, before)) {
-    const toxic = plan.steps.filter((candidate) => candidate.key === 'toxic')
-
-    if (!toxic.length) {
-      return { ...base, outcome: outcomeFromCosts(cost, lowGravity), reason: reason || 'The found plan offers no cost improvement' }
-    }
-
-    return { ...base, reason, plan: { ...plan, steps: toxic, work: toxic.reduce((total, candidate) => total + candidate.work, 0) }, after: planned, outcome: outcomeFromCosts(planned, lowGravity) }
+  // Compare the same worst-of-orbit cost the header, ending stage and ranking use. Equal-cost work is useful only when it also removes a dangerous gas; retain the complete plan so its operations and priced end state agree.
+  if (planned.raw > cost.raw || (!improvesCost && !meetsOtherGoal)) {
+    return { ...base, reason: 'No change of atmosphere in the bounded search lowers the colony cost', outcome: outcomeFromCosts(cost, lowGravity) }
   }
 
   return { ...base, reason, plan, work: plan.work, timeBasis: planTimeBasis(plan), after: planned, outcome: outcomeFromCosts(planned, lowGravity) }

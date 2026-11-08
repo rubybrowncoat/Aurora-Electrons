@@ -378,19 +378,41 @@ const planFor = (m, BreatheID, extra = {}) => {
 }
 const vapourShare = (body) => body.Atmosphere.filter((gas) => gas.AtmosGasID === 5).reduce((total, gas) => total + gas.AtmosGasPercentage, 0)
 
-check('planner', 'a plan for a breather other than oxygen keeps the water vapour under the breather\'s limit and leaves the water as saved where a drained surface would leave the species\' range, and the class and the stages carry the gravity class', (m) => {
+check('planner', 'a plan for a breather other than oxygen selects a cheaper whole-orbit drain where one fits, the water vapour follows the breathing pair\'s limit, and the class and stages carry the gravity class', (m) => {
   const oxygen = planFor(m, 10)
   const methane = planFor(m, 3)
   const sulphur = planFor(m, 15)
 
   assert.ok(oxygen.target && methane.target && sulphur.target, 'each breather has a plan')
-  assert.equal(oxygen.target.HydroExt, 75, 'an oxygen breather\'s plan aims the water at 75 % over the 50-75 % that holds the most people')
-  // The orbit of this body is eccentric: the ocean smooths its swing, a drained surface would leave the species' range, and the plan keeps the water as saved (and the cost of it, which the assessment reports). The 'drain' check has the same body on a circular orbit.
-  assert.equal(methane.target.HydroExt, 100, 'a methane breather\'s plan leaves the extent as saved where a dry surface would swing out of range')
-  assert.equal(sulphur.target.HydroExt, 100, 'a sulphur dioxide breather\'s plan leaves the extent as saved there too')
-  assert.ok(methane.assessment.after.raws.current > 0 && sulphur.assessment.after.raws.current > 0, 'the water still costs after such a plan')
-  assert.ok(vapourShare(methane.target) > 0.9, `water vapour has no limit for a methane breather (rating 0): ${vapourShare(methane.target)} % of the air`)
-  assert.ok(vapourShare(sulphur.target) < 0.5 && vapourShare(sulphur.target) > 0.499, `the vapour stays just under the 5,000 ppm that is dangerous to a sulphur dioxide breather: ${vapourShare(sulphur.target)} % of the air`)
+  assert.ok(oxygen.target.HydroExt >= 75, 'the oxygen target keeps its water unless a supplied transfer can settle it; a preferred smaller liquid extent alone cannot evaporate the excess')
+  // A full wet target is no reason to keep a water penalty when another sampled atmosphere can finish a thaw and drain over the whole orbit.
+  for (const found of [methane, sulphur]) {
+    assert.equal(found.target.HydroExt, 0, 'the selected drain leaves no surface water')
+    const pressure = found.target.Atmosphere.filter((gas) => !gas.FrozenOut).reduce((sum, gas) => sum + gas.GasAtm, 0)
+    const warming = found.target.Atmosphere.filter((gas) => !gas.FrozenOut && gas.GHGas).reduce((sum, gas) => sum + gas.GasAtm, 0)
+    const mean = 180 * Math.min(3, 1 + pressure / 10 + warming) * found.target.Albedo
+    const dampening = Math.min(0.5, pressure / 10)
+    const points = { current: mean, periapsis: mean * ((1 - dampening) / Math.sqrt(0.75) + dampening), apoapsis: mean * ((1 - dampening) / Math.sqrt(1.25) + dampening) }
+    const expected = Object.fromEntries(Object.entries(points).map(([point, temperature]) => [point, Math.round(Math.max(0, (250 - temperature) / 30, (temperature - 310) / 30) * 10000) / 10000]))
+
+    assert.deepEqual(found.assessment.after.raws, expected, 'the consistent dry target is independently priced; a conservative rejection need not retain the former full-orbit claim')
+    assert.ok(found.assessment.plan.steps.some((step) => step.drained === 100), 'the displayed operations complete that drain')
+    assert.ok(found.assessment.after.raw < found.assessment.cost.raw, 'the selected plan improves the whole-orbit cost')
+  }
+  const dryOxygen = cold(10, { HydroExt: 0, HydroID: HYDROSPHERE.none })
+  const oxygenSpecies = plannerSpecies(m, 10)
+  const harmless = m.t.planTerraforming(dryOxygen, oxygenSpecies, gasInfo)
+  const ratedInfo = (id) => id === 5 ? { ...gasInfo(id), DangerousOxygen: 3, DangerousPPMOxygen: 5000 } : gasInfo(id)
+  const rated = m.t.planTerraforming(dryOxygen, oxygenSpecies, ratedInfo)
+
+  assert.ok(harmless, 'the harmless pair can supply a consistent wetter target')
+  const harmlessTarget = m.t.terraformedBody(dryOxygen, oxygenSpecies, harmless, gasInfo)
+  assert.equal(rated, null, 'a 0.5 % vapour ceiling under 10 atm cannot supply the 0.5 atm needed for a 20 % surface')
+  const suppliedShare = ({ target }) => target.water / (target.water + target.breathable + target.greenhouse + target.antiGreenhouse + target.neutral) * 100
+
+  assert.ok(suppliedShare(harmless) > 0.5, 'a harmless water-vapour pair imposes no share limit on the supplied water, including the supply that later condenses')
+  assert.ok(vapourShare(harmlessTarget) < suppliedShare(harmless), 'the settled atmosphere does not retain the vapour that became surface water')
+  assert.equal(m.t.assessTerraforming(dryOxygen, oxygenSpecies, 1, ratedInfo).plan, null, 'the unsupplied ordinary target is not displayed')
   assert.equal(sulphur.assessment.after.factors.danger, 0, 'the plan adds no gas dangerous to the species')
 
   // The gravity class of a low-gravity body is carried by the assessment and by the stages.
@@ -445,9 +467,10 @@ check('drain', 'a world whose air suits a breather other than oxygen but whose l
   assert.notEqual(stuck.outcome, 'done', 'it is not done')
   assert.ok(!stuck.plan || stuck.plan.steps.every((step) => step.drained === 0), 'the ice is not drained')
   close(stuck.after.raws.current, 5, 'the ice still costs after the plan')
-  assert.ok(stuck.reason && stuck.reason.includes('Surface water remains') && stuck.reason.includes('thaw'), 'the remaining water cost has a drainage limitation reason')
+  assert.equal(stuck.plan, null, 'the search offers no equal-cost atmosphere change that leaves the water penalty')
+  assert.equal(stuck.reason, 'No change of atmosphere in the bounded search lowers the colony cost', 'the reason states that no improving plan was found')
 
-  // The cold ice body of the planner check on a circular orbit: warmed to liquid, then drained, for each breather but oxygen, which aims for its 75 %.
+  // The cold ice body on a circular orbit can thaw and drain for the other breathers; oxygen keeps its water when the smaller liquid target has no solved evaporation balance.
   for (const breather of [3, 4, 15]) {
     const { assessment, target } = planFor(m, breather, { Eccentricity: 0 })
     const name = `${NAMES[breather]} breather, 100 % ice warmed to liquid`
@@ -460,7 +483,7 @@ check('drain', 'a world whose air suits a breather other than oxygen but whose l
 
   const sweet = planFor(m, 10, { Eccentricity: 0 })
 
-  assert.equal(sweet.target.HydroExt, 75, 'an oxygen breather keeps its 75 %')
+  assert.equal(sweet.target.HydroExt, 100, 'an oxygen breather cannot lose 25 % of the surface to an unsolved evaporation target')
   assert.ok(sweet.assessment.plan.steps.every((step) => !step.drained), 'and drains nothing')
 })
 
@@ -575,7 +598,7 @@ check('minimum time', 'the years of a plan that drains surface water are the ter
   assert.deepEqual(methane.plan.steps.map((step) => [step.key, m.t.stepTimeBasis(step)]), [['water', MINIMUM], ['antiGreenhouse', CAPACITY]], 'only the step that drains is a minimum')
   assert.equal(methane.timeBasis, MINIMUM, 'the plan is a minimum when any step drains')
 
-  // Ordinary plans: the cold ice body of the planner check warmed and kept at 75 % for an oxygen breather has no drain, and so has a body that needs none.
+  // Ordinary oxygen plans keep the surface water and have no drain, as does a body that needs none.
   const ordinary = planFor(m, 10, { Eccentricity: 0 }).assessment
 
   assert.ok(ordinary.plan && ordinary.plan.steps.every((step) => !step.drained), 'the oxygen plan drains nothing')

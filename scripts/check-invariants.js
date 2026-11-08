@@ -583,7 +583,7 @@ const defineCases = (modules) => {
   invariant('terraforming', 'a plan the full table rejects as making things worse is unknown, not worse, when it adds a gas the table lacks', () => {
     const body = earthlike({ SurfaceTemp: 200, BaseTemp: 180 })
 
-    assert.equal(assessWith(body, (id) => GASES[id]).reason, 'The found plan would make it worse', 'control: the complete table rejects this plan')
+    assert.equal(assessWith(body, (id) => GASES[id]).reason, 'No change of atmosphere in the bounded search lowers the colony cost', 'control: the complete table rejects this plan')
     assert.deepEqual(assessWith(body, withoutGas(20)).missing, ['the properties of gas 20'])
   })
 
