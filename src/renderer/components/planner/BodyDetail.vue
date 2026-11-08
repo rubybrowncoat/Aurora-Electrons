@@ -101,7 +101,7 @@
               </v-list-item-content>
             </v-list-item>
           </v-list>
-          <div v-if="plan.partial" class="caption text--secondary mt-1">No whole-orbit target was found in the bounded search; the displayed plan retains a temperature limitation.</div>
+          <div v-if="plan.partial" class="caption text--secondary mt-1">A temperature limitation remains after this plan.</div>
           <div v-if="plan.dampening" class="caption text--secondary mt-1" data-detail="dampening">{{ dampeningNote }}</div>
 
           <div class="overline mt-3">What limits the colony cost at each stage</div>
@@ -235,7 +235,9 @@ export default {
       return this.assessment.plan
     },
     outcome() {
-      return OUTCOMES[this.assessment.outcome]
+      const outcome = OUTCOMES[this.assessment.outcome]
+
+      return !this.plan && !['done', 'no'].includes(this.assessment.outcome) ? { ...outcome, description: 'The body stays as it is.' } : outcome
     },
     afterCapacity() {
       return this.shown.capacityAfter

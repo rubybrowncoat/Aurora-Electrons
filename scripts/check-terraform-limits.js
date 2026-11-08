@@ -1,7 +1,7 @@
 /*
-  Checks what limits the colony cost at each stage of a terraforming plan (src/renderer/utilities/terraform-limits.js, the limiting-factor bars and the stage table of components/planner/BodyDetail.vue, and the page that hosts them) without a save.
+  Checks what limits the colony cost at each stage of a terraforming plan (src/renderer/utilities/terraform-limits.js, the limiting-factor bars and the stage table of components/planner/BodyDetail.vue, and the page that hosts them).
 
-  Every statement runs on bodies and a species made here and on the real utilities and component. Nothing is read from a save. The statements cover the acceptance of AE-070-01:
+  The planted cases run on bodies and a species made here and on the real utilities and component. The reported hot-periapsis cases and a bounded no-worsening invariant also read the registered played saves, without changing them. The statements cover:
   - the first stage is the body as the body detail prices it (the same cost factors at now, periapsis and apoapsis, and the factor bars flag the same factors), with the frozen-out flags the save carries;
   - each gas operation of a plan names the factors that limit the cost after it and the factors that would limit it next, every one of them where several are equal (exact ties, ties at the game's four decimals, ties between the orbit points), and says which it cleared and which it revealed;
   - the last stage is the plan's own end state, whatever the colonisation skill, and the water extent changes only in the stage that settles it;
@@ -15,12 +15,14 @@
 const fs = require('fs')
 const path = require('path')
 const compiler = require('vue/compiler-sfc')
+const { Database } = require('bun:sqlite')
 const { assert, kindOf, isSubjectThrow } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { mutating, refusePlanting } = require('./lib/no-mutations')
 const { inParallel } = require('./lib/check-pool')
+const { PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2, PLAYED_D2_1, PLAYED_D2_2 } = require('./lib/fixtures')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -85,6 +87,72 @@ const crowded = (nitrogen, warming, cooling, methane, oxygen) => {
   return [gas(7, 'Nitrogen', nitrogen, share(nitrogen)), gas(20, 'Aestusium', warming, share(warming), { GHGas: 1 }), gas(22, 'Frigusium', cooling, share(cooling), { AntiGHGas: 1 }), gas(METHANE_ID, 'Methane', methane, share(methane), METHANE), gas(OXYGEN_ID, 'Oxygen', oxygen, share(oxygen))]
 }
 
+// Independent endpoint pressure/climate arithmetic: shares retain stored gas, while only non-frozen rows supply pressure or the two climate multipliers.
+const pressureRefreshed = (body) => {
+  const rows = body.Atmosphere.map((row) => ({ ...row, FrozenOut: body.SurfaceTemp < row.FreezingPoint }))
+  const pressure = rows.reduce((sum, row) => sum + (row.FrozenOut ? 0 : row.GasAtm), 0)
+  const greenhouse = Math.min(3, 1 + pressure / 10 + rows.reduce((sum, row) => sum + (!row.FrozenOut && row.GHGas ? row.GasAtm : 0), 0))
+  const anti = Math.min(3, 1 + body.DustLevel / 20000 + rows.reduce((sum, row) => sum + (!row.FrozenOut && row.AntiGHGas ? row.GasAtm : 0), 0))
+  const moon = body.BodyClass === 2
+  const distance = moon ? body.ParentOrbitalDistance : body.OrbitalDistance
+  const eccentricity = moon ? body.ParentEccentricity : body.Eccentricity
+  const year = moon ? body.ParentYear : body.Year
+  const dampening = distance && eccentricity ? (Math.min(0.5, pressure / 10) + Math.min(0.3, body.HydroExt / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(year / 8760)) : 0
+  const circular = distance ? 255 / Math.sqrt(distance / Math.sqrt(body.StarLuminosity)) : 0
+  const temperature = Math.max(4, (body.BaseTemp * (1 - dampening) + circular * dampening) * greenhouse * body.Albedo / anti)
+
+  return { ...body, AtmosPress: pressure, SurfaceTemp: temperature, Atmosphere: rows }
+}
+
+// Reconstruct the inventory from displayed operations, then independently price a fixed point of gas freezing, current climate, water phase and ice albedo. No constructor pressure, phase or transfer field supplies the oracle.
+const independentEndpoint = (terraforming, body, species, plan, info, label) => {
+  const target = terraforming.terraformedBody(body, species, plan, info)
+
+  assert.ok(target, `${label}: a displayed plan has an endpoint`)
+  const water = (state) => state.Atmosphere.filter((row) => row.AtmosGasID === 5).reduce((sum, row) => sum + row.GasAtm, 0)
+  const operation = plan.steps.find((step) => step.gasId === 5)
+  const drained = plan.steps.reduce((sum, step) => sum + (step.drained || 0), 0)
+  const inventory = body.HydroExt / 40 + (operation ? operation.set : water(body)) - drained / 40
+  const vapour = inventory - target.HydroExt / 40
+  const stored = target.Atmosphere.reduce((sum, row) => sum + row.GasAtm, 0)
+  const rows = target.Atmosphere.map((row) => ({ ...(body.Atmosphere.find((gas) => gas.AtmosGasID === row.AtmosGasID) || info(row.AtmosGasID)), AtmosGasID: row.AtmosGasID, GasAtm: row.AtmosGasID === 5 ? vapour : row.GasAtm, AtmosGasPercentage: Math.round(row.GasAtm / stored * 100 * 1e9) / 1e9 }))
+
+  assert.ok(Math.abs(water(target) - vapour) < 1e-9, `${label}: water is conserved after displayed gas operations and drains`)
+  if (vapour > 1e-12 && !rows.some((row) => row.AtmosGasID === 5)) {
+    rows.push({ ...info(5), AtmosGasID: 5, GasAtm: vapour })
+  }
+  const candidates = [1, 2, 3, 4].map((phase) => {
+    const albedo = body.Albedo + (body.HydroID === 4 && phase !== 4 ? 0.0015 * body.HydroExt : body.HydroID !== 4 && phase === 4 ? -0.0015 * body.HydroExt : 0)
+    const refreshed = pressureRefreshed({ ...body, SurfaceTemp: target.SurfaceTemp, HydroExt: target.HydroExt, Albedo: albedo, Atmosphere: rows })
+    const actual = refreshed.AtmosPress <= 0 || (refreshed.AtmosPress < 0.006 && refreshed.SurfaceTemp > 245) ? 1 : refreshed.SurfaceTemp > 369 ? 2 : refreshed.SurfaceTemp > 245 ? 3 : 4
+
+    return { ...refreshed, HydroID: actual, consistent: phase === actual && refreshed.Atmosphere.every((row) => row.FrozenOut === (refreshed.SurfaceTemp < row.FreezingPoint)) }
+  })
+  const independent = candidates.find((state) => state.consistent && Math.abs(state.SurfaceTemp - target.SurfaceTemp) < 1e-8)
+
+  assert.ok(independent, `${label}: independent phase, albedo and frozen-gas climate have a consistent endpoint`)
+  assert.ok(!rows.length || independent.AtmosPress > 0, `${label}: no all-frozen residual-pressure claim`)
+  assert.ok(Math.abs(target.AtmosPress - independent.AtmosPress) < 1e-9, `${label}: independently summed active pressure`)
+  assert.equal(target.HydroID, independent.HydroID, `${label}: independently classified water phase`)
+  assert.ok(Math.abs(target.Albedo - independent.Albedo) < 1e-9, `${label}: independently derived ice albedo`)
+  assert.ok(target.HydroExt <= body.HydroExt - drained || independent.SurfaceTemp <= 369, `${label}: no hot condensation`)
+  assert.ok(independent.HydroID !== 1 || independent.HydroExt === 0, `${label}: None cannot hide retained surface water`)
+  const humidity = independent.AtmosPress * independent.HydroExt / 100 * 0.01
+  const condensation = independent.SurfaceTemp <= 369 ? Math.max(0, vapour - (independent.HydroID === 3 ? humidity : 0)) : 0
+  const evaporation = independent.HydroExt > 0 && [2, 3].includes(independent.HydroID) ? Math.max(0, (independent.HydroID === 3 ? humidity : independent.HydroExt / 40) - vapour) : 0
+
+  assert.ok(condensation <= 1e-8, `${label}: condensation would move ${condensation} atm`)
+  assert.ok(evaporation <= 1e-8, `${label}: evaporation would move ${evaporation} atm`)
+  for (const row of target.Atmosphere) {
+    const expected = independent.Atmosphere.find((gas) => gas.AtmosGasID === row.AtmosGasID)
+
+    assert.equal(!!row.FrozenOut, expected.FrozenOut, `${label}: independently frozen gas ${row.AtmosGasID}`)
+    assert.equal(row.AtmosGasPercentage, expected.AtmosGasPercentage, `${label}: stored-total share ${row.AtmosGasID}`)
+  }
+
+  return independent
+}
+
 // Hand-worked starts: `airless` is a cold body with no air and no water: the breathing gas (2) and the water (2) tie. `toxic` has methane at 5 % (rating 2) and 10 % water (1). `thick` holds 6 atm of nitrogen at 400 K (temperature 2.7333, pressure 2, water 2). `thin` holds 0.1 atm of nitrogen and no oxygen. `trace` holds 0.0005 atm of methane at exactly its dangerous share, which the game does not call dangerous, so the body is done; `traceOver` holds 0.0006 atm, just over it.
 const BODIES = {
   liveable: earthlike(),
@@ -122,11 +190,11 @@ const BODIES = {
   condensing: earthlike({ BaseTemp: 200, SurfaceTemp: 300, StarLuminosity: (200 / 255) ** 4, Eccentricity: 0.4, HydroExt: 10, AtmosPress: 4.05, Atmosphere: crowded(0.8, 2, 1, 0.05, 0.2) }),
   // A present-distance base below the circular reference makes the stage's changing dampening observable.
   seasonal: earthlike({ BaseTemp: 200, SurfaceTemp: 300, StarLuminosity: (220 / 255) ** 4, Eccentricity: 0.4, HydroExt: 10, AtmosPress: 4.05, Atmosphere: crowded(0.8, 2, 1, 0.05, 0.2) }),
-  // The plan only removes the methane, yet its target holds 20 % water.
+  // A removal-only trial formerly invented 20 % surface water without supplying any vapour.
   removalOnly: earthlike({ BaseTemp: 300, SurfaceTemp: 245.5, Gravity: 0.4, HydroExt: 0, HydroID: 1, AtmosPress: 4.05, Atmosphere: crowded(0.8, 1, 2, 0.05, 0.2) }),
   // Condensation takes 0.05 years, under the 0.1 the plan's wait text needs.
   shortSettle: earthlike({ BaseTemp: 200, SurfaceTemp: 300, HydroExt: 19.8, AtmosPress: 4.05, Atmosphere: crowded(0.8, 2, 1, 0.05, 0.2) }),
-  // No gas operation and no settling, but the target holds 20 % water: the planner's cost after terraforming is 1 against 2.
+  // An empty trial formerly claimed a 20 % surface-water gain with no gas operation or settling.
   noOperation: earthlike({ BaseTemp: 300, SurfaceTemp: 240, StarLuminosity: (300 / 255) ** 4, Gravity: 0.4, HydroExt: 0, HydroID: 4, AtmosPress: 4, Atmosphere: crowded(0.8, 1, 2, 0, 0.2).filter((row) => row.AtmosGasID !== 1) }),
   // A methane breather's world: 286 K is 220 K times 1 + 0.1 + the 0.2 atm of methane, a greenhouse gas, so the air suits and only the 50 % of liquid water (5, its extent times 0.1) is paid for; the same world under an ice sheet pays nothing, as a methane breather has no ice term.
   wetMethane: earthlike({ BaseTemp: 220, SurfaceTemp: 286, Atmosphere: [gas(METHANE_ID, 'Methane', 0.2, 20, METHANE), gas(7, 'Nitrogen', 0.8, 80)] }),
@@ -136,6 +204,9 @@ const BODIES = {
   frozenStays: earthlike({ BaseTemp: 200, SurfaceTemp: 220, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.75, 75), gas(METHANE_ID, 'Methane', 0.05, 5, { ...METHANE, FreezingPoint: 400, FrozenOut: 1 })] }),
   // Methane at 0.04 % of the air, under its 0.05 % limit, in air that needs warming: it is benign, so the plan neither removes it nor raises it.
   benignSide: earthlike({ BaseTemp: 200, SurfaceTemp: 220.044, AtmosPress: 1.0004, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 19.99), gas(7, 'Nitrogen', 0.8, 79.97), gas(METHANE_ID, 'Methane', 0.0004, 0.04, METHANE)] }),
+  // The fixed low-gravity floor already sets the cost: changing the climate alone gains nothing, but removing a dangerous gas is a separate goal at that same cost.
+  noBenefit: earthlike({ Gravity: 0.4, SurfaceTemp: 240 }),
+  equalToxic: earthlike({ Gravity: 0.4, SurfaceTemp: 240, Atmosphere: [gas(OXYGEN_ID, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.75, 75), gas(METHANE_ID, 'Methane', 0.05, 5, { ...METHANE, DangerousOxygen: 1 })] }),
 }
 
 deepFreeze(BODIES)
@@ -147,6 +218,27 @@ const memo = (make) => {
   return () => made || (made = make())
 }
 
+// Read every registered played save once, with the planner's own loaders. Keep only rows in memory and close every read-only connection.
+const campaigns = memo(async () => {
+  const data = (await loadUtilities(['colonization-data'], { stubs: { 'lodash/groupBy': GROUP_BY } }))['colonization-data']
+  const found = []
+
+  for (const save of [PLAYED, PLAYED_NEXT, PLAYED_C1, PLAYED_C2, PLAYED_D2_1, PLAYED_D2_2]) {
+    const database = new Database(path.join(root, save.file), { readonly: true })
+
+    try {
+      const source = { query: async (sql) => [database.query(sql).all()] }
+      const context = { GameID: save.gameId, RaceID: save.raceId }
+
+      found.push({ save, bodies: await data.loadBodies(source, context), species: await data.loadSpecies(source, context), gases: await data.loadGases(source) })
+    } finally {
+      database.close()
+    }
+  }
+
+  return found
+})
+
 const worldOf = (mutation = null) => {
   const text = { ...ORIGINALS }
 
@@ -154,7 +246,7 @@ const worldOf = (mutation = null) => {
     text[mutation.target] = patched(FILES[mutation.target], ORIGINALS[mutation.target], mutation.from, mutation.to)
   }
 
-  const modules = memo(() => loadUtilities(['habitability', 'terraforming', 'terraform-limits', 'provenance'], { sources: { habitability: text.habitability, terraforming: text.terraforming, 'terraform-limits': text.limits } }).then((loaded) => ({ habitability: loaded.habitability, terraforming: loaded.terraforming, limits: loaded['terraform-limits'], provenance: loaded.provenance })))
+  const modules = memo(() => loadUtilities(['habitability', 'terraforming', 'terraform-limits', 'provenance', 'colonization'], { sources: { habitability: text.habitability, terraforming: `${text.terraforming}\nexport { drainCanComplete, sequenceDrain }`, 'terraform-limits': text.limits } }).then((loaded) => ({ habitability: loaded.habitability, terraforming: loaded.terraforming, limits: loaded['terraform-limits'], provenance: loaded.provenance, colonization: loaded.colonization })))
   const component = memo(() => loadPage('components/planner/BodyDetail', { stubs: { 'lodash/groupBy': GROUP_BY }, modules: { 'utilities/appearance': APPEARANCE }, sources: { 'utilities/habitability': text.habitability, 'utilities/terraforming': text.terraforming, 'utilities/terraform-limits': text.limits, 'components/planner/BodyDetail': text.vue } }))
   const cache = new Map()
 
@@ -442,14 +534,454 @@ check('targetGasPhase', 'the target search prices a greenhouse gas freezing at a
   const phasedGasInfo = (id) => id === 20 ? { ...gasInfo(id), FreezingPoint: 290 } : gasInfo(id)
   const assessment = terraforming.assessTerraforming(body, species, 1, phasedGasInfo)
 
-  assert.ok(assessment.plan && assessment.plan.partial, 'no target keeps the cold end warm when the added greenhouse gas freezes')
-  assert.ok(assessment.after.raws.apoapsis > 0, 'the frozen greenhouse gas has a priced cold-end penalty')
+  assert.ok(assessment.plan && assessment.plan.partial, 'no whole-orbit target was found with the greenhouse gas freezing at an extreme')
+  assert.ok(assessment.after.raw < assessment.cost.raw, 'the partial fallback lowers the worst cost rather than keeping the ideal-centred cold penalty')
   const target = terraforming.terraformedBody(body, species, assessment.plan, phasedGasInfo)
 
-  assert.ok(habitability.temperaturePoints(target).apoapsis < species.MinimumTemperature, 'the cold-end temperature is the one the cost prices')
+  assert.ok(Object.values(habitability.temperaturePoints(target)).some((temperature) => temperature < species.MinimumTemperature || temperature > species.MaximumTemperature), 'the retained plan has a priced temperature limitation')
   const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo: phasedGasInfo }).stages
 
   assert.equal(stages[stages.length - 1].cost.apoapsis, assessment.after.raws.apoapsis, 'the ending stage prices the same gas phase')
+})
+
+check('hotPeriapsis', 'the reported locked planet and eccentric comet select a cooler partial plan by its final whole-orbit cost, never a warming plan that raises it', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const saves = await campaigns()
+
+  for (const [save, id, ceiling] of [[PLAYED_D2_2, 2513411, 0.4], [PLAYED, 2508694, 12]]) {
+    const campaign = saves.find((candidate) => candidate.save === save)
+    const body = campaign.bodies.find((candidate) => candidate.SystemBodyID === id)
+    const species = habitability.speciesLimits(campaign.species[0])
+    const info = (gasId) => campaign.gases.find((candidate) => candidate.GasID === gasId)
+    const assessment = terraforming.assessTerraforming(body, species, 1, info)
+
+    assert.ok(assessment.plan && assessment.plan.partial, `${id}: a useful temperature-limited plan exists`)
+    assert.ok(assessment.after.raw < assessment.cost.raw, `${id}: final whole-orbit cost ${assessment.after.raw} is below ${assessment.cost.raw}`)
+    assert.ok(assessment.after.raw < ceiling, `${id}: the fallback considers cooling, not only means inside the species range`)
+    assert.ok(assessment.plan.steps.some((step) => step.key === 'antiGreenhouse' && step.set > step.from), `${id}: heat is treated with anti-greenhouse gas`)
+    assert.ok(!assessment.plan.steps.some((step) => step.key === 'greenhouse' && step.set > step.from), `${id}: no greenhouse addition against the hot limit`)
+    const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo: info }).stages
+
+    assert.equal(stages[stages.length - 1].cost.worst, assessment.after.worst, `${id}: the ending stage and header agree`)
+    console.log(`REPORT ${path.basename(save.file)} ${id}: ${assessment.cost.raw} -> ${assessment.after.raw}; ${assessment.plan.steps.map((step) => `${step.label} ${step.set}`).join(', ')}`)
+  }
+})
+
+check('frozenEndpoint', 'frozen stored gas supplies neither active pressure nor climate effects, condensed vapour leaves the air, and a frozen-pressure illusion never admits a worsening or empty plan', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const campaign = (await campaigns()).find((candidate) => candidate.save === PLAYED)
+  const original = campaign.bodies.find((body) => body.SystemBodyID === 2508694)
+  const species = habitability.speciesLimits(campaign.species[0])
+  const info = (id) => campaign.gases.find((row) => row.GasID === id)
+  const row = (id, amount, total) => gas(id, info(id).Name, amount, amount / total * 100, info(id))
+
+  for (const [anti, before] of [[1.98, 10.3959], [2, 10.3987]]) {
+    const body = pressureRefreshed({ ...original, HydroExt: 20, HydroID: 4, SurfaceTemp: 18, AtmosPress: anti, Atmosphere: [row(10, 0.1, anti + 0.1), row(22, anti, anti + 0.1)] })
+    const plan = terraforming.planTerraforming(body, species, info)
+    const end = terraforming.terraformedBody(body, species, plan, info)
+    const reference = pressureRefreshed(end)
+
+    assert.equal(habitability.colonyCost(body, species, 1).raw, before, `${anti} atm: independent as-is cost`)
+    assert.equal(end.AtmosPress, 2, 'only Frigusium supplies the endpoint active pressure')
+    assert.equal(plan.target.pressure, 2, 'the blueprint pressure is the same active pressure')
+    assert.equal(end.Atmosphere.find((gas) => gas.AtmosGasID === 10).FrozenOut, true, 'oxygen remains stored but frozen')
+    assert.equal(end.Atmosphere.find((gas) => gas.AtmosGasID === 10).GasAtm, 0.1, 'freezing never erases the stored breathing pressure')
+    assert.equal(end.Atmosphere.find((gas) => gas.AtmosGasID === 10).AtmosGasPercentage, Math.round(0.1 / 2.1 * 100 * 1e9) / 1e9, 'shares use all stored gas, not just the active pressure')
+    assert.ok(Math.abs(end.SurfaceTemp - 18.55918827807438) < 1e-10, 'independent endpoint blend with pressure 2 atm')
+    assert.ok(Math.abs(habitability.temperaturePoints(reference).apoapsis - 13.451813699467449) < 1e-10, 'independent cold extreme')
+    assert.equal(habitability.colonyCost(reference, species, 1, true).raw, 10.3987, 'the reference cold cost is (263.02 - 13.451813699467449) / 24, rounded')
+    const assessment = terraforming.assessTerraforming(body, species, 1, info)
+
+    assert.equal(assessment.plan, null, anti === 2 ? 'an unchanged atmosphere has no empty zero-work blueprint' : '1.98 to 2 atm would worsen the cost and is rejected')
+    assert.equal(assessment.after.raw, before)
+    assert.equal(assessment.work, 0)
+    assert.equal(limits.terraformStages({ assessment, body, species, skill: 1, gasInfo: info }), null)
+  }
+
+  const assessment = terraforming.assessTerraforming(original, species, 1, info)
+
+  assert.ok(assessment.plan, 'the reported comet retains its supplied-water improvement, rather than losing it to an unremoved vapour row')
+  const end = terraforming.terraformedBody(original, species, assessment.plan, info)
+
+  assert.equal(end.AtmosPress, 2, 'the reported comet endpoint is repriced at its active pressure')
+  assert.ok(!end.Atmosphere.some((gas) => gas.AtmosGasID === 5), 'the supplied 0.5 atm condenses into 20 % ice and is not also a gas row')
+  assert.equal(assessment.after.raw, 10.3987)
+  const frozenInfo = (id) => [10, 20, 22].includes(id) ? { ...gasInfo(id), FreezingPoint: 400 } : gasInfo(id)
+  const frozenPlan = { target: { water: 0, breathable: 0.2, greenhouse: 0.2, antiGreenhouse: 0.2, neutral: 0.6, sideGreenhouse: 0, sideAnti: 0, sideNeutral: 0, hydroExt: 0, albedo: 1, temperature: 265 }, gases: { greenhouse: { id: 20 }, anti: { id: 22 }, neutral: { id: 7 }, greenhouseSide: [], antiSide: [], neutralSide: [] } }
+  const frozen = terraforming.terraformedBody(airless(), habitability.speciesLimits(SPECIES_ROW), frozenPlan, frozenInfo)
+
+  assert.equal(frozen.AtmosPress, 0.6, 'frozen breathing, greenhouse and anti-greenhouse gases supply no active pressure')
+  assert.equal(frozen.SurfaceTemp, 265, 'only active nitrogen warms by its pressure: 250 * (1 + 0.6 / 10)')
+  assert.equal(habitability.costFactors(frozen, habitability.speciesLimits(SPECIES_ROW), 265, true).factors.breathable, 0, 'frozen stored oxygen still satisfies breathing')
+})
+
+check('hotCondensation', 'the hot refreshed condensation witness is rejected instead of promising a water transfer opposite to evaporation', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const campaign = (await campaigns()).find((candidate) => candidate.save === PLAYED)
+  const species = habitability.speciesLimits(campaign.species[0])
+  const info = (id) => campaign.gases.find((row) => row.GasID === id)
+  const amounts = [[10, 0.2], [7, 0.8], [20, 0.21220771880367442], [5, 0.65625]]
+  const body = earthlike({ BodyTypeID: 2, Radius: 5999, BaseTemp: 350, SurfaceTemp: 417.77667068602534, HydroID: 2, HydroExt: 26.25, AtmosPress: 1.8684577188036744, Eccentricity: 0.8, DistanceToParent: 0.2, StarLuminosity: 0.14196178354493819, Atmosphere: amounts.map(([id, amount]) => gas(id, info(id).Name, amount, amount / 1.8684577188036744 * 100, info(id))) })
+  const plan = { steps: [{ gasId: 5, from: 0.65625, set: 0.25, drained: 0 }], settling: { process: 'Condense', years: 2.5 }, target: { water: 0.25, breathable: 0.2, greenhouse: 0.21220191484203738, antiGreenhouse: 0, neutral: 0.8, sideGreenhouse: 0, sideAnti: 0, sideNeutral: 0, hydroExt: 36.25, hydrosphere: 2, albedo: 1, pressure: 1.2122019148420375, temperature: 407.36906958634154 }, gases: { greenhouse: { id: 20 }, anti: { id: 22 }, neutral: { id: 7 }, greenhouseSide: [], antiSide: [], neutralSide: [] } }
+  // After the displayed removal the inventory is 26.25 / 40 + 0.25 = 0.90625 atm. Vapour and remaining extent / 40 split it equally above 369 K.
+  const vapour = (26.25 / 40 + 0.25) / 2
+  const balanced = pressureRefreshed({ ...body, HydroExt: vapour * 40, Atmosphere: body.Atmosphere.map((row) => ({ ...row, GasAtm: row.AtmosGasID === 5 ? vapour : row.GasAtm })) })
+
+  assert.equal(vapour, 0.453125)
+  assert.equal(balanced.HydroExt, 18.125)
+  assert.ok(Math.abs(balanced.SurfaceTemp - 423.6315690018765) < 1e-8)
+  assert.equal(round4((balanced.SurfaceTemp - 311.02) / 24), 4.6921, 'the conserved hot endpoint is worse than the starting 4.4482')
+  assert.equal(habitability.colonyCost(body, species, 1).raw, 4.4482)
+  assert.equal(terraforming.terraformedBody(body, species, plan, info), null, 'a refreshed hot endpoint cannot condense its supply')
+  // A supersaturated hot endpoint passes the one-sided water rule but still cannot promise a positive condensation transfer.
+  const hotExcess = { ...plan, steps: [{ gasId: 5, from: 0.65625, set: 2, drained: 0 }], target: { ...plan.target, water: 2 } }
+
+  assert.equal(terraforming.terraformedBody(body, species, hotExcess, info), null, 'hot condensation stays forbidden even when its final vapour is over the hot target')
+  const assessment = terraforming.assessTerraforming(body, species, 1, info)
+
+  if (assessment.plan) {
+    const end = independentEndpoint(terraforming, body, species, assessment.plan, info, 'hot condensation witness alternative')
+
+    assert.ok(end.SurfaceTemp <= 369 || end.HydroExt <= body.HydroExt, 'no generated hot condensation survives fallback selection')
+    assert.ok(assessment.after.raw <= 4.4482)
+  } else {
+    assert.equal(assessment.after.raw, 4.4482)
+    assert.equal(assessment.reason, 'No change of atmosphere in the bounded search lowers the colony cost')
+  }
+})
+
+check('frozenStages', 'operation rows and drain feasibility use active frozen-gas pressure and their own climate, not stored-gas warming', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const campaign = (await campaigns()).find((candidate) => candidate.save === PLAYED)
+  const body = campaign.bodies.find((candidate) => candidate.SystemBodyID === 2508694)
+  const species = habitability.speciesLimits(campaign.species[0])
+  const info = (id) => campaign.gases.find((row) => row.GasID === id)
+  const assessment = terraforming.assessTerraforming(body, species, 1, info)
+  const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo: info }).stages.filter((stage) => stage.step)
+
+  assert.deepEqual(stages.map((stage) => stage.pressure), [0.5, 0.5, 2.5], 'frozen oxygen adds no active pressure at either operation')
+  for (const stage of stages) {
+    const active = stage.body.Atmosphere.filter((row) => stage.temperature >= row.FreezingPoint)
+    const pressure = active.reduce((sum, row) => sum + row.GasAtm, 0)
+    const dampening = Math.min(0.5, pressure / 10) * Math.min(1, 1 / Math.sqrt(body.Year / 8760))
+    const circular = 255 / Math.sqrt(body.OrbitalDistance / Math.sqrt(body.StarLuminosity))
+    const expected = Math.max(4, (body.BaseTemp * (1 - dampening) + circular * dampening) * Math.min(3, 1 + pressure / 10) * body.Albedo / Math.min(3, 1 + active.reduce((sum, row) => sum + (row.AntiGHGas ? row.GasAtm : 0), 0)))
+
+    assert.ok(Math.abs(stage.temperature - expected) < 1e-9, `operation ${stage.index}: stage-specific active-pressure blend`)
+  }
+  const cold = earthlike({ BaseTemp: 200, SurfaceTemp: 220, HydroID: 4, AtmosPress: 0.8, Atmosphere: [gas(4, 'Ammonia', 0.2, 10, { FreezingPoint: 400, FrozenOut: true }), gas(20, 'Aestusium', 1, 50, { FreezingPoint: 400, FrozenOut: true, GHGas: 1 }), gas(7, 'Nitrogen', 0.8, 40)] })
+  const water = { gasId: 5, set: 0, from: 0, drained: 50 }
+  const wet = terraforming.bodyAfterTerraformStep(cold, { ...water, drained: 0 }, gasInfo)
+
+  assert.equal(wet.AtmosPress, 0.8)
+  assert.equal(wet.SurfaceTemp, 216, '200 * (1 + 0.8 / 10): frozen greenhouse gas cannot thaw this surface')
+  assert.equal(terraforming.drainCanComplete(cold, water, gasInfo), false, 'neither the wet nor dry endpoint thaws at any orbit point')
+  assert.equal(terraforming.sequenceDrain(cold, [water], gasInfo), null, 'a frozen-gas thaw illusion cannot schedule a drain')
+})
+
+check('waterSupply', 'ordinary oxygen-breather targets cannot invent water when the pressure or vapour ceiling cannot supply the increase', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, MaximumPressure: 0.4 })
+  const body = airless()
+  const assessment = terraforming.assessTerraforming(body, species, 1, gasInfo)
+
+  assert.equal(assessment.plan, null, '0.5 atm of condensation cannot fit alongside breathing gas under a 0.4 atm ceiling')
+  assert.equal(assessment.work, 0)
+  const plan = { target: { water: 0.1, breathable: 0.1, greenhouse: 0, antiGreenhouse: 0, neutral: 0.2, sideGreenhouse: 0, sideAnti: 0, sideNeutral: 0, hydroExt: 20, hydrosphere: 4, albedo: 1, temperature: 200 }, gases: { greenhouse: { id: 20 }, anti: { id: 22 }, neutral: { id: 7 }, greenhouseSide: [], antiSide: [], neutralSide: [] }, settling: { process: 'Condense', years: 1 } }
+
+  assert.equal(terraforming.terraformedBody(airless({ BaseTemp: 200, SurfaceTemp: 200 }), species, plan, gasInfo), null, '0.1 atm supplies at most 4%, not the promised 20%; phase and ice albedo otherwise agree')
+  const shrinking = { ...plan, target: { ...plan.target, water: 0, breathable: 0.2, neutral: 0.8, hydroExt: 25, hydrosphere: 2, albedo: 1, temperature: 440 }, settling: { process: 'Evaporate', years: 0.15625 } }
+
+  assert.equal(terraforming.terraformedBody(earthlike({ BaseTemp: 400, SurfaceTemp: 440, HydroID: 2 }), habitability.speciesLimits(SPECIES_ROW), shrinking, gasInfo), null, 'an arbitrary 50% to 25% evaporation target remains unsupported even when hot balance would be stationary')
+})
+
+check('phaseAlbedo', 'a refreshed ice transition cannot retain a liquid albedo, and an all-frozen atmosphere is rejected rather than priced at zero pressure', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits(SPECIES_ROW)
+  const body = earthlike({ BaseTemp: 200 })
+  const info = (id) => [10, 20].includes(id) ? { ...gasInfo(id), FreezingPoint: 400 } : gasInfo(id)
+  const plan = { target: { water: 0, breathable: 0.2, greenhouse: 0.2, antiGreenhouse: 0, neutral: 0.6, sideGreenhouse: 0, sideAnti: 0, sideNeutral: 0, hydroExt: 50, hydrosphere: 3, albedo: 1, temperature: 265 }, gases: { greenhouse: { id: 20 }, anti: { id: 22 }, neutral: { id: 7 }, greenhouseSide: [], antiSide: [], neutralSide: [] } }
+
+  assert.equal(terraforming.terraformedBody(body, species, plan, info), null, 'the frozen-gas refresh gives 212 K: ice requires albedo 1 - 0.0015 * 50 = 0.925')
+  const allFrozen = (id) => ({ ...gasInfo(id), FreezingPoint: 1000 })
+  const dryPlan = { ...plan, target: { ...plan.target, hydroExt: 0 } }
+
+  assert.equal(terraforming.terraformedBody(airless(), species, dryPlan, allFrozen), null, 'all frozen is a decaying prior-pressure / 20 state, not a stationary zero')
+})
+
+check('waterStationarity', 'final constructor endpoints obey both water-process directions within a fixed 1e-8 atm allowance, including high-pressure liquid and phase edges', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  const species = habitability.speciesLimits(WIDE_ROW)
+  const construct = ({ temperature, pressure = 1, extent = 40, vapour = 0, phase = temperature > 369 ? 2 : temperature > 245 ? 3 : 4, initial = temperature, frozenWater = false }) => {
+    const breathable = Math.min(0.2, pressure / 5)
+    const neutral = pressure - breathable - (frozenWater ? 0 : vapour)
+    const info = (id) => id === 5 && frozenWater ? { ...gasInfo(id), FreezingPoint: 1000 } : gasInfo(id)
+    const body = earthlike({ BaseTemp: temperature / (1 + pressure / 10), SurfaceTemp: initial, HydroExt: extent, HydroID: phase, AtmosPress: pressure, Atmosphere: [gas(10, 'Oxygen', breathable, 0), gas(7, 'Nitrogen', neutral, 0), gas(5, 'Water Vapour', vapour, 0, info(5))] })
+    const plan = { target: { water: vapour, breathable, greenhouse: 0, antiGreenhouse: 0, neutral, sideGreenhouse: 0, sideAnti: 0, sideNeutral: 0, hydroExt: extent, hydrosphere: initial === temperature ? phase : initial > 369 ? 2 : initial > 245 ? 3 : 4, albedo: 1, temperature: initial }, gases: { greenhouse: { id: 20 }, anti: { id: 22 }, neutral: { id: 7 }, greenhouseSide: [], antiSide: [], neutralSide: [] } }
+
+    return terraforming.terraformedBody(body, species, plan, info)
+  }
+  const cases = [
+    ['high-pressure balanced liquid', { temperature: 300, pressure: 5, extent: 100, vapour: 0.05 }, true],
+    ['liquid numerical residue inside allowance', { temperature: 300, vapour: 0.004 + 5e-9 }, true],
+    ['liquid under humidity target', { temperature: 300, vapour: 0.004 - 2e-8 }, false],
+    ['liquid over humidity target', { temperature: 300, vapour: 0.004 + 2e-8 }, false],
+    ['high-pressure liquid mismatch', { temperature: 300, pressure: 5, extent: 100, vapour: 0.05 + 2e-8 }, false],
+    ['balanced hot water', { temperature: 400, vapour: 1, pressure: 2 }, true],
+    ['under-target hot water', { temperature: 400, vapour: 0.5 }, false],
+    ['over-target hot water', { temperature: 400, vapour: 1.5, pressure: 2 }, true],
+    ['ice without vapour', { temperature: 240 }, true],
+    ['ice with vapour', { temperature: 240, vapour: 0.001 }, false],
+    ['ice with stored frozen vapour', { temperature: 240, vapour: 0.001, frozenWater: true }, false],
+    ['dry hot vapour', { temperature: 400, extent: 0, vapour: 0.1, phase: 1 }, true],
+    ['dry cold vapour', { temperature: 240, extent: 0, vapour: 0.1 }, false],
+    ['positive water at low-pressure None', { temperature: 300, pressure: 0.005, vapour: 0, phase: 1 }, false],
+    ['dry cold None', { temperature: 300, pressure: 0.005, extent: 0, phase: 1 }, true],
+    ['245 K is ice', { temperature: 245 }, true],
+    ['below 245 K is ice', { temperature: 245 - 1e-6 }, true],
+    ['above 245 K needs humidity', { temperature: 245 + 1e-6 }, false],
+    ['369 K is liquid', { temperature: 369, vapour: 0.004 }, true],
+    ['below 369 K is liquid', { temperature: 369 - 1e-6, vapour: 0.004 }, true],
+    ['above 369 K needs hot target', { temperature: 369 + 1e-6, vapour: 0.004 }, false],
+    ['refreshed hot climate overrides liquid aim', { temperature: 400, initial: 300, vapour: 0.004 }, false],
+  ]
+
+  for (const [label, input, accepted] of cases) {
+    const endpoint = construct(input)
+
+    assert.equal(!!endpoint, accepted, label)
+    if (endpoint) {
+      assert.ok(Math.abs(endpoint.SurfaceTemp - input.temperature) < 1e-10, `${label}: the constructor refreshes its own climate`)
+      assert.ok(Math.abs(endpoint.AtmosPress - (input.pressure || 1)) < 1e-10, `${label}: active pressure`)
+    }
+  }
+  console.log(`WATER ${cases.length} constructor controls; high-pressure liquid accepted at 5 atm, 100%, 0.05 atm vapour`)
+})
+
+check('refusedWetDrain', 'rejecting a nonstationary wet precursor must not discard its existing stationary completed-drain alternative', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const campaign = (await campaigns()).find((candidate) => candidate.save === PLAYED)
+  const info = (id) => campaign.gases.find((row) => row.GasID === id)
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, BreatheID: 4, BreatheName: 'Ammonia' })
+  const body = earthlike({ BaseTemp: 255, SurfaceTemp: 280.5, Atmosphere: [gas(4, 'Ammonia', 0.2, 20, info(4)), gas(7, 'Nitrogen', 0.8, 80, info(7))] })
+  const assessment = terraforming.assessTerraforming(body, species, 1, info)
+
+  assert.ok(assessment.plan, 'the supported drain remains available without a valid wet endpoint')
+  assert.equal(assessment.outcome, 'yes')
+  assert.deepEqual(assessment.plan.steps.map((step) => [step.gasId, step.drained]), [[5, 50]], 'the same completed water-removal operation is retained')
+  const endpoint = independentEndpoint(terraforming, body, species, assessment.plan, info, 'refused wet precursor')
+
+  assert.equal(endpoint.HydroExt, 0)
+  assert.equal(assessment.after.raw, 0)
+  const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo: info }).stages
+
+  assert.equal(stages[stages.length - 1].cost.raw, 0)
+})
+
+check('dangerousWater', 'equal-cost removal of dangerous water vapour is useful, but equal-cost removal of harmless vapour is not', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const species = habitability.speciesLimits({ ...SPECIES_ROW, BreatheID: 4, BreatheName: 'Ammonia' })
+
+  for (const dangerous of [false, true]) {
+    const water = { DangerousAmmonia: dangerous ? 2 : 0, DangerousPPMAmmonia: 2000 }
+    const info = (id) => id === 4 ? gasRow('Ammonia', { FreezingPoint: 195 }) : id === 5 ? gasRow('Water Vapour', water) : gasInfo(id)
+    const body = earthlike({ BaseTemp: 30, SurfaceTemp: 90, StarLuminosity: (30 / 255) ** 4, AtmosPress: 2.1, HydroID: 4, HydroExt: 0, Atmosphere: [gas(4, 'Ammonia', 0.2, 0.2 / 2.3 * 100, { FreezingPoint: 195, FrozenOut: 1 }), gas(5, 'Water Vapour', 0.1, 0.1 / 2.3 * 100, water), gas(20, 'Aestusium', 2, 2 / 2.3 * 100, { GHGas: 1 })] })
+    const assessment = terraforming.assessTerraforming(body, species, 1, info)
+
+    assert.equal(assessment.cost.raw, 5.6, 'the capped climate is 90 K: (258 - 90) / 30 = 5.6, masking water danger 2')
+    assert.equal(assessment.after.raw, 5.6, 'clearing water danger does not change the cold limit')
+    assert.equal(!!assessment.plan, dangerous, 'only removal of genuinely dangerous vapour warrants equal-cost work')
+
+    if (dangerous) {
+      assert.deepEqual(assessment.plan.steps.map((step) => step.key), ['water'], 'dangerous vapour has its water operation, not a toxic-role operation')
+      assert.equal(assessment.plan.steps[0].set, 0)
+      assert.ok(assessment.work > 0)
+      assert.equal(assessment.work, assessment.plan.steps.reduce((sum, step) => sum + step.work, 0), 'all charged work belongs to displayed operations')
+      const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo: info }).stages
+
+      assert.equal(stages[stages.length - 1].cost.raw, 5.6, 'stage and header agree on the complete plan')
+      assert.equal(stages[stages.length - 1].points.current.factors.danger, 0)
+    } else {
+      assert.equal(assessment.work, 0)
+    }
+  }
+})
+
+check('wetPartial', 'a generated wet partial is compared with the drain by its final whole-orbit cost instead of discarded before pricing', async (w) => {
+  const { habitability, terraforming, limits } = await w.modules()
+  const species = habitability.speciesLimits(METHANE_SPECIES_ROW)
+  const body = earthlike({ BaseTemp: 120, SurfaceTemp: 156, StarLuminosity: (120 / 255) ** 4, Eccentricity: 0.5, HydroExt: 5, Atmosphere: [gas(3, 'Methane', 0.2, 20, METHANE), gas(7, 'Nitrogen', 0.8, 80)] })
+  // Both generated 288 K trials are partial. At periapsis the wet atmosphere's dampening lowers the cost despite its 0.5 water term.
+  const partialCost = (extent, pressure, greenhouse) => {
+    const dampening = pressure / 10 + extent / 100 * 0.3
+    const mean = 120 * Math.min(3, 1 + pressure / 10 + greenhouse + 0.2)
+    const periapsis = mean * ((1 - dampening) / Math.sqrt(0.5) + dampening)
+    const cold = mean * ((1 - dampening) / Math.sqrt(1.5) + dampening)
+    const apoapsis = cold <= 245 ? cold * (1 - extent * 0.0015) : cold
+
+    return Math.round(Math.max((periapsis - 318) / 30, (258 - apoapsis) / 30, extent * 0.1) * 10000) / 10000
+  }
+
+  assert.equal(partialCost(5, 2.0009676320139618, 0.9999671481979485), 2.1215, 'independent wet 288 K trial cost')
+  assert.equal(partialCost(0, 2.000057998642639, 1.0000579986426386), 2.1815, 'independent dry 288 K trial cost')
+  const assessment = terraforming.assessTerraforming(body, species, 1, gasInfo)
+
+  assert.ok(assessment.plan && assessment.plan.partial)
+  assert.equal(assessment.plan.target.hydroExt, 5, 'the best bounded partial keeps its useful surface dampening')
+  assert.ok(!assessment.plan.steps.some((step) => step.drained > 0), 'no more expensive drain is charged')
+  const target = terraforming.terraformedBody(body, species, assessment.plan, gasInfo)
+  const independent = partialCost(5, target.AtmosPress, assessment.plan.target.greenhouse)
+
+  assert.equal(independent, 1.1455, 'the selected wet atmosphere has a cheaper worst cost than the drain-first fallback 1.1504')
+  assert.equal(assessment.after.raw, independent)
+  assert.equal(assessment.work, assessment.plan.steps.reduce((sum, step) => sum + step.work, 0))
+  const stages = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo }).stages
+
+  assert.equal(stages[stages.length - 1].cost.raw, independent)
+})
+
+check('noWorsening', 'no displayed plan raises the whole-orbit cost on the planted bodies and a deterministic bounded sample of every registered played save', async (w) => {
+  const { habitability, terraforming } = await w.modules()
+  let planted = 0
+  let displayed = 0
+  const compare = (body, species, info, label) => {
+    const assessment = terraforming.assessTerraforming(body, species, 1, info)
+
+    if (assessment.plan) {
+      displayed += 1
+      const independent = independentEndpoint(terraforming, body, species, assessment.plan, info, label)
+      const final = habitability.colonyCost(independent, species, 1, true)
+      const dangerous = (row) => {
+        const { dangerous, ppm } = habitability.gasDanger(row, species.BreatheID)
+
+        return !row.FrozenOut && dangerous > 0 && row.AtmosGasPercentage > ppm / 10000
+      }
+      const removedDanger = body.Atmosphere.some((row) => dangerous(row) && assessment.plan.steps.some((step) => step.gasId === row.AtmosGasID && step.set < row.GasAtm) && !independent.Atmosphere.some((gas) => gas.AtmosGasID === row.AtmosGasID && dangerous(gas)))
+
+      assert.ok(final.raw < assessment.cost.raw || (final.raw === assessment.cost.raw && removedDanger), `${label}: equality requires actual dangerous-gas removal`)
+      assert.equal(assessment.work, assessment.plan.steps.reduce((sum, step) => sum + step.work, 0), `${label}: complete displayed operation work`)
+
+      assert.ok(final.raw <= assessment.cost.raw, `${label}: displayed plan raises ${assessment.cost.raw} to ${final.raw}`)
+      assert.equal(assessment.after.raw, final.raw, `${label}: the displayed end and the final atmosphere agree`)
+    } else if (assessment.cost.colonisable) {
+      assert.equal(assessment.after.raw, assessment.cost.raw, `${label}: without a plan the body stays as it is`)
+      assert.equal(assessment.work, 0, `${label}: without a plan there is no time discount`)
+    }
+
+    return assessment
+  }
+
+  for (const [name, body] of Object.entries(BODIES)) {
+    compare(body, habitability.speciesLimits(SPECIES_ROW), gasInfo, name)
+    planted += 1
+  }
+
+  for (const campaign of await campaigns()) {
+    const ordered = [...campaign.bodies].sort((a, b) => a.SystemBodyID - b.SystemBodyID)
+    // Sixty-four evenly spaced bodies, plus every owned colony and both reported bodies if known: a fixed bound independent of the number of unexplored bodies.
+    const sample = new Set(ordered.filter((body) => body.OwnPopulations.length || [2513411, 2508694].includes(body.SystemBodyID)))
+
+    for (let index = 0; index < Math.min(64, ordered.length); index += 1) {
+      sample.add(ordered[Math.floor(index * ordered.length / Math.min(64, ordered.length))])
+    }
+
+    const info = (id) => campaign.gases.find((gas) => gas.GasID === id)
+    let evaluated = 0
+
+    for (const body of sample) {
+      for (const row of campaign.species) {
+        compare(body, habitability.speciesLimits(row), info, `${campaign.save.file}/${body.SystemBodyID}/${row.SpeciesID}`)
+        evaluated += 1
+      }
+    }
+
+    console.log(`INVARIANT ${path.basename(campaign.save.file)}: ${sample.size}/${ordered.length} bodies, ${evaluated} body/species assessments`)
+  }
+
+  const campaign = (await campaigns()).find((candidate) => candidate.save === PLAYED)
+  const original = campaign.bodies.find((body) => body.SystemBodyID === 2508694)
+  const species = habitability.speciesLimits(campaign.species[0])
+  const info = (id) => campaign.gases.find((row) => row.GasID === id)
+  const hotBody = (base, eccentricity, anti) => {
+    const pressure = 3.5 + anti
+    const atmosphere = [[10, 0.2], [7, 0.8], [5, 2.5], [22, anti]].filter(([, amount]) => amount > 0).map(([id, amount]) => ({ ...info(id), AtmosGasID: id, GasAtm: amount, FrozenOut: false, AtmosGasPercentage: Math.round(amount / pressure * 100 * 1e9) / 1e9 }))
+    const body = { ...original, BodyClass: 1, BodyTypeID: 2, TidalLock: 0, Gravity: 1, BaseTemp: base, Albedo: 1, OriginalAlbedo: 1, OrbitalDistance: 1, DistanceToParent: 1 - eccentricity, Eccentricity: eccentricity, Year: 8760, StarLuminosity: (base * Math.sqrt(1 - eccentricity) / 255) ** 4, AtmosPress: pressure, HydroExt: 100, HydroID: 2, Atmosphere: atmosphere, SurfaceTemp: 1000 }
+
+    return pressureRefreshed(body)
+  }
+  let visited = 0
+  let eligible = 0
+  let gridDisplayed = 0
+
+  for (const base of [450, 600, 800, 1000]) {
+    for (const eccentricity of [0.5, 0.8, 0.95]) {
+      for (const anti of [0, 0.2, 0.4]) {
+        visited += 1
+        const body = hotBody(base, eccentricity, anti)
+
+        if (body.SurfaceTemp <= 369) {
+          continue
+        }
+        eligible += 1
+        gridDisplayed += compare(body, species, info, `hot grid ${base}/${eccentricity}/${anti}`).plan ? 1 : 0
+      }
+    }
+  }
+  assert.equal(visited, 36)
+  assert.equal(eligible, 26, 'the hot-start eligibility convention is unchanged')
+  console.log(`HOT GRID ${visited} visited; ${eligible} eligible; ${gridDisplayed} displayed stationary plans`)
+  const witness = hotBody(600, 0.8, 0.22)
+  const badPlan = { steps: [{ key: 'water', gasId: 5, from: 2.5, set: 0, drained: 0 }, { key: 'antiGreenhouse', gasId: 22, from: 0.22, set: 0.36363636363636387, drained: 0 }], settling: { process: 'Stable', years: 0 }, target: { water: 0, breathable: 0.2, greenhouse: 0, antiGreenhouse: 0.36363636363636387, neutral: 0.8, sideGreenhouse: 0, sideAnti: 0, sideNeutral: 0, pressure: 1.363636363636364, temperature: 379.39205719999086, hydrosphere: 2, hydroExt: 100, albedo: 1, temperatureLow: 162.78627892302245, temperatureHigh: 379.39205719999086 }, gases: { greenhouse: { id: 20 }, anti: { id: 22 }, neutral: { id: 7 }, greenhouseSide: [], antiSide: [], neutralSide: [], breathable: witness.Atmosphere.find((row) => row.AtmosGasID === 10), waterVapour: witness.Atmosphere.find((row) => row.AtmosGasID === 5) }, partial: true }
+
+  assert.equal(witness.SurfaceTemp, 424.10153096726225, 'the exact zero-transfer witness climate')
+  assert.equal(terraforming.terraformedBody(witness, species, badPlan, info), null, 'the recorded 4.1764 Stable endpoint is not stationary and must be rejected')
+  const assessed = compare(witness, species, info, 'exact zero-transfer witness')
+
+  assert.equal(assessed.cost.raw, 4.7117)
+  console.log(`BALANCE WITNESS bad trial rejected; ${assessed.cost.raw} -> ${assessed.after.raw}; displayed ${!!assessed.plan}`)
+
+  console.log(`INVARIANT ${planted} planted bodies; ${displayed} displayed plans across planted and saved assessments`)
+})
+
+check('noBenefit', 'a plan that raises the worst cost, or only changes costs hidden under a fixed floor, is not displayed; equal-cost dangerous-gas removal retains its complete priced plan', async (w) => {
+  const { habitability, terraforming, colonization } = await w.modules()
+  const species = habitability.speciesLimits(SPECIES_ROW)
+  const campaign = (await campaigns()).find((candidate) => candidate.save === PLAYED)
+  const original = campaign.bodies.find((body) => body.SystemBodyID === 2508694)
+  const info = (id) => campaign.gases.find((row) => row.GasID === id)
+  const settled = pressureRefreshed({ ...original, HydroExt: 20, SurfaceTemp: 18, AtmosPress: 1.98, Atmosphere: [gas(10, 'Oxygen', 0.1, 0.1 / 2.08 * 100, info(10)), gas(22, 'Frigusium', 1.98, 1.98 / 2.08 * 100, info(22))] })
+  const candidate = terraforming.planTerraforming(settled, species, info)
+  const cost = habitability.colonyCost(settled, species, 1)
+  const end = habitability.colonyCost(terraforming.terraformedBody(settled, species, candidate, info), species, 1, true)
+
+  assert.ok(end.raw > cost.raw && end.raws.periapsis <= cost.raws.periapsis, 'an unchanged or cheaper periapsis does not outweigh a more expensive apoapsis')
+  const unchanged = terraforming.assessTerraforming(settled, species, 1, info)
+
+  for (const assessment of [unchanged, (await w.staged('noBenefit')).assessment]) {
+    assert.equal(assessment.plan, null, 'do nothing wins against a worsening or pointless candidate')
+    assert.equal(assessment.after.raw, assessment.cost.raw, 'the end cost is the cost as it is')
+    assert.equal(assessment.work, 0, 'no work is charged')
+    assert.equal(assessment.reason, 'No change of atmosphere in the bounded search lowers the colony cost')
+    const vm = instantiate(await w.component(), { $store: { getters: {}, state: {} }, data: { item: { body: settled }, shown: { assessment, species }, rules: { ColonizationSkill: 1 }, gases: GAS_LIST } })
+    const ranked = colonization.evaluate({ species, assessment, capacityNow: 100, capacityAfter: 100 }, { goal: 'people', ranking: colonization.DEFAULT_RANKING, terraformCapacityPerYear: 1e6, distanceAU: 0, minerals: { surveyed: false }, cmcReady: false })
+
+    assert.equal(vm.plan, null, 'there is no blueprint or cost arrow')
+    assert.deepEqual(vm.stageRows, [], 'there is no stage table without a plan')
+    assert.equal(vm.noPlanText, `${assessment.reason}.`, 'the reason reads as one sentence')
+    assert.equal(vm.outcome.description, 'The body stays as it is.', 'the verdict never claims terraforming helped')
+    assert.equal(ranked.strategy, 'now', 'the body ranks as it is')
+    assert.equal(ranked.raw, assessment.cost.raw, 'the ranking uses the as-is whole-orbit cost')
+    assert.equal(ranked.years, 0, 'the ranking charges no terraforming time')
+  }
+
+  const equal = await stagesOf(w, 'equalToxic')
+
+  assert.equal(equal.assessment.after.raw, equal.assessment.cost.raw, 'dangerous-gas removal is useful at the same final cost')
+  assert.ok(equal.assessment.plan.steps.some((step) => step.key === 'toxic'), 'the dangerous gas is removed')
+  assert.ok(equal.assessment.plan.steps.some((step) => step.key !== 'toxic'), 'the complete atmosphere plan is retained, not cropped after pricing')
+  assert.equal(equal.assessment.work, equal.assessment.plan.steps.reduce((sum, step) => sum + step.work, 0), 'the complete plan carries its work')
+  assert.ok(equal.assessment.work > 0, 'equal-cost work is not free')
+  assert.equal(equal.stages[equal.stages.length - 1].cost.raw, equal.assessment.after.raw, 'the ending stage and header agree')
 })
 
 check('bars', 'the factor bars of the body detail flag the factors the first stage names, every one of a tie', async (w) => {
@@ -566,7 +1098,7 @@ check('operations', 'each gas operation names the limits after it, what it clear
   const last = swing[swing.length - 1]
 
   assert.deepEqual(keysOf(last.limiting), ['temperature'])
-  assert.deepEqual(last.limiting[0].at, ['periapsis'])
+  assert.deepEqual(last.limiting[0].at, ['current', 'periapsis', 'apoapsis'].filter((point) => last.cost[point] === last.cost.raw), 'the temperature limit names the worst point of the cheaper fallback, not the discarded ideal-centred hot end')
   assert.ok(last.points.current.factors.temperature < last.limiting[0].value, 'not the temperature now')
 
   const moon = (await stagesOf(w, 'moon')).stages[2]
@@ -593,31 +1125,30 @@ check('operations', 'each gas operation names the limits after it, what it clear
   assert.deepEqual(swung.cleared[2], [])
   assert.deepEqual(swung.stages[2].overtaken, ['hydrosphere', 'gravity'])
 
-  // A plan that only removes gas but whose target holds the water the plan settles to ends at the cost the Planner shows after terraforming.
-  const removal = await stagesOf(w, 'removalOnly')
+  // Neither a removal-only nor an empty trial can improve the water cost by inventing unsupplied surface water.
+  for (const name of ['removalOnly', 'noOperation']) {
+    const found = await w.staged(name)
 
-  assert.ok(removal.assessment.plan.steps.every((step) => step.key === 'toxic'))
-  assert.equal(removal.stages[removal.stages.length - 1].cost.raw, removal.assessment.after.raw)
-  assert.ok(removal.stages[0].cost.raw > removal.assessment.after.raw, 'the plan\'s target lowers the cost')
-  assert.deepEqual(removal.stages.map(({ kind }) => kind), ['start', 'step', 'target'], 'the removal is one stage and the target another')
-  assert.equal(removal.stages[1].hydroExt, removal.body.HydroExt, 'removing methane leaves the water as saved')
-  assert.equal(removal.stages[1].cost.raw, 2, 'the water still limits after the removal')
-  assert.deepEqual(keysOf(removal.stages[1].limiting), ['hydrosphere'])
-  assert.ok(!removal.stages[1].cleared.includes('hydrosphere'), 'the removal does not clear the water')
-  assert.deepEqual(keysOf(removal.stages[2].limiting), ['gravity'])
-  assert.equal(removal.stages[2].step, null)
+    assert.equal(found.assessment.plan, null, `${name}: no consistent improving target exists`)
+    assert.equal(found.assessment.after.raw, found.assessment.cost.raw)
+    assert.equal(found.assessment.work, 0)
+    assert.equal(found.result, null)
+    assert.equal((await w.detail(name)).stageRows.length, 0, 'there is no fictitious target stage')
+  }
 
-  // A plan with no gas operation and no settling still moves to its target: the stage after the start is labelled as the end state and carries no step.
-  const idle = await stagesOf(w, 'noOperation')
+  // A stage-only climate refresh with no gas work still needs a correctly labelled target, without inventing water.
+  const { habitability, terraforming, limits } = await w.modules()
+  const body = earthlike({ SurfaceTemp: 200, Atmosphere: [gas(10, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.795, 79.5), gas(5, 'Water Vapour', 0.005, 0.5)] })
+  const species = habitability.speciesLimits(SPECIES_ROW)
+  const plan = { steps: [], settling: { process: 'Stable', years: 0 }, target: { water: 0.005, breathable: 0.2, greenhouse: 0, antiGreenhouse: 0, neutral: 0.795, sideGreenhouse: 0, sideAnti: 0, sideNeutral: 0, hydroExt: 50, hydrosphere: 3, albedo: 1, temperature: 275 }, gases: { greenhouse: { id: 20 }, anti: { id: 22 }, neutral: { id: 7 }, greenhouseSide: [], antiSide: [], neutralSide: [] } }
+  const end = terraforming.terraformedBody(body, species, plan, gasInfo)
+  const assessment = { cost: habitability.colonyCost(body, species, 1), plan }
+  const idle = limits.terraformStages({ assessment, body, species, skill: 1, gasInfo }).stages
 
-  assert.deepEqual(idle.assessment.plan.steps, [])
-  assert.equal(idle.assessment.plan.settling.process, 'Stable')
-  assert.deepEqual(idle.stages.map(({ kind }) => kind), ['start', 'target'])
-  assert.equal(idle.stages[1].step, null)
-  assert.equal(idle.stages[0].cost.raw, 2, 'the saved start is kept')
-  assert.equal(idle.stages[1].cost.raw, idle.assessment.after.raw)
-  assert.equal(idle.stages[1].hydroExt, idle.assessment.plan.target.hydroExt)
-  assert.equal((await w.detail('noOperation')).stageRows.length, 2)
+  assert.equal(end.HydroExt, 50, 'the idle climate refresh conserves the existing water')
+  assert.deepEqual(idle.map(({ kind }) => kind), ['start', 'target'])
+  assert.equal(idle[1].step, null)
+  assert.equal(idle[1].cost.raw, 0, '250 * (1 + 1 / 10) = 275 K, with suitable unchanged air and water')
 })
 
 check('stages', 'every stage of every plan is what its points say: the worst cost, the factors tied at it, the next below it, the changes from the stage before', async (w) => {
@@ -1319,14 +1850,14 @@ check('leverSweep', 'across eccentric bodies, orbits and water, a plan pulls a l
   assert.ok(kept >= 10, `${kept} plans that keep a temperature limit`)
 })
 
-check('leverGuard', 'a lever that costs the species more than the cold end it saves is not pulled: a methane breather pays for liquid water, so the plan keeps its temperature limit and drains the water the body has', async (w) => {
+check('leverGuard', 'a lever that costs the species more than the temperature it saves is not pulled: a methane breather can retain water as ice when that leaves a cheaper whole-orbit cost than a thaw and drain', async (w) => {
   const found = await w.staged('methaneWet', 1, WET_METHANE_ROW)
   const { plan, outcome } = found.assessment
 
   assert.equal(outcome, 'limited', 'the body stays limited by its temperature')
   assert.equal(plan.partial, true)
   assert.equal(plan.dampening, null, 'no lever is pulled')
-  assert.ok(plan.steps.some(({ drained }) => drained > 0), 'the plan takes the liquid water off instead')
+  assert.ok(Object.values(found.result.stages[found.result.stages.length - 1].points).every(({ factors }) => factors.hydrosphere === 0), 'the cheaper frozen target has no water penalty at any priced point')
   assert.ok(found.result.stages.every(({ lever }) => lever === null), 'no stage names a lever')
 })
 
@@ -1385,6 +1916,32 @@ check('leverComponent', 'the body detail words the lever of a stage and of a ste
 // ---- The planted faults ----------------------------------------------------------------------------------------------
 // Each plants one change in one source, and the checks named must fail on it. [label, target, text, replacement, the checks that must fail]
 const FAULTS = [
+  ['frozen stored gas supplies active pressure', 'terraforming', 'pressure += gas.FrozenOut ? 0 : gas.GasAtm', 'pressure += gas.GasAtm', ['frozenEndpoint']],
+  ['condensed water remains in the atmosphere', 'terraforming', 'Math.max(0, suppliedWater - transferred) : supplied', 'suppliedWater : supplied', ['frozenEndpoint']],
+  ['frozen greenhouse gas still warms the endpoint', 'terraforming', 'greenhouse += !gas.FrozenOut && gas.GHGas ? gas.GasAtm : 0', 'greenhouse += gas.GHGas ? gas.GasAtm : 0', ['frozenEndpoint']],
+  ['frozen anti-greenhouse gas still cools the endpoint', 'terraforming', 'anti += !gas.FrozenOut && gas.AntiGHGas ? gas.GasAtm : 0', 'anti += gas.AntiGHGas ? gas.GasAtm : 0', ['frozenEndpoint']],
+  ['hot refreshed endpoints keep their condensation', 'terraforming', '(transferred > 0 && endpoint.SurfaceTemp > 369)', 'false', ['hotCondensation']],
+  ['operations count frozen gas as active', 'terraforming', 'const initial = refreshAtmosphere(previous, [...atmosphere.values()], extent, previous.Albedo)', 'const initial = refreshAtmosphere(previous, [...atmosphere.values()].map((gas) => ({ ...gas, FreezingPoint: 0 })), extent, previous.Albedo)', ['frozenStages']],
+  ['unsupplied water is clamped into an invented surface', 'terraforming', 'if (suppliedWater - transferred < -1e-10) {', 'if (false) {', ['waterSupply']],
+  ['an arbitrary smaller surface is promised as evaporation', 'terraforming', 'if (transferred < 0) {', 'if (false) {', ['waterSupply']],
+  ['refreshed ice retains the solved liquid albedo', 'terraforming', 'if (!(Math.abs(endpoint.Albedo - expectedAlbedo) < 1e-10)) {', 'if (false) {', ['phaseAlbedo']],
+  ['all frozen is priced as zero pressure', 'terraforming', 'if (rows.length && pressure === 0) {', 'if (false) {', ['phaseAlbedo']],
+  ['F1 zero transfer bypasses final water stationarity', 'terraforming', 'return waterIsStationary(endpoint) ? endpoint : null', 'return transferred === 0 || waterIsStationary(endpoint) ? endpoint : null', ['waterStationarity', 'noWorsening']],
+  ['F2 liquid uses the hot evaporation target', 'terraforming', 'const liquidTarget = body.AtmosPress * (extent / 100) * HUMIDITY', 'const liquidTarget = extent / HYDRO_PER_ATM', ['waterStationarity']],
+  ['F3 water stationarity reads pre-refresh climate', 'terraforming', 'return waterIsStationary(endpoint) ? endpoint : null', 'return waterIsStationary({ ...endpoint, SurfaceTemp: target.temperature, HydroID: target.hydrosphere }) ? endpoint : null', ['waterStationarity']],
+  ['None suppresses retained-water evaporation', 'terraforming', 'if (phase === HYDROSPHERE.NONE && extent > 0) {', 'if (false) {', ['waterStationarity']],
+  ['the water allowance widens to the search tolerance', 'terraforming', 'const WATER_STATIONARITY_ALLOWANCE = 1e-8', 'const WATER_STATIONARITY_ALLOWANCE = 1e-4', ['waterStationarity']],
+  ['water stationarity requires exact equality', 'terraforming', 'const WATER_STATIONARITY_ALLOWANCE = 1e-8', 'const WATER_STATIONARITY_ALLOWANCE = 0', ['waterStationarity']],
+  ['a refused wet precursor discards the stationary drain', 'terraforming', 'return !plan && species.BreatheID !== GAS.OXYGEN && body.HydroExt > 0 && lever.hydroExt === 0 ? planFor(body, species, gasInfo, targetMean, hold, true, lever) : plan', 'return plan', ['refusedWetDrain']],
+  ['equal-cost water danger removal is not another goal', 'terraforming', 'const meetsOtherGoal = body.Atmosphere.some((gas) => isDangerousGas(gas, species, body.SurfaceTemp, false) && plan.steps.some((step) => step.gasId === gas.AtmosGasID && step.set < gas.GasAtm) && !target.Atmosphere.some((after) => after.AtmosGasID === gas.AtmosGasID && isDangerousGas(after, species, target.SurfaceTemp, true)))', "const meetsOtherGoal = plan.steps.some((step) => step.key === 'toxic')", ['dangerousWater']],
+  ['every equal-cost water removal is another goal', 'terraforming', 'const meetsOtherGoal = body.Atmosphere.some((gas) => isDangerousGas(gas, species, body.SurfaceTemp, false) && plan.steps.some((step) => step.gasId === gas.AtmosGasID && step.set < gas.GasAtm) && !target.Atmosphere.some((after) => after.AtmosGasID === gas.AtmosGasID && isDangerousGas(after, species, target.SurfaceTemp, true)))', "const meetsOtherGoal = plan.steps.some((step) => step.key === 'water' && step.set < step.from)", ['dangerousWater']],
+  ['a partial drain wins before either alternative is priced', 'terraforming', 'return dryCost < wetCost || (dryCost === wetCost && draining.work < plan.work) ? draining : plan', 'return draining', ['wetPartial']],
+  ['the partial fallback keeps the first solved aim', 'terraforming', 'if (!fallback || cost < fallbackCost || (cost === fallbackCost && trial.work < fallback.work)) {', 'if (!fallback) {', ['hotPeriapsis']],
+  ['the partial fallback ranks only the present position', 'terraforming', 'const cost = leftCost(body, species, trial, gasInfo)', 'const cost = colonyCost(terraformedBody(body, species, trial, gasInfo), species, 1, true).current', ['hotPeriapsis']],
+  ['partial aims stay inside the species comfort range', 'terraforming', 'index <= PARTIAL_TEMPERATURE_RUNGS', 'index < 0', ['hotPeriapsis']],
+  ['a plan is rejected only if all three points worsen', 'terraforming', 'planned.raw > cost.raw || (!improvesCost && !meetsOtherGoal)', '(planned.raws.current > cost.raws.current && planned.raws.periapsis > cost.raws.periapsis && planned.raws.apoapsis > cost.raws.apoapsis) || (!improvesCost && planned.raw === cost.raw && !meetsOtherGoal)', ['noBenefit']],
+  ['equal-cost work without another goal is kept', 'terraforming', '(!improvesCost && !meetsOtherGoal)', 'false', ['noBenefit']],
+  ['the verdict claims an unused plan helped', 'vue', '!this.plan && ![\'done\', \'no\'].includes(this.assessment.outcome)', 'false', ['noBenefit']],
   ['a methane breather is rated by the oxygen pair', 'habitability', 'const { dangerous, ppm } = gasDanger(gas, species.BreatheID)', 'const { dangerous, ppm } = gasDanger(gas)', ['breathers']],
   ['the plan sorts the toxic gases by the oxygen pair', 'terraforming', 'const toxicFor = (gas, species, warmedTo) => isDangerousGas(gas, species, 0, false) || (warmedTo !== null && isDangerousGas(gas, species, warmedTo, true))', 'const toxicFor = (gas, species) => isDangerousGas(gas, { ...species, BreatheID: GAS.OXYGEN }, 0, false)', ['breathers']],
   ['a gas the breather rates is toxic whatever its share', 'terraforming', 'const toxicFor = (gas, species, warmedTo) => isDangerousGas(gas, species, 0, false) || (warmedTo !== null && isDangerousGas(gas, species, warmedTo, true))', 'const toxicFor = (gas, species) => gasDanger(gas, species.BreatheID).dangerous > 0', ['settle', 'thaw']],
@@ -1412,7 +1969,7 @@ const FAULTS = [
   ['every stage carries every operation', 'limits', 'plan.steps.slice(0, applied)', 'plan.steps', ['operations']],
   ['the next limits are cut to the first factor', 'limits', 'merged(others.filter((factor) => round4(factor.value) === top))', 'merged(others.filter((factor) => round4(factor.value) === top).slice(0, 1))', ['ties', 'stages', 'component']],
   ['the gas shares are not recomputed after an operation', 'habitability', 'AtmosGasPercentage: total > 0 ? Math.round((gas.GasAtm / total) * 100 * SHARE_DECIMALS) / SHARE_DECIMALS : 0', 'AtmosGasPercentage: gas.AtmosGasPercentage', ['operations']],
-  ['a planned gas row carries its pressure as its share', 'terraforming', 'const rows = withAtmosphereShares(atmosphere)', 'const rows = atmosphere.map((gas) => ({ ...gas, AtmosGasPercentage: gas.GasAtm }))', ['plannedShares']],
+  ['a planned gas row carries its pressure as its share', 'terraforming', 'const rows = withAtmosphereShares(atmosphere.map((gas) => ({ ...gas })))', 'const rows = atmosphere.map((gas) => ({ ...gas, AtmosGasPercentage: gas.GasAtm }))', ['plannedShares']],
   ['the settling stage is never made', 'limits', 'const settles = plan.settling.process !== \'Stable\' && plan.settling.years > 0', 'const settles = false', ['operations', 'settle']],
   ['the first stage is priced as a planned body', 'limits', 'planned: false, previous: null', 'planned: true, previous: null', ['start']],
   ['the limit is read at now only', 'limits', 'distinct.filter((name) => costs[name] === raw)', 'distinct.filter((name) => name === \'current\')', ['stages', 'operations']],
@@ -1423,8 +1980,7 @@ const FAULTS = [
   ['a factor whose penalty stands is called cleared when it only stops limiting', 'limits', 'Math.max(...distinct.map((name) => round4(standing(name, entry.key)))) < round4(entry.value)', 'true', ['operations', 'stages']],
   ['the last operation takes the planner\'s end state', 'limits', 'body: bodyAfter(body, plan, gasInfo, index + 1), species', 'body: index === steps.length - 1 ? ending : bodyAfter(body, plan, gasInfo, index + 1), species', ['conservation', 'settle', 'operations']],
   ['a short settling is left out', 'limits', 'const settles = plan.settling.process !== \'Stable\' && plan.settling.years > 0', 'const settles = plan.settling.process !== \'Stable\' && plan.settling.years > 0.1', ['settle']],
-  ['a plan with no gas operation stops at the saved start', 'limits', 'if (settles || waterLever || !sameCosts || !sameLimits) {', 'if (settles) {', ['operations', 'end']],
-  ['a target that differs after the last operation is left out', 'limits', 'if (settles || waterLever || !sameCosts || !sameLimits) {', 'if (settles || !steps.length) {', ['operations', 'end']],
+  ['a plan with no gas operation stops at the saved start', 'limits', 'if (settles || waterLever || !sameCosts || !sameLimits) {', 'if (settles) {', ['operations']],
   ['the floor is stated before the skill', 'limits', 'floorWorst: stages[0].lowGravity ? skill : 0', 'floorWorst: stages[0].lowGravity ? 1 : 0', ['fixed']],
   ['a lock is flagged on a moon', 'limits', 'tidalLock: !!body.TidalLock && body.BodyClass !== BODY_CLASS.MOON', 'tidalLock: !!body.TidalLock', ['fixed']],
   ['the bars flag only the first of a tie', 'vue', 'new Set(limitingFactors(factors).map(', 'new Set(limitingFactors(factors).slice(0, 1).map(', ['bars']],
@@ -1432,13 +1988,13 @@ const FAULTS = [
   ['the stage table shows no rows', 'vue', 'v-for="row in stageRows"', 'v-for="row in stageRows.slice(0, 0)"', ['template']],
   ['the limit chips show no entries', 'vue', 'v-for="entry in row.limiting"', 'v-for="entry in row.limiting.slice(0, 0)"', ['template']],
   ['the page does not hand the gases over', 'page', ' :gases="gases"', '', ['wiring']],
-  ['the plan reads its swing off the saved body', 'terraforming', 'const ends = temperaturePoints(terraformedBody(body, species, plan, gasInfo))', 'const ends = temperaturePoints(body)', ['dampening']],
+  ['the plan reads its swing off the saved body', 'terraforming', 'const ends = temperaturePoints(endpoint)', 'const ends = temperaturePoints(body)', ['dampening']],
   ['a stage dampens on the saved pressure', 'terraforming', 'surfaceTemperature({ ...previous, AtmosPress: pressure, HydroExt: extent },', 'surfaceTemperature({ ...previous, HydroExt: extent },', ['dampening']],
   ['the target search returns only the ideal trial', 'terraforming', 'if (initial && !initial.partial && clearsWater(initial)) {', 'if (true) {', ['targetSearch', 'phase']],
   ['the target search ignores the hot extreme', 'terraforming', 'const high = Math.max(ends.current, ends.periapsis, ends.apoapsis)', 'const high = Math.max(ends.current, ends.apoapsis)', ['targetSearch', 'phase']],
   ['the target search ignores the cold extreme', 'terraforming', 'const low = Math.min(ends.current, ends.periapsis, ends.apoapsis)', 'const low = Math.min(ends.current, ends.periapsis)', ['targetSearchImpossible']],
   ['the target search ignores gas freezing at an extreme', 'habitability', 'if (threshold >= gas.FreezingPoint) {', 'if (true) {', ['targetGasPhase']],
-  ['a null trial terminates the target search', 'terraforming', 'fallback = fallback || trial', 'if (!trial) { return { plan: fallback, reached } }\n\n    fallback = fallback || trial', ['targetPressureBracket']],
+  ['a null trial terminates the target search', 'terraforming', '    consider(trial)', '    if (!trial) { return { plan: fallback, reached } }\n\n    consider(trial)', ['targetPressureBracket']],
   ['the target search restores r3 side pruning', 'terraforming', ORIGINALS.terraforming.slice(ORIGINALS.terraforming.indexOf('  // Integer indices'), ORIGINALS.terraforming.indexOf('\n}\n', ORIGINALS.terraforming.indexOf('const searchAims'))), `  const search = (minimum, maximum, cooling) => {
     const edgeAim = cooling ? minimum : maximum
     const edge = planAtTemperature(body, species, gasInfo, edgeAim, false, lever)
