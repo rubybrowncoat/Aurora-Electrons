@@ -1424,6 +1424,7 @@ const evaluatorChecks = (library, data) => {
         expectThat('a count of 0 with no part is refused', !throws(() => evaluate({ ...base, engine: null, engines: 0 })) && !throws(() => evaluate({ ...boxcar(), stage: null, stages: 0 }))),
         expectThat('an engine-less saved design is counted with no engine', library.missileCandidateOf(modded, designOf(modded, 154198)).engines === 0 && evaluate(library.missileCandidateOf(modded, designOf(modded, 154198))).verdict !== undefined),
         expectThat('a stage with its minerals given is refused', !throws(() => evaluate(boxcar()))),
+        expectThat('a stage whose cost equals its stored minerals gives 0 Corundium despite float cancellation', !throws(() => evaluate({ ...boxcar(), stage: library.missileStageOf({ designs: [{ id: 1, row: { SecondStageID: 0, Size: 1, Cost: 1.696, FuelRequired: 0, TotalFlightTime: 1, Corbomite: 0, Tritanium: 0, Boronide: 0.636, Uridium: 1.06, Gallicite: 0 } }] }, { SecondStageID: 1, NumSS: 1 }) }))),
         expectThat('a limit of 0 is not a limit', zero.verdict === 'infeasible')
       )
     }],
@@ -1634,7 +1635,8 @@ const MISSILE_MUTANTS = [
   { name: 'an engine counted with no engine accepted', find: 'if (engines > 0 && !hasEngine) {', replace: 'if (false) {', fails: [N.validation] },
   { name: 'a stage counted with no stage accepted', find: 'if (stages > 0 && !hasStage) {', replace: 'if (false) {', fails: [N.validation] },
   { name: 'the engines of an engine-less saved design counted', find: 'engines: engineMounted ? row.NumEngines : 0', replace: 'engines: row.NumEngines', fails: [N.roundTrip, N.validation] },
-  { name: 'the Vendarite of a saved stage left out', find: 'Corundium: stage.row.Cost - stored, Vendarite: 0 }', replace: 'Corundium: stage.row.Cost - stored }', fails: [N.roundTrip] },
+  { name: 'the Vendarite of a saved stage left out', find: 'Corundium: Math.max(0, roundHalfEven(stage.row.Cost - stored, 4)), Vendarite: 0 }', replace: 'Corundium: Math.max(0, roundHalfEven(stage.row.Cost - stored, 4)) }', fails: [N.roundTrip] },
+  { name: 'the Corundium of a saved stage not clamped at 0', find: 'Corundium: Math.max(0, roundHalfEven(stage.row.Cost - stored, 4))', replace: 'Corundium: stage.row.Cost - stored', fails: [N.validation] },
   { name: 'the engine of a saved design counted from the record given', find: 'engines: engineMounted ? row.NumEngines : 0', replace: 'engines: engine ? row.NumEngines : 0', fails: [N.mounting] },
   { name: 'the second stages of a saved design counted from the record given', find: 'stages: stageMounted ? row.NumSS : 0', replace: 'stages: stage ? row.NumSS : 0', fails: [N.mounting] },
   { name: 'a mounted engine given no record dropped', find: 'engine: engineMounted ? engine || missingMissileEngine(row) : null', replace: 'engine: engine || null', fails: [N.mounting] },
@@ -2720,7 +2722,7 @@ const ALL_MUTANTS = [...MISSILE_MUTANTS, ...SENSOR_MUTANTS, ...PIN_MUTANTS]
 
 // What a planted fault can change: the rules and the loaders of the utilities and the reconciliation of scripts/lib. `UTILITY_CLOSURE` is every utility the first two load, copied with them so the mutant loads on its own.
 const PLANTABLE = [{ name: 'design-rules', directory: UTILITIES }, { name: 'design-data', directory: UTILITIES }, { name: 'missile-reconcile', directory: MISSILE_LIBRARY }, { name: 'sensor-reconcile', directory: MISSILE_LIBRARY }]
-const UTILITY_CLOSURE = ['design-rules', 'design-data', 'provenance', 'tank-packing', 'missile-hit', 'capabilities', 'capability-reads']
+const UTILITY_CLOSURE = ['design-rules', 'design-data', 'provenance', 'tank-packing', 'missile-hit', 'capabilities', 'capability-reads', 'decimal']
 
 // Copies the utilities and the reconciliation into a temporary folder with `replace` in place of `find`, which must be found once in one of the files that can be planted. Returns the folder and the two folders to load from.
 const plantedFault = (find, replace) => {

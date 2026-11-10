@@ -7,6 +7,8 @@
 
   The map's danger flag is checked here too: the protection of the race's ships in a system against the system's danger rating, compared unrounded, so a protection of 4.6 against a danger of 5 is a shortfall that rounding would hide.
 
+  The reported body (AE-311-22): Tau Cephei A I of saves/AuroraDB-320-thexruler.db, an oxygen breather's liquid ocean above 75 %, planned with the planner's own loaders and held against an independent working of the game's climate and colony cost rules from the save's own rows (the save is skipped when it is absent).
+
   Each planted fault (a copy of one source with one change, loaded in place of it) must fail the checks it names. Prints `N of N checks passed`; a check that fails, a fault that no named check catches and a fault whose anchor does not match each set exit code 1. `--no-mutations` skips the faults.
 
   bun scripts/check-breather-cost.js [--no-mutations]
@@ -384,7 +386,8 @@ check('planner', 'a plan for a breather other than oxygen selects a cheaper whol
   const sulphur = planFor(m, 15)
 
   assert.ok(oxygen.target && methane.target && sulphur.target, 'each breather has a plan')
-  assert.ok(oxygen.target.HydroExt >= 75, 'the oxygen target keeps its water unless a supplied transfer can settle it; a preferred smaller liquid extent alone cannot evaporate the excess')
+  close(oxygen.target.HydroExt, 75, 'the oxygen target keeps the 75 % that keeps the most people: its melted ocean is drained down to it, not to none and not left at 100 %')
+  assert.equal((oxygen.assessment.plan.steps.find((step) => step.key === 'water') || { drained: null }).drained, 25, 'the water step drains the 25 % above 75 %')
   // A full wet target is no reason to keep a water penalty when another sampled atmosphere can finish a thaw and drain over the whole orbit.
   for (const found of [methane, sulphur]) {
     assert.equal(found.target.HydroExt, 0, 'the selected drain leaves no surface water')
@@ -430,7 +433,7 @@ const speciesOf = (m, BreatheID, row = {}) => m.h.speciesLimits(speciesRow(Breat
 const wet = (BreatheID, extra = {}) => planet(BreatheID, { HydroExt: 50, HydroID: HYDROSPHERE.liquid, SurfaceTemp: 280.5, ...extra })
 const ZERO = { current: 0, periapsis: 0, apoapsis: 0 }
 
-check('drain', 'a world whose air suits a breather other than oxygen but whose liquid water costs is not done: the plan drains the water as the game\'s terraformer does and counts the drain as work, ice that no breather can drain is left, and what costs nothing needs no plan', (m) => {
+check('drain', 'a world whose air suits a breather other than oxygen but whose liquid water costs is not done: the plan drains the water as the game\'s terraformer does and counts the drain as work, ice that no breather can drain is left, what costs nothing needs no plan, and an oxygen breather\'s liquid ocean above 75 % is drained down to 75 % and no further', (m) => {
   const assess = (breather, body, row = {}) => m.t.assessTerraforming(body, speciesOf(m, breather, row), 1, gasInfo)
 
   // 50 % of liquid water at 280.5 K under 1 atm of the breather's gas and nitrogen: the extent times 0.1 for methane and ammonia, times 1 for sulphur dioxide.
@@ -470,7 +473,7 @@ check('drain', 'a world whose air suits a breather other than oxygen but whose l
   assert.equal(stuck.plan, null, 'the search offers no equal-cost atmosphere change that leaves the water penalty')
   assert.equal(stuck.reason, 'No change of atmosphere in the bounded search lowers the colony cost', 'the reason states that no improving plan was found')
 
-  // The cold ice body on a circular orbit can thaw and drain for the other breathers; oxygen keeps its water when the smaller liquid target has no solved evaporation balance.
+  // The cold ice body on a circular orbit can thaw and drain for the other breathers (all the melted water) and for an oxygen breather (what is above the 75 % that keeps the most people).
   for (const breather of [3, 4, 15]) {
     const { assessment, target } = planFor(m, breather, { Eccentricity: 0 })
     const name = `${NAMES[breather]} breather, 100 % ice warmed to liquid`
@@ -482,9 +485,158 @@ check('drain', 'a world whose air suits a breather other than oxygen but whose l
   }
 
   const sweet = planFor(m, 10, { Eccentricity: 0 })
+  const melted = sweet.assessment.plan.steps.find((step) => step.key === 'water')
+  const air = sweet.target.Atmosphere.filter((gas) => !gas.FrozenOut)
+  // The thawed surface loses the ice albedo it had (0.0015 for each percent of the surface), so the albedo is 1 + 0.0015 * 100; the orbit is circular, so the temperature is the base 180 K times the two multipliers and the albedo.
+  const temperature = 180 * Math.min(3, 1 + air.reduce((sum, gas) => sum + gas.GasAtm, 0) / 10 + air.filter((gas) => gas.GHGas).reduce((sum, gas) => sum + gas.GasAtm, 0)) * (1 + 0.0015 * 100)
 
-  assert.equal(sweet.target.HydroExt, 100, 'an oxygen breather cannot lose 25 % of the surface to an unsolved evaporation target')
-  assert.ok(sweet.assessment.plan.steps.every((step) => !step.drained), 'and drains nothing')
+  assert.equal(sweet.assessment.outcome, 'yes', 'an oxygen breather\'s 100 % ice warmed to liquid is solved')
+  assert.equal(melted ? melted.drained : null, 25, 'the plan drains the 25 % above the 75 % that keeps the most people, not the whole melted ocean')
+  close(sweet.target.HydroExt, 75, 'the end state keeps 75 % of the surface in water')
+  assert.equal(sweet.target.HydroID, HYDROSPHERE.liquid, 'and it is liquid')
+  assert.ok(temperature >= 250 && temperature <= 310, `the worked end temperature ${temperature} is inside the species' 250 to 310 K`)
+  close(sweet.target.SurfaceTemp, temperature, 'the end temperature is the one the climate rule gives')
+  assert.deepEqual(sweet.assessment.after.raws, ZERO, 'nothing costs after the plan')
+})
+
+// ---- An oxygen breather's ocean above 75 % ---------------------------------------------------------------------------------------------
+// The body of the report (AE-311-22), read from the save it was reported on, a witness on the terms of the played saves of scripts/lib/fixtures.js: Tau Cephei A I (game 161, race 909), a tide-locked planet with a 94.79 % liquid ocean at 75.7 °C and 0.337 atm of oxygen, for the Human species (878: oxygen from 0.1 to 0.3 atm, 287.02 K give or take 24, up to 4 atm). Every liquid end state of an oxygen breather aims the ocean at 75 % (above it the capacity falls), so each needs surface water taken off, which only a drain does.
+const REPORTED = Object.freeze({ file: 'saves/AuroraDB-320-thexruler.db', gameId: 161, raceId: 909, bodyId: 2485971, speciesId: 878 })
+
+// The game's climate worked from stored rows alone, with no call of the code under test. At `distance` AU from the star a body is at 255 / sqrt(distance / sqrt(luminosity)) (4 K at least), times the greenhouse multiplier min(3, 1 + pressure / 10 + warming gas) and the albedo, over the anti-greenhouse multiplier min(3, 1 + dust / 20000 + cooling gas). An eccentric body with air or water blends that toward the same at its own orbital distance by the dampening (min(0.5, pressure / 10) + min(0.3, water / 100 * 0.3)) * min(1, 1 / sqrt(year / 8760)), water in percent.
+const climateAt = ({ body, luminosity, pressure, warming, cooling, extent }, distance) => {
+  const equilibrium = (at) => Math.max(255 / Math.sqrt(at / Math.sqrt(luminosity)), 4)
+  const dampening = body.Eccentricity > 0 && (pressure > 0 || extent > 0) ? (Math.min(0.5, pressure / 10) + Math.min(0.3, extent / 100 * 0.3)) * Math.min(1, 1 / Math.sqrt(body.Year / 8760)) : 0
+
+  return (equilibrium(distance) * (1 - dampening) + equilibrium(body.OrbitalDistance) * dampening) * Math.min(3, 1 + pressure / 10 + warming) * body.Albedo / Math.min(3, 1 + body.DustLevel / 20000 + cooling)
+}
+
+check('oxygen drain', 'an oxygen breather\'s liquid ocean above 75 % is planned with the drain down to 75 %, neither left partial nor drained to none: Tau Cephei A I is free to colonise after the drain, inside the species\' temperature range over its whole orbit, with the cooling gas under 2 atm and the figures held against a working of the game\'s rules from the save\'s own rows', async (m) => {
+  const file = path.join(root, REPORTED.file)
+
+  if (!fs.existsSync(file)) {
+    console.log(`SKIP oxygen drain: ${REPORTED.file} is absent`)
+    return
+  }
+
+  const OXYGEN_ID = 10
+  const VAPOUR_ID = 5
+  const COOLING_ID = 22
+  const database = new Database(file, { readonly: true })
+
+  try {
+    // What the planner is given: its own loaders' body, species, race rules and gas table.
+    const source = shim(database)
+    const context = { GameID: REPORTED.gameId, RaceID: REPORTED.raceId }
+    const body = (await m.d.loadBodies(source, context)).find((candidate) => candidate.SystemBodyID === REPORTED.bodyId)
+    const species = m.h.speciesLimits((await m.d.loadSpecies(source, context)).find((candidate) => candidate.SpeciesID === REPORTED.speciesId))
+    const { ColonizationSkill: skill } = await m.d.loadRaceRules(source, context)
+    const gases = await m.d.loadGases(source)
+    const info = (id) => gases.find((row) => row.GasID === id)
+
+    // What the oracle is given: the stored rows, read here.
+    const stored = database.query('select Radius, Gravity, HydroExt, HydroID, Albedo, AtmosPress, DustLevel, OrbitalDistance, DistanceToParent, Eccentricity, Year, SurfaceTemp, StarID from FCT_SystemBody where SystemBodyID = ?').get(REPORTED.bodyId)
+    const { Luminosity: luminosity } = database.query('select Luminosity from FCT_Star where StarID = ?').get(stored.StarID)
+    const table = new Map(database.query('select GasID, FreezingPoint, GHGas, AntiGHGas, DangerousOxygen, DangerousPPMOxygen from DIM_Gases').all().map((row) => [row.GasID, row]))
+    const held = new Map(database.query('select AtmosGasID, GasAtm from FCT_AtmosphericGas where SystemBodyID = ?').all(REPORTED.bodyId).map((row) => [row.AtmosGasID, row.GasAtm]))
+    const kind = database.query('select BreatheID, Oxygen, OxyDev, PressMax, Temperature, TempDev, Gravity, GravDev from FCT_Species where SpeciesID = ?').get(REPORTED.speciesId)
+    const range = { minimum: kind.Temperature - kind.TempDev, maximum: kind.Temperature + kind.TempDev }
+    const breathing = { minimum: kind.Oxygen - kind.OxyDev, maximum: kind.Oxygen + kind.OxyDev }
+
+    assert.ok(body && species && stored && kind.BreatheID === OXYGEN_ID, 'the body and the oxygen-breathing species of the report are in the save')
+    assert.ok(stored.HydroID === HYDROSPHERE.liquid && stored.HydroExt > 75, 'the body holds a liquid ocean above 75 %')
+    assert.ok(held.get(OXYGEN_ID) > breathing.maximum, 'its oxygen is over what the species breathes')
+
+    // The climate of an atmosphere (gas id to atm, none frozen out) under `extent` % of water at the three points the colony cost prices: the body now, at periapsis and at apoapsis.
+    const climate = (amounts, extent) => {
+      const sum = (keep) => [...amounts].reduce((total, [id, atm]) => total + (keep(table.get(id)) ? atm : 0), 0)
+      const state = { body: stored, luminosity, pressure: sum(() => true), warming: sum((gas) => gas.GHGas), cooling: sum((gas) => gas.AntiGHGas), extent }
+
+      return { pressure: state.pressure, current: climateAt(state, stored.DistanceToParent), periapsis: climateAt(state, stored.OrbitalDistance * (1 - stored.Eccentricity)), apoapsis: climateAt(state, stored.OrbitalDistance * (1 + stored.Eccentricity)) }
+    }
+    const POINTS = ['current', 'periapsis', 'apoapsis']
+
+    // The oracle reproduces the saved climate before it prices anything: the saved pressure and the saved surface temperature, from the stored gases.
+    const now = climate(held, stored.HydroExt)
+
+    assert.ok(Math.abs(now.pressure - stored.AtmosPress) < 1e-9, `the stored gases add to the stored pressure: ${now.pressure} != ${stored.AtmosPress}`)
+    assert.ok(Math.abs(now.current - stored.SurfaceTemp) < 1e-6, `the climate rule reproduces the stored surface temperature: ${now.current} != ${stored.SurfaceTemp}`)
+
+    // The cost as saved: breathing outside the range costs 2 unless the temperature already costs more, the temperature costs its excess over the range per deviation and a fifth of it on a tide-locked planet, and the pressure costs nothing under its limit. The oxygen is over its limit and the water of an oxygen breather costs only under 20 %.
+    const costNow = Object.fromEntries(POINTS.map((point) => {
+      const temperature = Math.max(0, range.minimum - now[point], now[point] - range.maximum) / kind.TempDev / 5
+
+      assert.ok(now.pressure <= kind.PressMax, 'the saved pressure is under the limit, so it costs nothing')
+
+      return [point, Math.round(Math.max(temperature < 2 ? 2 : temperature, 0) * 10000) / 10000]
+    }))
+    const assessment = m.t.assessTerraforming(body, species, skill, info)
+
+    assert.deepEqual(assessment.cost.raws, costNow, 'the cost as saved is the one the rule gives')
+
+    // The plan: free to colonise, a complete plan, a drain that is a minimum in time.
+    const { plan } = assessment
+
+    assert.equal(assessment.outcome, 'yes', `an oxygen breather's ocean above 75 % is planned to free: ${assessment.outcome}`)
+    assert.ok(plan && !plan.partial, 'the plan holds the whole orbit in the species\' range, it is not partial')
+    assert.equal(assessment.timeBasis, m.t.TIME_BASIS.MINIMUM, 'the plan drains surface water, so its years are a minimum')
+
+    // The drain takes the excess over 75 % off the surface: 94.79 to 75 %, not to none.
+    const water = plan.steps.find((step) => step.key === 'water')
+
+    assert.ok(water, 'the plan has a water step')
+    close(water.drained, stored.HydroExt - 75, 'the water step drains the part of the ocean above 75 %')
+    assert.ok(water.drained < stored.HydroExt - 1, 'and not the whole ocean')
+
+    const end = m.t.terraformedBody(body, species, plan, info)
+
+    close(end.HydroExt, 75, 'the end state keeps 75 % of the surface in water')
+    close(plan.target.hydroExt, 75, 'and so does the plan\'s target')
+
+    // The atmosphere the displayed operations leave, from the saved rows: a step sets the figure of its gas (none removes it). The vapour that stays is the humidity of a liquid 75 % ocean under the end pressure, 1 % of the surface's share of the air.
+    const after = new Map(held)
+
+    plan.steps.forEach((step) => (step.set > 0 ? after.set(step.gasId, step.set) : after.delete(step.gasId)))
+    const planned = climate(after, 75)
+
+    assert.ok(Math.abs(after.get(VAPOUR_ID) - planned.pressure * 0.75 * 0.01) < 1e-8, 'the vapour left is the humidity of a liquid 75 % ocean under the end pressure')
+    assert.ok([...after.keys()].every((id) => table.get(id).FreezingPoint < Math.min(...POINTS.map((point) => planned[point]))), 'no gas of the end state freezes out anywhere in the orbit')
+    POINTS.forEach((point) => assert.ok(planned[point] > range.minimum && planned[point] < range.maximum && planned[point] > 273.15 && planned[point] < 373.15, `the end temperature at ${point}, ${planned[point]} K, is inside ${range.minimum} to ${range.maximum} K and the ocean stays liquid`))
+    assert.ok(Math.abs(end.SurfaceTemp - planned.current) < 1e-6, `the plan's end temperature is the one the climate rule gives: ${end.SurfaceTemp} != ${planned.current}`)
+    assert.ok(Math.abs(end.AtmosPress - planned.pressure) < 1e-9, 'and its pressure is the sum of the gases')
+
+    // The cost after: no factor is left. Gravity is in the species' range, the pressure under its limit, the oxygen in its range and under 30 % of the air, no gas the table rates dangerous to oxygen breathers is over its limit, and 75 % of water costs an oxygen breather nothing.
+    const share = (id) => after.get(id) / planned.pressure * 100
+
+    assert.ok(stored.Gravity >= kind.Gravity - kind.GravDev && stored.Gravity <= kind.Gravity + kind.GravDev, 'the gravity is in the species\' range')
+    assert.ok(planned.pressure <= kind.PressMax, `the end pressure ${planned.pressure} is under ${kind.PressMax} atm`)
+    assert.ok(after.get(OXYGEN_ID) >= breathing.minimum - 1e-9 && after.get(OXYGEN_ID) <= breathing.maximum + 1e-9 && share(OXYGEN_ID) <= 30, 'the oxygen is in its range and at most 30 % of the air')
+    assert.deepEqual([...after.keys()].filter((id) => table.get(id).DangerousOxygen > 0 && share(id) > table.get(id).DangerousPPMOxygen / 10000), [], 'no gas rated dangerous to an oxygen breather is over its limit')
+    assert.deepEqual(assessment.after.raws, ZERO, 'nothing costs after the plan')
+    assert.equal(assessment.after.worst, 0, 'and the worst point costs nothing after the colonisation skill')
+
+    // The cooling gas: some is needed (the stored temperature is over the range) and it stays under the 2 atm of cooling the earlier plan ran into, which ended the orbit frozen.
+    const cooling = after.get(COOLING_ID) || 0
+
+    assert.ok(cooling > 0 && cooling < 2, `the plan adds ${cooling} atm of the cooling gas, under 2 atm`)
+
+    // The work: the drain is 1 atm of vapour for each 40 % of the surface, the other steps their change of pressure, all over the game's unit of surface (four times 3.1416 times the radius squared against the Earth's 511,187,128).
+    const ratio = 4 * 3.1416 * stored.Radius ** 2 / 511187128
+    const work = plan.steps.reduce((total, step) => total + (Math.abs((after.get(step.gasId) || 0) - (held.get(step.gasId) || 0)) + step.drained / 40) * ratio, 0)
+
+    close(plan.work, work, 'the work is the change of each gas and the drain at 1 atm for each 40 %')
+
+    // The stages: the surface is as saved before the drain operation, and 75 % after it and in every stage that follows.
+    const staged = m.l.terraformStages({ assessment, body, species, skill, gasInfo: info })
+    const drainIndex = plan.steps.findIndex((step) => step.drained > 0)
+
+    assert.ok(staged, 'the plan has stages')
+    close(staged.stages[drainIndex].hydroExt, stored.HydroExt, 'before the drain the stage holds the surface as saved')
+    staged.stages.slice(drainIndex + 1).forEach((stage) => close(stage.hydroExt, 75, 'the drain and the stages after it hold 75 %'))
+    console.log(`OXYGEN DRAIN ${body.SystemName} ${body.PlanetNumber}: drains ${water.drained.toFixed(4)} % of ${stored.HydroExt.toFixed(4)} % to 75 %, ${cooling.toFixed(4)} atm of cooling, ${planned.current.toFixed(2)} K now, ${planned.periapsis.toFixed(2)} to ${planned.apoapsis.toFixed(2)} K over the orbit, cost ${assessment.cost.worst} to ${assessment.after.worst}`)
+  } finally {
+    database.close()
+  }
 })
 
 // Terra's frozen-start and hold-shortcut counterexamples: the printed sequence must reach a thaw before the water operation can finish.
@@ -598,14 +750,19 @@ check('minimum time', 'the years of a plan that drains surface water are the ter
   assert.deepEqual(methane.plan.steps.map((step) => [step.key, m.t.stepTimeBasis(step)]), [['water', MINIMUM], ['antiGreenhouse', CAPACITY]], 'only the step that drains is a minimum')
   assert.equal(methane.timeBasis, MINIMUM, 'the plan is a minimum when any step drains')
 
-  // Ordinary oxygen plans keep the surface water and have no drain, as does a body that needs none.
-  const ordinary = planFor(m, 10, { Eccentricity: 0 }).assessment
+  // Ordinary oxygen plans keep the surface water and have no drain, as does a body that needs none; an oxygen ocean above 75 % drains the excess, and that is a minimum like any other drain.
+  const ordinary = planFor(m, 10, { Eccentricity: 0, HydroExt: 60 }).assessment
 
   assert.ok(ordinary.plan && ordinary.plan.steps.every((step) => !step.drained), 'the oxygen plan drains nothing')
   assert.equal(ordinary.timeBasis, CAPACITY, 'its years keep the capacity basis')
   assert.ok(ordinary.plan.steps.every((step) => m.t.stepTimeBasis(step) === CAPACITY), 'and so do its steps')
   assert.equal(m.t.timeWords(m.t.planYears(ordinary.work, 100), ordinary.timeBasis, YEARS), YEARS(m.t.planYears(ordinary.work, 100)), 'its time is worded as the plain figure')
   assert.equal(m.t.assessTerraforming(wet(4, { HydroExt: 0, HydroID: HYDROSPHERE.none }), speciesOf(m, 4), 1, gasInfo).timeBasis, CAPACITY, 'a body that needs no plan has the capacity basis')
+
+  const oceanic = planFor(m, 10, { Eccentricity: 0 }).assessment
+
+  assert.deepEqual((oceanic.plan ? oceanic.plan.steps : []).map((step) => [step.key, m.t.stepTimeBasis(step)]), [['greenhouse', CAPACITY], ['water', MINIMUM]], 'an oxygen ocean over 75 % drains the excess in the water step alone, which is the minimum')
+  assert.equal(oceanic.timeBasis, MINIMUM, 'and the plan is a minimum')
 
   // The ranking and the plan states of the probe, at 100 installations of rate 1: the years are the capacity bound, marked, and the state says why.
   const row = await ranked(m, 4, body)
@@ -626,7 +783,7 @@ check('minimum time', 'the years of a plan that drains surface water are the ter
   assert.ok(row.state.text(reTimed(2.36)).includes('Terraforming takes at least 2.3 years'), 'and so does the state\'s text')
   assert.equal(row.state.chip(reTimed(12.6)), 'To free · at least 12 years', 'a 12.6-year bound reads 12 years in the chip at the state\'s whole years, not 13')
 
-  const plain = await ranked(m, 10, cold(10, { Eccentricity: 0 }), { IdealTemperature: 280, MaximumPressure: 10 })
+  const plain = await ranked(m, 10, cold(10, { Eccentricity: 0, HydroExt: 60 }), { IdealTemperature: 280, MaximumPressure: 10 })
 
   assert.equal(plain.best.strategy, 'terraform', 'the ordinary plan is the best route')
   assert.equal(plain.best.yearsBasis, CAPACITY, 'its years keep the capacity basis')
@@ -927,6 +1084,7 @@ const faults = [
   { name: 'the gas list reads the boiling point as the freezing point', module: 'colonization-data', from: 'select GasID, Name, FreezingPoint, GHGas', to: 'select GasID, Name, BoilingPoint as FreezingPoint, GHGas', fails: ['frozen'] },
   { name: 'a body that pays for its surface water is called done', module: 'terraforming', from: 'if (suited && !paysForSurfaceWater(body, species)) {', to: 'if (suited) {', fails: ['drain'] },
   { name: 'a plan never drains the surface water', module: 'terraforming', from: 'if (!plan || !leavesDrainableWater(body, species, plan, gasInfo)) {', to: 'if (true) {', fails: ['drain'] },
+  { name: 'a plan for an oxygen breather never drains the ocean it must shrink to 75 %', module: 'terraforming', from: 'return !plan && body.HydroExt > 0 && lever.hydroExt === 0 ?', to: 'return !plan && species.BreatheID !== GAS.OXYGEN && body.HydroExt > 0 && lever.hydroExt === 0 ?', fails: ['oxygen drain', 'drain', 'planner', 'minimum time'], needs: REPORTED },
   { name: 'a drain is allowed without a thawed stage', module: 'terraforming', from: 'if (drainCanComplete(state, water, gasInfo)) {', to: 'if (true) {', fails: ['drain order'] },
   { name: 'the held plan keeps its costly ice and suppresses the aim search', module: 'terraforming', from: 'return plan && !plan.partial && !leavesDrainableWater(body, species, plan, gasInfo) ? plan : null', to: 'return plan && !plan.partial ? plan : null', fails: ['drain order'] },
   { name: 'a full but wet aim suppresses a reachable thaw-and-drain aim', module: 'terraforming', from: 'if (initial && !initial.partial && clearsWater(initial)) {', to: 'if (initial && !initial.partial) {', fails: ['drain order'] },
@@ -983,6 +1141,11 @@ const main = async () => {
     let total = results.length
 
     for (const fault of mutating() ? faults : []) {
+      if (fault.needs && !fs.existsSync(path.join(root, fault.needs.file))) {
+        console.log(`SKIP mutant ${fault.name}: ${fault.needs.file} is absent`)
+        continue
+      }
+
       total += 1
       refusePlanting(fault.name)
       const source = plantedPatch(`${fault.module}.js`, ORIGINALS[fault.module], fault.from, fault.to)

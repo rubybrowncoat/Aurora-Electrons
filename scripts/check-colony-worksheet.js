@@ -196,7 +196,8 @@ const TIME_GASES = [
 
 const TIME_CASES = {
   drain: { species: { SpeciesID: 3, SpeciesName: 'Ammonians', BreatheID: 4, Oxygen: 0.2, OxyDev: 0.1, PressMax: 4, Temperature: 288, TempDev: 30, Gravity: 1, GravDev: 0.5, PopulationDensityModifier: 1 }, own: 4, body: { BaseTemp: 255, SurfaceTemp: 280.5, HydroID: 3, HydroExt: 50 } },
-  plain: { species: { SpeciesID: 4, SpeciesName: 'Humans', BreatheID: 10, Oxygen: 0.2, OxyDev: 0.1, PressMax: 10, Temperature: 280, TempDev: 30, Gravity: 1, GravDev: 0.5, PopulationDensityModifier: 1 }, own: 10, body: { BaseTemp: 180, SurfaceTemp: 198, HydroID: 4, HydroExt: 100 } },
+  // The oxygen breather's ocean is 60 %, which needs no drain: a liquid ocean above 75 % is drained down to 75 % for an oxygen breather, so 100 % would be a drain and a minimum.
+  plain: { species: { SpeciesID: 4, SpeciesName: 'Humans', BreatheID: 10, Oxygen: 0.2, OxyDev: 0.1, PressMax: 10, Temperature: 280, TempDev: 30, Gravity: 1, GravDev: 0.5, PopulationDensityModifier: 1 }, own: 10, body: { BaseTemp: 180, SurfaceTemp: 198, HydroID: 4, HydroExt: 60 } },
 }
 
 const PLANNED_BODY = 201

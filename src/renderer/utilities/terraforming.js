@@ -114,7 +114,7 @@ export const hydrosphereState = (temperature, pressure) => {
   return hydrosphereAtTemperature(temperature)
 }
 
-// An oxygen breather aims for 20 % water (no colony cost), then for what keeps the most people: liquid water between 50 and 75 % (above 75 % the body holds fewer people), ice anywhere. Any other breather pays for liquid water by its extent (sulphur dioxide for ice as well) and never for water it lacks, so a plan for one keeps the extent as saved unless `drain` is set, when it aims for none: the game's terraformer, set to remove water vapour, keeps removing it until the surface holds no water and the oceans evaporate to refill the air.
+// An oxygen breather aims for 20 % water (no colony cost), then for what keeps the most people: liquid water between 50 and 75 % (above 75 % the body holds fewer people), ice anywhere. Any other breather pays for liquid water by its extent (sulphur dioxide for ice as well) and never for water it lacks, so a plan for one keeps the extent as saved unless `drain` is set, when it aims for none: the game's terraformer, set to remove water vapour, keeps removing it until the surface holds no water and the oceans evaporate to refill the air. An oxygen breather's aim does not depend on `drain`: where it lies below the extent held (liquid water above 75 %) a drain takes the surface down to it, 75 %, never to none.
 const plainHydroExtent = (current, hydrosphere, species, drain) => {
   if (species.BreatheID !== GAS.OXYGEN) {
     return drain ? 0 : current
@@ -450,7 +450,7 @@ const hydrosphereSettling = (body, solution, drained) => {
   return evaporating > TOLERANCE ? { process: 'Evaporate', years: evaporating / EVAPORATION_RATE } : { process: 'Stable', years: 0 }
 }
 
-// The plan for one target mean, with the existing pressure, gas-multiplier and breathing limits. `hold` keeps the climate the air gives (the greenhouse and anti-greenhouse gases are left as they are) and `drain` takes the water off the surface, which the game's terraformer does by removing water vapour until the surface is dry. Each trial solves its own atmosphere and albedo before pricing its swing; no ratio extrapolates an extreme from another trial.
+// The plan for one target mean, with the existing pressure, gas-multiplier and breathing limits. `hold` keeps the climate the air gives (the greenhouse and anti-greenhouse gases are left as they are) and `drain` takes the water off the surface down to the extent the plan aims for (`plainHydroExtent`): none for a breather other than oxygen, which the game's terraformer does by removing water vapour until the surface is dry, and 75 % for an oxygen breather's liquid ocean above that. Each trial solves its own atmosphere and albedo before pricing its swing; no ratio extrapolates an extreme from another trial.
 const planFor = (body, species, gasInfo, targetMean, hold, drain, lever = NO_LEVER) => {
   // The body's surface in the game's unit of work: four times its pi (3.1416), the same figure the capacity rule spreads pressure over, so a plan's work and that spread are inverses.
   const area = 4 * PI_APPROX * body.Radius ** 2
@@ -629,8 +629,8 @@ const planAtTemperature = (body, species, gasInfo, targetMean, hold = false, lev
   const plan = planFor(body, species, gasInfo, targetMean, hold, false, lever)
 
   if (!plan || !leavesDrainableWater(body, species, plan, gasInfo)) {
-    // A refused wet endpoint is not a prerequisite for a stationary dry one. Keep the existing drain alternative and its operation-order feasibility checks.
-    return !plan && species.BreatheID !== GAS.OXYGEN && body.HydroExt > 0 && lever.hydroExt === 0 ? planFor(body, species, gasInfo, targetMean, hold, true, lever) : plan
+    // A refused wet endpoint is not a prerequisite for a stationary dry one, or for the 75 % an oxygen breather's liquid ocean above that is taken down to: a smaller surface is reached only by a completed drain. Keep the existing drain alternative and its operation-order feasibility checks.
+    return !plan && body.HydroExt > 0 && lever.hydroExt === 0 ? planFor(body, species, gasInfo, targetMean, hold, true, lever) : plan
   }
 
   // A plan that raises the surface water holds the water the lever sets: it drains none of it.
