@@ -16,3 +16,10 @@ artifacts/
 saves/
 __pycache__/
 .check-runs/
+
+# Skoormit's imported Aur_Calcs workbook is an optional local reference, not a build input. The README stays tracked.
+/references/aurcalcs/*
+!/references/aurcalcs/README.md
+# Skoormit's imported query collection, including survey.txt, is an optional local reference, not a build input. The README stays tracked.
+/references/queries/*
+!/references/queries/README.md

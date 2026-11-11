@@ -1,6 +1,8 @@
 # Aur_Calcs reference workbook
 
-`Aur_Calcs260.xlsx` is a community calculator workbook for Aurora C# 2.6.0. It's kept here as a reference for features and game maths to port into Aurora Electrons. The app doesn't read it.
+`Aur_Calcs260.xlsx` is an imported skoormit workbook for Aurora C# 2.6.0. It accompanies the imported query collection in `references/queries/`, including `excel/survey.txt`. Permission from skoormit to reshare it is established. It is kept here as an optional local reference for features and game maths to port into Aurora Electrons. The app doesn't read it, and it is not a build input.
+
+No licence for the workbook is granted here, and Aurora Electrons' MIT licence does not cover it. Removing it from the index keeps the working copy and does not rewrite or erase Git history.
 
 ## How it gets its data
 

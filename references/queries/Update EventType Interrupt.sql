@@ -1,1 +1,0 @@
-update DIM_EventType set PlayerInterrupt = 1 where Description = 'Hostile Contact Update'
