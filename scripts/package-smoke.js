@@ -35,8 +35,10 @@ const run = (command, args, options = {}) => {
   if (result.error || result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.status}): ${result.error?.message || ''}\n${result.stdout || ''}\n${result.stderr || ''}`)
   return result.stdout.trim()
 }
+// Node inherits PowerShell 7's module paths; Windows PowerShell children need their own edition's defaults.
+const WINDOWS_POWERSHELL_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath'))
 const powershell = (args, { reject = false } = {}) => {
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'verify-signature.ps1'), ...args], { cwd: ROOT, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 1024 * 1024 })
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'verify-signature.ps1'), ...args], { cwd: ROOT, env: WINDOWS_POWERSHELL_ENV, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 1024 * 1024 })
   if (result.error) throw result.error
   if (reject) {
     assert.notEqual(result.status, 0, 'shared verifier rejects negative control')
@@ -302,7 +304,7 @@ const summary = ({ pid, created, executable }) => ({ pid, created, executable })
 // Rows of Win32_Process for a WQL filter. CreationDate comes back as a fixed-width UTC string, so creation times order as strings.
 const processes = (filter) => {
   const script = `$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; parent = [int]$_.ParentProcessId; name = $_.Name; executable = $_.ExecutablePath; commandLine = $_.CommandLine; created = $(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') }) } } | ConvertTo-Json -Compress`
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { cwd: ROOT, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 1024 * 1024 })
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { cwd: ROOT, env: WINDOWS_POWERSHELL_ENV, encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 1024 * 1024 })
   if (result.error || result.status !== 0) throw new Error(`Windows process query failed (${result.status}): ${result.error?.message || ''}\n${result.stdout}\n${result.stderr}`)
   const text = result.stdout.replace(/^\uFEFF/, '').trim()
   return text ? [].concat(JSON.parse(text)) : []
