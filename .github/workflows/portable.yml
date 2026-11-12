@@ -1,0 +1,303 @@
+name: Windows portable draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Unsigned staging, or approved production signing (never use before provider activation)
+        type: choice
+        options: [unsigned, production]
+        default: unsigned
+      reviewed_sha:
+        description: Production only — exact independently reviewed commit SHA
+        type: string
+      reviewed_ref:
+        description: Production only — full reviewed refs/heads/... or refs/tags/... ref
+        type: string
+      reviewed_version:
+        description: Production only — reviewed package version
+        type: string
+  push:
+    branches: [signpath-preparation]
+    tags: ['v*']
+
+concurrency:
+  group: portable-${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest-build' }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0'
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  RELEASE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'unsigned' }}
+  INPUT_REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+  INPUT_REVIEWED_REF: ${{ inputs.reviewed_ref }}
+  INPUT_REVIEWED_VERSION: ${{ inputs.reviewed_version }}
+  SIGNPATH_REVIEWED_SHA: ${{ vars.SIGNPATH_REVIEWED_SHA }}
+  SIGNPATH_REVIEWED_REF: ${{ vars.SIGNPATH_REVIEWED_REF }}
+  SIGNPATH_REVIEWED_VERSION: ${{ vars.SIGNPATH_REVIEWED_VERSION }}
+  SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+  SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+  SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+  SIGNPATH_INNER_CONFIG_SLUG: ${{ vars.SIGNPATH_INNER_CONFIG_SLUG }}
+  SIGNPATH_PORTABLE_CONFIG_SLUG: ${{ vars.SIGNPATH_PORTABLE_CONFIG_SLUG }}
+  SIGNPATH_EXPECTED_SUBJECT: ${{ vars.SIGNPATH_EXPECTED_SUBJECT }}
+  SIGNPATH_MANUAL_APPROVAL: ${{ vars.SIGNPATH_MANUAL_APPROVAL }}
+  SIGNPATH_ENVIRONMENT: ${{ vars.SIGNPATH_ENVIRONMENT }}
+
+jobs:
+  prepare:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      mode: ${{ steps.unsigned.outputs.mode || steps.production.outputs.mode }}
+      version: ${{ steps.unsigned.outputs.version || steps.production.outputs.version }}
+      destination: ${{ steps.unsigned.outputs.destination || steps.production.outputs.destination }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Require exact source and Node 24
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Source SHA mismatch' }
+          if ((node -p 'process.versions.node.split(".")[0]') -ne '24') { throw 'Node 24 required' }
+      # The bootstrap push executes only this secret-free claim, never an environment job.
+      - name: Claim unsigned draft
+        id: unsigned
+        if: env.RELEASE_MODE == 'unsigned'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/lib/draft-release.js prepare
+      - name: Validate public production configuration and existing protections, then claim
+        id: production
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'production'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/lib/draft-release.js prepare
+
+  unsigned:
+    needs: prepare
+    if: needs.prepare.outputs.mode == 'unsigned'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      RELEASE_MODE: unsigned
+      BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/bun-download-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Cache dependency downloads only
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/bun-download-cache
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: windows-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock') }}
+      - name: Frozen install and toolchain identity
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Source SHA mismatch' }
+          if ((node -p 'process.versions.node.split(".")[0]') -ne '24') { throw 'Node 24 required' }
+          if ((bun --version) -ne '1.4.2') { throw 'Bun 1.4.2 required' }
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((node -p "require('app-builder-lib/package.json').version") -ne '26.15.3') { throw 'Reviewed electron-builder 26.15.3 required' }
+      - name: CI-safe reporting, release decisions and lint
+        shell: pwsh
+        run: |
+          bun scripts/check-reporting.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun scripts/check-release.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run lint
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build production unpacked application
+        run: bun run build --win --dir
+      - name: Capture exact inner and upstream payload
+        run: node scripts/package-smoke.js snapshot inner
+      - name: Wrap the same prepackaged bytes without recompiling
+        run: node node_modules/electron-builder/cli.js --win portable --prepackaged build/win-unpacked --config builder.config.js
+      - name: Package, licence, signature-control and real SQLite launch checks
+        run: node scripts/package-smoke.js
+      - name: Recheck claim and stage complete UNSIGNED draft set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/lib/draft-release.js publish build/release-evidence
+
+  production:
+    needs: prepare
+    if: github.event_name == 'workflow_dispatch' && needs.prepare.outputs.mode == 'production'
+    runs-on: windows-latest
+    timeout-minutes: 110
+    environment: production-signing
+    permissions:
+      contents: write
+      actions: write
+    env:
+      RELEASE_MODE: production
+      BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/bun-download-cache
+    steps:
+      - name: Require the approved environment token before any other work
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNPATH_API_TOKEN)) { throw 'Missing protected environment SIGNPATH_API_TOKEN; signing is stopped' }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Cache dependency downloads only
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/bun-download-cache
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: windows-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock') }}
+      - name: Frozen install and toolchain identity
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Source SHA mismatch' }
+          if ((node -p 'process.versions.node.split(".")[0]') -ne '24') { throw 'Node 24 required' }
+          if ((bun --version) -ne '1.4.2') { throw 'Bun 1.4.2 required' }
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((node -p "require('app-builder-lib/package.json').version") -ne '26.15.3') { throw 'Reviewed electron-builder 26.15.3 required' }
+      - name: CI-safe reporting, release decisions and lint
+        shell: pwsh
+        run: |
+          bun scripts/check-reporting.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun scripts/check-release.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run lint
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build production unpacked application
+        run: bun run build --win --dir
+      - name: Capture inner content and every upstream file before signing
+        run: node scripts/package-smoke.js snapshot inner
+      - name: Upload only the exact inner signing target
+        id: inner_input
+        uses: actions/upload-artifact@v4
+        with:
+          name: signpath-inner-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/win-unpacked/Aurora Electrons.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: Submit inner; wait for manual approval, completion and retrieval
+        id: inner_sign
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INNER_CONFIG_SLUG }}
+          github-artifact-id: ${{ steps.inner_input.outputs.artifact-id }}
+          parameters: 'version: "${{ needs.prepare.outputs.version }}"'
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          service-unavailable-timeout-in-seconds: 120
+          download-signed-artifact-timeout-in-seconds: 120
+          output-artifact-directory: build/signpath-return/inner
+      - name: Verify inner trust, timestamp, identity and unchanged content; reinsert exact bytes
+        id: inner_accept
+        run: node scripts/package-smoke.js accept inner build/signpath-return/inner
+      - name: Wrap verified inner without rebuilding or repacking application
+        run: node node_modules/electron-builder/cli.js --win portable --prepackaged build/win-unpacked --config builder.config.js
+      - name: Capture exact wrapper before signing
+        run: node scripts/package-smoke.js snapshot portable
+      - name: Upload only the exact portable signing target
+        id: portable_input
+        uses: actions/upload-artifact@v4
+        with:
+          name: signpath-portable-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/aurora-electrons-${{ needs.prepare.outputs.version }}.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: Submit wrapper; wait for manual approval, completion and retrieval
+        id: portable_sign
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_PORTABLE_CONFIG_SLUG }}
+          github-artifact-id: ${{ steps.portable_input.outputs.artifact-id }}
+          parameters: 'version: "${{ needs.prepare.outputs.version }}"'
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          service-unavailable-timeout-in-seconds: 120
+          download-signed-artifact-timeout-in-seconds: 120
+          output-artifact-directory: build/signpath-return/portable
+      - name: Verify wrapper trust, timestamp, identity and unchanged content; reinsert exact bytes
+        id: portable_accept
+        run: node scripts/package-smoke.js accept portable build/signpath-return/portable
+      - name: Check package, upstream bytes, embedded signed inner, controls and real SQLite launch
+        run: node scripts/package-smoke.js
+      - name: Recheck claim and stage only the complete verified SIGNED set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/lib/draft-release.js publish build/release-evidence
+      - name: Record request and provenance identities even on failure
+        if: always()
+        shell: pwsh
+        env:
+          INNER_ID: ${{ steps.inner_input.outputs.artifact-id }}
+          INNER_DIGEST: ${{ steps.inner_input.outputs.artifact-digest }}
+          INNER_REQUEST: ${{ steps.inner_sign.outputs.signing-request-id }}
+          INNER_URL: ${{ steps.inner_sign.outputs.signing-request-web-url }}
+          WRAPPER_ID: ${{ steps.portable_input.outputs.artifact-id }}
+          WRAPPER_DIGEST: ${{ steps.portable_input.outputs.artifact-digest }}
+          WRAPPER_REQUEST: ${{ steps.portable_sign.outputs.signing-request-id }}
+          WRAPPER_URL: ${{ steps.portable_sign.outputs.signing-request-web-url }}
+        run: |
+          @"
+          ## SignPath requests (not resumable after timeout)
+          Source: $env:GITHUB_SHA; run/attempt: $env:GITHUB_RUN_ID/$env:GITHUB_RUN_ATTEMPT
+          Inner workflow artifact: $env:INNER_ID; digest: $env:INNER_DIGEST
+          Inner request: $env:INNER_REQUEST $env:INNER_URL
+          Wrapper workflow artifact: $env:WRAPPER_ID; digest: $env:WRAPPER_DIGEST
+          Wrapper request: $env:WRAPPER_REQUEST $env:WRAPPER_URL
+          A failed/timeout request is not signed output. Pending inputs remain until retention expiry; investigate/cancel the request before a fresh rerun. Never reuse a return from another run.
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Delete exact safely consumed inner workflow artifact only
+        if: always() && steps.inner_sign.outcome == 'success' && steps.inner_accept.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/lib/draft-release.js cleanup-artifact ${{ steps.inner_input.outputs.artifact-id }} signpath-inner-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Delete exact safely consumed wrapper workflow artifact only
+        if: always() && steps.portable_sign.outcome == 'success' && steps.portable_accept.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/lib/draft-release.js cleanup-artifact ${{ steps.portable_input.outputs.artifact-id }} signpath-portable-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}

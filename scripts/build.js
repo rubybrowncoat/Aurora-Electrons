@@ -10,7 +10,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..')
 const BUILD_DIR = path.join(PROJECT_ROOT, 'build')
 
 const run = (args) => {
-  const { status } = spawnSync(process.execPath, args, { cwd: PROJECT_ROOT, stdio: 'inherit' })
+  const { status } = spawnSync(process.execPath, args, { cwd: PROJECT_ROOT, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' } })
 
   if (status !== 0) {
     process.exit(status ?? 1)

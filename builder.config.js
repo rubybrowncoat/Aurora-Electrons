@@ -1,8 +1,13 @@
+const fs = require('fs')
+const path = require('path')
+
 const ICONS_DIR = 'build/icons/'
 
 const windowsOS = {
   win: {
     icon: ICONS_DIR + 'win-icon.ico',
+    // Resource editing still runs; only project signing is delegated to the two explicit SignPath stages.
+    signExecutable: false,
     signtoolOptions: {
       publisherName: 'nerdship',
     },
@@ -15,6 +20,8 @@ const windowsOS = {
 
   portable: {
     splashImage: 'splash.bmp',
+    // Portable has no updater/elevation need. This path avoids adding elevate.exe to the prepackaged payload.
+    useZip: true,
   },
 }
 
@@ -70,6 +77,18 @@ module.exports = {
     'out/preload/**',
     'out/renderer/**',
   ],
+  extraResources: [
+    { from: 'LICENSE', to: 'LICENSE' },
+    { from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' },
+  ],
+  afterPack: async (context) => {
+    if (context.electronPlatformName !== 'win32') return
+    // Use the same checksum-pinned toolset the installed builder uses for the wrapper.
+    const { getMakeNsisPath } = require('app-builder-lib/out/toolsets/windows')
+    const tool = await getMakeNsisPath(context.packager.config.toolsets?.nsis)
+    const directory = tool.env?.NSISDIR || path.dirname(tool.path)
+    fs.copyFileSync(path.join(directory, 'COPYING'), path.join(context.appOutDir, 'resources', 'LICENSE.nsis.txt'))
+  },
   ...windowsOS,
   ...linuxOS,
   ...macOS,

@@ -1,6 +1,13 @@
 out
 .github/*
 !.github/dependabot.yml
+!.github/workflows/
+.github/workflows/*
+!.github/workflows/portable.yml
+!.github/signpath/
+.github/signpath/*
+!.github/signpath/inner-app.xml
+!.github/signpath/portable.xml
 build/*
 !build/icons
 node_modules
