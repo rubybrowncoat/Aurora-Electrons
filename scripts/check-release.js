@@ -82,22 +82,32 @@ const boundaries = (api) => {
   assert.throws(() => api.verifiedOutput({ ...signed, signatures: { ...signed.signatures, inner: { ...signed.signatures.inner, TimestampPresent: false } } }, production), /stages/)
 }
 
-const lifecycle = async () => {
+const lifecycle = async (source) => {
   const clone = (value) => JSON.parse(JSON.stringify(value))
   const previous = owner({ sha: 'b'.repeat(40), version: '3.2.1', mode: 'production', assets: ['aurora-electrons-3.2.1-signed.exe', 'aurora-electrons-3.2.1-signed.build.json', 'aurora-electrons-3.2.1-signed.SHA256SUMS.txt'] })
   const original = draft(previous, { name: 'latest-build — verified signed Windows build', target_commitish: previous.sha, html_url: 'https://example.invalid/draft/7' })
   const next = release.plan(context({ runId: '102' }))
-  const source = fs.readFileSync(path.join(__dirname, 'lib/draft-release.js'), 'utf8')
   const fixture = (options = {}) => {
-    const current = clone(original)
+    const releases = options.releases ? clone(options.releases) : [clone(original)]
+    const current = releases.find((item) => item.id === 7)
     let deletes = 0
+    let corruption
     const mutations = []
     if (options.foreign) current.assets.push({ id: 99, name: 'foreign.exe' })
     const fetch = async (url, { method = 'GET', body } = {}) => {
-      const route = new URL(url).pathname.replace('/repos/rubybrowncoat/Aurora-Electrons', '')
+      const { pathname, searchParams } = new URL(url)
+      const route = pathname.replace('/repos/rubybrowncoat/Aurora-Electrons', '')
+      const target = /^\/releases\/(\d+)$/.exec(route)?.[1]
       const response = (value, status = 200) => ({ status, ok: status >= 200 && status < 300, json: async () => clone(value), text: async () => 'injected transport failure' })
-      if (method === 'GET' && route === '/releases') return response([current])
-      if (method === 'GET' && route === '/releases/7') return response(current)
+      let changed = current
+      if (method === 'GET' && route === '/releases') {
+        const page = Number(searchParams.get('page'))
+        return response(releases.slice((page - 1) * 100, page * 100))
+      }
+      if (method === 'GET' && target) {
+        const found = releases.find((item) => item.id === Number(target))
+        return found ? response(found) : response(null, 404)
+      }
       if (method === 'DELETE' && route.startsWith('/releases/assets/')) {
         deletes++
         if (options.failDelete === deletes) return response(null, 500)
@@ -107,17 +117,27 @@ const lifecycle = async () => {
         if (options.takeover && deletes === 1) current.body = release.body({ ...previous, runId: '103' })
       } else if (method === 'PATCH' && route === '/releases/7') {
         if (options.failPatch) return response(null, 500)
-        Object.assign(current, JSON.parse(body))
+        const fields = JSON.parse(body)
+        // Observed on the real draft: a PATCH that omits tag_name stores an untagged-* tag; an explicit tag_name is preserved.
+        if (!('tag_name' in fields)) current.tag_name = 'untagged-9fdb3b15c5aece2ff9ca'
+        Object.assign(current, fields)
+        if (corruption) corruption(current)
+      } else if (method === 'POST' && route === '/releases') {
+        changed = { id: 5000, assets: [], html_url: 'https://example.invalid/draft/5000', ...JSON.parse(body) }
+        releases.push(changed)
       } else {
         throw new Error(`Unexpected local release request: ${method} ${route}`)
       }
-      mutations.push({ method, draft: clone(current) })
-      return response(current, method === 'DELETE' ? 204 : 200)
+      mutations.push({ method, draft: clone(changed) })
+      return response(changed, method === 'POST' ? 201 : method === 'DELETE' ? 204 : 200)
     }
-    const env = { GITHUB_REPOSITORY: next.owner.repository, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: next.owner.ref, GITHUB_SHA: next.owner.sha, GITHUB_RUN_ID: next.owner.runId, GITHUB_RUN_ATTEMPT: next.owner.attempt, GITHUB_WORKFLOW_REF: `${next.owner.repository}/${next.owner.workflow}@${next.owner.ref}`, GITHUB_WORKFLOW_SHA: next.owner.sha, RELEASE_MODE: 'unsigned', GH_TOKEN: 'local-transport-control-only' }
-    const sandbox = { module: { exports: {} }, exports: {}, require: createRequire(path.join(__dirname, 'lib/draft-release.js')), __dirname: path.join(__dirname, 'lib'), console: { log: () => {} }, process: { env }, Buffer, URL, fetch }
-    vm.runInNewContext(source, sandbox, { filename: 'draft-release-lifecycle.js' })
-    return { api: sandbox.module.exports, mutations, get current() { return current } }
+    const load = (plan = next) => {
+      const env = { GITHUB_REPOSITORY: plan.owner.repository, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: plan.owner.ref, GITHUB_SHA: plan.owner.sha, GITHUB_RUN_ID: plan.owner.runId, GITHUB_RUN_ATTEMPT: plan.owner.attempt, GITHUB_WORKFLOW_REF: `${plan.owner.repository}/${plan.owner.workflow}@${plan.owner.ref}`, GITHUB_WORKFLOW_SHA: plan.owner.sha, RELEASE_MODE: 'unsigned', GH_TOKEN: 'local-transport-control-only' }
+      const sandbox = { module: { exports: {} }, exports: {}, require: createRequire(path.join(__dirname, 'lib/draft-release.js')), __dirname: path.join(__dirname, 'lib'), console: { log: () => {} }, process: { env }, Buffer, URL, fetch }
+      vm.runInNewContext(source, sandbox, { filename: 'draft-release-lifecycle.js' })
+      return sandbox.module.exports
+    }
+    return { api: load(), load, corrupt: (change) => { corruption = change }, mutations, get current() { return current }, get releases() { return releases } }
   }
   const assertPrevious = (current) => {
     assert.equal(current.body, original.body, 'remaining old downloads retain their exact old source/run provenance')
@@ -160,6 +180,69 @@ const lifecycle = async () => {
   const foreign = fixture({ foreign: true })
   await assert.rejects(foreign.api.prepare(), /foreign asset/)
   assert.equal(foreign.mutations.length, 0, 'foreign assets are never removed or relabelled')
+
+  // Verified uploads carry the asset IDs that the existing upload and download-hash checks established.
+  const files = next.assetNames.map((name, i) => ({ id: 20 + i, name, size: i + 1, sha256: 'c'.repeat(64) }))
+  const uploaded = (server) => { server.current.assets.push(...files.map((file) => ({ id: file.id, name: file.name, size: file.size }))) }
+  const reuse = fixture()
+  await reuse.api.prepare()
+  assertPending(reuse.current)
+  uploaded(reuse)
+  await reuse.api.completeDraft(7, next, files)
+  const completed = clone(reuse.current)
+  assert.equal(completed.tag_name, 'latest-build', 'completion keeps the exact reusable tag')
+  assert.equal(completed.draft, true)
+  assert.equal(release.marker(completed).state, 'complete')
+  const completion = reuse.mutations.length
+  await reuse.load(release.plan(context({ runId: '103' }))).prepare()
+  assert.deepEqual(reuse.mutations.slice(completion).map((item) => item.method), ['DELETE', 'DELETE', 'DELETE', 'PATCH'], 'the next run reuses the same release by PATCH and never creates a new one')
+  reuse.mutations.slice(completion, -1).forEach(({ draft: current }) => assert.equal(current.body, completed.body, 'completed provenance persists until the old downloads are gone'))
+  assert.equal(release.marker(reuse.current).runId, '103')
+  assert.equal(reuse.current.assets.length, 0)
+
+  const corruptions = {
+    'tag identity': (current) => { current.tag_name = 'untagged-0123456789abcdef0123' },
+    'target revision': (current) => { current.target_commitish = 'b'.repeat(40) },
+    'prerelease flag': (current) => { current.prerelease = false },
+    'draft state': (current) => { current.draft = false },
+    'owner marker': (current) => { current.body = release.body({ ...release.marker(current), state: 'claimed' }, files) },
+    'missing asset': (current) => { current.assets.pop() },
+    'swapped asset': (current) => { current.assets[0].id = 99 },
+  }
+  for (const [name, corrupt] of Object.entries(corruptions)) {
+    const corrupted = fixture()
+    await corrupted.api.prepare()
+    uploaded(corrupted)
+    corrupted.corrupt(corrupt)
+    await assert.rejects(corrupted.api.completeDraft(7, next, files), /persist/, `completion rejects a persisted ${name} corruption despite HTTP 200`)
+  }
+
+  const orphan = draft(previous, { id: 8, tag_name: 'untagged-aecbb50345f2c75ec91b', name: 'latest-build — UNSIGNED Windows build', assets: previous.assets.map((name, i) => ({ id: 31 + i, name })) })
+  const orphaned = fixture({ releases: [orphan] })
+  await assert.rejects(orphaned.api.prepare(), /untagged.*\b8\b/, 'an owned untagged draft of another version and mode blocks creating a third release')
+  assert.equal(orphaned.mutations.length, 0)
+
+  const filler = Array.from({ length: 99 }, (_, i) => ({ id: 1000 + i, tag_name: `filler-${i}`, draft: false, body: '', assets: [] }))
+  const ambiguous = fixture({ releases: [draft(owner(), { id: 7 }), ...filler, draft(owner(), { id: 11 })] })
+  await assert.rejects(ambiguous.api.prepare(), /ambiguous/i, 'exact matches on separate pages are refused')
+  assert.equal(ambiguous.mutations.length, 0)
+
+  const retained = fixture({ releases: [orphan, original] })
+  await retained.api.prepare()
+  assertPending(retained.current)
+  assert.deepEqual(retained.mutations.map((item) => item.method), ['DELETE', 'DELETE', 'DELETE', 'PATCH'])
+  assert.deepEqual(retained.releases.find((item) => item.id === 8), orphan, 'a retained historical orphan is left untouched')
+
+  const unrelatedRows = [
+    draft(owner({ workflow: 'foreign.yml' }), { id: 21, tag_name: 'untagged-1', name: 'latest-build — UNSIGNED Windows build' }),
+    draft(previous, { id: 22, tag_name: 'untagged-2', name: 'v3.2.2 — UNSIGNED Windows build' }),
+    { id: 23, tag_name: 'untagged-3', name: 'latest-build — notes', draft: true, body: 'hand-written draft', assets: [] },
+  ]
+  const unrelated = fixture({ releases: unrelatedRows })
+  await unrelated.api.prepare()
+  assert.deepEqual(unrelated.mutations.map((item) => item.method), ['POST'], 'foreign and unrelated untagged drafts do not block a new destination')
+  assert.deepEqual(unrelated.releases.slice(0, 3), unrelatedRows, 'foreign and unrelated drafts are not touched')
+  assertPending(unrelated.releases.find((item) => item.id === 5000))
 }
 
 boundaries(release)
@@ -168,9 +251,15 @@ const mutants = [
   ['published draft acceptance', 'if (draft) {\n    if (!draft.draft)', 'if (draft) {\n    if (false)'],
   ['older run overwrite', 'BigInt(previous.runId) > BigInt(next.owner.runId)', 'false'],
   ['foreign asset acceptance', '!allowed.has(asset.name)', 'false'],
+  ['omitted final tag_name', "{ method: 'PATCH', data: fields }", "{ method: 'PATCH', data: { name: fields.name, body: fields.body, draft: fields.draft } }", /did not persist/],
+  ['removed persisted postcondition', 'const persisted = (stored, id, fields, complete, files) => {\n', 'const persisted = (stored, id, fields, complete, files) => {\n  return\n', /Missing expected rejection/],
 ]
-lifecycle().then(() => inParallel(mutants, async ([name, from, to]) => {
+lifecycle(source).then(() => inParallel(mutants, async ([name, from, to, lifecycleFailure]) => {
   assert.equal(source.split(from).length, 2, `unique mutant: ${name}`)
+  if (lifecycleFailure) {
+    await assert.rejects(lifecycle(source.replace(from, to)), lifecycleFailure, `lifecycle detects ${name}`)
+    return name
+  }
   const sandbox = { module: { exports: {} }, exports: {}, require, __dirname: path.join(__dirname, 'lib'), console, process, Buffer, URL }
   vm.runInNewContext(source.replace(from, to), sandbox, { filename: 'draft-release-mutant.js' })
   assert.throws(() => boundaries(sandbox.module.exports), undefined, `boundary detects ${name}`)

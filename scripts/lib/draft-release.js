@@ -1,6 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const { isDeepStrictEqual } = require('util')
 
 const WORKFLOW = '.github/workflows/portable.yml'
 const REPOSITORY = 'rubybrowncoat/Aurora-Electrons'
@@ -39,6 +40,8 @@ const plan = (context, config = {}) => {
 }
 
 const body = (owner, files = []) => `${owner.state === 'complete' ? (owner.mode === 'production' ? 'Verified production-signed' : 'UNSIGNED — no project code signature') : 'Build pending — assets are not a completed or verified release'} Windows portable build.\n\nSource: ${owner.sha}\nRun: https://github.com/${owner.repository}/actions/runs/${owner.runId}/attempts/${owner.attempt}\nState: ${owner.state}\n\n${files.map((file) => `${file.name}: ${file.size} bytes; SHA-256 ${file.sha256}`).join('\n')}\n\n<!-- aurora-portable:${JSON.stringify(owner)} -->\n`
+// Every draft write states tag_name: GitHub resets an omitted tag_name on a draft to an untagged-* tag, which loses the reusable destination.
+const releaseFields = (next, owner, files) => ({ tag_name: next.destination, target_commitish: next.owner.sha, name: `${next.destination} — ${owner.state === 'complete' ? (next.mode === 'production' ? 'verified signed' : 'UNSIGNED') : `pending ${next.mode}`} Windows build`, body: body(owner, files), draft: true, prerelease: next.destination === 'latest-build' })
 const marker = (draft) => {
   const matches = [...(draft.body || '').matchAll(/<!-- aurora-portable:(.*?) -->/g)]
   if (matches.length !== 1) fail('Refusing unowned draft destination')
@@ -79,6 +82,10 @@ const completeSet = (files, next) => {
     if (!/^[a-f0-9]{64}$/.test(file.sha256)) fail('Invalid asset hash')
   })
 }
+const sameAssets = (draft, files) => (draft.assets || []).length === files.length && files.every((file) => Number.isSafeInteger(file.id) && draft.assets.some((asset) => asset.id === file.id && asset.name === file.name && asset.size === file.size))
+const persisted = (stored, id, fields, complete, files) => {
+  if (!stored || stored.id !== id || ['draft', 'tag_name', 'target_commitish', 'prerelease'].some((key) => stored[key] !== fields[key]) || !sameAssets(stored, files) || !isDeepStrictEqual(marker(stored), complete)) fail('Completed draft did not persist its expected identity, owner marker and verified assets')
+}
 const verifiedOutput = (report, next) => {
   if (!report || report.sourceSha !== next.owner.sha || report.runId !== next.owner.runId || report.attempt !== next.owner.attempt || report.version !== next.version || report.mode !== next.mode || report.passed !== true) fail('Package verification identity/status mismatch')
   if (next.mode === 'production') {
@@ -111,14 +118,30 @@ const api = async (route, { method = 'GET', data, bytes, accept = 'application/v
   if (response.status === 204) return null
   return accept === 'application/octet-stream' ? Buffer.from(await response.arrayBuffer()) : response.json()
 }
+// An owned draft that lost its tag (untagged-*) is not the reusable destination, yet a new POST would add yet another object next to it.
+const orphaned = (release, destination) => {
+  if (!release.draft || !String(release.tag_name).startsWith('untagged-') || !String(release.name).startsWith(`${destination} — `)) return false
+  try {
+    const value = marker(release)
+    return value.repository === REPOSITORY && value.workflow === WORKFLOW
+  } catch {
+    return false
+  }
+}
 const getDraft = async (destination) => {
-  // GitHub's tag endpoint can omit drafts; enumerate authenticated releases instead.
+  // GitHub's tag endpoint can omit drafts; enumerate every authenticated release page before choosing, because a later page may hold a second exact match.
+  const exact = []
+  const untagged = []
   for (let page = 1; ; page++) {
     const releases = await api(`/releases?per_page=100&page=${page}`)
-    const found = releases.find((release) => release.tag_name === destination)
-    if (found) return api(`/releases/${found.id}`)
-    if (releases.length < 100) return null
+    exact.push(...releases.filter((release) => release.tag_name === destination))
+    untagged.push(...releases.filter((release) => orphaned(release, destination)))
+    if (releases.length < 100) break
   }
+  if (exact.length > 1) fail(`Ambiguous ${destination} drafts ${exact.map((release) => release.id).join(', ')}; refusing to choose one`)
+  if (exact.length) return api(`/releases/${exact[0].id}`)
+  if (untagged.length) fail(`Refusing to create ${destination}: owned untagged draft(s) ${untagged.map((release) => release.id).join(', ')} already exist; recover them explicitly`)
+  return null
 }
 const preflight = async () => {
   let next
@@ -160,11 +183,19 @@ const prepare = async () => {
     const current = await recheckPrevious()
     if (current.assets.length) fail('Previous assets remain before claim')
   }
-  const data = { tag_name: next.destination, target_commitish: next.owner.sha, name: `${next.destination} — pending ${next.mode} Windows build`, body: body(owner), draft: true, prerelease: next.destination === 'latest-build' }
-  const release = await api(existing ? `/releases/${existing.id}` : '/releases', { method: existing ? 'PATCH' : 'POST', data })
+  const release = await api(existing ? `/releases/${existing.id}` : '/releases', { method: existing ? 'PATCH' : 'POST', data: releaseFields(next, owner) })
   recheck(await api(`/releases/${release.id}`), next)
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `mode=${next.mode}\nversion=${next.version}\nrelease_id=${release.id}\ndestination=${next.destination}\n`)
   console.log(`Claimed draft ${release.html_url} for ${next.owner.sha} run ${next.owner.runId}/${next.owner.attempt}`)
+}
+// A successful PATCH status proves nothing about the stored identity, so the same release is read back and staging is reported only when it persisted.
+const completeDraft = async (id, next, files) => {
+  const complete = { ...next.owner, state: 'complete', assets: [...next.assetNames] }
+  const fields = releaseFields(next, complete, files)
+  await api(`/releases/${id}`, { method: 'PATCH', data: fields })
+  const stored = await api(`/releases/${id}`)
+  persisted(stored, id, fields, complete, files)
+  return stored
 }
 const publishAssets = async (directory) => {
   const next = fromEnvironment()
@@ -197,13 +228,14 @@ const publishAssets = async (directory) => {
     if (stored.name !== file.name || stored.size !== file.size) fail('Uploaded asset name/size mismatch')
     const downloaded = await api(`/releases/assets/${stored.id}`, { accept: 'application/octet-stream' })
     if (!downloaded || hash(downloaded) !== file.sha256) fail('Downloaded draft asset hash mismatch')
+    file.id = stored.id
   }
   const finalDraft = await api(`/releases/${draft.id}`)
   recheck(finalDraft, next)
-  if (finalDraft.assets.length !== files.length || files.some((file) => !finalDraft.assets.some((asset) => asset.name === file.name && asset.size === file.size))) fail('Remote complete asset set mismatch')
-  await api(`/releases/${draft.id}`, { method: 'PATCH', data: { name: `${next.destination} — ${next.mode === 'production' ? 'verified signed' : 'UNSIGNED'} Windows build`, body: body({ ...next.owner, state: 'complete', assets: next.assetNames }, files), draft: true } })
-  console.log(`Staged complete ${next.mode} set: ${finalDraft.html_url}`)
-  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## ${next.mode} draft\n${finalDraft.html_url}\n\n${files.map((file) => `- ${file.name}: ${file.size} bytes, SHA-256 \`${file.sha256}\``).join('\n')}\n`)
+  if (!sameAssets(finalDraft, files)) fail('Remote complete asset set mismatch')
+  const staged = await completeDraft(draft.id, next, files)
+  console.log(`Staged complete ${next.mode} set: ${staged.html_url}`)
+  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## ${next.mode} draft\n${staged.html_url}\n\n${files.map((file) => `- ${file.name}: ${file.size} bytes, SHA-256 \`${file.sha256}\``).join('\n')}\n`)
 }
 
 const cleanupArtifact = async (id, name) => {
@@ -214,7 +246,7 @@ const cleanupArtifact = async (id, name) => {
   console.log(`Deleted safely consumed workflow artifact ${id} (${name})`)
 }
 
-module.exports = { plan, body, marker, claim, recheck, completeSet, verifiedOutput, signingEnvironment, signingToken, prepare }
+module.exports = { plan, body, marker, claim, recheck, completeSet, verifiedOutput, signingEnvironment, signingToken, prepare, completeDraft }
 if (require.main === module) {
   const [command, directory, name] = process.argv.slice(2)
   const work = command === 'prepare' ? prepare() : command === 'publish' && directory ? publishAssets(directory) : command === 'cleanup-artifact' ? cleanupArtifact(directory, name) : Promise.reject(new Error('usage: node scripts/lib/draft-release.js prepare | publish <evidence-directory> | cleanup-artifact <id> <name>'))
