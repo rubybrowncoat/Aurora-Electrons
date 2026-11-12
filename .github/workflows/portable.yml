@@ -112,6 +112,11 @@ jobs:
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
           key: windows-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock') }}
+      - name: Use canonical temporary directory
+        shell: pwsh
+        run: |
+          node -e "const fs=require('fs');const reported=require('os').tmpdir();const real=fs.realpathSync.native(reported);fs.appendFileSync(process.env.GITHUB_ENV,'TEMP='+real+'\nTMP='+real+'\n');console.log('TEMP and TMP: '+reported+' -> '+real)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Frozen install and toolchain identity
         shell: pwsh
         env:
@@ -181,6 +186,11 @@ jobs:
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
           key: windows-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock') }}
+      - name: Use canonical temporary directory
+        shell: pwsh
+        run: |
+          node -e "const fs=require('fs');const reported=require('os').tmpdir();const real=fs.realpathSync.native(reported);fs.appendFileSync(process.env.GITHUB_ENV,'TEMP='+real+'\nTMP='+real+'\n');console.log('TEMP and TMP: '+reported+' -> '+real)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Frozen install and toolchain identity
         shell: pwsh
         env:
