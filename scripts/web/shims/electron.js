@@ -38,6 +38,9 @@ const downloadPng = (base64, fileName) => {
 export const ipcRenderer = {
   invoke (channel, ...args) {
     switch (channel) {
+      case 'reporting': {
+        return Promise.resolve({ available: false, savedChoice: false, enabled: false, initialized: false, restartRequired: false, persistenceError: null, cleanupError: null, error: null, revision: 0 })
+      }
       case 'request-storage-path': {
         return ready()
       }

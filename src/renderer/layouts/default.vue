@@ -1,5 +1,6 @@
 <template>
   <v-app :style="rootStyle">
+    <reporting-choice prompt />
     <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
       <div class="rail__empire" :class="{ 'rail__empire--active': onEmpiresPage, 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID && !onEmpiresPage }" :style="neutralStyle" role="link" tabindex="0" @click="goEmpires" @keydown.enter="goEmpires" @mouseenter="onEmpiresPage || peekSection(EMPIRES_ID)" @mouseleave="leaveRail">
         <empire-avatar :race="selectedRace" :size="40" />
@@ -115,6 +116,7 @@ import HistoryButtons from '../components/navigation/HistoryButtons.vue'
 import PagePalette from '../components/navigation/PagePalette.vue'
 import PageTrail from '../components/navigation/PageTrail.vue'
 import SaveStatus from '../components/navigation/SaveStatus.vue'
+import ReportingChoice from '../components/ReportingChoice.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import CapabilityState from '../components/page/CapabilityState.vue'
@@ -141,6 +143,7 @@ export default {
     HistoryButtons,
     PagePalette,
     PageTrail,
+    ReportingChoice,
     SaveStatus,
     SectionFlyout,
     SectionNav,

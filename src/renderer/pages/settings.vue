@@ -1,6 +1,7 @@
 <template>
   <div>
     <v-container fluid class="settings-page">
+      <reporting-choice class="mb-6" />
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
           <v-card class="panel flex-grow-1" data-summary="Set number formatting and whether computer-run empires appear alongside player empires." elevation="1">
@@ -263,6 +264,7 @@ import AppearanceFile from '../components/settings/AppearanceFile.vue'
 import FontChoice from '../components/settings/FontChoice.vue'
 import PresetCard from '../components/settings/PresetCard.vue'
 import PresetReference from '../components/settings/PresetReference.vue'
+import ReportingChoice from '../components/ReportingChoice.vue'
 import countFormat from '../mixins/count-format'
 import { ACCENTS_KEY, ACCENT_MODES, APPEARANCE_KEY, APPEARANCE_SETTINGS, BASELINE_POLICIES, CUSTOM_ID, DEFAULT_PRESET_ID, DRAFT_ID, NO_OVERRIDE, POLICIES, POLICY_KEY, accentMode, activeAppearance, adoptAppearance, appearanceOverride, appearancePolicy, appliedPresetId, applyAccents, applyPolicy, applyPreset, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, systemMode, unsupportedPresetId } from '../utilities/appearance'
 import { KIND_LABELS, MAX_BYTES as FILE_BYTES, appearanceFileName } from '../utilities/appearance-file'
@@ -320,7 +322,7 @@ const download = (text, name) => {
 
 export default {
   name: 'SettingsPage',
-  components: { AppearanceFile, FontChoice, PresetCard, PresetReference },
+  components: { AppearanceFile, FontChoice, PresetCard, PresetReference, ReportingChoice },
   mixins: [countFormat],
   data() {
     return {

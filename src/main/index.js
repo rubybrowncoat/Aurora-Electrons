@@ -1,19 +1,20 @@
 import path from 'path'
 import fs, { promises as fsPromises } from 'fs'
 
-import { app, dialog, ipcMain, nativeTheme } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net } from 'electron'
 import Store from 'electron-store'
 import envPaths from 'env-paths'
 
-// Before the window and its handlers, so their errors are reported too.
-import './sentry'
+import { installReporting, reportingStoreRequest } from './sentry'
 import './boot'
 import { databaseOf, handleLaunch, launchDatabase, openWindow, windowRegistry } from './mainWindow'
 import { createRecent, createSaveService } from './saves'
 import { createStoreHost } from './store-host'
 
 // One process per user-data folder, one window per database. The campaign registry and the history files are read, changed and written whole by the renderers, and windows of one process share the browser locks that serialise them (utilities/recording-owner.js), which a second process could not. A second launch therefore hands over to the running process with the database it was started for (the AuroraDB.db beside its executable): a database that has a window gets that window forward, another database gets a window of its own.
-if (!app.requestSingleInstanceLock({ database: launchDatabase() })) {
+const primaryInstance = app.requestSingleInstanceLock({ database: launchDatabase() })
+
+if (!primaryInstance) {
   app.quit()
 } else {
   app.on('second-instance', (_event, _argv, _workingDirectory, additionalData) => handleLaunch(additionalData && additionalData.database))
@@ -39,8 +40,10 @@ if (app.isPackaged && !fs.existsSync(settingsPath) && fs.existsSync(legacySettin
 // Every window's settings and history files are read and written here, one request at a time (store-host.js; the window's electron-store is src/preload/store-client.js): two windows writing config.json from their own processes would drop each other's keys.
 const storeHost = createStoreHost((options) => new Store(options))
 
+if (primaryInstance) installReporting({ app, BrowserWindow, ipcMain, net, storeHost })
+
 ipcMain.on('aurora-store', (event, request) => {
-  event.returnValue = storeHost.handle(request)
+  event.returnValue = reportingStoreRequest(request, app.getPath('userData')) ? { ok: false, message: 'Reporting choices can only be changed through the reporting controls.' } : storeHost.handle(request)
 })
 
 // The saves a window can switch to (src/main/saves.js): the recent ones live in their own file beside config.json, opened when first needed so that a damaged one cannot stop the launch.

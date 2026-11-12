@@ -1,6 +1,6 @@
 import Vue from 'vue'
 import * as Sentry from '@sentry/electron/renderer'
-import { init as vueInit } from '@sentry/vue'
+import { init as vueInit, vueIntegration } from '@sentry/vue'
 
 import './plugins/async-computed'
 import './plugins/icons'
@@ -13,11 +13,29 @@ import router from './app/router'
 import store from './app/store'
 import Layout from './layouts/default.vue'
 import './styles/page-chrome.scss'
+import { connectReporting } from './utilities/reporting'
 
-// Only production builds report errors: development, web mode and the smoke tests build in other modes. They go through the main process (src/main/sentry.js), which adds the release and the app's context.
-if (import.meta.env.MODE === 'production') {
-  Sentry.init({ Vue }, vueInit)
-}
+// Main grants consent and owns egress for every process. A revoked renderer is never re-enabled before restart.
+connectReporting((state) => {
+  if (state.enabled && !Sentry.getClient()) {
+    Sentry.init({
+      Vue,
+      defaultIntegrations: false,
+      integrations: [Sentry.globalHandlersIntegration(), vueIntegration()],
+      autoSessionTracking: false,
+      enableLogs: false,
+      enableMetrics: false,
+      sendDefaultPii: false,
+      maxBreadcrumbs: 0,
+      tracePropagationTargets: [],
+      dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false, databaseQueryData: false, queues: false, stackFrameVariables: false, frameContextLines: 0 },
+      beforeBreadcrumb: () => null,
+      beforeSend: (event) => state.enabled ? event : null,
+    }, vueInit)
+  } else if (!state.enabled && Sentry.getClient()) {
+    Sentry.getClient().getOptions().enabled = false
+  }
+})
 
 // Before the app mounts, so the race guard in plugins/navigation.js sees the first navigation too.
 ;[database, history, navigation].forEach((plugin) => plugin({ router, store }))
