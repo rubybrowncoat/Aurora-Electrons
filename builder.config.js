@@ -1,5 +1,6 @@
 const fs = require('fs')
 const path = require('path')
+const VERSION = require('./package.json').version
 
 const ICONS_DIR = 'build/icons/'
 
@@ -63,6 +64,11 @@ module.exports = {
   // node_modules/sqlite3's binary in place, and when another process has it loaded that leaves it missing.
   npmRebuild: false,
   productName: 'Aurora Electrons',
+  // Keep PE versions independent of ambient CI build-number variables.
+  buildNumber: '0',
+  buildVersion: VERSION,
+  // Only scripts/lib/draft-release.js may stage assets after package verification.
+  publish: null,
   appId: 'net.nerdship.aurora.electrons',
   // eslint-disable-next-line no-template-curly-in-string
   artifactName: 'aurora-electrons-${version}.${ext}',

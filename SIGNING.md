@@ -1,6 +1,6 @@
 # Code signing policy
 
-Aurora Electrons does not sign its releases today. This page states the policy under which signing is prepared, so that it is clear what would be signed, by whom, and how, before any certificate exists.
+The checked releases, 2.7.10 to 3.2.2, are unsigned. This page states the policy under which signing is prepared, so that it is clear what would be signed, by whom, and how, before signing is activated. This preparation did not look up whether a certificate already exists.
 
 ## Status
 
@@ -10,7 +10,7 @@ Checked on 2026-11-11; this page was last revised on 2026-11-12.
 | --- | --- |
 | Published downloads | Unsigned. The v3.2.2 download (`aurora-electrons-3.2.2.exe`, SHA-256 `2453ded88ff56edcedc371d3f4e9e2cc589f40af5ebab2b78589dde2b5aa6cf4`, the digest GitHub shows for the asset) reads as `NotSigned` in `Get-AuthenticodeSignature` on a byte-identical local copy. So do the 3.2.1, 3.2.0, 2.7.11 and 2.7.10 downloads, each checked the same way against its published digest. Windows may warn about an unsigned download. |
 | Repository preparation | The release workflow, the two SignPath artifact configurations and the signature verifier are on the `signpath-preparation` branch of this repository (see [RELEASING.md](RELEASING.md)); that branch is not merged into the default branch. |
-| SignPath Foundation application | Prepared in [SIGNPATH_APPLICATION.md](SIGNPATH_APPLICATION.md). Not submitted, not accepted. |
+| SignPath Foundation application | Prepared in [SIGNPATH_APPLICATION.md](SIGNPATH_APPLICATION.md). This preparation has not submitted it; no acceptance is claimed. |
 | Provider account and certificate | This preparation created or verified no SignPath account or certificate and made no signing request. It did not look up whether an account or certificate already exists. No project-signed artifact was produced by this preparation. |
 | Team prerequisites | Multi-factor authentication and an independent second approver are not confirmed (see [Team roles](#team-roles)). |
 
@@ -26,7 +26,7 @@ Only two Windows executables, both produced by this project's own build from its
 | `aurora-electrons-<version>.exe`, the portable wrapper that electron-builder generates around the signed inner executable | Second stage ([`.github/signpath/portable.xml`](.github/signpath/portable.xml)) | The launcher users download. Same open question. |
 | Electron and Chromium libraries and data files (`ffmpeg.dll`, `vk_swiftshader.dll`, `vulkan-1.dll`, `d3dcompiler_47.dll`, `dxcompiler.dll`, `dxil.dll`, `*.pak`, ...), `app.asar`, the native `sqlite3` binding, notices | Never | Upstream files and data. They are never signed under this project's subscription and keep the bytes they shipped with, including any upstream signature. The pipeline is built to check this. Whether the three Microsoft DirectX files count as system libraries is a separate open question ([question 3](SIGNPATH_APPLICATION.md#questions-for-the-signpath-foundation); [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), section 3). |
 
-Both configurations enforce the product name `Aurora Electrons` and one product version, the package version, for each build.
+For source package version `M.m.p`, both configurations enforce product name `Aurora Electrons` and FileVersion `M.m.p`. The inner ProductVersion is `M.m.p.0`; the portable wrapper ProductVersion is `M.m.p`.
 
 Which of the two files the provider accepts, and the certificate subject, are the provider's decisions. The builder setting `publisherName: nerdship` is the project's current value; it is not a statement about any future certificate, and the expected subject is configured separately (`SIGNPATH_EXPECTED_SUBJECT`).
 
@@ -42,7 +42,7 @@ The Foundation asks projects to name three roles. Aurora Electrons has one maint
 
 Members who are added are listed here and in the matching GitHub and SignPath permission groups before they act in a role. Whether a one-person team meets the Foundation's expectations is one of the questions in the application.
 
-**Second approver on GitHub.** A signing run also needs approval from the GitHub environment `production-signing` (see below), whose required reviewers must be independent of the person who starts the run, with self-review prevented. While the maintainer is the only person who starts runs, that needs a second trusted person as an environment reviewer. None is named yet, and this repository cannot create or verify one.
+**Second approver on GitHub.** A signing run also needs approval from the GitHub environment `production-signing` (see below), whose required reviewers must be independent of the person who starts the run, with self-review prevented. While the maintainer is the only person who starts runs, that needs a second trusted person as an environment reviewer. This policy names none, and this repository cannot create or verify one.
 
 **Multi-factor authentication.** Every member must use it on both GitHub and SignPath. This repository cannot verify it; the maintainer enables and confirms it before the application is submitted.
 
@@ -80,8 +80,8 @@ What remains outside the repository's control: the workflow cannot tell where a 
 2. The `Windows portable draft` workflow is dispatched in `production` mode with `reviewed_sha`, `reviewed_ref` (the full `refs/heads/...` or `refs/tags/...` form) and `reviewed_version` equal to those variables and to the checked-out revision.
 3. The preparation job runs the public check above and claims the draft destination.
 4. GitHub holds the signing job until the environment's reviewers approve it. Its first step checks the token, as above.
-5. **Inner executable.** The workflow builds the unpacked app (`bun run build --win --dir`) and uploads a minimal workflow artifact (`signpath-inner-<sha>-<run>-<attempt>`, kept 3 days) holding only `Aurora Electrons.exe`. SignPath receives it from GitHub, the approver approves the request, the action waits up to 1800 seconds and downloads the result only if the request is `Completed`. `scripts/verify-signature.ps1` then checks the Authenticode status and chain, the timestamp, the expected subject, product name and version, and the file's identity. Only then is that one file replaced.
-6. **Portable wrapper.** electron-builder wraps the prepackaged directory (`--win portable --prepackaged build/win-unpacked --config builder.config.js`) without rebuilding it, so the signed inner file is not recompiled. The same steps run on a second artifact (`signpath-portable-<sha>-<run>-<attempt>`), and the wrapper is confirmed to hold the same verified signed inner executable.
+5. **Inner executable.** The workflow builds the unpacked app (`bun run build --win --dir`) and uploads a minimal workflow artifact (`signpath-inner-<sha>-<run>-<attempt>`, kept 3 days) holding only `Aurora Electrons.exe`. SignPath receives it from GitHub, the approver approves the request, the action waits up to 1800 seconds and downloads the result only if the request is `Completed`. `scripts/verify-signature.ps1` then checks the Authenticode status and chain, the timestamp, the expected subject and product name, exact ProductVersion `M.m.p.0` and FileVersion `M.m.p` for source version `M.m.p`, and the file's identity. The version parameter remains `M.m.p`; the inner artifact definition adds `.0`, and the build number is pinned to zero. Only then is that one file replaced.
+6. **Portable wrapper.** electron-builder wraps the prepackaged directory (`--win portable --prepackaged build/win-unpacked --config builder.config.js --publish never`) without rebuilding it, so the signed inner file is not recompiled. The same steps run on a second artifact (`signpath-portable-<sha>-<run>-<attempt>`), and the wrapper is confirmed to hold the same verified signed inner executable. The wrapper's ProductVersion and FileVersion must both equal `M.m.p`. Builder publication is disabled in both stages; only the reviewed draft helper stages the verified assets.
 7. The verified bytes are staged to the draft release as `aurora-electrons-<version>-signed.exe`, `aurora-electrons-<version>-signed.build.json` and `aurora-electrons-<version>-signed.SHA256SUMS.txt`. Each temporary artifact is deleted by its exact ID, only after its request has completed and its result has been retrieved and verified; a pending or failed request keeps its input.
 8. The maintainer inspects the draft and publishes it by hand. A draft is not a public release.
 

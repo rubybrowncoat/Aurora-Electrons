@@ -20,7 +20,8 @@ const run = (args) => {
 const builderArguments = () => {
   const args = process.argv.slice(2)
 
-  return args.includes('--config') || args.includes('-c') ? args : [...args, '--config', 'builder.config.js']
+  const configured = args.includes('--config') || args.includes('-c') ? args : [...args, '--config', 'builder.config.js']
+  return [...configured, '--publish', 'never']
 }
 
 checkInstalled(PROJECT_ROOT)

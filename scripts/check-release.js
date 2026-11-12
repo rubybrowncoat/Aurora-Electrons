@@ -74,7 +74,7 @@ const boundaries = (api) => {
   assert.throws(() => api.verifiedOutput({ ...report, passed: false }, next), /status/)
   const production = api.plan(context({ mode: 'production', runId: '102' }), config)
   assert.throws(() => api.verifiedOutput({ ...report, mode: 'production' }, production), /stages/)
-  const signed = { ...report, mode: 'production', inner: { sha256: 'd'.repeat(64) }, wrapper: { sha256: 'e'.repeat(64) }, signatures: Object.fromEntries([['inner', 'Aurora Electrons.exe', 'd'], ['wrapper', 'aurora-electrons-3.2.2.exe', 'e']].map(([stage, name, hex]) => [stage, { Status: 'Valid', TimestampPresent: true, Subject: config.subject, Product: 'Aurora Electrons', Version: '3.2.2', FileName: name, SHA256: hex.repeat(64) }])) }
+  const signed = { ...report, mode: 'production', inner: { sha256: 'd'.repeat(64) }, wrapper: { sha256: 'e'.repeat(64) }, signatures: Object.fromEntries([['inner', 'Aurora Electrons.exe', 'd'], ['wrapper', 'aurora-electrons-3.2.2.exe', 'e']].map(([stage, name, hex]) => [stage, { Status: 'Valid', TimestampPresent: true, Subject: config.subject, Product: 'Aurora Electrons', ProductVersion: stage === 'inner' ? '3.2.2.0' : '3.2.2', FileVersion: '3.2.2', FileName: name, SHA256: hex.repeat(64) }])) }
   assert.doesNotThrow(() => api.verifiedOutput(signed, production))
   for (const status of ['Rejected', 'Pending', 'Failed', 'TimedOut']) {
     assert.throws(() => api.verifiedOutput({ ...signed, signatures: { ...signed.signatures, wrapper: { ...signed.signatures.wrapper, Status: status } } }, production), /stages/)

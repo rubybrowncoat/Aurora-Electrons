@@ -4,7 +4,7 @@
     <parameter name="version" required="true" />
   </parameters>
   <zip-file>
-    <pe-file path="Aurora Electrons.exe" product-name="Aurora Electrons" product-version="${version}">
+    <pe-file path="Aurora Electrons.exe" product-name="Aurora Electrons" product-version="${version}.0" file-version="${version}">
       <authenticode-sign hash-algorithm="sha256" append="true" />
     </pe-file>
   </zip-file>

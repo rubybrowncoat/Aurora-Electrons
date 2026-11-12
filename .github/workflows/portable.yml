@@ -93,7 +93,6 @@ jobs:
       contents: write
     env:
       RELEASE_MODE: unsigned
-      BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/bun-download-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,6 +114,8 @@ jobs:
           key: windows-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock') }}
       - name: Frozen install and toolchain identity
         shell: pwsh
+        env:
+          BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/bun-download-cache
         run: |
           if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Source SHA mismatch' }
           if ((node -p 'process.versions.node.split(".")[0]') -ne '24') { throw 'Node 24 required' }
@@ -136,7 +137,7 @@ jobs:
       - name: Capture exact inner and upstream payload
         run: node scripts/package-smoke.js snapshot inner
       - name: Wrap the same prepackaged bytes without recompiling
-        run: node node_modules/electron-builder/cli.js --win portable --prepackaged build/win-unpacked --config builder.config.js
+        run: node node_modules/electron-builder/cli.js --win portable --prepackaged build/win-unpacked --config builder.config.js --publish never
       - name: Package, licence, signature-control and real SQLite launch checks
         run: node scripts/package-smoke.js
       - name: Recheck claim and stage complete UNSIGNED draft set
@@ -155,7 +156,6 @@ jobs:
       actions: write
     env:
       RELEASE_MODE: production
-      BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/bun-download-cache
     steps:
       - name: Require the approved environment token before any other work
         shell: pwsh
@@ -183,6 +183,8 @@ jobs:
           key: windows-${{ runner.arch }}-node24-bun1.4.2-${{ hashFiles('bun.lock') }}
       - name: Frozen install and toolchain identity
         shell: pwsh
+        env:
+          BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/bun-download-cache
         run: |
           if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Source SHA mismatch' }
           if ((node -p 'process.versions.node.split(".")[0]') -ne '24') { throw 'Node 24 required' }
@@ -232,7 +234,7 @@ jobs:
         id: inner_accept
         run: node scripts/package-smoke.js accept inner build/signpath-return/inner
       - name: Wrap verified inner without rebuilding or repacking application
-        run: node node_modules/electron-builder/cli.js --win portable --prepackaged build/win-unpacked --config builder.config.js
+        run: node node_modules/electron-builder/cli.js --win portable --prepackaged build/win-unpacked --config builder.config.js --publish never
       - name: Capture exact wrapper before signing
         run: node scripts/package-smoke.js snapshot portable
       - name: Upload only the exact portable signing target

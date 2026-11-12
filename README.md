@@ -16,7 +16,7 @@ Windows downloads are portable executables on the [releases page](https://github
 
 There is no installer. Save the executable, put it next to the `AuroraDB.db` it should open (in Aurora's folder, or a copy of it), and start it. At start it opens the `AuroraDB.db` beside it; another save can be chosen from inside the app, and recent saves are remembered. The portable executable unpacks itself to a temporary folder each time it starts.
 
-Releases are **not code-signed yet**, so Windows may warn about the download. GitHub shows a SHA-256 digest next to each asset to compare with the file you downloaded. See [Code signing policy](#code-signing-policy).
+The checked releases, from 2.7.10 to 3.2.2, are **not code-signed**, so Windows may warn about the download. GitHub shows a SHA-256 digest next to each asset to compare with the file you downloaded. See [Code signing policy](#code-signing-policy).
 
 **What the app does to your save.** Aurora Electrons reads your save. The one exception is the Galaxy Map's **Save positions** button: after a confirmation it writes the positions of the systems you moved, rounded to whole units, into the save's survey rows for the empire you are viewing. Use it with the game closed, or load the save again in the game afterwards, and keep a copy of the save. Nothing else is written to a save, and the app never moves or copies one.
 
@@ -26,7 +26,7 @@ Aurora Electrons has no accounts, no analytics and no usage tracking. Your saves
 
 ## Code signing policy
 
-The releases from 2.7.10 to 3.2.2 are unsigned. Signing through the SignPath Foundation is being prepared but has not been applied for, accepted or used; nothing here claims otherwise. The policy that will apply, the covered files, the team roles and how a signed release is made are in [SIGNING.md](SIGNING.md). How release builds are made is in [RELEASING.md](RELEASING.md).
+The releases from 2.7.10 to 3.2.2 are unsigned. Signing through the SignPath Foundation is being prepared. This preparation has not applied for it or made a signing request; no Foundation acceptance or active signing is claimed. The policy that will apply, the covered files, the team roles and how a signed release is made are in [SIGNING.md](SIGNING.md). How release builds are made is in [RELEASING.md](RELEASING.md).
 
 ## Remove the app and its data
 

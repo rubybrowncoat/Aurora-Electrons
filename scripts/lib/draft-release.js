@@ -85,7 +85,7 @@ const verifiedOutput = (report, next) => {
     for (const [stage, name] of [['inner', 'Aurora Electrons.exe'], ['wrapper', `aurora-electrons-${next.version}.exe`]]) {
       if (!/^[a-f0-9]{64}$/.test(report[stage]?.sha256)) fail('Both signing stages require a content hash')
       const signature = report.signatures?.[stage]
-      if (!signature || signature.Status !== 'Valid' || signature.TimestampPresent !== true || signature.Subject !== next.expectedSubject || signature.Product !== 'Aurora Electrons' || signature.Version !== next.version || signature.FileName !== name || signature.SHA256 !== report[stage]?.sha256) fail('Both completed, trusted, timestamped signing stages are required; no unsigned fallback')
+      if (!signature || signature.Status !== 'Valid' || signature.TimestampPresent !== true || signature.Subject !== next.expectedSubject || signature.Product !== 'Aurora Electrons' || signature.ProductVersion !== (stage === 'inner' ? `${next.version}.0` : next.version) || signature.FileVersion !== next.version || signature.FileName !== name || signature.SHA256 !== report[stage]?.sha256) fail('Both completed, trusted, timestamped signing stages are required; no unsigned fallback')
     }
   } else if (report.metadata?.inner?.Status !== 'NotSigned' || report.metadata?.wrapper?.Status !== 'NotSigned') fail('Unsigned route must remain explicitly unsigned')
 }

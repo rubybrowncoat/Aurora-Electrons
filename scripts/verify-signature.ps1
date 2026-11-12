@@ -4,7 +4,8 @@ param(
     [string]$ExpectedFileName,
     [string]$ExpectedSubject,
     [string]$ExpectedProduct,
-    [string]$ExpectedVersion,
+    [string]$ExpectedProductVersion,
+    [string]$ExpectedFileVersion,
     [string]$OriginalPath,
     [switch]$Inspect,
     [switch]$SelfTest
@@ -14,8 +15,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 function Assert-SignatureResult {
-    param($Result, [string]$Name, [string]$Subject, [string]$Product, [string]$Version)
-    foreach ($value in @($Name, $Subject, $Product, $Version)) {
+    param($Result, [string]$Name, [string]$Subject, [string]$Product, [string]$ProductVersion, [string]$FileVersion)
+    foreach ($value in @($Name, $Subject, $Product, $ProductVersion, $FileVersion)) {
         if ([string]::IsNullOrWhiteSpace($value)) { throw 'Missing expected signature identity/configuration' }
     }
     if ($Result.FileName -cne $Name) { throw 'Unexpected exact target filename' }
@@ -23,7 +24,8 @@ function Assert-SignatureResult {
     if ([string]::IsNullOrWhiteSpace($Result.Subject) -or $Result.Subject -cne $Subject) { throw 'Unexpected certificate subject' }
     if (-not $Result.TimestampPresent) { throw 'Missing trusted Authenticode timestamp' }
     if ($Result.Product -cne $Product) { throw 'Unexpected ProductName' }
-    if ($Result.Version -cne $Version) { throw 'Unexpected ProductVersion' }
+    if ($Result.ProductVersion -cne $ProductVersion) { throw 'Unexpected ProductVersion' }
+    if ($Result.FileVersion -cne $FileVersion) { throw 'Unexpected FileVersion' }
 }
 
 function Get-SignatureResult {
@@ -39,7 +41,8 @@ function Get-SignatureResult {
         TimestampPresent = $null -ne $signature.TimeStamperCertificate
         TimestampSubject = if ($null -ne $signature.TimeStamperCertificate) { $signature.TimeStamperCertificate.Subject } else { '' }
         Product = $item.VersionInfo.ProductName
-        Version = $item.VersionInfo.ProductVersion
+        ProductVersion = $item.VersionInfo.ProductVersion
+        FileVersion = $item.VersionInfo.FileVersion
         SHA256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 }
@@ -91,14 +94,14 @@ function Assert-SamePeContent {
 }
 
 if ($SelfTest) {
-    $good = @{ FileName = 'test.exe'; Status = 'Valid'; Subject = 'CN=Trusted Control'; TimestampPresent = $true; Product = 'Control'; Version = '1.2.3' }
-    Assert-SignatureResult $good 'test.exe' 'CN=Trusted Control' 'Control' '1.2.3'
-    $cases = @(@{ Status = 'NotTrusted' }, @{ Status = 'HashMismatch' }, @{ TimestampPresent = $false }, @{ Subject = '' }, @{ Product = 'Other' }, @{ Version = '9.9.9' }, @{ FileName = 'other.exe' })
+    $good = @{ FileName = 'test.exe'; Status = 'Valid'; Subject = 'CN=Trusted Control'; TimestampPresent = $true; Product = 'Control'; ProductVersion = '1.2.3.0'; FileVersion = '1.2.3' }
+    Assert-SignatureResult $good 'test.exe' 'CN=Trusted Control' 'Control' '1.2.3.0' '1.2.3'
+    $cases = @(@{ Status = 'NotTrusted' }, @{ Status = 'HashMismatch' }, @{ TimestampPresent = $false }, @{ Subject = '' }, @{ Product = 'Other' }, @{ ProductVersion = '1.2.3' }, @{ FileVersion = '9.9.9' }, @{ FileName = 'other.exe' })
     foreach ($case in $cases) {
         $bad = $good.Clone()
         foreach ($key in $case.Keys) { $bad[$key] = $case[$key] }
         $rejected = $false
-        try { Assert-SignatureResult $bad 'test.exe' 'CN=Trusted Control' 'Control' '1.2.3' } catch { $rejected = $true }
+        try { Assert-SignatureResult $bad 'test.exe' 'CN=Trusted Control' 'Control' '1.2.3.0' '1.2.3' } catch { $rejected = $true }
         if (-not $rejected) { throw "Verifier accepted invalid collected result: $($case | ConvertTo-Json -Compress)" }
     }
     @{ passed = $true; collectedResultCases = $cases.Length + 1; scope = 'Decision controls only; not a certificate or project signature' } | ConvertTo-Json -Compress
@@ -107,7 +110,7 @@ if ($SelfTest) {
 if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Missing signature target path' }
 $result = Get-SignatureResult $Path
 if (-not $Inspect) {
-    Assert-SignatureResult $result $ExpectedFileName $ExpectedSubject $ExpectedProduct $ExpectedVersion
+    Assert-SignatureResult $result $ExpectedFileName $ExpectedSubject $ExpectedProduct $ExpectedProductVersion $ExpectedFileVersion
     if (-not [string]::IsNullOrWhiteSpace($OriginalPath)) { Assert-SamePeContent $OriginalPath $Path }
 }
 $result | ConvertTo-Json -Compress
