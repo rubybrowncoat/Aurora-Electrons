@@ -26,7 +26,7 @@ The hosted workflow does not run `bun run reporting:smoke`. That check builds th
 | Manual dispatch, mode `production` with `reviewed_sha`, `reviewed_ref` and `reviewed_version` | Signed build; see [SIGNING.md](SIGNING.md). Fails during preparation if production signing is not fully configured. |
 | Push of a version tag that equals `v<version in package.json>` | Unsigned build and draft release for that version |
 
-GitHub lists a workflow for manual dispatch only after its file is on the repository's default branch. Until `portable.yml` has been merged into `master`, the branch push is the way to start it, and a `gh workflow run` dispatch is expected to be refused. Merging is a maintainer decision outside this workflow.
+The preparation branch can be dispatched directly with `gh workflow run portable.yml --ref signpath-preparation -f mode=unsigned`. This was accepted on 2026-11-12 while `master` still had no workflow file. Merging into `master` remains a maintainer decision, not a prerequisite for that observed CLI route.
 
 ## Draft rules
 
@@ -40,7 +40,7 @@ One preparation job validates the mode, revision and version and claims the draf
 
 ## Making an unsigned draft
 
-1. Push to `signpath-preparation`, or (once the workflow is on `master`) run `gh workflow run portable.yml --ref <branch> -f mode=unsigned`.
+1. Push to `signpath-preparation`, or run `gh workflow run portable.yml --ref signpath-preparation -f mode=unsigned`.
 2. Open the run and check that every step passed.
 3. Open the draft release. Check the asset names, sizes and the SHA-256 in `SHA256SUMS.txt`; download one asset and hash it again.
 4. Publish by hand only if the draft is meant to be a release.
