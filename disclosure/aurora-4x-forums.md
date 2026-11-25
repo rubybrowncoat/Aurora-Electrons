@@ -163,7 +163,7 @@ Please don't raise this with Steve, or on the forum or Discord, on my behalf. Th
 
 ## The record
 
-My own forum posts and messages are copied from the data export I downloaded from the forum on 19 November 2026. The export holds only my own posts. Steve's private messages are transcribed from screenshots of the thread, which show the date but not the time. The Discord messages are copied from Discord. Steve's chat message and his two thread posts are as they stood on the forum on 19 November 2026. Spelling and punctuation are as in the originals.
+My own forum posts and messages are copied from the data export I downloaded from the forum on 19 November 2026. The export holds only my own posts. Steve's private messages are transcribed from screenshots of the thread, which show the date but not the time. The Discord messages are copied from Discord. Steve's chat message and his two thread posts are as they stood on the forum on 19 November 2026.
 
 As of 19 November 2026, the anti-modding thread (topic 1416) and the Electrons thread (topic 1177) both return a 404. My account and the rest of my posts were deleted on 25 November.
 
