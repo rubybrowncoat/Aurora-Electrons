@@ -45,8 +45,8 @@ const PAGES = [
   { route: '/about', section: null, tab: 'About', title: 'About', noRace: true, icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where the data lives.', keywords: 'version license github forum feedback credits contribute help data folder settings file' },
 ]
 
-// The forum thread for updates and feedback. The About page links to it while this is set, and says "coming soon" while it is empty.
-const FORUM_URL = 'https://aurora4x.com/t/aurora-electrons-looking-inwards-v0-9-14/1177'
+// The note on why the app has no thread on the Aurora 4x forums. The About page links to it while this is set, and says "coming soon" while it is empty.
+const FORUMS_NOTE_URL = 'https://github.com/rubybrowncoat/Aurora-Electrons/blob/master/disclosure/aurora-4x-forums.md'
 
 const sectionById = Object.fromEntries(SECTIONS.map((section) => [section.id, section]))
 const pageByRoute = Object.fromEntries(PAGES.map((page) => [page.route, page]))
@@ -58,4 +58,4 @@ const needsRace = (path) => {
   return !(page && page.noRace)
 }
 
-export { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute, needsRace }
+export { SECTIONS, PAGES, FORUMS_NOTE_URL, sectionById, pageByRoute, needsRace }
