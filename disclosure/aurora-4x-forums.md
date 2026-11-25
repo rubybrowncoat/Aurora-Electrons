@@ -10,30 +10,35 @@ Steve owns the forum and pays for it, and he decides who posts there. This page 
 
 ## Timeline
 
+<details>
+<summary>Show the timeline</summary>
+
 | When | What happened |
 |---|---|
 | 7 May 2026 | Steve publishes [Mods and v3.0](https://aurora4x.com/t/mods-and-v3-0/510), announcing that features will stop working when mods are detected. |
 | 1–10 November 2026 | Aurora v3.0, v3.1, v3.2 and v3.3 are released. |
-| 10–12 November 2026 | I file five bug reports in the v3.3.0 bug thread. Steve answers each one inline. |
-| 12 November, 19:28 | I post “Anti-modding measures in v3.x: an opinion and a thread” in General Discussion. |
-| 12 November, before 20:20 | Steve's first private message. By then he has deleted the thread and silenced my account. |
-| 12 November, 20:20 | My reply. |
-| 12 November, between 20:20 and 21:19 | Steve's second private message. |
-| 12 November, 21:19 | My second reply. |
-| 12 November, between 21:19 and 22:21 | My account is suspended. The automated email gives the end as 15 November, 21:47. |
-| 12 November, 22:21 and 22:43 | I ask Steve on Discord what feedback the suspension refers to. No reply. |
+| 10–12 November 2026 | I file [five bug reports](#record-bug-reports) in the v3.3.0 bug thread. Steve answers each one inline. |
+| 12 November, 19:28 | I post [“Anti-modding measures in v3.x: an opinion and a thread”](#record-post) in General Discussion. |
+| 12 November, before 20:20 | Steve's [first private message](#record-private-messages). By then he has deleted the thread and silenced my account. |
+| 12 November, 20:20 | [My reply](#record-private-messages). |
+| 12 November, between 20:20 and 21:19 | Steve's [second private message](#record-private-messages). |
+| 12 November, 21:19 | [My second reply](#record-private-messages). |
+| 12 November, between 21:19 and 22:21 | My account is suspended. The [automated email](#record-suspension-email) gives the end as 15 November, 21:47. |
+| 12 November, 22:21 and 22:43 | I [ask Steve on Discord](#record-discord) what feedback the suspension refers to. No reply. |
 | 13 November, by 00:40 | The Aurora Electrons thread is gone from the forum. Another member asks in a forum chat channel what happened to it. |
-| 13 November, 00:55 | Steve answers in that chat channel with his account of the exchange. |
+| 13 November, 00:55 | Steve answers in that chat channel with [his account of the exchange](#record-chat-message). |
 | 13 November, from 07:33 | In a public thread, a member asks what happened to the Electrons thread and why I was banned. |
-| 13 November, 11:31 | Steve gives a second account of the exchange in [that thread](https://aurora4x.com/t/where-can-i-find-something-like-aurora-elections-that-works/906/17). |
+| 13 November, 11:31 | Steve gives a second account of the exchange in [that thread](https://aurora4x.com/t/where-can-i-find-something-like-aurora-elections-that-works/906/17) ([text](#record-thread-post)). |
 | 13 November, 11:37 | The member asks whether there is a rule against talking about mods. |
-| 13 November, 11:41 | Steve replies that the member shares my city and ISP. The member is suspended, and later reinstated. |
-| 13 November, 12:58 | I state on Discord that the account is not mine. |
-| 13 November, 14:46 | I ask Steve on Discord whether the suspension is now permanent, and whether the Electrons thread was deleted or hidden. No reply. |
-| 15 November, 22:55 | About an hour after the end time in the email, I still cannot log in. I ask Steve on Discord for an export of my account data. |
-| 19 November, 12:54 | Steve temporarily lifts the suspension so that I can download my data. My profile now shows me as silenced until 26 November. |
-| 19 November, 13:55 | I download my posts and ask him to reconsider the full suspension. No reply. |
+| 13 November, 11:41 | Steve [replies](#record-other-member) that the member shares my city and ISP. The member is suspended, and later reinstated. |
+| 13 November, 12:58 | I [state on Discord](#record-other-member) that the account is not mine. |
+| 13 November, 14:46 | I [ask Steve on Discord](#record-discord) whether the suspension is now permanent, and whether the Electrons thread was deleted or hidden. No reply. |
+| 15 November, 22:55 | About an hour after the end time in the email, I still cannot log in. I [ask Steve on Discord](#record-discord) for an export of my account data. |
+| 19 November, 12:54 | Steve [temporarily lifts the suspension](#record-discord) so that I can download my data. My profile now shows me as silenced until 26 November. |
+| 19 November, 13:55 | I download my posts and [ask him to reconsider](#record-discord) the full suspension. No reply. |
 | 25 November, after about 16:00 | My account is deleted, along with all of my posts. |
+
+</details>
 
 ## The post
 
@@ -167,6 +172,8 @@ My own forum posts and messages are copied from the data export I downloaded fro
 
 As of 19 November 2026, the anti-modding thread (topic 1416) and the Electrons thread (topic 1177) both return a 404. My account and the rest of my posts were deleted on 25 November.
 
+<a name="record-post"></a>
+
 <details>
 <summary>The post: “Anti-modding measures in v3.x: an opinion and a thread” (12 November 2026, 19:28)</summary>
 
@@ -238,6 +245,8 @@ As of 19 November 2026, the anti-modding thread (topic 1416) and the Electrons t
 
 </details>
 
+<a name="record-private-messages"></a>
+
 <details>
 <summary>The private messages, 12 November 2026</summary>
 
@@ -284,6 +293,8 @@ As of 19 November 2026, the anti-modding thread (topic 1416) and the Electrons t
 
 </details>
 
+<a name="record-bug-reports"></a>
+
 <details>
 <summary>My bug reports in the v3.3.0 thread, 10–12 November 2026</summary>
 
@@ -296,6 +307,8 @@ Five reports, each followed by the reply Steve added inline.
 - 12 November, 09:50: “Closing Select Known System does not cancel”. “SJW: Fixed for 3.3.1”
 
 </details>
+
+<a name="record-suspension-email"></a>
 
 <details>
 <summary>The suspension email</summary>
@@ -315,6 +328,8 @@ Five reports, each followed by the reply Steve added inline.
 > For additional guidance, refer to our community guidelines. (https://aurora4x.com/guidelines)
 
 </details>
+
+<a name="record-discord"></a>
 
 <details>
 <summary>Discord messages</summary>
@@ -347,6 +362,8 @@ Five reports, each followed by the reply Steve added inline.
 
 </details>
 
+<a name="record-chat-message"></a>
+
 <details>
 <summary>Steve's chat message</summary>
 
@@ -366,6 +383,8 @@ Steve was replying to another member, who had asked at 00:40 whether something h
 
 </details>
 
+<a name="record-thread-post"></a>
+
 <details>
 <summary>Steve's thread post</summary>
 
@@ -378,6 +397,8 @@ Steve was replying to another member, who had asked at 00:40 whether something h
 > I am not trying to win an argument, or seek approval for my position, or maximise the number of players. I am just trying to have fun with my hobby and I don’t need the drama. Unlike Henry II, I can just mute the turbulent priest and move on with my life.
 
 </details>
+
+<a name="record-other-member"></a>
 
 <details>
 <summary>Steve's reply to the other member, and my statement on Discord</summary>
