@@ -60,15 +60,15 @@
               <v-list-item>
                 <v-list-item-icon><v-icon>mdi-forum-outline</v-icon></v-list-item-icon>
                 <v-list-item-content>
-                  <v-list-item-title>Forum thread</v-list-item-title>
-                  <v-list-item-subtitle>
-                    <external-link v-if="forumUrl" :href="forumUrl" class="forum-link" />
+                  <v-list-item-title>Aurora 4x forums</v-list-item-title>
+                  <v-list-item-subtitle class="text-wrap">
+                    <external-link v-if="forumsNoteUrl" :href="forumsNoteUrl" class="forum-link">Why Aurora Electrons isn't on the Aurora 4x forums</external-link>
                     <span v-else class="forum-soon">Coming soon</span>
                   </v-list-item-subtitle>
                 </v-list-item-content>
               </v-list-item>
             </v-list>
-            <div class="panel-foot caption text--secondary">Report bugs in the GitHub issues. Updates are posted in the forum thread.</div>
+            <div class="panel-foot caption text--secondary">Report bugs in the GitHub issues. Updates are posted in the GitHub releases.</div>
           </v-card>
         </v-col>
 
@@ -194,7 +194,7 @@ import ExternalLink from '../components/ExternalLink.vue'
 import { READ_SAVES } from '../utilities/capabilities'
 import { CREDITS } from '../utilities/credits'
 import { registryStore } from '../utilities/history'
-import { FORUM_URL } from '../utilities/navigation'
+import { FORUMS_NOTE_URL } from '../utilities/navigation'
 import { version } from '../../../package.json'
 
 const REPO_URL = 'https://github.com/rubybrowncoat/Aurora-Electrons'
@@ -215,7 +215,7 @@ export default {
     return {
       version,
       auroraLine: READ_SAVES,
-      forumUrl: FORUM_URL,
+      forumsNoteUrl: FORUMS_NOTE_URL,
       repoUrl: REPO_URL,
       issuesUrl: `${REPO_URL}/issues`,
       authorUrl: 'https://github.com/rubybrowncoat',
