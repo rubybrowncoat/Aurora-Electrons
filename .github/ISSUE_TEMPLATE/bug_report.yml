@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in Aurora Electrons is wrong, broken or crashes.
+labels: ["bug"]
+body:
+  - type: input
+    id: electrons-version
+    attributes:
+      label: Aurora Electrons version
+      description: Shown on the About page.
+      placeholder: "3.2.2"
+    validations:
+      required: true
+  - type: input
+    id: aurora-version
+    attributes:
+      label: Aurora version
+      placeholder: "3.3.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected to see instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The page you were on and what you did before the problem appeared.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else
+      description: Error messages, or a note on whether it happens with every save or only one.
+    validations:
+      required: false
