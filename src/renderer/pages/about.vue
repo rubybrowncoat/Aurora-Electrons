@@ -58,6 +58,13 @@
                 </v-list-item-content>
               </v-list-item>
               <v-list-item>
+                <v-list-item-icon><v-icon>mdi-comment-multiple-outline</v-icon></v-list-item-icon>
+                <v-list-item-content>
+                  <v-list-item-title>Discussions</v-list-item-title>
+                  <v-list-item-subtitle><external-link :href="discussionsUrl" class="discussions-link" /></v-list-item-subtitle>
+                </v-list-item-content>
+              </v-list-item>
+              <v-list-item>
                 <v-list-item-icon><v-icon>mdi-forum-outline</v-icon></v-list-item-icon>
                 <v-list-item-content>
                   <v-list-item-title>Aurora 4x forums</v-list-item-title>
@@ -68,7 +75,7 @@
                 </v-list-item-content>
               </v-list-item>
             </v-list>
-            <div class="panel-foot caption text--secondary">Report bugs in the GitHub issues. Updates are posted in the GitHub releases.</div>
+            <div class="panel-foot caption text--secondary">Report bugs in the GitHub issues. Ideas, questions and feedback go in the GitHub discussions. Updates are posted in the GitHub releases.</div>
           </v-card>
         </v-col>
 
@@ -218,6 +225,7 @@ export default {
       forumsNoteUrl: FORUMS_NOTE_URL,
       repoUrl: REPO_URL,
       issuesUrl: `${REPO_URL}/issues`,
+      discussionsUrl: `${REPO_URL}/discussions`,
       authorUrl: 'https://github.com/rubybrowncoat',
       auroraForumUrl: 'https://aurora4x.com/',
 

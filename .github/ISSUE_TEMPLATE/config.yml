@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ideas, requests and questions
+    url: https://github.com/rubybrowncoat/Aurora-Electrons/discussions
+    about: Suggest a feature, ask how something works or leave feedback in Discussions.
